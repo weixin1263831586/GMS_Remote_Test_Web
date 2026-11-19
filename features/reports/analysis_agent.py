@@ -27,6 +27,10 @@ from .analyzer import HostLogParser, TestReport, XMLReportParser
 logger = logging.getLogger(__name__)
 
 
+class ReportScanIncompleteError(ValueError):
+    """The report attachment inventory was truncated and is not trustworthy."""
+
+
 class ReportAnalysisAgent:
     """Analyze report attachments by recursively expanding containers and selecting useful artifacts."""
 
@@ -55,6 +59,7 @@ class ReportAnalysisAgent:
         self.max_files = max_files
         self.xml_parser = XMLReportParser()
         self.host_log_parser = HostLogParser()
+        self._incomplete_reason = ""
 
     def analyze_path(self, path: str) -> dict[str, Any] | None:
         """Analyze one file or directory path."""
@@ -62,6 +67,7 @@ class ReportAnalysisAgent:
 
     def analyze_paths(self, paths: Sequence[str]) -> dict[str, Any] | None:
         """Analyze one or more local files/directories as a single report bundle."""
+        self._incomplete_reason = ""
         workspace_parent = self.temp_dir if os.path.isdir(self.temp_dir) else tempfile.gettempdir()
         workspace = tempfile.mkdtemp(prefix="report_agent_", dir=workspace_parent)
         try:
@@ -70,6 +76,10 @@ class ReportAnalysisAgent:
             for path in paths:
                 if path and os.path.exists(path):
                     self._expand_entry(path, workspace, files, seen_archives, depth=0)
+            if self._incomplete_reason:
+                # A failure or XML report may sit outside the traversal budget.
+                # Do not silently present the subset as a complete report.
+                raise ReportScanIncompleteError(self._incomplete_reason)
             if not files:
                 return None
             return self._analyze_expanded_files(files)
@@ -87,10 +97,20 @@ class ReportAnalysisAgent:
         seen_archives: set[str],
         depth: int,
     ) -> None:
+        if self._incomplete_reason:
+            return
         if len(files) >= self.max_files:
+            self._incomplete_reason = (
+                f"报告扫描文件数量超过 {self.max_files} 个上限，结果不完整；"
+                "请精简附件或分批分析，不要将部分结果当作完整报告"
+            )
             return
         if depth > self.max_depth:
-            logger.warning("Report archive nesting exceeds max_depth=%s at %s", self.max_depth, path)
+            self._incomplete_reason = (
+                f"报告嵌套压缩包超过 {self.max_depth} 层上限，结果不完整；"
+                "请解压或精简嵌套层级后重新分析"
+            )
+            logger.warning("Report archive nesting exceeds max_depth=%s", self.max_depth)
             return
 
         if os.path.isdir(path):
@@ -98,7 +118,7 @@ class ReportAnalysisAgent:
                 dirs[:] = [d for d in dirs if d not in {"__MACOSX"}]
                 for filename in filenames:
                     self._expand_entry(os.path.join(root, filename), workspace, files, seen_archives, depth)
-                    if len(files) >= self.max_files:
+                    if self._incomplete_reason:
                         return
             return
 
@@ -206,6 +226,10 @@ class ReportAnalysisAgent:
         result = self._report_to_dict(report)
         if xml_report and xml_report.total == 0 and host_reports:
             result = self._report_to_dict(host_reports[0])
+        elif xml_report and host_reports:
+            # XML supplies canonical case data; host_log supplies the exact
+            # timestamped FAILURE block. Preserve both without synthesizing logs.
+            self._attach_original_host_logs(result["failures"], host_reports)
 
         self._enrich_details(result, files, host_reports)
         result["analysis_sources"] = {
@@ -221,6 +245,72 @@ class ReportAnalysisAgent:
         result["host_log_errors"] = self._extract_log_errors_from_files(host_logs, "host")
         result["device_log_errors"] = self._extract_log_errors_from_files(device_logs, "device")
         return result
+
+    @staticmethod
+    def _attach_original_host_logs(
+        failures: list[dict[str, Any]], host_reports: list[TestReport],
+    ) -> None:
+        """Associate XML failures with unmodified host_log blocks by case name.
+
+        Identical names can occur in multiple retries or modules. Never attach
+        an arbitrary log when the matching raw evidence is ambiguous.
+        """
+        by_name: dict[str, list[Any]] = {}
+        for host_report in host_reports:
+            for host_failure in host_report.failures:
+                if host_failure.raw_log:
+                    by_name.setdefault(host_failure.name, []).append(host_failure)
+
+        for failure in failures:
+            candidates = by_name.get(str(failure.get("name") or ""), [])
+            if not candidates:
+                continue
+            # A shared method name is insufficient to prove that a raw log
+            # belongs to the XML module. Suite-level host tags (CTS/GTS/VTS)
+            # remain valid when there is no detailed host module name.
+            module = str(failure.get("module") or "")
+            if module:
+                exact = [item for item in candidates if item.module == module]
+                if exact:
+                    candidates = exact
+                else:
+                    generic = [
+                        item for item in candidates
+                        if str(item.module or "").casefold() in {
+                            "", "unknown", "未知模块", "cts", "gts", "vts", "sts", "mts", "ats",
+                        }
+                    ]
+                    if not generic:
+                        continue
+                    candidates = generic
+            xml_reason = str(failure.get("reason") or "").strip()
+            # A report can contain several retry attempts of the same case.
+            # Prefer an attempt whose error text matches the XML failure.
+            # Otherwise, never bind an unrelated retry just by test name.
+            if xml_reason and xml_reason != "无失败原因":
+                first_line = next((part.strip() for part in xml_reason.splitlines() if part.strip()), "")
+                matching_reason = [
+                    item for item in candidates
+                    if (
+                        first_line[:120] in item.reason
+                        or (item.reason.splitlines()[0][:120] in xml_reason if item.reason else False)
+                    )
+                ]
+                if not matching_reason:
+                    continue
+                candidates = matching_reason
+            elif len(candidates) > 1:
+                # More than one retry with no usable error fingerprint.
+                continue
+            # Several retries can share exactly the same failure. In that
+            # case show the latest matching *real* host_log entry, not an
+            # invented prefix or an empty XML-only stack.
+            failure["raw_log"] = max(
+                candidates,
+                key=lambda item: (item.raw_log[:14] if re.match(
+                    r"^\d{2}-\d{2} \d{2}:\d{2}:\d{2}", item.raw_log,
+                ) else "", item.raw_log),
+            ).raw_log
 
     def _parse_first_xml(self, files: list[str]) -> TestReport | None:
         for path in self._xml_files(files):
@@ -383,6 +473,7 @@ class ReportAnalysisAgent:
                     "reason": failure.reason,
                     "module": failure.module,
                     "stack_trace": failure.stack_trace,
+                    "raw_log": failure.raw_log,
                 }
                 for failure in report.failures
             ],

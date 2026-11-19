@@ -187,7 +187,7 @@ function renderWeeklyReportAiError(msg) {
         box.id = 'weekly-report-ai';
         content.insertBefore(box, content.firstChild);
     }
-    box.innerHTML = `<div style="background: var(--card-bg); border:1px dashed var(--border-color); border-radius:8px; padding:10px 14px; margin-bottom:12px; color: var(--text-secondary); font-size:13px;">✨ AI 总结未生成：${_esc(msg || '未知原因')}。可点击「✨ 重新总结」重试。</div>`;
+    box.innerHTML = `<div data-ui-type-size="body" style="background: var(--card-bg); border:1px dashed var(--border-color); border-radius:8px; padding:10px 14px; margin-bottom:12px; color: var(--text-secondary); ">✨ AI 总结未生成：${_esc(msg || '未知原因')}。可点击「✨ 重新总结」重试。</div>`;
 }
 
 // 把 AI 总结渲染/插入到报告顶部（#weekly-report-ai 区块）
@@ -203,8 +203,8 @@ function renderWeeklyReportAi(d) {
     const html = _renderMarkdownLite(d.aiSummary);
     box.innerHTML = `
         <div style="background: linear-gradient(135deg, var(--primary-color, #2563eb), #7c3aed); color: white; border-radius:10px; padding:12px 16px; margin-bottom:14px;">
-            <div style="font-weight:700; margin-bottom:8px; display:flex; align-items:center; gap:6px; font-size:14px;">✨ AI 周报总结 ${d.aiProvider ? `<span style="font-size:11px; opacity:0.8; font-weight:400;">· ${_esc(d.aiProvider)}</span>` : ''}</div>
-            <div style="background: rgba(255,255,255,0.14); border-radius:8px; padding:12px 14px; line-height:1.75; font-size:13px;">${html}</div>
+            <div data-ui-type-size="card" data-ui-type-weight="bold" style="margin-bottom:8px; display:flex; align-items:center; gap:6px; ">✨ AI 周报总结 ${d.aiProvider ? `<span data-ui-type-size="small" data-ui-type-weight="regular" style="opacity:0.8; ">· ${_esc(d.aiProvider)}</span>` : ''}</div>
+            <div data-ui-type-size="body" style="background: rgba(255,255,255,0.14); border-radius:8px; padding:12px 14px; line-height:1.75; ">${html}</div>
         </div>`;
 }
 
@@ -227,11 +227,11 @@ function _renderMarkdownLite(md) {
         const trimmed = line.trim();
         if (!trimmed) { i++; continue; }
         if (/^## /.test(trimmed)) {
-            out.push(`<h4 style="margin:10px 0 4px; font-size:13.5px;">${inline(trimmed.slice(3))}</h4>`);
+            out.push(`<h4 data-ui-type-size="card" style="margin:10px 0 4px; ">${inline(trimmed.slice(3))}</h4>`);
             i++; continue;
         }
         if (/^### /.test(trimmed)) {
-            out.push(`<div style="margin:8px 0 2px; font-weight:700; font-size:13px;">${inline(trimmed.slice(4))}</div>`);
+            out.push(`<div data-ui-type-size="body" data-ui-type-weight="bold" style="margin:8px 0 2px; ">${inline(trimmed.slice(4))}</div>`);
             i++; continue;
         }
         // 列表块：连续若干行，每行都符合（含缩进子项）。用缩进层级嵌套渲染。
@@ -281,7 +281,7 @@ function _themesText(themes, max) {
 function _themesChips(themes, max) {
     const arr = (themes || []).slice(0, max || 8);
     if (!arr.length) return '<span style="color: var(--text-muted);">—</span>';
-    return arr.map(t => `<span style="display:inline-block; background: var(--light-bg); border:1px solid var(--border-color); border-radius:10px; padding:1px 8px; margin:2px 4px 2px 0; font-size:12px;">${_esc(t.tag)} <b style="color: var(--primary-color);">${t.count}</b></span>`).join('');
+    return arr.map(t => `<span data-ui-type-size="small" style="display:inline-block; background: var(--light-bg); border:1px solid var(--border-color); border-radius:10px; padding:1px 8px; margin:2px 4px 2px 0; ">${_esc(t.tag)} <b style="color: var(--primary-color);">${t.count}</b></span>`).join('');
 }
 
 function buildWeeklyReportMarkdown(data) {
@@ -405,7 +405,6 @@ function buildWeeklyReportMarkdown(data) {
     }
 
     // —— 数据汇总（折叠）——
-    // 顺序：Redmine → Gerrit → GMS 认证测试 → Android17 移植
     lines.push(`<details><summary>数据汇总</summary>`);
     lines.push('');
     lines.push(`### Redmine 工单`);
@@ -461,14 +460,14 @@ function renderWeeklyReportHtml(data) {
 
     const statCard = (label, value, color) => `
         <div style="background: var(--card-bg); border:1px solid var(--border-color); border-radius:8px; padding:10px 12px; flex:1 1 110px; min-width:110px;">
-            <div style="font-size:12px; color: var(--text-secondary);">${_esc(label)}</div>
-            <div style="font-size:22px; font-weight:700; color: ${color || 'var(--text-primary)'}; margin-top:2px;">${_esc(value)}</div>
+            <div data-ui-type-size="small" style="color: var(--text-secondary);">${_esc(label)}</div>
+            <div data-ui-type-size="display-medium" data-ui-type-weight="bold" style="color: ${color || 'var(--text-primary)'}; margin-top:2px;">${_esc(value)}</div>
         </div>`;
 
     // 分组卡片与完整明细共用 workHtml。
     const sectionCard = (title, color, inner) => `
         <div style="margin-top:10px; background: var(--light-bg); border:1px solid var(--border-color); border-left:3px solid ${color}; border-radius:6px; overflow:hidden;">
-            <div style="padding:6px 12px; font-weight:700; color:${color}; font-size:13px; border-bottom:1px solid var(--border-color); background: var(--card-bg);">${title}</div>
+            <div data-ui-type-size="body" data-ui-type-weight="bold" style="padding:6px 12px; color:${color}; border-bottom:1px solid var(--border-color); background: var(--card-bg);">${title}</div>
             <div style="padding:8px 12px;">${inner || ''}</div>
         </div>`;
 
@@ -535,7 +534,7 @@ function renderWeeklyReportHtml(data) {
             const head = issueFmt(it);
             const reply = (it.last_external_reply || '').trim();
             const replyBy = it.last_external_reply_by ? `（${_esc(it.last_external_reply_by)}）` : '';
-            const tail = reply ? `<div style="margin:2px 0 4px 0; padding:2px 6px; background: var(--card-bg); border-left:2px solid var(--border-color); font-size:12px; color: var(--text-secondary);">最新进展${replyBy}：${_esc(reply.slice(0, 300))}</div>` : '';
+            const tail = reply ? `<div data-ui-type-size="small" style="margin:2px 0 4px 0; padding:2px 6px; background: var(--card-bg); border-left:2px solid var(--border-color); color: var(--text-secondary);">最新进展${replyBy}：${_esc(reply.slice(0, 300))}</div>` : '';
             return `<li style="margin:5px 0; list-style:none;">${head}${tail}</li>`;
         }).join('');
     };
@@ -550,7 +549,6 @@ function renderWeeklyReportHtml(data) {
             return '<div style="color: var(--text-muted); padding:6px 0;">本周暂无可用数据。</div>';
         }
         const parts = [];
-        // 顺序：Redmine → Gerrit → GMS 认证测试 → Android17 移植
         // —— Redmine 工单 ——
         const rParts = [];
         if (rmOk && rm.resolved_this_period) {
@@ -569,7 +567,7 @@ function renderWeeklyReportHtml(data) {
             gParts.push(`<div style="margin-top:6px;"><b style="color: var(--success-color);">本周合并 · 主要（${mergedMajor.length}）</b><ul style="margin:4px 0 0 0; padding:0; color: var(--text-secondary);">${changeBlock(mergedMajor, 8)}</ul></div>`);
         }
         if (mergedMinor.length) {
-            gParts.push(`<div style="margin-top:6px;"><b style="color: var(--text-muted);">本周合并 · 版本/例行（${mergedMinor.length}）</b><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-muted); font-size:12px;">${mergedMinor.map(it => `<li>${changeFmt(it)}</li>`).join('')}</ul></div>`);
+            gParts.push(`<div style="margin-top:6px;"><b style="color: var(--text-muted);">本周合并 · 版本/例行（${mergedMinor.length}）</b><ul data-ui-type-size="small" style="margin:4px 0 0 18px; padding:0; color: var(--text-muted); ">${mergedMinor.map(it => `<li>${changeFmt(it)}</li>`).join('')}</ul></div>`);
         }
         if (newMajor.length) {
             gParts.push(`<div style="margin-top:6px;"><b>本周新增/进行中（${newItems.length}）</b><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${changeBlock(newMajor, 6)}</ul></div>`);
@@ -582,12 +580,12 @@ function renderWeeklyReportHtml(data) {
                 const cells = (p.modules || []).map(m => {
                     const rate = m.pass_rate || '-';
                     return `<div style="display:flex; justify-content:space-between; gap:8px; padding:4px 6px; border-bottom:1px solid var(--border-color);">
-                        <div><b>${_esc(m.module)}</b><div style="font-size:11px; color: var(--text-secondary);">总 ${m.total || 0} · ${_esc(m.latest_ts || '').slice(0,18)}</div></div>
-                        <div style="text-align:right; white-space:nowrap;">通过率 <b>${_esc(rate)}</b><div style="font-size:11px; color:${failColor(m.fail || 0)};">剩余 fail <b>${m.fail || 0}</b></div></div>
+                        <div><b>${_esc(m.module)}</b><div data-ui-type-size="small" style="color: var(--text-secondary);">总 ${m.total || 0} · ${_esc(m.latest_ts || '').slice(0,18)}</div></div>
+                        <div style="text-align:right; white-space:nowrap;">通过率 <b>${_esc(rate)}</b><div data-ui-type-size="small" style="color:${failColor(m.fail || 0)};">剩余 fail <b>${m.fail || 0}</b></div></div>
                     </div>`;
                 }).join('');
                 return `<div style="margin-top:6px; border:1px solid var(--border-color); border-radius:6px; overflow:hidden;">
-                    <div style="padding:5px 8px; background: var(--card-bg); font-weight:700;">${_esc(p.platform)} <span style="font-weight:400; font-size:11px; color: var(--text-secondary);">· ${p.module_count} 模块 · 总 ${p.total_cases || 0} · 失败 <b style="color:${failColor(p.total_fail || 0)};">${p.total_fail || 0}</b> · 通过率 ${_esc(p.pass_rate || '-')}</span></div>
+                    <div data-ui-type-weight="bold" style="padding:5px 8px; background: var(--card-bg); ">${_esc(p.platform)} <span data-ui-type-size="small" data-ui-type-weight="regular" style="color: var(--text-secondary);">· ${p.module_count} 模块 · 总 ${p.total_cases || 0} · 失败 <b style="color:${failColor(p.total_fail || 0)};">${p.total_fail || 0}</b> · 通过率 ${_esc(p.pass_rate || '-')}</span></div>
                     ${cells}
                 </div>`;
             }).join('');
@@ -597,7 +595,7 @@ function renderWeeklyReportHtml(data) {
         if (a17Ok && (a17.tasks || []).length) {
             const rows = a17.tasks.slice(0, 12).map(t => {
                 const head = `[${_esc(t.category || '')}] ${_esc(t.task || '')}`;
-                return `<li style="margin:4px 0;"><b>${head.trim() || '任务'}</b>${t.progress ? `<div style="margin:2px 0 4px 0; padding:2px 6px; background: var(--card-bg); border-left:2px solid var(--border-color); font-size:12px; color: var(--text-secondary);">${_esc(t.progress.slice(0, 200))}</div>` : ''}</li>`;
+                return `<li style="margin:4px 0;"><b>${head.trim() || '任务'}</b>${t.progress ? `<div data-ui-type-size="small" style="margin:2px 0 4px 0; padding:2px 6px; background: var(--card-bg); border-left:2px solid var(--border-color); color: var(--text-secondary);">${_esc(t.progress.slice(0, 200))}</div>` : ''}</li>`;
             }).join('');
             parts.push(sectionCard('🟣 Android17 SDK 移植适配', 'var(--purple-color, #7c3aed)', `<ul style="margin:4px 0 0 0; padding:0; color: var(--text-secondary);">${rows}</ul>`));
         }
@@ -610,9 +608,8 @@ function renderWeeklyReportHtml(data) {
         const arr = Array.isArray(items) ? items : [];
         if (!arr.length) return '';
         const rows = arr.slice(0, 30).map(it => `<li style="margin:2px 0;">${fmt(it)}</li>`).join('');
-        return `<div style="margin-top:8px;"><div style="font-weight:600; color: var(--text-primary);">${_esc(title)}（${arr.length}）</div><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${rows}</ul></div>`;
+        return `<div style="margin-top:8px;"><div data-ui-type-weight="semibold" style="color: var(--text-primary);">${_esc(title)}（${arr.length}）</div><ul style="margin:4px 0 0 18px; padding:0; color: var(--text-secondary);">${rows}</ul></div>`;
     };
-    // 顺序：Redmine → Gerrit → GMS 认证测试 → Android17 移植
     let detailInner = '';
     if (rmOk) {
         let rmDetail = '';
@@ -642,25 +639,25 @@ function renderWeeklyReportHtml(data) {
         if (a17Detail) detailInner += sectionCard('🟣 Android17 SDK 移植适配', 'var(--purple-color, #7c3aed)', a17Detail);
     }
     const detailHtml = detailInner
-        ? `<details style="margin-top:12px; border-top:1px dashed var(--border-color); padding-top:8px;"><summary style="cursor:pointer; color: var(--text-secondary); font-weight:600;">完整明细（点击展开）</summary><div style="margin-top:6px;">${detailInner}</div></details>`
+        ? `<details style="margin-top:12px; border-top:1px dashed var(--border-color); padding-top:8px;"><summary data-ui-type-weight="semibold" style="cursor:pointer; color: var(--text-secondary); ">完整明细（点击展开）</summary><div style="margin-top:6px;">${detailInner}</div></details>`
         : '';
 
     const themesHtml = hasThemes ? `
         <div style="margin-top:8px;">
-            <div style="font-weight:600; color: var(--text-primary); margin-bottom:2px;">本周关键词</div>
-            ${themes.redmine && themes.redmine.length ? `<div style="margin:2px 0;"><span style="color: var(--text-secondary); font-size:12px;">工单：</span>${_themesChips(themes.redmine)}</div>` : ''}
-            ${themes.gerrit && themes.gerrit.length ? `<div style="margin:2px 0;"><span style="color: var(--text-secondary); font-size:12px;">提交：</span>${_themesChips(themes.gerrit)}</div>` : ''}
+            <div data-ui-type-weight="semibold" style="color: var(--text-primary); margin-bottom:2px;">本周关键词</div>
+            ${themes.redmine && themes.redmine.length ? `<div style="margin:2px 0;"><span data-ui-type-size="small" style="color: var(--text-secondary); ">工单：</span>${_themesChips(themes.redmine)}</div>` : ''}
+            ${themes.gerrit && themes.gerrit.length ? `<div style="margin:2px 0;"><span data-ui-type-size="small" style="color: var(--text-secondary); ">提交：</span>${_themesChips(themes.gerrit)}</div>` : ''}
         </div>` : '';
 
     return `
         <div style="background: var(--light-bg); border:1px solid var(--border-color); border-left:3px solid var(--primary-color); border-radius:6px; padding:8px 12px; margin-bottom:10px;">
-            <div style="font-size:12px; color: var(--text-secondary);">${_esc(r.start)} ~ ${_esc(r.end)}（${_esc(r.label || '自定义')}） · ${_esc(data.name || '')}</div>
+            <div data-ui-type-size="small" style="color: var(--text-secondary);">${_esc(r.start)} ~ ${_esc(r.end)}（${_esc(r.label || '自定义')}） · ${_esc(data.name || '')}</div>
             <div style="margin-top:4px;">${summary}</div>
             ${themesHtml}
         </div>
         <h3 style="margin:10px 0 2px; color: var(--text-primary);">本周工作</h3>
         ${workHtml}
-        <details style="margin-top:10px;"><summary style="cursor:pointer; color: var(--text-secondary); font-size:12px;">数据汇总（关闭/名下/开放/待评审…）</summary>
+        <details style="margin-top:10px;"><summary data-ui-type-size="small" style="cursor:pointer; color: var(--text-secondary); ">数据汇总（关闭/名下/开放/待评审…）</summary>
             <h4 style="margin:8px 0 2px; color: var(--text-primary);">Redmine 工单</h4>
             ${redmineStats}
             <h4 style="margin:8px 0 2px; color: var(--text-primary);">Gerrit 提交</h4>

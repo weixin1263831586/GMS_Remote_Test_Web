@@ -16,6 +16,17 @@ class HostLogFailureExtractionTests(unittest.TestCase):
     next timestamped log line (the real boundary between log entries).
     """
 
+    def test_tradefed_host_log_file_extensions(self):
+        for filename in (
+            "host_log_112233.txt", "host_log_112233.log",
+            "invoc_complete_host_log_4455.log", "end_host_log_345.txt",
+            "host_log",
+        ):
+            with self.subTest(filename=filename):
+                self.assertTrue(HostLogParser._is_host_log_filename(filename))
+        self.assertFalse(HostLogParser._is_host_log_filename("device_logcat_test.txt"))
+        self.assertFalse(HostLogParser._is_host_log_filename("host_log_1122.zip"))
+
     def test_multiline_failure_with_blank_lines_is_kept_intact(self):
         # 模拟被空行分段的 SELinux 失败内容。
         log = "\n".join([
@@ -42,6 +53,10 @@ class HostLogFailureExtractionTests(unittest.TestCase):
         self.assertIn("device specific genfs_contexts:", failure.reason)
         self.assertIn("Missing sysfs_wakeup labels", failure.reason)
         self.assertIn("Exit Code: 1", failure.reason)
+        self.assertTrue(failure.raw_log.startswith(
+            "07-02 09:20:17 I/ModuleListener: [1/1] RK3576GMS1"
+        ))
+        self.assertIn("genfscon sysfs devices/platform", failure.raw_log)
         # And nothing from the following unrelated log line leaked in.
         self.assertNotIn("BackgroundDeviceAction", failure.reason)
 

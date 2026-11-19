@@ -123,8 +123,8 @@ def extract_image_ocr_text(
     except Exception as exc:
         return "", f"OCR 依赖缺失: {type(exc).__name__}"
     try:
-        # bundled_tesseract_cmd()/configure_bundled_tesseract() 首调后缓存，
-        # 每图检查代价可忽略；与 analysis_attachments 共用同一捆绑二进制。
+        # 与 analysis_attachments 共用可运行 OCR 引擎选择策略；捆绑版本
+        # 不兼容时回退系统 Tesseract，并重新配置动态库和语言数据路径。
         from .tesseract_finder import (
             configure_usable_tesseract,
         )

@@ -133,7 +133,7 @@ function notifyUser(title, message, level) {
   var toast = document.createElement('div');
   toast.id = 'gerrit-local-toast';
   toast.textContent = title + (message ? ': ' + message : '');
-  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:20000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:12px;overflow-wrap:anywhere;pointer-events:none;';
+  toast.style.cssText = 'position:fixed;right:16px;bottom:16px;z-index:20000;max-width:min(460px,calc(100vw - 32px));padding:10px 12px;border-radius:6px;background:#111827;color:#f8fafc;border:1px solid #334155;box-shadow:0 8px 24px rgba(0,0,0,.28);font-size:var(--ui-type-size-small);overflow-wrap:anywhere;pointer-events:none;';
   document.body.appendChild(toast);
   setTimeout(function(){ if (toast.parentNode) toast.remove(); }, 3600);
 }
@@ -503,7 +503,7 @@ async function checkGerritRoute() {
       const okLabel = function(ok, extra) { return ok ? '<span style="color:var(--ok)">✅ ' + (extra || '通') + '</span>' : '<span style="color:var(--bad)">❌ 不通</span>'; };
       var rows = [];
       rows.push('<div style="display:grid;gap:10px">');
-      rows.push('<div style="font-size:15px;font-weight:600">' + (data.level === 'ok' ? '✅ ' : '⚠️ ') + esc(data.verdict || '') + '</div>');
+      rows.push('<div style="font-size:var(--ui-type-size-section);font-weight:var(--ui-type-weight-semibold)">' + (data.level === 'ok' ? '✅ ' : '⚠️ ') + esc(data.verdict || '') + '</div>');
       rows.push('<div style="border-top:1px solid var(--border);padding-top:10px;display:grid;gap:8px">');
       rows.push('<div>ICMP Ping：' + okLabel(data.ping_ok, data.ping_ok && data.latency ? '通 (' + esc(data.latency) + ')' : '通') + '</div>');
       rows.push('<div>SSH 端口 ' + esc(data.ssh_port || '?') + '：' + okLabel(data.ssh_port_ok, '开放') + '</div>');

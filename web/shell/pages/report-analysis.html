@@ -4,17 +4,28 @@
     <!-- Analysis workbench: same 84px compact intake and 29px controls as APK. -->
     <div class="analysis-upload-frame report-workbench-upload">
         <div id="report-upload-zone" class="report-upload-zone upload-empty">
-            <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz" style="display:none">
+            <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz,.txt,.log" multiple style="display:none">
             <input type="file" id="report-folder-input" webkitdirectory directory style="display:none">
             <div class="report-upload-content">
                 <span class="report-upload-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span>
                 <div class="analysis-upload-copy">
                     <div class="analysis-upload-title">拖拽测试报告到此处</div>
-                    <div class="upload-instructions">支持 XML、ZIP、RAR、TAR.GZ 文件以及 Redmine 附件拖拽</div>
+                    <div class="upload-instructions">支持报告 ZIP / XML 与 host_log 同时上传，也支持文件夹、Redmine 附件拖拽</div>
                 </div>
                 <button class="btn-xs" type="button" data-click="_actClickById" data-a0="report-file-input">
                     <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 上传报告
                 </button>
+            </div>
+            <!-- Persistent status for slow uploads / server-side parsing. Toasts
+                 are transient; this stays visible until the request settles. -->
+            <div id="report-analysis-activity" class="report-analysis-activity" role="status" aria-live="polite" aria-atomic="true" hidden>
+                <span class="report-analysis-spinner" aria-hidden="true"></span>
+                <div class="report-analysis-activity-copy">
+                    <div id="report-analysis-activity-title" class="report-analysis-activity-title">正在准备报告分析</div>
+                    <div id="report-analysis-activity-detail" class="report-analysis-activity-detail">请保持页面打开</div>
+                    <div id="report-analysis-activity-time" class="report-analysis-activity-time" aria-hidden="true">已等待 00:00</div>
+                </div>
+                <button type="button" class="btn-xs report-analysis-cancel" data-click="resetReportAnalysis" title="取消等待并清除当前分析（已提交服务器的处理可能继续）">取消等待</button>
             </div>
             <div class="report-upload-progress" id="report-upload-progress">
                 <div class="report-upload-progress-bar" id="report-progress-fill" style="width:0%"></div>

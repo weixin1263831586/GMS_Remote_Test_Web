@@ -117,7 +117,7 @@ const RESULT_COLUMN_RENDERERS = {
     'pass': r => ({ text: escapeHtml(String(r.pass ?? '-')), style: 'text-align: right; color: var(--success-color, #43a047);' }),
     'fail': r => {
         const failNum = Number(r.fail) || 0;
-        return { text: escapeHtml(String(r.fail ?? '-')), style: `text-align: right;${failNum > 0 ? ' color: var(--danger-color, #e53935); font-weight: 600;' : ''}` };
+        return { text: escapeHtml(String(r.fail ?? '-')), style: `text-align: right;${failNum > 0 ? ' color: var(--danger-color, #e53935); font-weight: var(--ui-type-weight-semibold);' : ''}` };
     },
     'warning': r => ({ text: escapeHtml(String(r.warning ?? '-')), style: 'text-align: right;' }),
     'modules complete': r => ({
@@ -154,7 +154,7 @@ const RESULT_COLUMN_RENDERERS = {
         );
         const color = palette[hash % palette.length];
         return {
-            text: `<span style="background: ${color}22; color: ${color}; padding: 2px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;">${escapeHtml(project)}</span>`,
+            text: `<span style="background: ${color}22; color: ${color}; padding: 2px 8px; border-radius: 4px; font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-compact);">${escapeHtml(project)}</span>`,
         };
     },
 };
@@ -195,7 +195,7 @@ function renderTestResults(results, columns) {
     listEl.innerHTML = `
         <table style="width: 100%; border-collapse: collapse;">
             <thead style="position: sticky; top: 0; z-index: 1;">
-                <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color); font-size: 12px;">${headerCells}</tr>
+                <tr style="background: var(--darker-bg); border-bottom: 1px solid var(--border-color); ">${headerCells}</tr>
             </thead>
             <tbody id="test-results-tbody"></tbody>
         </table>
@@ -204,7 +204,7 @@ function renderTestResults(results, columns) {
     const tbody = $('test-results-tbody');
     results.forEach(r => {
         const tr = document.createElement('tr');
-        tr.style.cssText = 'border-bottom: 1px solid var(--border-color); cursor: pointer; font-size: 12px;';
+        tr.style.cssText = 'border-bottom: 1px solid var(--border-color); cursor: pointer; ';
         tr.onmouseenter = () => { tr.style.background = 'var(--hover-bg, rgba(0,0,0,0.04))'; };
         tr.onmouseleave = () => { tr.style.background = ''; };
         tr.title = r.result_directory ? `跳转到目录 results/${r.result_directory}` : '无结果目录';

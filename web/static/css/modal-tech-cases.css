@@ -1,13 +1,13 @@
 /* Task-specific composition. Each selector corresponds to a real dialog body. */
 .tech-form-section { min-width: 0; }
-.tech-form-section > .tech-section-title { color: var(--text-secondary); font-size: var(--tech-font-body); }
+.tech-form-section > .tech-section-title { color: var(--text-secondary);  }
 /* Identity: connection summary first, then editable credentials. */
 :is(.modal,.modal-backdrop) .modal-content.tech-dialog--username-detect { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
 .tech-dialog--username-detect .tech-field-card { min-height: 54px; }
-.tech-dialog--username-detect .modal-ssh-info { margin-top: 18px; color: var(--text-secondary); padding: 12px 0 0; border: 0; background: transparent; font-size: var(--tech-font-body); }
+.tech-dialog--username-detect .modal-ssh-info { margin-top: 18px; color: var(--text-secondary); padding: 12px 0 0; border: 0; background: transparent;  }
 .tech-dialog--username-detect .tech-field-card:has(#username-detect-ip) { background: var(--tech-panel); border-color: var(--tech-edge-soft); }
 .tech-dialog--device-password #device-host-display,
-.tech-dialog--firmware-share-password #firmware-share-password-host { font-family: ui-monospace,monospace; color: var(--primary-light); }
+.tech-dialog--firmware-share-password #firmware-share-password-host {  color: var(--primary-light); }
 .tech-dialog--elevate #elevate-action-label { border-color: #997148; background: #2a2226; }
 .tech-dialog--vpn-credential .tech-field-card { min-height: 60px; }
 .tech-dialog--wifi .tech-form-section { display: grid; gap: 4px; }
@@ -71,12 +71,12 @@
 .tech-dialog--report-copy .tech-field-glyph { display: none; }
 .tech-dialog--report-copy .tech-field-card > label { padding-left: 10px; }
 .tech-dialog--report-copy .tech-section-title { margin-bottom: 10px; }
-.tech-dialog--report-copy .modal-body > .modal-info-text { margin-top: 0; padding: 10px 14px; font-size: var(--tech-font-caption); }
+.tech-dialog--report-copy .modal-body > .modal-info-text { margin-top: 0; padding: 10px 14px;  }
 /* ADB / USB-IP connection dialogs share a color emoji plug title glyph.
    Keep the established 28px title box and unchanged modal interaction. */
 :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .tech-title-glyph {
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
-  font-size: 21px;
+  
+  
   line-height: 1;
 }
 /* Device routing: paired endpoints above device inventory and live assignments. */
@@ -111,17 +111,17 @@
 :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .device-routing-current { margin-top: 8px; }
 :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .adb-proxy-assignments {
   min-height: 32px; max-height: 160px; margin: 0; padding: 7px 9px;
-  font-size: var(--tech-font-body);
+  
   border: 1px solid var(--tech-edge-soft); background: var(--tech-input); border-radius: 8px;
 }
-.tech-dialog--usbip-attach .usbip-transport-state { font-size: var(--tech-font-caption); }
+.tech-dialog--usbip-attach .usbip-transport-state {  }
 :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .modal-info-text {
-  margin-top: 8px; padding: 6px 8px; font-size: var(--tech-font-caption); line-height: 1.5;
+  margin-top: 8px; padding: 6px 8px;  line-height: 1.5;
 }
 :is(#adb-proxy-modal,#usbip-attach-modal) > .device-routing-modal-content {
   height: auto; max-height: calc(100dvh - 32px);
 }
-.device-routing-notes { margin-top: 6px; color: var(--text-secondary); font-size: var(--tech-font-caption); }
+.device-routing-notes { margin-top: 6px; color: var(--text-secondary);  }
 .device-routing-notes p { margin: 6px 0 0; }
 /* Diagnosis: summary sidebar and independently scrolling evidence pane. */
 .tech-dialog--report-diagnosis .report-diagnosis-body { display: grid; grid-template-columns: minmax(240px,300px) minmax(0,1fr); gap: 12px; overflow: hidden; padding: 20px; }
@@ -138,14 +138,18 @@
 .tech-dialog--weekly-report .modal-body > div:first-of-type { padding: 14px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
 .tech-dialog--weekly-report #weekly-report-content { margin-top: 8px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; padding: 20px !important; background: var(--tech-input); }
 .tech-dialog--test-results #test-results-list { margin-bottom: 20px; border-color: var(--tech-edge-soft) !important; background: var(--tech-input); }
-/* Results-list header controls: reserve safe distance from the angled SVG
-   perimeter and align the minimize action with the close button. Unlike the
-   old anonymous wrapper these bounds are explicitly covered by browser tests. */
+/* Test-result window actions share one geometry. Keep their header rail
+   clear of the decorative SVG; only this modal receives the override. */
 #test-results-modal .tech-dialog--test-results > .modal-header {
-  min-height: 58px;
   box-sizing: border-box;
+  min-height: 58px;
   padding: 12px 20px 12px 18px;
   align-items: center;
+}
+/* Stop the decorative header trace before the action rail, even in narrow dialogs.
+   Its SVG width follows the available header width instead of painting behind buttons. */
+#test-results-modal .tech-dialog--test-results > .modal-header > .tech-header-rule {
+  width: calc(100% - 128px);
 }
 #test-results-modal .test-results-header-actions {
   position: relative;
@@ -154,42 +158,46 @@
   flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
-  gap: 10px;
-  min-width: 0;
+  gap: 8px;
   margin-left: auto;
 }
-#test-results-modal .test-results-minimize {
+#test-results-modal .tech-dialog--test-results .test-results-header-actions > button {
   box-sizing: border-box;
-  display: inline-flex;
-  flex: 0 0 48px;
-  align-items: center;
-  justify-content: center;
-  width: 48px;
-  min-width: 48px;
-  height: 28px;
-  min-height: 28px;
-  padding: 0 8px;
+  display: inline-grid;
+  flex: 0 0 30px;
+  place-items: center;
+  width: 30px;
+  min-width: 30px;
+  height: 30px;
+  min-height: 30px;
   margin: 0;
+  padding: 0;
   line-height: 1;
+  border: 1px solid var(--tech-edge-soft);
   border-radius: 6px;
+  background: var(--tech-panel);
+  color: var(--text-primary);
   box-shadow: none;
   transform: none;
 }
-#test-results-modal .test-results-header-actions > .modal-close {
-  flex: 0 0 30px;
-  margin: 0;
-  align-self: center;
+#test-results-modal .tech-dialog--test-results .test-results-header-actions > button:hover {
+  border-color: var(--tech-edge);
+  background: var(--tech-accent-soft);
+}
+#test-results-modal .test-results-minimize-glyph {
+  display: inline-block;
+  line-height: 1;
+}
+#test-results-modal .test-results-header-actions .modal-close .ui-icon {
+  display: block;
+  width: 15px;
+  height: 15px;
 }
 @media (max-width: 480px) {
   #test-results-modal .tech-dialog--test-results > .modal-header {
     padding: 12px 14px;
   }
   #test-results-modal .test-results-header-actions { gap: 6px; }
-  #test-results-modal .test-results-minimize {
-    flex-basis: 42px;
-    min-width: 42px;
-    width: 42px;
-  }
 }
 
 .tech-dialog--sidebar-visibility .sidebar-settings-tabs { padding: 6px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
@@ -273,12 +281,12 @@
 .report-import-choice { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 14px; min-height: 160px; padding: 20px 16px; border: 1px dashed var(--primary-light); border-radius: 12px; background: var(--tech-panel); color: var(--text-primary); cursor: pointer; }
 .report-import-choice:hover { background: var(--tech-control); border-color: var(--primary-light); }
 .report-import-choice > .ui-icon { width: 38px; height: 38px; color: var(--primary-light); }
-.report-import-choice > strong { font-size: 16px; }
-.report-import-choice > span { color: var(--text-secondary); font-size: var(--tech-font-body); }
+.report-import-choice > strong {  }
+.report-import-choice > span { color: var(--text-secondary);  }
 .report-import-choice > .report-choice-folder-icon {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 38px; height: 38px; line-height: 1; font-size: 34px; color: inherit;
-  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif;
+  width: 38px; height: 38px; line-height: 1;  color: inherit;
+  
 }
 .tech-dialog--redmine-auth .modal-form-row { gap: 12px; padding: 12px; background: var(--tech-panel); border: 1px solid var(--tech-edge-soft); border-radius: 9px; }
 .tech-dialog--redmine-auth .modal-form-row > label { min-width: 72px; color: var(--primary-light); }
@@ -307,25 +315,25 @@
 #route-check-dialog .modal-content.tech-dialog--route-check { width: min(600px,calc(100vw - 32px)); max-width: min(600px,calc(100vw - 32px)); }
 #route-check-dialog :is(.route-check-corner,.route-check-rule,.route-check-ticks,.route-check-slashes) { display: none; }
 #route-check-dialog .modal-header { min-height: 54px; padding: 10px 18px 14px; border-bottom: 1px solid var(--tech-edge-soft); }
-#route-check-dialog .modal-title { font-size: 17px; letter-spacing: 0; }
+#route-check-dialog .modal-title {  letter-spacing: 0; }
 #route-check-dialog .route-check-badge { width: 28px; height: 28px; background: var(--tech-accent-soft); box-shadow: none; }
 #route-check-dialog .route-check-title-sep { height: 22px; }
 #route-check-dialog .modal-body { padding: 14px 18px; gap: 12px; display: flex; flex-direction: column; }
 #route-check-dialog .route-check-form .form-group { display: grid; grid-template-columns: 108px minmax(0,1fr); gap: 4px 12px; margin: 0; padding: 12px 14px; background: var(--tech-panel); border: 1px solid var(--tech-edge-soft); border-radius: 9px; }
-#route-check-dialog .route-check-form label { align-self: center; font-size: var(--tech-font-body); margin: 0; }
-#route-check-dialog .route-check-form .route-check-field { background: var(--tech-input); border-color: var(--tech-edge-soft); min-height: 36px; }
-#route-check-dialog .route-check-form input[type=text] { font-size: var(--tech-font-body); background: transparent; padding: 8px 12px; }
-#route-check-dialog .route-check-form small { grid-column: 2; margin: 0; font-size: 11px; }
+#route-check-dialog .route-check-form label { align-self: center;  margin: 0; }
+#route-check-dialog .route-check-form .route-check-field { background: var(--tech-input); border-color: var(--tech-edge-soft); min-height: var(--ui-control-height-dialog-field); }
+#route-check-dialog .route-check-form input[type=text] {  background: transparent; padding: 8px 12px; }
+#route-check-dialog .route-check-form small { grid-column: 2; margin: 0;  }
 #route-check-dialog .route-probe-results { margin-top: 6px; }
 #route-check-dialog .ping-result { margin: 0; padding: 8px 0; border: 0; background: transparent; }
 #route-check-dialog .route-check-actions { margin: 0; min-height: 62px; padding: 10px 18px 22px; }
-#route-check-dialog .route-check-actions .btn-xxs { min-height: 34px; padding: 7px 12px; font-size: var(--tech-font-body); }
+#route-check-dialog .route-check-actions .btn-xxs { min-height: var(--ui-control-height-dialog); padding: 7px 12px;  }
 @media(max-width: 700px) {
  .report-import-choices { grid-template-columns: 1fr; gap: 14px; }
  .report-import-choice { min-height: 150px; }
  .tech-dialog--report-reply .modal-body,
  .tech-dialog--redmine-reply .modal-body { display: block; }
- #route-check-dialog .modal-title { font-size: 16px; }
+ #route-check-dialog .modal-title {  }
  #route-check-dialog .modal-body { padding: 18px; }
  #route-check-dialog .route-check-form .form-group { grid-template-columns: 1fr; }
  #route-check-dialog .route-check-form small { grid-column: 1; }
@@ -333,10 +341,10 @@
 }
 /* Content-sized information and transfer dialogs must reveal all primary fields. */
 #username-detect-modal > .modal-content.tech-dialog { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
-#username-detect-modal .modal-ssh-info { background: transparent; padding: 12px 0 0; font-size: var(--tech-font-body); }
+#username-detect-modal .modal-ssh-info { background: transparent; padding: 12px 0 0;  }
 #report-copy-modal > .report-copy-modal-content { width: min(760px,calc(100vw - 32px)); max-width: min(760px,calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); }
 #tailscale-info-modal [data-modal-initial-focus]:focus { outline: none; }
-.tech-dialog--firmware .btn-small { min-height: 34px; padding: 7px 12px; border-color: var(--tech-edge-soft); background: var(--tech-control); }
+.tech-dialog--firmware .btn-small { min-height: var(--ui-control-height-dialog); padding: 7px 12px; border-color: var(--tech-edge-soft); background: var(--tech-control); }
 .tech-dialog--firmware .firmware-artifact-card .tech-section-title .ui-icon { display: block; }
 @media(max-width: 520px) {
  #report-copy-modal > .report-copy-modal-content { max-height: calc(100dvh - 16px); }
@@ -353,13 +361,13 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 .dx-summary-cards { display: grid; gap: 12px; margin-bottom: 18px; }
 .dx-summary-card { display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 2px 12px; align-items: center; padding: 10px; border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel); }
 .dx-summary-card > .ui-icon { grid-row: 1 / span 2; width: 28px; height: 28px; color: var(--primary-light); }
-.dx-summary-card > span { font-size: var(--tech-font-caption); color: var(--text-secondary); }
-.dx-summary-card > strong { font-size: 16px; color: var(--text-primary); overflow-wrap: anywhere; }
+.dx-summary-card > span {  color: var(--text-secondary); }
+.dx-summary-card > strong {  color: var(--text-primary); overflow-wrap: anywhere; }
 .dx-summary-card.success { background: #203332; border-color: #38625b; }
 .dx-summary-card.success > :is(strong,.ui-icon) { color: #69d4a1; }
 .dx-summary-card.danger { background: #37202e; border-color: #874357; }
 .dx-summary-card.danger > :is(strong,.ui-icon) { color: #ed8299; }
-.tech-dialog--report-diagnosis .dx-hero { font-size: var(--tech-font-caption); border-color: var(--tech-edge-soft); }
+.tech-dialog--report-diagnosis .dx-hero {  border-color: var(--tech-edge-soft); }
 .tech-dialog--report-diagnosis .dx-workflow-step { padding: 16px; border: 1px solid var(--tech-edge-soft); border-radius: 10px; background: var(--tech-panel); }
 .tech-dialog--report-diagnosis .dx-section { background: var(--tech-input); border-color: var(--tech-edge-soft); }
 @media(max-width: 800px) {
@@ -368,10 +376,10 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 /* Small tasks retain their original size tiers; these variants need modest room. */
 :is(.modal,.modal-backdrop) .modal-content:is(.tech-dialog--gerrit-personal,.tech-dialog--gerrit-department,.tech-dialog--gerrit-owner) { width: min(520px,calc(100vw - 24px)); max-width: min(520px,calc(100vw - 24px)); }
 :is(.modal,.modal-backdrop) .modal-content:is(.tech-dialog--gerrit-trend-range,.tech-dialog--redmine-user) { width: min(620px,calc(100vw - 24px)); max-width: min(620px,calc(100vw - 24px)); }
-#report-copy-modal select.combo-box { min-height: 36px; }
+#report-copy-modal select.combo-box { min-height: var(--ui-control-height-dialog-field); }
 #route-check-dialog .route-probe-results { padding: 10px 12px; }
-#route-check-dialog .route-probe-results .tech-section-title { margin-bottom: 6px; padding-bottom: 6px; font-size: var(--tech-font-body); }
-#route-check-dialog .tech-notice { margin: 0; padding: 6px 2px; border: 0; background: transparent; font-size: var(--tech-font-caption); }
+#route-check-dialog .route-probe-results .tech-section-title { margin-bottom: 6px; padding-bottom: 6px;  }
+#route-check-dialog .tech-notice { margin: 0; padding: 6px 2px; border: 0; background: transparent;  }
 .firmware-share-form-grid { display: grid; grid-template-columns: minmax(0,1fr) 200px; gap: 12px; align-items: start; }
 /* The shared-firmware list is a data grid: allocate real viewport height,
    scroll the grid on both axes, and never scroll the fixed action footer. */
@@ -410,7 +418,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 }
 #firmware-share-modal .firmware-share-table thead th {
   position: sticky; top: 0; z-index: 2;
-  background: var(--tech-panel); font-weight: 600; color: var(--text-primary);
+  background: var(--tech-panel);  color: var(--text-primary);
   text-align: left;
 }
 /* Desktop: all five fields remain visible. Full paths and names stay available in title tooltips. */
@@ -423,7 +431,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   max-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
 }
 #firmware-share-modal .firmware-share-path {
-  font-family: ui-monospace,monospace; font-size: var(--tech-font-caption);
+   
 }
 #firmware-share-modal .firmware-share-actions { overflow: visible; white-space: nowrap; }
 @media (max-width: 920px) {
@@ -471,7 +479,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 
 .tech-dialog--tool #emoji-picker-row { grid-column: 1 / -1; display: block; min-width: 0; }
 .tech-dialog--tool #emoji-picker-row > .tech-field-glyph { display: none; }
-.tech-dialog--tool #emoji-picker-row > label { display: block; min-width: 0; margin: 0 0 6px; font-size: var(--tech-font-caption); color: var(--text-secondary); }
+.tech-dialog--tool #emoji-picker-row > label { display: block; min-width: 0; margin: 0 0 6px;  color: var(--text-secondary); }
 .tech-dialog--tool #emoji-picker { width: 100%; box-sizing: border-box; grid-template-columns: repeat(auto-fill,minmax(28px,1fr)) !important; max-height: 88px; overflow-y: auto; }
 .tech-dialog--firmware-share .tech-field-card:has(#firmware-share-expire-days) { display: flex; flex-wrap: nowrap; gap: 8px; }
 .tech-dialog--firmware-share .tech-field-card:has(#firmware-share-expire-days) > .tech-field-glyph { display: none; }
@@ -494,21 +502,21 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   margin: 0; gap: 12px; min-height: 65px; background: #252033;
 }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > label {
-  width: 156px; min-width: 156px; font-size: var(--tech-font-body);
+  width: 156px; min-width: 156px; 
 }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > input {
   min-width: 0; flex: 1; width: 100%;
 }
 #username-detect-modal .modal-ssh-info {
-  padding: 12px 13px; margin-top: 12px; font-size: var(--tech-font-body);
+  padding: 12px 13px; margin-top: 12px; 
   border: 1px solid #55406f; border-left: 3px solid #b278ee;
   border-radius: 7px; background: #282137; color: #d2c3e4;
 }
 #tailscale-info-modal .tech-tailscale-row {
   border-color: #5b4475; background: #241e32; border-radius: 9px;
 }
-#tailscale-info-modal .tech-tailscale-row > label { font-size: var(--tech-font-body); }
-#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--tech-font-body); }
+#tailscale-info-modal .tech-tailscale-row > label {  }
+#tailscale-info-modal .tech-tailscale-row > input {  }
 #firmware-modal > .modal-content.tech-dialog--firmware {
   width: min(820px,calc(100vw - 32px)); max-width: min(820px,calc(100vw - 32px));
 }
@@ -545,8 +553,8 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   padding: 0; border: 1px solid #664b86; border-radius: 10px; background: #211c30;
 }
 #report-diagnosis-modal .tech-diagnosis-panel-title {
-  flex-shrink: 0; margin: 0; padding: 12px 16px; font-size: var(--tech-font-body);
-  font-weight: 700; color: #f1dcff; border-bottom: 1px solid #634b81;
+  flex-shrink: 0; margin: 0; padding: 12px 16px; 
+   color: #f1dcff; border-bottom: 1px solid #634b81;
   background: #302340;
 }
 #report-diagnosis-modal .tech-diagnosis-scroll {
@@ -599,32 +607,32 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #firmware-modal .firmware-preflight-grid .modal-form-row { margin-bottom: 0; }
 #firmware-modal .firmware-artifact-card .tech-field-card { min-height: 0; }
 #firmware-modal .input-with-btn > button { height: var(--tech-control-height); padding: 4px 8px; flex: none; line-height: 1.4; }
-#firmware-modal .firmware-target-list { font-size: var(--tech-font-body); line-height: 1.4; }
+#firmware-modal .firmware-target-list {  line-height: 1.4; }
 #firmware-modal .tech-section-title { margin-bottom: 7px; padding-bottom: 6px; }
-#firmware-modal .firmware-file-meta { min-height: 0; margin-top: 6px; font-size: var(--tech-font-caption); }
+#firmware-modal .firmware-file-meta { min-height: 0; margin-top: 6px;  }
 #firmware-modal .firmware-file-meta.is-empty { display: none; }
 #firmware-modal .firmware-target-chip { white-space: normal; overflow-wrap: anywhere; }
-#firmware-modal #firmware-aoa-hint { min-height: 0; margin: 6px 0; font-size: var(--tech-font-caption); }
+#firmware-modal #firmware-aoa-hint { min-height: 0; margin: 6px 0;  }
 #firmware-modal .tech-notice { margin-top: 10px; }
 
 /* Shared header geometry for VPN route probing; one SVG perimeter + one rail. */
 #route-check-dialog .modal-content.tech-dialog--route-check > .modal-header { min-height: 56px; padding: 11px 18px 15px; gap: 10px; }
-#route-check-dialog .modal-content.tech-dialog--route-check .modal-title { display: block; flex: none; font-size: var(--tech-font-title) !important; font-weight: 650; letter-spacing: .2px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .modal-title { display: block; flex: none;   letter-spacing: .2px; }
 #route-check-dialog .modal-content.tech-dialog--route-check .modal-body { padding: 12px 16px; }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form .form-group { margin-bottom: 10px; }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { gap: 6px; margin-bottom: 4px; font-size: var(--tech-font-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { gap: 6px; margin-bottom: 4px;  }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-field { min-height: var(--tech-control-height); padding: 0 8px; }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { padding: 5px 0; font-size: var(--tech-font-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { padding: 5px 0;  }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions { min-height: 58px; padding: 8px 16px 18px; margin: 0; gap: 9px; }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px; font-size: var(--tech-font-body) !important; letter-spacing: 0; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px;  letter-spacing: 0; }
 /* UI inspection: remove blank fixed-height workspace, scroll the long list inside. */
 .tech-dialog--ui-control .ui-control-body { display: flex; flex-direction: column; gap: 8px; }
 .tech-dialog--ui-control .ui-control-body > * { flex: none; }
 .tech-dialog--ui-control .ui-control-header-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
-.tech-dialog--ui-control .ui-control-serial { min-width: 0; max-width: 32%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--tech-font-caption); color: var(--text-secondary); }
+.tech-dialog--ui-control .ui-control-serial { min-width: 0; max-width: 32%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;  color: var(--text-secondary); }
 .tech-dialog--ui-control .ui-control-workspace { display: grid; grid-template-columns: minmax(0,.9fr) minmax(0,1.1fr); align-items: start; gap: 12px; min-height: 0; }
 .tech-dialog--ui-control :is(.ui-control-screen-panel,.ui-control-elements-panel) { min-width: 0; overflow: hidden; padding: 10px; }
-.tech-dialog--ui-control .ui-control-panel-title { margin: 0 0 8px; font-size: var(--tech-font-body); font-weight: 600; color: var(--text-secondary); line-height: 1.5; }
+.tech-dialog--ui-control .ui-control-panel-title { margin: 0 0 8px;   color: var(--text-secondary); line-height: 1.5; }
 .tech-dialog--ui-control #ui-control-screenshot { display: block; width: auto; max-width: 100%; max-height: min(55dvh, 580px); object-fit: contain; border: 1px solid var(--tech-edge-soft); border-radius: 7px; }
 .tech-dialog--ui-control #ui-control-screenshot:not([src]) { display: none; }
 .tech-dialog--ui-control .ui-control-filter-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -645,7 +653,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 /* Device UI hierarchy rows: no inline style or duplicate class attributes. */
 .tech-dialog--ui-control .ui-ctrl-el {
   padding: 8px 10px; border-bottom: 1px solid var(--tech-edge-soft);
-  font-size: var(--tech-font-body); overflow-wrap: anywhere;
+   overflow-wrap: anywhere;
 }
 .tech-dialog--ui-control .ui-ctrl-el[role="button"] { cursor: pointer; }
 .tech-dialog--ui-control .ui-ctrl-el.is-inert { opacity: .75; }
@@ -659,7 +667,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 .tech-dialog--ui-control .ui-ctrl-el-coordinates {
   color: var(--text-secondary); margin-left: auto; white-space: nowrap;
 }
-.tech-dialog--ui-control .ui-ctrl-el-meta { color: var(--text-secondary); font-size: var(--tech-font-caption); margin-top: 2px; }
+.tech-dialog--ui-control .ui-ctrl-el-meta { color: var(--text-secondary);  margin-top: 2px; }
 
 /* The file inventory is the primary content. Keep directory actions compact
    and let the file list claim all height not used by the modal chrome. */
@@ -684,8 +692,8 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #file-browser-modal .file-browser-location-label {
   flex: none;
   color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  
+  
 }
 #file-browser-modal .file-browser-path {
   flex: 1 1 auto;
@@ -696,7 +704,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   margin: 0;
   padding: 7px 9px;
   line-height: 18px;
-  font-size: 11px;
+  
   white-space: nowrap;
   word-break: normal;
   overflow: hidden;
@@ -736,7 +744,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #file-browser-modal .file-browser-worker-row > label {
   min-width: 0;
   white-space: nowrap;
-  font-size: 12px;
+  
 }
 #file-browser-modal .file-browser-worker-row > select {
   flex: 1;

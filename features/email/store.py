@@ -197,16 +197,31 @@ class EmailOutboxStore:
             params.extend([needle, needle, needle])
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         with self._connect() as conn:
-            total = conn.execute(
-                f"SELECT COUNT(*) FROM email_outbox {where}", params
-            ).fetchone()[0]
+            aggregate = conn.execute(
+                f"""SELECT COUNT(*) AS total,
+                           COALESCE(SUM(CASE WHEN sent = 1 THEN 1 ELSE 0 END), 0) AS success,
+                           COALESCE(SUM(CASE WHEN sent = 0 THEN 1 ELSE 0 END), 0) AS failed,
+                           MAX(created_at) AS latest_at
+                    FROM email_outbox {where}""",
+                params,
+            ).fetchone()
             rows = conn.execute(
                 f"""SELECT * FROM email_outbox {where}
                     ORDER BY created_at DESC, id DESC
                     LIMIT ? OFFSET ?""",
                 [*params, limit, offset],
             ).fetchall()
-        return {"total": int(total), "items": [_row_to_dict(row) for row in rows]}
+        total = int(aggregate["total"])
+        return {
+            "total": total,
+            "items": [_row_to_dict(row) for row in rows],
+            "summary": {
+                "total": total,
+                "success": int(aggregate["success"]),
+                "failed": int(aggregate["failed"]),
+                "latest_at": aggregate["latest_at"] or "",
+            },
+        }
 
     def get(self, email_id: str) -> dict[str, Any] | None:
         with self._connect() as conn:

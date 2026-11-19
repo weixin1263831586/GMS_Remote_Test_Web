@@ -165,6 +165,21 @@ class ManageApiGuardTests(_ManageApiHarness):
         )
         self.assertEqual(response.status_code, 403)
 
+    def test_update_requires_elevated_human(self):
+        self.store.add(source_id="a16", repo_root="/sdk",
+                       ssh_host="host", ssh_username="user")
+        for headers in (
+            {"x-test-elevated": "0"},
+            {"x-test-method": "agent_token"},
+        ):
+            response = self.client.put(
+                "/api/sdk/manage/sources/a16",
+                json={"android_version": "Android16"},
+                headers=headers,
+            )
+            self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(self.store.get("a16")["android_version"], "")
+
     def test_unknown_server_404(self):
         response = self.client.post(
             "/api/sdk/manage/probe",
@@ -332,9 +347,200 @@ class ManageApiFlowTests(_ManageApiHarness):
         with self.assertRaises(UserSourceStoreError):
             self.store.get("a16")
 
+    def test_registration_survives_reload_failure(self):
+        with (
+            self._patch_ssh(stdout="DIR_OK\nREPO_OK\nSUB_GIT_OK\n"),
+            mock.patch.object(
+                self.manage, "reload_source_runtime",
+                side_effect=RuntimeError("reload unavailable"),
+            ) as reload,
+        ):
+            response = self.client.post(
+                "/api/sdk/manage/sources",
+                json={"server_id": "build-206", "repo_root": "/home/hcj/sdk-kept"},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["success"])
+        self.assertFalse(response.json()["data"]["runtime_reload_ok"])
+        self.assertEqual(response.json()["data"]["source"]["registry_state"], "RELOAD_FAILED")
+        self.assertIn("已保存", response.json()["warning"])
+        self.assertEqual(self.store.get("sdk-kept")["repo_root"], "/home/hcj/sdk-kept")
+        self.assertEqual(reload.call_count, 2)
+
+    def test_deletion_survives_reload_failure(self):
+        self.store.add(
+            source_id="to-delete", repo_root="/sdk",
+            ssh_host="10.10.10.206", ssh_username="hcj",
+        )
+        with mock.patch.object(self.manage, "reload_source_runtime",
+                               side_effect=RuntimeError("reload unavailable")) as reload:
+            response = self.client.delete("/api/sdk/manage/sources/to-delete")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["data"]["runtime_reload_ok"])
+        self.assertTrue(response.json()["data"]["deleted"])
+        with self.assertRaises(UserSourceStoreError):
+            self.store.get("to-delete")
+        self.assertEqual(reload.call_count, 2)
+
     def test_delete_unknown_404(self):
         response = self.client.delete("/api/sdk/manage/sources/ghost")
         self.assertEqual(response.status_code, 404)
+
+
+    def test_update_version_and_revision_preserves_password(self):
+        """版本和 revision 只修改记录，不探测 SSH、不重建源 ID/口令。"""
+        self.store.add(
+            source_id="7_Android17_1017", repo_root="/home/hcq/7_Android17_1017",
+            ssh_host="10.10.10.206", ssh_port=22, ssh_username="hcq",
+            ssh_password="secret-pw", android_version="Android16",
+        )
+        before = self.store.get("7_Android17_1017")
+        with mock.patch.object(self.manage, "_run_remote_probe") as probe, \
+                mock.patch.object(self.manage, "reload_source_runtime", return_value="AVAILABLE") as reload:
+            response = self.client.put(
+                "/api/sdk/manage/sources/7_Android17_1017",
+                json={
+                    "android_version": "Android17",
+                    "default_revision": "android-17",
+                    "expected_config_fingerprint": before["config_fingerprint"],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        probe.assert_not_called()
+        reload.assert_called_once()
+        record = self.store.get("7_Android17_1017")
+        self.assertEqual(record["source_id"], before["source_id"])
+        self.assertEqual(record["repo_root"], before["repo_root"])
+        self.assertEqual(record["android_version"], "Android17")
+        self.assertEqual(record["default_revision"], "android-17")
+        self.assertEqual(self.store.get_password(record["source_id"]), "secret-pw")
+        self.assertNotIn("ssh_password_enc", response.json()["data"]["source"])
+        self.assertNotIn("secret-pw", response.text)
+
+    def test_update_rejects_stale_form_and_immutable_fields(self):
+        self.store.add(source_id="id-1", repo_root="/sdk", ssh_host="host",
+                       ssh_username="user", ssh_password="secret")
+        original = self.store.get("id-1")
+        with mock.patch.object(self.manage, "reload_source_runtime", return_value="AVAILABLE"):
+            first = self.client.put(
+                "/api/sdk/manage/sources/id-1",
+                json={"android_version": "Android17",
+                      "expected_config_fingerprint": original["config_fingerprint"]},
+            )
+        self.assertEqual(first.status_code, 200)
+        stale = self.client.put(
+            "/api/sdk/manage/sources/id-1",
+            json={"android_version": "Android16",
+                  "expected_config_fingerprint": original["config_fingerprint"]},
+        )
+        self.assertEqual(stale.status_code, 409)
+        illegal = self.client.put(
+            "/api/sdk/manage/sources/id-1",
+            json={"source_id": "renamed"},
+        )
+        self.assertEqual(illegal.status_code, 422)
+        self.assertEqual(self.store.get("id-1")["android_version"], "Android17")
+
+    def test_update_location_reprobes_and_resets_verification(self):
+        self.store.add(source_id="a16", repo_root="/sdk/old", ssh_host="old-host",
+                       ssh_username="user", ssh_password="old-pw")
+        self.store.mark_verified("a16", ok=True)
+        with mock.patch.object(
+            self.manage, "_run_remote_probe", return_value=("DIR_OK\nREPO_OK\nSUB_GIT_OK\n", 0)
+        ) as probe, mock.patch.object(
+            self.manage, "_resolve_password_by_target", return_value="new-pw"
+        ), mock.patch.object(
+            self.manage, "reload_source_runtime", return_value="AVAILABLE"
+        ):
+            response = self.client.put(
+                "/api/sdk/manage/sources/a16",
+                json={
+                    "target": "user@new-host:2222",
+                    "repo_root": "/sdk/new",
+                    "expected_config_fingerprint": self.store.get("a16")["config_fingerprint"],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        probe.assert_called()
+        record = self.store.get("a16")
+        self.assertEqual(record["ssh_host"], "new-host")
+        self.assertEqual(record["ssh_port"], 2222)
+        self.assertEqual(record["repo_root"], "/sdk/new")
+        self.assertEqual(self.store.get_password("a16"), "new-pw")
+        self.assertNotIn("last_verified_at", record)
+
+    def test_update_missing_path_keeps_previous_record(self):
+        self.store.add(source_id="local", provider="local_git", repo_root="/sdk/old")
+        with mock.patch.object(self.manage, "_probe_local_path", return_value={
+            "path_exists": False, "summary": "路径不存在",
+        }):
+            response = self.client.put(
+                "/api/sdk/manage/sources/local",
+                json={
+                    "repo_root": "/sdk/missing",
+                    "expected_config_fingerprint": self.store.get("local")["config_fingerprint"],
+                },
+            )
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.store.get("local")["repo_root"], "/sdk/old")
+
+
+
+    def test_update_committed_but_reload_failed_is_not_reported_as_failed_save(self):
+        self.store.add(source_id="reload-edit", provider="local_git", repo_root="/sdk")
+        before = self.store.get("reload-edit")
+        with mock.patch.object(
+            self.manage, "reload_source_runtime",
+            side_effect=RuntimeError("internal-secret-should-not-leak"),
+        ):
+            response = self.client.put(
+                "/api/sdk/manage/sources/reload-edit",
+                json={
+                    "android_version": "Android17",
+                    "expected_config_fingerprint": before["config_fingerprint"],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        payload = response.json()
+        self.assertTrue(payload["success"])
+        self.assertFalse(payload["data"]["runtime_reload_ok"])
+        self.assertEqual(payload["data"]["source"]["registry_state"], "RELOAD_FAILED")
+        self.assertIn("已保存", payload["warning"])
+        self.assertNotIn("internal-secret-should-not-leak", response.text)
+        stored = self.store.get("reload-edit")
+        self.assertEqual(stored["android_version"], "Android17")
+        self.assertNotEqual(stored["config_fingerprint"], before["config_fingerprint"])
+
+    def test_update_reload_recovers_on_one_transient_failure(self):
+        self.store.add(source_id="recover-edit", provider="local_git", repo_root="/sdk")
+        old = self.store.get("recover-edit")
+        with mock.patch.object(
+            self.manage, "reload_source_runtime",
+            side_effect=[OSError("temporary reload problem"), "AVAILABLE"],
+        ) as reload_runtime:
+            response = self.client.put(
+                "/api/sdk/manage/sources/recover-edit",
+                json={
+                    "android_version": "Android17",
+                    "expected_config_fingerprint": old["config_fingerprint"],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertTrue(response.json()["data"]["runtime_reload_ok"])
+        self.assertEqual(response.json()["data"]["source"]["registry_state"], "AVAILABLE")
+        self.assertEqual(reload_runtime.call_count, 2)
+        self.assertEqual(self.store.get("recover-edit")["android_version"], "Android17")
+        self.assertNotIn("temporary reload problem", response.text)
+
+    def test_update_requires_fresh_config_fingerprint(self):
+        self.store.add(source_id="fingerprint-required", provider="local_git", repo_root="/sdk")
+        original = self.store.get("fingerprint-required")
+        response = self.client.put(
+            "/api/sdk/manage/sources/fingerprint-required",
+            json={"android_version": "Android17"},
+        )
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.store.get("fingerprint-required"), original)
 
 
 class DiscoverTests(_ManageApiHarness):
@@ -801,6 +1007,38 @@ class BatchRegisterTests(_ManageApiHarness):
         self.assertTrue(data["created"][0]["source_id"].startswith("batch-local"))
         self.assertEqual(len(data["failed"]), 1)
         self.assertIn("不存在", data["failed"][0]["error"])
+
+    def test_batch_persisted_records_survive_reload_failure(self):
+        first = self._make_temp_git_repo("partial-a")
+        second = self._make_temp_git_repo("partial-b")
+        with mock.patch.object(self.manage, "reload_source_runtime",
+                               side_effect=RuntimeError("reload unavailable")) as reload:
+            response = self.client.post(
+                "/api/sdk/manage/sources/batch",
+                json={"provider": "local_git", "repo_roots": [str(first), str(second)]},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertFalse(data["runtime_reload_ok"])
+        self.assertEqual(len(data["created"]), 2)
+        self.assertTrue(all(row["registry_state"] == "RELOAD_FAILED"
+                            for row in data["created"]))
+        self.assertEqual(len(self.store.list_sources()), 2)
+        self.assertEqual(reload.call_count, 2)
+
+    def test_batch_all_invalid_does_not_reload(self):
+        with mock.patch.object(self.manage, "reload_source_runtime") as reload:
+            response = self.client.post(
+                "/api/sdk/manage/sources/batch",
+                json={"provider": "local_git",
+                      "repo_roots": [str(self.root / "does-not-exist")]},
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+        data = response.json()["data"]
+        self.assertEqual(data["created"], [])
+        self.assertEqual(len(data["failed"]), 1)
+        self.assertTrue(data["runtime_reload_ok"])
+        reload.assert_not_called()
 
     def test_batch_probe_command_and_parser(self):
         """BPR 标记协议：路径含空格安全，缺行可由数量校验兜底。"""

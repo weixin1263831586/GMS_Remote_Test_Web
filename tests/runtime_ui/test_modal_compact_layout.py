@@ -110,7 +110,7 @@ class CompactModalLayoutTests(RuntimeUiHarness):
                         field = modal.locator(field_selector).bounding_box()
                         self.assertLessEqual(card['y'] + card['height'] - field['y'] - field['height'], 14)
                     for button in modal.locator('.modal-buttons button').all():
-                        expect(button).to_have_css('font-size', '13px')
+                        expect(button).to_have_css('font-size', '12px')
                         self.assertLessEqual(button.bounding_box()['height'], 34)
                     expect(modal.locator('.modal-title')).to_have_css('font-size', '16px')
                     self.capture(page, 'firmware')

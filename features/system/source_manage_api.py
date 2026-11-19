@@ -7,6 +7,7 @@
 - ``POST   /api/sdk/manage/probe``               绑定前探测远端 SDK 路径
 - ``POST   /api/sdk/manage/sources``             校验 + 注册 + 热重载 registry（单路径兼容）
 - ``POST   /api/sdk/manage/sources/batch``       批量注册：一次 SSH 连接探测多条路径
+- ``PUT    /api/sdk/manage/sources/{source_id}`` 原地编辑 + 热重载
 - ``DELETE /api/sdk/manage/sources/{source_id}`` 注销 + 热重载
 
 安全模型（ADR 0012）：全部 human-only——读操作
@@ -22,6 +23,7 @@ SSH 执行走 ADR 0004 唯一层（``SSHManager`` + ``ssh_executor``），远端
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 import os
@@ -46,6 +48,12 @@ from foundation.config_paths import build_servers_path
 from foundation.error_model import API_ERROR_CODES, ApiError
 from foundation.errors import handle_api_errors
 
+from .source_manage_edit import (
+    SourceEditDependencies,
+    _parse_target,
+    persisted_sdk_write_response,
+    update_source_config,
+)
 from .source_provider import reload_source_runtime, user_source_store
 from .source_user_store import (
     UserSourceStoreError,
@@ -467,44 +475,6 @@ def _load_build_servers() -> list[dict[str, Any]]:
             }
         )
     return listing
-
-
-def _parse_target(target: str) -> dict[str, Any]:
-    """解析手动输入的连接目标：``user@10.0.0.9`` / ``user@host:2222``。
-
-    返回 {host, port, username}；用户名不设缺省（root 连接太危险），
-    留空直接 422。
-    """
-    text = str(target or "").strip()
-    if not text:
-        raise UserSourceStoreError("请输入编译服务器地址（如 user@10.0.0.9）")
-    # 去掉可能粘贴进来的 scheme 与空白
-    text = text.replace("ssh://", "").strip()
-    if any(ch.isspace() for ch in text) or "@" in text.replace("@", "", 1):
-        raise UserSourceStoreError("服务器地址格式非法（应为 user@host[:port]）")
-    username, sep, hostport = text.rpartition("@")
-    if not sep:
-        raise UserSourceStoreError("请使用 user@host 格式（如 user@10.0.0.9）")
-    if "@" in hostport:
-        raise UserSourceStoreError("服务器地址格式非法（多个 @）")
-    host, port_str = hostport, ""
-    if ":" in hostport:
-        host, port_str = hostport.rsplit(":", 1)
-    host = host.strip()
-    username = username.strip()
-    if not host or not username:
-        raise UserSourceStoreError("服务器地址缺少主机名或用户名")
-    if any(ch.isspace() for ch in host) or any(ch.isspace() for ch in username):
-        raise UserSourceStoreError("主机名/用户名不能包含空白")
-    port = 22
-    if port_str:
-        try:
-            port = int(port_str)
-        except ValueError as exc:
-            raise UserSourceStoreError("端口必须是数字") from exc
-        if not 1 <= port <= 65535:
-            raise UserSourceStoreError("端口必须在 1-65535 之间")
-    return {"host": host, "port": port, "username": username}
 
 
 def _get_server(server_id: str) -> dict[str, Any]:
@@ -1019,12 +989,12 @@ def register_sdk_source(request: Request, req: dict[str, Any]):
         record, error = _register_single_source(request, req)
         if error is not None:
             return _error_response(error)
-        state = reload_source_runtime()
-    except (RuntimeError, OSError) as exc:  # 热重载/磁盘异常
-        logger.exception("SDK 源注册后置步骤失败")
+    except (RuntimeError, OSError) as exc:
+        logger.exception("SDK 源注册保存失败")
         return _error_response(exc)
-    record["registry_state"] = state
-    return {"success": True, "data": {"source": _public_record(record)}}
+    return persisted_sdk_write_response(
+        reload_source_runtime, logger, "新增", {"source": _public_record(record)},
+    )
 
 
 def _register_single_source(
@@ -1162,14 +1132,30 @@ def register_sdk_sources_batch(request: Request, req: dict[str, Any]):
             created.append(_public_record(record))
         else:
             failed.append({"repo_root": repo_root, "error": str(error)})
-    try:
-        state = reload_source_runtime()
-    except (RuntimeError, OSError) as exc:  # 热重载/磁盘异常
-        logger.exception("SDK 源批量注册后热重载失败")
-        return _error_response(exc)
-    for item in created:
-        item["registry_state"] = state
-    return {"success": True, "data": {"created": created, "failed": failed}}
+    return persisted_sdk_write_response(
+        reload_source_runtime, logger, "批量新增",
+        {"created": created, "failed": failed}, changed=bool(created),
+    )
+
+
+@router.put(
+    "/sources/{source_id}",
+    description=inspect.cleandoc(update_source_config.__doc__ or ""),
+)
+@handle_api_errors
+def update_sdk_source(request: Request, source_id: str, req: dict[str, Any]):
+    require_elevated_admin(request)
+    services = SourceEditDependencies(
+        store_factory=user_source_store,
+        error_response=_error_response,
+        password_resolver=_resolve_password_by_target,
+        remote_probe=_probe_via_target,
+        local_probe=_probe_local_path,
+        public_record=_public_record,
+        reload_runtime=reload_source_runtime,
+        logger=logger,
+    )
+    return update_source_config(request, source_id, req, services=services)
 
 
 @router.delete("/sources/{source_id}")
@@ -1178,16 +1164,15 @@ def delete_sdk_source(request: Request, source_id: str):
     require_elevated_admin(request)
     try:
         user_source_store().delete(source_id)
-        state = reload_source_runtime()
     except UserSourceStoreError as exc:
         return _error_response(exc)
     except (RuntimeError, OSError) as exc:
-        logger.exception("SDK 源删除后热重载失败")
+        logger.exception("SDK 源删除保存失败")
         return _error_response(exc)
-    return {
-        "success": True,
-        "data": {"deleted": True, "id": source_id, "registry_state": state},
-    }
+    return persisted_sdk_write_response(
+        reload_source_runtime, logger, f"删除 {source_id}",
+        {"deleted": True, "id": source_id},
+    )
 
 
 def _public_record(record: dict[str, Any]) -> dict[str, Any]:

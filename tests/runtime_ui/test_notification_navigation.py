@@ -95,11 +95,14 @@ class NotificationNavigationTests(RuntimeUiHarness):
                     make('redmine', {redmine_issue_id: '12345'}),
                     make('suite-download', {worker_id: 'w-1', archive_path: 'cts.zip'}),
                     make('system', {}),
+                    make('cluster', {job_id: 'job-5', status: 'running',
+                                     timestamp: '2026-11-18T21:00:00'}),
+                    make('report', {timestamp: '2026.11.18_14.55.10.142_9114'}),
                 ];
             }""")
             self.assertEqual([d["kind"] if d else None for d in destinations], [
                 "report", "workspace", "apk", "workspace", "workspace",
-                "workspace", None,
+                "workspace", None, "workspace", "report",
             ])
             self.assertEqual(destinations[0]["anchor"]["cluster_job_id"], "job-1")
             self.assertEqual(destinations[1]["page"], "cluster")
@@ -107,5 +110,8 @@ class NotificationNavigationTests(RuntimeUiHarness):
             self.assertEqual(destinations[3]["context"]["automation_run_id"], "run-4")
             self.assertEqual(destinations[4]["context"]["redmine_issue_id"], "12345")
             self.assertEqual(destinations[5]["context"]["worker_id"], "w-1")
+            self.assertEqual(destinations[7]["page"], "cluster")
+            self.assertEqual(destinations[8]["anchor"]["report_timestamp"],
+                             "2026.11.18_14.55.10.142_9114")
         finally:
             page.close()

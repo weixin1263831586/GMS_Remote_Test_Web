@@ -69,15 +69,16 @@ async def _read_capped_request_body(request: Request) -> bytes:
     return b"".join(chunks)
 
 _ASSISTANT_BOOT_SHELL = """<!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-type-root="assistant-boot">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GMS助手</title>
 <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
+<link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 <style>
   html, body { margin: 0; height: 100%; background: var(--page-background);
-      font-family: system-ui, sans-serif; }
+      }
   #assistant-upstream-frame { position: fixed; inset: 0; width: 100%;
       height: 100%; border: 0; }
   #assistant-boot { position: fixed; inset: 0; display: flex;
@@ -92,7 +93,7 @@ _ASSISTANT_BOOT_SHELL = """<!doctype html>
   @keyframes boot-spin { to { transform: rotate(360deg); } }
   #assistant-boot-retry { margin-top: 14px; padding: 8px 22px;
       border: 1px solid var(--border-color); border-radius: 8px; background: var(--primary-gradient); color: var(--text-on-accent);
-      cursor: pointer; font-size: 14px; }
+      cursor: pointer; }
   #assistant-boot-retry:hover { background: var(--primary-gradient-hover); }
 </style>
 </head>
@@ -259,9 +260,9 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
     if not upstream:
         if path.startswith("public/agents/") and path.endswith("/chat"):
             return HTMLResponse(
-                """<!doctype html><html lang='zh-CN'><meta charset='utf-8'>
-<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><style>
-body{font-family:system-ui,sans-serif;margin:0;padding:32px;color:var(--text-primary);background:var(--page-background)}
+                """<!doctype html><html lang='zh-CN' data-ui-type-root='assistant-unconfigured'><meta charset='utf-8'>
+<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5"><style>
+body{margin:0;padding:32px;color:var(--text-primary);background:var(--page-background)}
 main{max-width:640px;margin:8vh auto;padding:28px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px}
 code{background:var(--lighter-bg);padding:3px 6px;border-radius:4px}
 </style><main><h2>GMS助手暂未配置</h2>

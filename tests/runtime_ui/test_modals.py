@@ -7,6 +7,31 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeModalsTests(RuntimeUiHarness):
+    def test_usbip_install_guide_renders_server_instructions_as_text(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            self.close_initial_modals(page)
+            instruction = "在主机执行检查步骤\\n<img src=x onerror=alert(1)>"
+            page.evaluate(
+                "([title, guide]) => showInstallGuide(title, guide)",
+                ["当前主机安装指导", instruction],
+            )
+            expect(page.locator("#install-guide-modal")).to_be_visible()
+            expect(page.locator("#install-guide-title")).to_have_text("当前主机安装指导")
+            expect(page.locator("#install-guide-dynamic")).to_be_visible()
+            expect(page.locator("#install-guide-default-steps")).to_be_hidden()
+            self.assertEqual(
+                page.locator("#install-guide-content").text_content(), instruction
+            )
+            self.assertEqual(page.locator("#install-guide-content img").count(), 0)
+
+            page.evaluate("closeInstallGuide(); showInstallGuide('usbipd 安装指南', '')")
+            expect(page.locator("#install-guide-dynamic")).to_be_hidden()
+            expect(page.locator("#install-guide-default-steps")).to_be_visible()
+        finally:
+            page.close()
+
     def test_notification_panel_only_closes_on_outside_mouse_click(self):
         page = self.new_page()
         page_errors = []
@@ -629,7 +654,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
                 ("fontTitle", "16px"),
                 ("fontLabel", "13px"),
                 ("fontInput", "13px"),
-                ("fontButton", "13px"),
+                ("fontButton", "12px"),
             ):
                 self.assertEqual(report[key], value, report)
             self.assertEqual(report["brands"], 4)

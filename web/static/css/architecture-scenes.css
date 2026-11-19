@@ -50,7 +50,7 @@
 .architecture-v2 .arch-scene-edge-pill--command{stroke:#8b69d5}
 .architecture-v2 .arch-scene-edge-pill--report{stroke:#358e81}
 .architecture-v2 .arch-scene-edge-label{
-  fill:#dbd1f3;font-size:11px;font-weight:650;
+  fill:#dbd1f3;
   text-anchor:middle;paint-order:stroke;stroke:#151624;stroke-width:6px;
   stroke-linejoin:round;letter-spacing:.05px;
 }
@@ -107,11 +107,11 @@
 .architecture-v2 .arch-scene-icon{display:inline-block;width:18px;height:18px;flex:none;stroke:currentColor;fill:none;stroke-width:1.8}
 .architecture-v2 .arch-scene-node-icon .arch-scene-icon{width:26px;height:26px;stroke-width:2}
 .architecture-v2 .arch-scene-title{display:flex;flex-direction:column;align-items:center;min-width:0;gap:4px}
-.architecture-v2 .arch-scene-title strong{font-size:14px;font-weight:750;color:#f7f4ff}
-.architecture-v2 .arch-scene-title small{font-size:10px;font-weight:500;color:#c4bdd8}
+.architecture-v2 .arch-scene-title strong{color:#f7f4ff}
+.architecture-v2 .arch-scene-title small{color:#c4bdd8}
 .architecture-v2 .arch-scene-node--control[data-scene-node="controller"] .arch-scene-title strong,
 .architecture-v2 .arch-scene-node--control[data-scene-node="control"] .arch-scene-title strong{
-  font-size:19px;letter-spacing:.15px;
+  letter-spacing:.15px;
 }
 .architecture-v2 .arch-scene-chips{
   display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
@@ -122,7 +122,7 @@
   padding:5px 3px;border-radius:6px;min-height:25px;
   border:1px solid color-mix(in srgb,var(--node-border) 58%,#373852);
   background:linear-gradient(180deg,rgba(52,54,94,.39),rgba(23,24,42,.9));
-  color:#e9e6f4;font-size:10px;font-weight:560;
+  color:#e9e6f4;
   line-height:1.32;text-align:center;overflow-wrap:anywhere;
 }
 .architecture-v2 .arch-scene-chip:last-child:nth-child(odd){grid-column:1/-1}
@@ -139,7 +139,7 @@
 }
 .architecture-v2 .arch-scene-sidecard h3{
   display:flex;align-items:center;gap:7px;margin:0 0 12px;
-  font-size:12px;font-weight:750;color:#e8e2f4;
+  color:#e8e2f4;
 }
 .architecture-v2 .arch-scene-sidecard h3 .arch-scene-icon{color:#bd92ff}
 .architecture-v2 .arch-scene-legend{
@@ -147,7 +147,7 @@
   display:flex;flex-direction:column;gap:12px;
 }
 .architecture-v2 .arch-scene-legend li{
-  display:flex;align-items:center;gap:8px;font-size:10px;
+  display:flex;align-items:center;gap:8px;
   color:#c7bedb;line-height:1.25;
 }
 .architecture-v2 .arch-scene-swatch{
@@ -165,17 +165,17 @@
 .architecture-v2 .arch-scene-swatch--external{--swatch:#9d7adc}
 .architecture-v2 .arch-scene-edge-key{
   display:flex;align-items:center;gap:8px;margin:11px 0 0;
-  color:#bcb2d3;font-size:10px;
+  color:#bcb2d3;
 }
 .architecture-v2 .arch-scene-line{width:27px;flex:none;border-top:2px solid #64c8ff}
 .architecture-v2 .arch-scene-line--command{border-color:#bd91fa;border-top-style:dashed}
 .architecture-v2 .arch-scene-boundaries{
   padding-left:16px;margin:0;display:grid;gap:12px;
-  color:#c2bbd0;font-size:10px;line-height:1.65;
+  color:#c2bbd0;line-height:1.65;
 }
 .architecture-v2 .arch-scene-boundaries li::marker{color:#af8bf3}
 .architecture-v2 .arch-scene-panel .arch-v2-intro{
-  font-size:11px;line-height:1.5;color:#bcb5d0;padding:9px 15px;
+  line-height:1.5;color:#bcb5d0;padding:9px 15px;
 }
 .architecture-v2 .arch-scene-bottom-card{
   border-top:2px solid var(--card-accent);
@@ -186,7 +186,7 @@
 .architecture-v2 .arch-scene-bottom-card--risk{--card-accent:#eac45c}
 .architecture-v2 .arch-scene-bottom-card h2{
   display:flex;align-items:center;gap:8px;
-  min-height:42px;font-size:12px;letter-spacing:.1px;
+  min-height:42px;letter-spacing:.1px;
 }
 .architecture-v2 .arch-scene-bottom-card h2 .arch-scene-icon{
   color:var(--card-accent);width:17px;height:17px;
@@ -197,16 +197,16 @@
 }
 .architecture-v2 .arch-scene-bottom-card table{
   min-width:0;width:100%;table-layout:fixed;border-collapse:collapse;
-  font-size:11px;line-height:1.48;
+  line-height:1.48;
 }
 .architecture-v2 .arch-scene-bottom-card td,
 .architecture-v2 .arch-scene-bottom-card th{
   height:34px;padding:7px 9px;border-bottom:1px solid #363247;
-  text-align:left;font-size:10px;vertical-align:top;
+  text-align:left;vertical-align:top;
 }
 .architecture-v2 .arch-scene-bottom-card th{
   background:rgba(60,48,88,.18);color:#d4c6f6;
-  width:35%;font-weight:650;white-space:normal;
+  width:35%;white-space:normal;
 }
 .architecture-v2 .arch-scene-bottom-card td{
   color:#bcb6c9;overflow-wrap:anywhere;
@@ -322,14 +322,14 @@
 .architecture-v2 .arch-v2-bottom{margin-top:8px;gap:9px}
 .architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel h2,
 .architecture-v2 .arch-scene-bottom-card h2{
-  min-height:31px;padding:7px 10px;font-size:11px;line-height:1.3
+  min-height:31px;padding:7px 10px;line-height:1.3
 }
-.architecture-v2 .arch-scene-bottom-card :is(th,td){height:auto;padding:5px 8px;font-size:10px;line-height:1.4}
+.architecture-v2 .arch-scene-bottom-card :is(th,td){height:auto;padding:5px 8px;line-height:1.4}
 .architecture-v2 .arch-scene-bottom-card th{width:32%}
 .architecture-v2 .arch-scene-tablewrap{max-height:none;overflow-x:hidden;overflow-y:visible}
-.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td){padding:5px 8px;font-size:10px;line-height:1.3}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td){padding:5px 8px;line-height:1.3}
 .architecture-v2 .arch-v2-timeline{padding:3px 10px}
-.architecture-v2 .arch-v2-timeline li{padding:4px 2px;font-size:10px;line-height:1.35}
+.architecture-v2 .arch-v2-timeline li{padding:4px 2px;line-height:1.35}
 .architecture-v2 .arch-v2-timeline li::before{min-width:23px;padding:2px 4px}
 .architecture-v2 .arch-scene-sidecard{padding:8px 9px;min-height:0}
 .architecture-v2 .arch-scene-sidecard h3{margin-bottom:8px}
@@ -365,18 +365,18 @@
     inset 0 0 12px color-mix(in srgb,var(--node-color) 6%,transparent);
 }
 .architecture-v2 .arch-scene-node header{margin-bottom:7px;gap:7px}
-.architecture-v2 .arch-scene-title strong{font-size:15px;line-height:1.3}
-.architecture-v2 .arch-scene-title small{font-size:10.5px;line-height:1.3}
+.architecture-v2 .arch-scene-title strong{line-height:1.3}
+.architecture-v2 .arch-scene-title small{line-height:1.3}
 .architecture-v2 .arch-scene-chips{align-content:center;gap:6px}
 .architecture-v2 .arch-scene-chip{
-  font-size:10.7px;line-height:1.35;font-weight:600;min-height:27px;padding:4px 4px;
+  line-height:1.35;min-height:27px;padding:4px 4px;
   background:linear-gradient(180deg,rgba(71,72,129,.23),rgba(24,26,47,.93));
 }
 .architecture-v2 .arch-scene-chip .arch-scene-icon{width:13px;height:13px}
-.architecture-v2 .arch-scene-sidecard h3{font-size:12.5px}
-.architecture-v2 .arch-scene-legend li{font-size:11px}
-.architecture-v2 .arch-scene-boundaries{font-size:10.8px}
-.architecture-v2 .arch-scene-edge-key{font-size:10.6px}
+.architecture-v2 .arch-scene-sidecard h3{}
+.architecture-v2 .arch-scene-legend li{}
+.architecture-v2 .arch-scene-boundaries{}
+.architecture-v2 .arch-scene-edge-key{}
 /* Worker boxes are blue in these three scenes: their legend must be blue too. */
 .architecture-v2 .arch-scene-layout:is(
  [data-scene-view="platform"],[data-scene-view="firmware"],
@@ -385,7 +385,7 @@
 /* Do not let a gold execution legend identify a blue device-worker node. */
 .architecture-v2 .arch-scene-layout[data-scene-view="agent-analysis"] .arch-scene-swatch--resource{--swatch:#3cddaf}
 @media(max-width:760px){
-  .architecture-v2 .arch-scene-legend li{font-size:10.5px}
+  .architecture-v2 .arch-scene-legend li{}
 }
 
 
@@ -422,7 +422,7 @@
   white-space:nowrap;
   overflow:hidden;
   padding-inline:3px;
-  font-size:10px;
+  
 }
 .architecture-v2 .arch-scene-chip > span{
   min-width:0;

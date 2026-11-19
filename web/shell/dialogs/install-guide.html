@@ -2,7 +2,7 @@
         <div class="modal-content modal-m tech-dialog tech-dialog--install-guide"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
         <span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
             <div class="modal-header tech-dialog-header">
-                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#download"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title">usbipd 安装指南</span></div>
+                <div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#download"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title" id="install-guide-title">usbipd 安装指南</span></div>
                 <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeInstallGuide">&times;</button>
             <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
             <div class="modal-body">
@@ -11,25 +11,30 @@
                     📋 检测到 Windows 主机缺少必要组件，需要安装 usbipd
                 </div>
 
-                <div style="margin-bottom: 15px;">
-                    <div style="font-weight: 600; margin-bottom: 10px; color: var(--text-primary);">🔧 手动安装步骤：</div>
+                <div id="install-guide-dynamic" hidden>
+                    <div style="margin-bottom: 10px; color: var(--text-primary);" data-ui-type-weight="semibold">🔧 当前主机安装指导：</div>
+                    <pre id="install-guide-content" style="white-space: pre-wrap; overflow-wrap: anywhere;   line-height: 1.6; color: var(--text-secondary); margin: 0 0 15px; padding: 12px; border: 1px solid var(--border-color); border-radius: 5px; background: var(--darker-bg);" data-ui-type-font="mono" data-ui-type-size="body"></pre>
+                </div>
+
+                <div id="install-guide-default-steps" style="margin-bottom: 15px;">
+                    <div style="margin-bottom: 10px; color: var(--text-primary);" data-ui-type-weight="semibold">🔧 手动安装步骤：</div>
                     <div style="background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 3px; padding: 10px;">
                         <ol style="margin: 0; padding-left: 20px; color: var(--text-secondary); line-height: 1.8;">
                             <li>在 Windows 电脑上以<strong style="color: var(--danger-color);">【管理员身份】</strong>打开 PowerShell</li>
-                            <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget install dorssel.usbipd-win --source winget</code></li>
-                            <li>查看版本：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">usbipd --version</code></li>
+                            <li>安装命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px;  color: var(--primary-color);" data-ui-type-font="mono">winget install dorssel.usbipd-win --source winget</code></li>
+                            <li>查看版本：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px;  color: var(--primary-color);" data-ui-type-font="mono">usbipd --version</code></li>
 
-                            <li>卸载命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px; font-family: 'Consolas', monospace; color: var(--primary-color);">winget uninstall usbipd</code></li>
+                            <li>卸载命令：<code style="background: var(--bg-color); padding: 2px 6px; border-radius: 3px;  color: var(--primary-color);" data-ui-type-font="mono">winget uninstall usbipd</code></li>
                         </ol>
                     </div>
                 </div>
 
                 <div id="install-progress" style="display: none; margin-bottom: 15px;">
-                    <div style="font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">⏳ 正在自动安装...</div>
+                    <div style="margin-bottom: 8px; color: var(--text-primary);" data-ui-type-weight="semibold">⏳ 正在自动安装...</div>
                     <div style="background: var(--border-color); border-radius: 3px; height: 6px; overflow: hidden;">
                         <div id="install-progress-bar" style="background: var(--primary-color); height: 100%; width: 0%; transition: width 0.3s;"></div>
                     </div>
-                    <div id="install-status" style="margin-top: 4px; font-size: 15px; color: var(--text-secondary);">准备安装...</div>
+                    <div id="install-status" style="margin-top: 4px;  color: var(--text-secondary);" data-ui-type-size="section">准备安装...</div>
                 </div>
 
 

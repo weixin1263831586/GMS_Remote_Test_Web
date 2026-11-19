@@ -7,17 +7,17 @@
     justify-content: flex-end;
     gap: 0;
     /* 全站页头动作区统一 11px 字号（tests/runtime_ui/test_workspaces.py 契约）。 */
-    font-size: 11px;
+    
     color: var(--text-secondary);
 }
 
 #apk-task-history {
     width: min(360px, 42vw);
     min-width: 180px;
-    min-height: 26px;
-    height: 26px;
+    min-height: var(--ui-control-height-small);
+    height: var(--ui-control-height-small);
     padding: 3px 8px;
-    font-size: 11px;
+    
 }
 
 #apk-task-history-refresh {
@@ -28,8 +28,8 @@
     max-width: 64px;
     overflow: hidden;
     white-space: nowrap;
-    min-height: 26px;
-    height: 26px;
+    min-height: var(--ui-control-height-small);
+    height: var(--ui-control-height-small);
 }
 
 /* 分析页统一上传区模板（报告分析 / APK 分析共用）。 */
@@ -81,21 +81,21 @@
     gap: 8px;
     width: 100%;
     color: var(--text-secondary);
-    font-family: inherit;
-    font-size: 12px;
+    
+    
     line-height: 1.6;
 }
 #page-report-analysis > .section-title {
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 700;
+    
+    
+    
     line-height: 1.6;
 }
 .report-upload-content > div:first-child,
 .apk-upload-content > div:first-child {
     flex: 0 0 28px;
     width: 28px;
-    font-size: 20px;
+    
     opacity: 0.8;
     text-align: center;
     align-self: center;
@@ -116,18 +116,18 @@
 }
 .analysis-upload-title {
     height: 22px;
-    font-family: inherit;
-    font-size: 14px;
-    font-weight: 600;
+    
+    
+    
     line-height: 22px;
     white-space: nowrap;
 }
 .analysis-upload-copy .upload-instructions {
     margin-top: 4px;
     color: var(--text-secondary);
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 400;
+    
+    
+    
     line-height: 1.6;
 }
 .report-upload-content button,
@@ -137,8 +137,8 @@
     margin-left: 6px;
     align-self: center;
     padding: 10px 20px;
-    font-family: inherit;
-    font-size: 12px;
+    
+    
     line-height: 1.6;
 }
 /* 收起态：隐藏多行说明。 */
@@ -154,7 +154,7 @@
 .report-upload-zone:not(.upload-empty) button,
 .apk-upload-zone:not(.upload-empty) button {
     padding: 6px 12px;
-    font-size: 11px;
+    
 }
 /* 上传进度条：默认隐藏，上传期间由 JS 拉起。 */
 .report-upload-progress,
@@ -189,16 +189,12 @@
     margin-bottom: 10px;
 }
 #apk-analysis-status .section-title {
-    font-size: 16px;
-    font-weight: 600;
+    
+    
     margin-bottom: 12px;
 }
 
 @media (max-width: 700px) {
-    .main-container > #page-apk-analysis.page-content {
-        --page-body-frame-top: 74px;
-    }
-
     .apk-page-header {
         align-items: stretch;
         flex-direction: column;
@@ -240,8 +236,8 @@
     border: 1px solid var(--border-color);
     background: var(--light-bg);
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 500;
+    
+    
     cursor: pointer;
     transition: all 0.2s ease;
 }
@@ -291,21 +287,21 @@
     margin-bottom: 0;
 }
 .apk-manifest-label {
-    font-size: 12px;
+    
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
-    font-weight: 500;
+    
     justify-content: flex-start;
     white-space: nowrap;
 }
 .apk-manifest-value {
-    font-size: 12px;
-    font-weight: 600;
+    
+    
     color: var(--text-primary);
     word-break: break-all;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+    
     text-align: left;
     min-width: 0;
 }
@@ -317,7 +313,7 @@
     align-items: center;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
-    font-size: 12px;
+    
     transition: background 0.15s ease;
 }
 .apk-permission-item:hover {
@@ -331,13 +327,13 @@
     min-width: 30px;
 }
 .apk-perm-name {
-    font-family: monospace;
-    font-size: 12px;
+    
+    
     word-break: break-all;
 }
 .apk-perm-short {
     color: var(--text-secondary);
-    font-size: 10px;
+    
     white-space: nowrap;
     margin-left: 10px;
 }
@@ -356,7 +352,7 @@
     cursor: pointer;
     border-radius: 6px;
     transition: all 0.15s ease;
-    font-size: 13px;
+    
 }
 .apk-tree-item:hover {
     background: var(--lighter-bg);
@@ -364,18 +360,18 @@
 }
 .apk-tree-item.dir {
     color: var(--warning-color);
-    font-weight: 500;
+    
 }
 .apk-tree-item.dir::before {
     content: '📁';
-    font-size: 14px;
+    
 }
 .apk-tree-item.file {
     color: var(--text-secondary);
 }
 .apk-tree-item.file::before {
     content: '📄';
-    font-size: 14px;
+    
 }
 .apk-tree-item.file:hover {
     color: var(--text-primary);
@@ -394,8 +390,8 @@
     animation: fadeIn 0.2s ease;
 }
 .apk-file-path {
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
-    font-size: 10px;
+    
+    
     color: var(--text-secondary);
     padding: 4px 8px;
     background: var(--darker-bg);
@@ -411,8 +407,8 @@
     padding: 15px;
     border-radius: 6px;
     background: var(--darker-bg);
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
-    font-size: 12px;
+    
+    
     line-height: 1.5;
     color: var(--text-secondary);
     white-space: pre;
@@ -495,8 +491,8 @@ body.apk-resizing {
 }
 
 .apk-source-tree {
-    font-family: monospace;
-    font-size: 12px;
+    
+    
     height: 100%;
     min-height: 0;
     overflow-y: auto;
@@ -537,7 +533,7 @@ body.apk-resizing {
     border-radius: 6px 6px 0 0;
     background: var(--darker-bg);
     color: var(--text-secondary);
-    font-size: 10px;
+    
     cursor: pointer;
     white-space: nowrap;
 }
@@ -573,7 +569,7 @@ body.apk-resizing {
     padding: 8px 12px;
     cursor: pointer;
     border-bottom: 1px solid var(--border-color);
-    font-size: 13px;
+    
     transition: background-color 0.15s ease;
 }
 
@@ -585,13 +581,11 @@ body.apk-resizing {
     border-bottom: none;
 }
 
-.apk-search-result-name {
-    font-family: monospace;
-}
+
 
 .apk-search-result-path {
     color: var(--text-secondary);
-    font-size: 10px;
+    
     margin-left: 8px;
 }
 
@@ -601,7 +595,7 @@ body.apk-resizing {
     align-items: center;
     gap: 8px;
     padding: 4px 0;
-    font-size: 12px;
+    
     color: var(--text-secondary);
 }
 
@@ -619,7 +613,7 @@ body.apk-resizing {
 .redmine-file-remove {
     cursor: pointer;
     color: var(--danger-color);
-    font-size: 14px;
+    
 }
 
 .redmine-drop-zone.drag-over {
@@ -635,7 +629,7 @@ body.apk-resizing {
     border-radius: 4px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    font-size: 12px;
+    
 }
 
 .apk-search-input:focus {
@@ -695,7 +689,7 @@ body.apk-resizing {
     margin: auto;
     max-width: 560px;
     color: var(--text-secondary);
-    font-size: 13px;
+    
     line-height: 1.7;
     text-align: center;
     padding: 22px;
@@ -758,8 +752,8 @@ body.apk-resizing {
 }
 
 .agent-role {
-    font-size: 10px;
-    font-weight: 700;
+    
+    
     color: var(--text-secondary);
 }
 
@@ -768,16 +762,16 @@ body.apk-resizing {
 }
 
 .agent-time {
-    font-size: 10px;
+    
     color: var(--text-muted);
-    font-family: 'Consolas', 'SF Mono', monospace;
+    
     white-space: nowrap;
 }
 
 .agent-message-body {
     padding: 10px 12px;
     color: var(--text-primary);
-    font-size: 13px;
+    
     line-height: 1.55;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
@@ -800,20 +794,20 @@ body.apk-resizing {
 
 .agent-plan-key {
     color: var(--text-muted);
-    font-size: 12px;
+    
 }
 
 .agent-plan-value {
     color: var(--text-primary);
-    font-size: 12px;
-    font-family: 'Consolas', 'SF Mono', monospace;
+    
+    
     word-break: break-word;
 }
 
 .agent-plan-note {
     margin-top: 10px;
     color: var(--warning-color);
-    font-size: 12px;
+    
 }
 
 .agent-question {
@@ -826,14 +820,14 @@ body.apk-resizing {
 .agent-question-field {
     display: grid;
     gap: 4px;
-    font-size: 12px;
+    
 }
 
 .agent-question-field select,
 .agent-question-field input {
     width: 100%;
     min-width: 0;
-    font-size: 12px;
+    
 }
 
 /* Agent 步骤面板：ATS Run 实时进展条（阶段模型与 ATS 页一致） */
@@ -843,7 +837,7 @@ body.apk-resizing {
 
 .agent-run-progress-empty {
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 
 .agent-run-progress-head {
@@ -855,19 +849,17 @@ body.apk-resizing {
 }
 
 .agent-run-stage-label {
-    font-size: 12px;
-    font-weight: 600;
+    
+    
     color: var(--text-primary);
 }
 
 .agent-run-stage-time {
-    font-size: 10px;
+    
     color: var(--text-secondary);
 }
 
-.agent-artifact-download {
-    font-size: 10px;
-}
+
 
 .agent-run-stage-bar {
     display: flex;
@@ -914,7 +906,7 @@ body.apk-resizing {
 .agent-typing {
     align-self: flex-start;
     color: var(--text-secondary);
-    font-size: 12px;
+    
     padding: 7px 12px;
     opacity: 0.82;
     border: 1px solid var(--border-color);
@@ -934,15 +926,15 @@ body.apk-resizing {
 }
 
 .agent-run-title {
-    font-size: 13px;
-    font-weight: 600;
+    
+    
     white-space: nowrap;
 }
 
 #agent-status {
     flex: 0 0 auto;
     color: var(--text-secondary);
-    font-size: 11px;
+    
     white-space: nowrap;
 }
 
@@ -953,7 +945,7 @@ body.apk-resizing {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    font-size: 11px;
+    
 }
 
 /* 对话引擎状态着色：与模型状态同一套语义色。 */
@@ -973,7 +965,7 @@ body.apk-resizing {
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    font-size: 11px;
+    
 }
 
 #agent-model-status {
@@ -994,7 +986,7 @@ body.apk-resizing {
     min-width: 44px;
     min-height: 24px;
     padding: 2px 7px;
-    font-size: 10px;
+    
 }
 
 /* ==================== 用户与 Agent 接入管理 ==================== */
@@ -1013,8 +1005,8 @@ body.apk-resizing {
 
 .users-view-tabs .btn-xs {
     /* 24px 分段按钮 + 上下边框 = 26px 胶囊，与全站动作区控件同高同底边。 */
-    height: 24px;
-    min-height: 24px;
+    height: var(--ui-segmented-inner-height);
+    min-height: var(--ui-segmented-inner-height);
     padding: 3px 9px;
     border: 0;
     border-radius: 0;
@@ -1025,7 +1017,8 @@ body.apk-resizing {
 
 #agent-access-entry,
 #sdk-config-entry,
-#audit-outbox-entry {
+#audit-outbox-entry,
+#audit-disk-entry {
     display: flex;
     align-items: stretch;
     border-left: 1px solid var(--border-color);
@@ -1033,7 +1026,8 @@ body.apk-resizing {
 
 #agent-access-entry > .btn-xs,
 #sdk-config-entry > .btn-xs,
-#audit-outbox-entry > .btn-xs {
+#audit-outbox-entry > .btn-xs,
+#audit-disk-entry > .btn-xs {
     flex: 1;
 }
 
@@ -1057,19 +1051,13 @@ body.apk-resizing {
 #agent-access-panel,
 #sdk-config-panel,
 #audit-main-view,
-#audit-outbox-panel {
+#audit-outbox-panel,
+#audit-disk-panel {
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-height: 0;
     min-width: 0;
-}
-
-#users-main-view,
-#agent-access-panel,
-#sdk-config-panel,
-#audit-main-view,
-#audit-outbox-panel {
-    display: flex;
-    flex-direction: column;
 }
 
 /* Agent 接入统计卡已并入 page-stat-row/workbench-stat 模板
@@ -1098,7 +1086,7 @@ body.apk-resizing {
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
     background: var(--darker-bg);
-    font-size: 13px;
+    
     text-align: center;
 }
 
@@ -1204,9 +1192,9 @@ body.apk-resizing {
     min-height: 0;
 }
 #kb-doc-tags { height: 26px; }
-#kb-doc-title { height: 30px; font-size: 15px; font-weight: 600; }
+#kb-doc-title { height: 30px;   }
 #kb-doc-tags,
-#kb-search-input { height: 28px; font-size: 12px; }
+#kb-search-input { height: 28px;  }
 #kb-doc-content {
     flex: 1;
     min-height: 0;
@@ -1214,8 +1202,8 @@ body.apk-resizing {
     border: 0;
     background: transparent;
     color: var(--text-primary);
-    font-family: Consolas, monospace;
-    font-size: 13px;
+    
+    
     line-height: 1.6;
     resize: none;
 }
@@ -1225,7 +1213,7 @@ body.apk-resizing {
     overflow: auto;
     border-top: 1px solid var(--border-color);
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 .api-toolbar { margin-bottom: 10px; }
 #api-search-input {
@@ -1236,7 +1224,7 @@ body.apk-resizing {
     border-radius: 6px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    font-size: 12px;
+    
 }
 .api-filter-row {
     display: flex;
@@ -1266,9 +1254,9 @@ body.apk-resizing {
 #btn-download-suite,
 #btn-extract-suite { height: 32px; min-width: 100px; white-space: nowrap; }
 .suite-progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.suite-progress-status { min-width: 80px; color: var(--text-muted); font-size: 12px; }
+.suite-progress-status { min-width: 80px; color: var(--text-muted);  }
 .suite-progress-track { flex: 1; height: 6px; overflow: hidden; border-radius: 4px; background: var(--border-color); }
-.suite-progress-percent { min-width: 40px; color: var(--success-color); font-size: 12px; text-align: right; }
+.suite-progress-percent { min-width: 40px; color: var(--success-color);  text-align: right; }
 #suite-progress-bar {
     width: 0%;
     height: 100%;
@@ -1301,13 +1289,13 @@ body.apk-resizing {
     }
 
     .sidebar-brand {
-        font-size: 0;
+        
         letter-spacing: 0;
     }
 
     .sidebar-brand::after {
         content: "GMS";
-        font-size: 12px;
+        
         letter-spacing: 0.4px;
     }
 
@@ -1330,21 +1318,8 @@ body.apk-resizing {
         display: none;
     }
 
-    .container {
-        padding: 8px;
-    }
-
     .users-stats {
         grid-template-columns: 1fr !important;
-    }
-
-    .main-container > .page-content:not(#page-test) {
-        --page-body-frame-inset: 8px;
-        --page-body-frame-top: 33px;
-    }
-
-    .main-container > #page-apk-analysis.page-content {
-        --page-body-frame-top: 67px;
     }
 
     #page-test,
@@ -1516,7 +1491,7 @@ body.apk-resizing {
 .emoji-opt {
     background: transparent;
     border: none;
-    font-size: 16px;
+    
     cursor: pointer;
     padding: 2px 3px;
     border-radius: 3px;

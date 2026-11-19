@@ -212,6 +212,23 @@ def test_styles_preserve_import_cascade_relative_urls_and_cached_http(tmp_path):
         assert client.get(f"/{STYLES_PATH}", headers={"If-None-Match": response.headers["etag"]}).status_code == 304
 
 
+def test_canonical_nested_typography_imports_bundle_in_production(tmp_path):
+    _, static = style_fixture(tmp_path, imports="", production=False)
+    (static / "typography").mkdir()
+    (static / "typography/part.css").write_text(".role { font-size: 13px; }")
+    (static / "common.css").write_text(
+        '@import url("/static/css/typography/part.css?v=canonical");\n'
+        '.main { background: url("icon.svg"); }'
+    )
+    # Build after the nested dependency exists, as in the real repository.
+    templates = create_shell_templates(tmp_path / "shell", production=True)
+    asset = templates.style_bundle.asset
+    assert asset is not None
+    assert b".role { font-size: 13px; }" in asset.content
+    assert b"@import" not in asset.content
+    assert any(path.as_posix().endswith("/typography/part.css") for path, *_ in asset.sources)
+
+
 def test_development_import_edit_refreshes_style_version(tmp_path):
     templates, static = style_fixture(tmp_path)
     first = templates.env.get_template("shell.html").render()

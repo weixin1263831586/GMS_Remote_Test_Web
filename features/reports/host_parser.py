@@ -47,7 +47,9 @@ class HostLogParser:
     def _is_host_log_filename(cls, filename: str) -> bool:
         """Check whether a filename matches any known host-log convention."""
         lower = filename.lower()
-        return lower.endswith('.txt') and any(lower.startswith(p) for p in cls._HOST_LOG_PREFIXES)
+        return (lower.endswith(('.txt', '.log')) or lower == 'host_log') and any(
+            lower.startswith(p) for p in cls._HOST_LOG_PREFIXES
+        )
 
     def _find_host_log(self, log_dir: str) -> str | None:
         """查找host_log文件"""
@@ -328,7 +330,8 @@ class HostLogParser:
             name=test_name,
             reason=reason,
             module=module,
-            stack_trace=stack_trace
+            stack_trace=stack_trace,
+            raw_log=line
         )
 
     def _parse_assumption_failure(self, line: str, module: str) -> TestFailure:

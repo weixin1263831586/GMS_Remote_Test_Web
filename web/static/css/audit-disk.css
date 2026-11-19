@@ -1,0 +1,77 @@
+/* Disk audit inherits audit-log/mail cards, header, filters and table-row sizing. */
+#page-security-audit #audit-disk-panel { min-height: 0; }
+#page-security-audit .audit-disk-filters > .combo-box { flex: 0 1 174px; min-width: 123px; max-width: 200px; }
+#page-security-audit .audit-disk-table { min-width: 1010px; table-layout: fixed; }
+#page-security-audit .audit-disk-table thead th {
+    position: sticky; top: 0; z-index: 2; height: var(--ui-table-header-height);
+    padding: 9px 10px; text-align: left; background: var(--light-bg);
+    border-bottom: 1px solid var(--border-color);
+}
+#page-security-audit .audit-disk-table :is(th:nth-child(3),th:nth-child(4),th:nth-child(6)),
+#page-security-audit .audit-disk-table :is(td:nth-child(3),td:nth-child(4),td:nth-child(6)) { text-align: center; }
+#page-security-audit.page-ui-rework .audit-disk-table tbody td {
+    height: var(--ui-table-row-height); padding: 8px 10px; max-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+#page-security-audit .audit-disk-row { cursor: pointer; }
+#page-security-audit .audit-disk-row.selected { background: color-mix(in srgb, var(--primary-color) 10%, var(--card-bg)); }
+#page-security-audit .audit-disk-row:focus-visible { outline: 2px solid var(--primary-light); outline-offset: -2px; }
+#page-security-audit .audit-disk-location { color: var(--text-secondary); }
+#page-security-audit .audit-disk-number { font-variant-numeric: tabular-nums; }
+#page-security-audit .audit-disk-priority {
+    display: inline-flex; border: 1px solid var(--border-color);
+    border-radius: 5px; padding: 2px 5px; color: var(--text-secondary);
+}
+#page-security-audit .audit-disk-priority.high { color: var(--danger-color); }
+#page-security-audit .audit-disk-priority.medium { color: var(--warning-color); }
+#page-security-audit .audit-disk-description {
+    margin: 0; padding: 2px 14px 14px; line-height: 1.6;
+    color: var(--text-secondary); overflow-wrap: anywhere;
+}
+
+
+/* Loading state is visible immediately, including when refreshed totals match. */
+#page-security-audit #audit-disk-refresh-btn.audit-disk-refreshing .ui-icon {
+    animation: audit-disk-spin 1.1s linear infinite;
+}
+#page-security-audit #audit-disk-refresh-btn:disabled {
+    cursor: progress;
+    opacity: 0.72;
+}
+#page-security-audit .audit-disk-breakdown-title {
+    padding: 9px 12px 5px;
+    border-top: 1px solid var(--border-color);
+}
+#page-security-audit #audit-disk-scanned-at {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+@keyframes audit-disk-spin { to { transform: rotate(360deg); } }
+
+/* KPI acts as an accessible quick filter, preserving the 95px card template. */
+#page-security-audit.page-ui-rework .audit-disk-stat-action {
+    width: 100%; cursor: pointer; color: inherit;
+}
+#page-security-audit.page-ui-rework .audit-disk-stat-action[aria-pressed="true"] {
+    border-color: var(--audit-accent);
+    box-shadow: inset 0 0 0 1px var(--audit-accent);
+}
+#page-security-audit.page-ui-rework .audit-disk-stat-action:focus-visible {
+    outline: 2px solid var(--audit-accent); outline-offset: 2px;
+}
+/* Table header uses the existing typography; only its sort affordance changes. */
+#page-security-audit .audit-disk-sort-button {
+    display: inline-flex; justify-content: center; align-items: center; gap: 6px;
+    width: 100%; padding: 0; color: inherit; cursor: pointer;
+    background: transparent; border: 0; white-space: nowrap;
+}
+#page-security-audit .audit-disk-sort-button:hover,
+#page-security-audit .audit-disk-sort-button:focus-visible {
+    color: var(--primary-light);
+}
+#page-security-audit .audit-disk-sort-button:focus-visible {
+    outline: 2px solid var(--primary-color); outline-offset: 3px;
+}
+#page-security-audit #audit-disk-sort-indicator {
+    display: inline-block; min-width: 11px; color: var(--primary-light);
+}

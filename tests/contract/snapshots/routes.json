@@ -2952,6 +2952,12 @@
   },
   {
     "methods": [
+      "PUT"
+    ],
+    "path": "/api/sdk/manage/sources/{source_id}"
+  },
+  {
+    "methods": [
       "GET"
     ],
     "path": "/api/sdk/read"
@@ -2979,6 +2985,12 @@
       "GET"
     ],
     "path": "/api/security-audit/detail/{event_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/security-audit/disk-artifacts"
   },
   {
     "methods": [

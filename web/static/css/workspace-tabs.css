@@ -1,7 +1,7 @@
 /* Shared embedded workspace header: header > tablist + optional actions.
    Keep domain classes as behavior hooks; tab geometry belongs here. */
 :root {
-    --workspace-tab-height: 44px;
+    --workspace-tab-height: var(--ui-tab-height);
     --workspace-tab-width: 112px;
     --workspace-header-inset: 16px;
 }
@@ -70,7 +70,7 @@
     border-radius: 0;
     background: transparent;
     color: var(--text-secondary);
-    font: 600 13px/1.4 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    
     text-align: center;
     white-space: nowrap;
     cursor: pointer;

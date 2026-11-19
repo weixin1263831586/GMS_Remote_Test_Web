@@ -65,7 +65,7 @@
             const renderGeneration = Number(box.dataset.renderGeneration || 0) + 1;
             box.dataset.renderGeneration = String(renderGeneration);
             const table = document.createElement('table');
-            table.style.cssText = 'width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;';
+            table.style.cssText = 'width:100%;border-collapse:collapse;table-layout:fixed;';
             table.innerHTML = `
                 ${colgroup}
                 <thead><tr>${headerHtml}</tr></thead>
@@ -197,7 +197,7 @@
                     </td>
                 </tr>`;
             }).join('');
-            box.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed;">
+            box.innerHTML = `<table style="width:100%;border-collapse:collapse;table-layout:fixed;">
                 <colgroup><col style="width:32%"><col style="width:12%"><col style="width:42%"><col style="width:14%"></colgroup>
                 <thead><tr>
                     <th class="dcfg-th">资源名</th><th class="dcfg-th">类型</th>

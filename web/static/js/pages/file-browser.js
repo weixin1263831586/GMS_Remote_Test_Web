@@ -407,8 +407,8 @@ function renderFirmwareShareBrowseError(host, message) {
     list.innerHTML = `
         <div class="file-browser-item" style="cursor: default; flex-direction: column; align-items: flex-start; gap: 6px;">
             <div style="color: var(--danger-color);">⚠️ 无法加载远端固件目录</div>
-            <div style="color: var(--text-secondary); font-size: 12px;">主机 ${escapeHtml(host || '')}：${escapeHtml(message || '')}</div>
-            <div style="color: var(--text-muted); font-size: 11px;">请确认主机可达且 SSH 凭据正确；若仍失败可关闭后重试。</div>
+            <div class="file-browser-error-host" style="color: var(--text-secondary);">主机 ${escapeHtml(host || '')}：${escapeHtml(message || '')}</div>
+            <div class="file-browser-error-help" style="color: var(--text-muted);">请确认主机可达且 SSH 凭据正确；若仍失败可关闭后重试。</div>
             ${routeBtn}
         </div>
     `;

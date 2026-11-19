@@ -1,21 +1,15 @@
 name: Audit one-shot Android real-device verification
 
+# Real hardware changes device attachment/test state; run only on explicit dispatch.
 on:
-  push:
-    branches:
-      - audit/global-current-1cd4167-20261118
-    paths:
-      - .github/workflows/audit-real-device-validation.yml
-      - tools/scripts/testing/resolve_soak_host_config.py
-      - tests/test_soak_host_config.py
-      - tests/soak/test_device_chain_soak.py
   workflow_dispatch:
 
 permissions:
   contents: read
 
 # Preflight is read-only and intentionally does not reserve lab hardware.
-# The actual device chain remains exclusive with scheduled nightly soak.
+# Controller job admission and USB/IP ownership protect DUTs; this workflow
+# does not share nightly-soak's GitHub concurrency group.
 jobs:
   runner-preflight:
     runs-on: [self-hosted, linux, x64]
@@ -45,12 +39,10 @@ jobs:
   audited-device-chain:
     needs: runner-preflight
     runs-on: [self-hosted, linux, x64]
-    # Old audit workflows have an orphaned queue entry waiting for a lab-only
-    # label. Scope this verification to its dedicated single-job on-prem runner
-    # rather than let that stale workflow-level concurrency block dispatch.
-    # Cluster job leases and target BUSID checks still guard the shared DUT.
+    # Keep the hardware job single-flight for manual runs. Controller/USB-IP
+    # checks separately reject busy Workers and foreign device ownership.
     concurrency:
-      group: gms-audit-device-chain-1cd4167
+      group: gms-audit-device-chain
       cancel-in-progress: false
     timeout-minutes: 90
     env:

@@ -4,14 +4,14 @@ on:
   push:
     # Audit branch deliberately validates every module change, not only
     # edits to the audit scripts. Runner jobs are independent of CI jobs.
-    branches: [audit/global-current-1cd4167-20261118]
+    branches: ['audit/**']
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: audit-host-full-validation-1cd4167
+  group: audit-host-full-validation-${{ github.ref_name }}
   cancel-in-progress: true
 
 jobs:

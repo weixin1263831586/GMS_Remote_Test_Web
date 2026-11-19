@@ -1,0 +1,271 @@
+"""Rendered geometry regression: preserve one-line controls."""
+
+import json
+import os
+from pathlib import Path
+
+from tests.runtime_ui.harness import RuntimeUiHarness
+
+
+class UiSizingRenderedTests(RuntimeUiHarness):
+    def test_suite_and_analysis_page_frames_follow_header_geometry(self):
+        """Three workspace frames start directly below the actual title row."""
+        page = self.new_page()
+        evidence = {}
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (680, 800), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                snapshots = {}
+                for name, first_selector in (
+                    ("test-suites", ".suite-download-section"),
+                    ("report-analysis", ".report-workbench-upload"),
+                    ("apk-analysis", ".apk-intake-row"),
+                ):
+                    page.evaluate("(name) => switchPage(name, null)", name)
+                    geometry = page.evaluate(
+                        """({name, firstSelector}) => {
+                          const root = document.getElementById('page-' + name);
+                          const header = root.querySelector('.page-header-row');
+                          const first = root.querySelector(firstSelector);
+                          const frame = getComputedStyle(root, '::after');
+                          const emptyUpload = root.querySelector(
+                            '#report-upload-zone.upload-empty, #apk-upload-zone.upload-empty');
+                          const uploadBorder = emptyUpload && getComputedStyle(emptyUpload);
+                          if (!header || !first) throw Error('Missing workspace header/content');
+                          return {
+                            frameContent: frame.content,
+                            frameDisplay: frame.display,
+                            emptyUpload: Boolean(emptyUpload),
+                            uploadBorderStyle: uploadBorder?.borderTopStyle,
+                            uploadBorderWidth: uploadBorder && parseFloat(uploadBorder.borderTopWidth),
+                            frameTop: parseFloat(frame.top),
+                            headerHeight: header.getBoundingClientRect().height,
+                            pagePaddingTop: parseFloat(getComputedStyle(root).paddingTop),
+                            contentGap: first.getBoundingClientRect().top -
+                              header.getBoundingClientRect().bottom,
+                          };
+                        }""",
+                        {"name": name, "firstSelector": first_selector},
+                    )
+                    snapshots[name] = geometry
+                    target = os.getenv("GMS_UI_PREVIEW_DIR")
+                    if target and width in (1440, 390):
+                        out = Path(target)
+                        out.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(out / f"frame-{name}-{width}.png"))
+                    with self.subTest(width=width, page=name):
+                        self.assertNotEqual(geometry["frameContent"], "none", geometry)
+                        if name == "test-suites":
+                            self.assertNotEqual(geometry["frameDisplay"], "none", geometry)
+                        elif geometry["emptyUpload"]:
+                            # Empty analysis pages draw the same solid 1px border
+                            # as the shell's other page frames, without a second outline.
+                            self.assertEqual(geometry["frameDisplay"], "none", geometry)
+                            self.assertEqual(geometry["uploadBorderStyle"], "solid", geometry)
+                            self.assertAlmostEqual(
+                                geometry["uploadBorderWidth"], 1, delta=0.1, msg=str(geometry),
+                            )
+                        self.assertAlmostEqual(
+                            geometry["frameTop"],
+                            geometry["pagePaddingTop"] + geometry["headerHeight"] + 1,
+                            delta=1,
+                            msg=str(geometry),
+                        )
+                        expected_gap = 6 if name == "test-suites" else 1
+                        self.assertAlmostEqual(
+                            geometry["contentGap"], expected_gap,
+                            delta=1, msg=str(geometry),
+                        )
+                evidence[str(width)] = snapshots
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                out = Path(target)
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "computed-workspace-frame-geometry.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        finally:
+            page.close()
+
+    def test_embedded_dashboard_stat_geometry_matches_across_modules(self):
+        """Cluster, Redmine and Gerrit keep the same KPI inset, height and chart gap."""
+        page = self.new_page()
+        evidence = {}
+        try:
+            for width, height in ((1440, 900), (960, 720)):
+                page.set_viewport_size({"width": width, "height": height})
+                measured = {}
+                for module in ("cluster", "redmine-agent", "gerrit-dashboard"):
+                    page.goto(f"{self.base_url}/{module}", wait_until="domcontentloaded")
+                    geometry = page.evaluate(
+                        """(module) => {
+                          const cluster = module === 'cluster';
+                          if (!cluster) {
+                            const redmine = module === 'redmine-agent';
+                            const tab = document.querySelector(redmine
+                              ? '#tab-stats' : '#tab-personal');
+                            const content = document.querySelector(redmine
+                              ? '#statsContent' : '#personalContent');
+                            if (!tab || !content) throw new Error('Missing dashboard markup');
+                            tab.classList.add('active');
+                            if (!redmine) {
+                              document.querySelector('#personalStatus').textContent = '';
+                              const banner = document.querySelector('#connBanner');
+                              banner.classList.remove('show');
+                              banner.style.display = 'none';
+                            }
+                            const cards = Array.from(
+                              {length: redmine ? 7 : 6},
+                              (_, i) => '<div class="stat-card"><div class="value">' +
+                                (i + 1) + '</div><div class="label">' +
+                                (redmine ? '当前未关闭' : '待评审') +
+                                '</div></div>'
+                            ).join('');
+                            content.innerHTML = '<section class="' +
+                              (redmine ? 'stats-section' : 'list-section') +
+                              '"><div class="stats-grid">' + cards +
+                              '</div></section><div class="trend-grid">' +
+                              '<section class="trend-panel">趋势</section></div>';
+                          }
+                          const header = document.querySelector('.workspace-header');
+                          const grid = document.querySelector(cluster
+                            ? '#dashboard .dash-cards' : '.tab-content.active .stats-grid');
+                          const next = document.querySelector(cluster
+                            ? '#dashboard .dash-charts-row' : '.tab-content.active .trend-grid');
+                          if (!header || !grid || !next) {
+                            throw new Error('Missing dashboard geometry element');
+                          }
+                          const cards = Array.from(grid.querySelectorAll(cluster
+                            ? '.dash-stat-card' : '.stat-card'));
+                          const headerRect = header.getBoundingClientRect();
+                          const gridRect = grid.getBoundingClientRect();
+                          const nextRect = next.getBoundingClientRect();
+                          return {
+                            inset: gridRect.top - headerRect.bottom,
+                            chartGap: nextRect.top - gridRect.bottom,
+                            cardGap: parseFloat(getComputedStyle(grid).columnGap),
+                            cardHeights: cards.map(card => card.getBoundingClientRect().height),
+                          };
+                        }""",
+                        module,
+                    )
+                    measured[module] = geometry
+                    with self.subTest(viewport=width, module=module):
+                        for name, expected in (("inset", 16), ("chartGap", 16), ("cardGap", 12)):
+                            self.assertAlmostEqual(
+                                geometry[name], expected, delta=1, msg=str(geometry),
+                            )
+                        self.assertGreater(len(geometry["cardHeights"]), 0)
+                        for card_height in geometry["cardHeights"]:
+                            self.assertAlmostEqual(
+                                card_height, 95, delta=1, msg=str(geometry),
+                            )
+                evidence[str(width)] = measured
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                out = Path(target)
+                out.mkdir(parents=True, exist_ok=True)
+                (out / "computed-embedded-dashboard-geometry.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        finally:
+            page.close()
+
+    def test_shell_geometry_and_no_wrap_at_desktop_and_mobile_widths(self):
+        page = self.new_page()
+        evidence = {}
+        errors = []
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (1792, 1000), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                snapshot = {}
+                for name in ("users", "devices", "security-audit", "api-docs"):
+                    page.evaluate("(name) => switchPage(name, null)", name)
+                    page.wait_for_timeout(180)
+                    measured = page.evaluate(
+                        """(name) => {
+                          const root = document.getElementById('page-' + name);
+                          const rect = (el) => el.getBoundingClientRect();
+                          const visible = (el) => rect(el).width > 0 && rect(el).height > 0;
+                          const elements = (selector) => Array.from(
+                            root.querySelectorAll(selector)
+                          ).filter(visible);
+                          const controls = {
+                            users: ['#users-list-search', '#users-list-status-filter',
+                                    '#users-list-refresh'],
+                            'api-docs': ['.api-search-box', '.api-search-toolbar .api-action'],
+                          };
+                          const singleLine = {
+                            users: ['.users-view-tabs .btn-xs', '.users-table thead th'],
+                            devices: ['.page-header-actions button',
+                                      '.device-management-table thead th'],
+                            'security-audit': ['.page-header-actions button'],
+                            'api-docs': ['.api-search-toolbar .api-action',
+                                         '.api-path', '.api-title'],
+                          };
+                          const samples = [];
+                          for (const selector of (controls[name] || [])) {
+                            for (const el of elements(selector).slice(0, 4)) {
+                              samples.push({selector, h: rect(el).height});
+                            }
+                          }
+                          const inline = [];
+                          for (const selector of (singleLine[name] || [])) {
+                            for (const el of elements(selector).slice(0, 8)) {
+                              inline.push({selector,
+                                           whiteSpace: getComputedStyle(el).whiteSpace,
+                                           text: (el.textContent || '').trim().slice(0, 30)});
+                            }
+                          }
+                          const cards = elements('.page-stat-row > .page-stat-card')
+                            .map((el) => rect(el).height);
+                          const tabHeights = name === 'users'
+                            ? elements('.users-view-tabs .btn-xs').map((el) => rect(el).height)
+                            : [];
+                          return {name, samples, inline, cards, tabHeights};
+                        }""",
+                        name,
+                    )
+                    snapshot[name] = measured
+                    for el in measured["samples"]:
+                        if abs(el["h"] - 32) > 1:
+                            errors.append(f"{width}px {name}: {el['selector']} height {el['h']} != 32")
+                    for el in measured["inline"]:
+                        if el["whiteSpace"] != "nowrap":
+                            errors.append(f"{width}px {name}: {el['selector']} wraps: {el}")
+                    if width >= 1440:
+                        for h in measured["cards"]:
+                            if abs(h - 95) > 1:
+                                errors.append(f"{width}px {name}: KPI height {h} != 95")
+                    if name == "users":
+                        for h in measured["tabHeights"]:
+                            if abs(h - 24) > 1:
+                                errors.append(f"{width}px users: segmented tab {h} != 24")
+                    if width in (1440, 390):
+                        target = os.getenv("GMS_UI_PREVIEW_DIR")
+                        if target:
+                            out = Path(target)
+                            out.mkdir(parents=True, exist_ok=True)
+                            page.screenshot(path=str(out / f"sizing-{name}-{width}.png"))
+                if width >= 1440:
+                    card_heights = [
+                        v for item in snapshot.values() for v in item["cards"]
+                    ]
+                    if len(card_heights) < 10:
+                        errors.append(f"{width}px: insufficient KPI cards")
+                    elif max(card_heights) - min(card_heights) > 1:
+                        errors.append(f"{width}px: KPI heights differ {card_heights}")
+                evidence[str(width)] = snapshot
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                (Path(target) / "computed-ui-sizing.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            self.assertEqual(errors, [], "\n".join(errors))
+        finally:
+            page.close()

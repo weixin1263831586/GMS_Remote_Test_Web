@@ -190,6 +190,54 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.assertEqual(body["mode"], "suite_log_dir")
         self.assertEqual(body["data"]["report_type"], "log")
 
+    def test_multi_file_upload_keeps_host_module_listener_prefix(self):
+        """XML plus host_log uploaded together must not drop the original log."""
+        from features.reports.tests.test_analysis_agent import HOST_LOG_ONE, TEST_XML
+
+        response = self.client.post(
+            "/api/reports/analyze",
+            data={"mode": "upload"},
+            files=[
+                ("files[]", ("test_result.xml", TEST_XML, "application/xml")),
+                ("files[]", ("host_log_3164372127909839935.txt",
+                            HOST_LOG_ONE, "text/plain")),
+            ],
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertTrue(result["success"], result)
+        report = result["data"]
+        self.assertEqual(report["summary"]["fail"], 1)
+        self.assertEqual(len(report["analysis_sources"]["host_logs"]), 1)
+        self.assertEqual(
+            report["failures"][0]["name"],
+            "com.google.android.gts.SampleTest#testFailure",
+        )
+        self.assertTrue(report["failures"][0]["raw_log"].startswith(
+            "03-07 08:50:02 I/ModuleListener: FAILURE:"
+        ))
+
+    def test_multi_file_upload_rejects_incomplete_scan_with_explicit_reason(self):
+        """An XML at the end must not be silently skipped by max_files."""
+        from features.reports.analysis_agent import ReportAnalysisAgent
+        from features.reports.tests.test_analysis_agent import TEST_XML
+
+        with patch(
+            "features.reports.analysis_api.ReportAnalysisAgent",
+            side_effect=lambda **kwargs: ReportAnalysisAgent(max_files=1, **kwargs),
+        ):
+            response = self.client.post(
+                "/api/reports/analyze",
+                data={"mode": "upload"},
+                files=[
+                    ("files[]", ("noise.log", "not a report", "text/plain")),
+                    ("files[]", ("test_result.xml", TEST_XML, "application/xml")),
+                ],
+            )
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertIn("不完整", response.text)
+        self.assertIn("1 个上限", response.text)
+
     def test_returns_clear_error_when_dir_not_local(self):
         resp = self.client.post(
             "/api/reports/analyze-log-dir",

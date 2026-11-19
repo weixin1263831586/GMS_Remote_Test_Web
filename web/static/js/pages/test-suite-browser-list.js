@@ -1,3 +1,5 @@
+let suiteBrowserSearchRequestGeneration = 0;
+
 // UI event handlers own their promises; awaited initialization still propagates
 // cancellation to GmsPageLifecycle without running later UI updates.
 async function runSuiteBrowserAction(action) {
@@ -16,13 +18,20 @@ function clearSuiteBrowserSelection(message) {
     state.suiteBrowser.selectedSuitePath = '';
     state.suiteBrowser.currentPath = '';
     state.suiteBrowser.highlightPath = '';
+    state.suiteBrowser.suiteRoot = '';
 
     const titleEl = $('suite-browser-title');
     const pathEl = $('suite-browser-path');
     const breadcrumb = $('suite-browser-breadcrumb');
     if (titleEl) titleEl.textContent = '未选择测试套件';
-    if (pathEl) pathEl.textContent = '';
-    if (breadcrumb) breadcrumb.innerHTML = '';
+    if (pathEl) { pathEl.textContent = ''; pathEl.title = ''; }
+    const typeEl = $('suite-browser-type');
+    if (typeEl) { typeEl.textContent = ''; typeEl.hidden = true; }
+    if (breadcrumb) {
+        breadcrumb.replaceChildren();
+        breadcrumb.title = '';
+    }
+    $('suite-browser-run-actions')?.replaceChildren();
     clearSuiteSearchResults();
 
     renderTestSuiteBrowserList();
@@ -55,7 +64,7 @@ function renderTestSuiteBrowserList() {
     });
 
     if (countEl) {
-        countEl.textContent = `${_browserSuitesCache.length} 个套件`;
+        countEl.textContent = String(_browserSuitesCache.length);
     }
 
     if (suites.length === 0) {
@@ -75,6 +84,7 @@ function renderTestSuiteBrowserList() {
         // 将 cts-verifier 显示为 CTS-V
         if (displayType === 'cts-verifier') displayType = 'cts-v';
         badge.textContent = displayType.toUpperCase();
+        badge.dataset.type = displayType.toLowerCase().replace(/[^a-z0-9-]/g, '');
 
         const main = document.createElement('div');
         main.className = 'suite-suite-main';
@@ -84,7 +94,16 @@ function renderTestSuiteBrowserList() {
         `;
 
         row.append(badge, main);
+        row.title = getSuiteReleasePath(suite);
+        row.tabIndex = 0;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(suite.tools_path === state.suiteBrowser.selectedSuitePath));
         row.addEventListener('click', () => runSuiteBrowserAction(() => selectTestSuiteForBrowser(suite.tools_path)));
+        row.addEventListener('keydown', (event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            runSuiteBrowserAction(() => selectTestSuiteForBrowser(suite.tools_path));
+        });
         listEl.appendChild(row);
     });
 }
@@ -96,6 +115,9 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
         return;
     }
 
+    if (state.suiteBrowser.selectedSuitePath !== suite.tools_path) {
+        state.suiteBrowser.suiteRoot = '';
+    }
     state.suiteBrowser.selectedSuitePath = suite.tools_path;
     state.suiteBrowser.currentPath = path || '';
     // Suite Browser 是纯浏览上下文：这里选择套件不得写入全局测试执行
@@ -114,8 +136,11 @@ async function selectTestSuiteForBrowser(suitePath, path = '', options = {}) {
     let displayType = suite.test_type || '';
     // 将 cts-verifier 显示为 CTS-V
     if (displayType === 'cts-verifier') displayType = 'cts-v';
-    if (titleEl) titleEl.textContent = `${displayType.toUpperCase()} ${getSuiteDisplayName(suite)}`;
-    if (pathEl) pathEl.textContent = getSuiteRootFromToolsPath(suite.tools_path);
+    if (titleEl) titleEl.textContent = getSuiteDisplayName(suite);
+    const fullPath = getSuiteRootFromToolsPath(suite.tools_path);
+    if (pathEl) { pathEl.textContent = fullPath; pathEl.title = fullPath; }
+    const typeEl = $('suite-browser-type');
+    if (typeEl) { typeEl.textContent = displayType.toUpperCase(); typeEl.hidden = false; }
 
     renderTestSuiteBrowserList();
     await loadSuiteBrowserDirectory(path || '');
@@ -132,6 +157,7 @@ function handleSuiteFileSearchKeydown(event) {
 }
 
 function clearSuiteSearchResults() {
+    ++suiteBrowserSearchRequestGeneration;
     const resultsEl = $('suite-search-results');
     if (resultsEl) {
         resultsEl.innerHTML = '';
@@ -207,6 +233,7 @@ async function searchSuiteFilesInSuite(suite, query, limit = 30) {
 }
 
 async function searchSuiteFiles() {
+    const generation = ++suiteBrowserSearchRequestGeneration;
     const input = $('suite-file-search');
     const query = (input?.value || '').trim();
     if (!query) {
@@ -217,6 +244,7 @@ async function searchSuiteFiles() {
         // 浏览页空缓存时走自己的加载器，避免把执行页的缓存
         // 隐式拉进浏览上下文。
         await loadSuitesForBrowserWorker(false);
+        if (generation !== suiteBrowserSearchRequestGeneration) return;
     }
     if (!_browserSuitesCache.length) {
         showToast('未找到可搜索的测试套件', 'warning');
@@ -238,6 +266,7 @@ async function searchSuiteFiles() {
         let items = [];
         for (const suite of orderedSuites) {
             items = await searchSuiteFilesInSuite(suite, query, 30);
+            if (generation !== suiteBrowserSearchRequestGeneration) return;
             if (items.length) break;
         }
         renderSuiteSearchResults(items, query);
@@ -248,6 +277,7 @@ async function searchSuiteFiles() {
             showToast('未找到匹配项', 'warning');
         }
     } catch (error) {
+        if (generation !== suiteBrowserSearchRequestGeneration) return;
         renderSuiteSearchResults([], query);
         showToast('搜索失败: ' + error.message, 'error');
     }

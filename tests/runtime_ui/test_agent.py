@@ -84,7 +84,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 page.locator("#agent-access-panel thead th").all_text_contents()[:2],
-                ["Agent", "状态"],
+                ["Agent", "Token ID"],
             )
             scopes = page.evaluate(
                 "() => Array.from(document.querySelectorAll("
@@ -147,7 +147,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             # 页面有两个 agent-access-table（接入凭据 + SDK 源码源）；
             # 本用例只验收凭据表，选择器按 tbody id 收窄。
             self.assertEqual(
-                page.locator("table:has(#agent-access-tokens) thead th").count(), 7
+                page.locator("table:has(#agent-access-tokens) thead th").count(), 11
             )
             self.assertEqual(page.locator("#agent-access-tokens img").count(), 0)
             self.assertFalse(page.evaluate("Boolean(window.injected)"))
@@ -470,6 +470,115 @@ class RuntimeAgentTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_disk_audit_requires_elevation_before_fetching_and_recovers(self):
+        """Read-only disk audit must not query privileged metadata unelevated."""
+        page = self.new_page()
+        disk_requests = []
+        page.on(
+            "request",
+            lambda req: disk_requests.append(req.url)
+            if "/api/security-audit/disk-artifacts" in req.url else None,
+        )
+        payload = {
+            "success": True,
+            "data": {
+                "summary": {
+                    "measured_bytes": 2048, "aged_bytes": 0,
+                    "scanned_categories": 1, "attention_categories": 0,
+                    "disk": {"free_bytes": 8192},
+                },
+                "generated_at": "2026-11-19T08:00:00Z",
+                "items": [{
+                    "id": "apk", "name": "APK 原包与反编译", "group": "APK",
+                    "scope": "Controller", "location": "data/apk_uploads",
+                    "description": "只读检查", "cleanup": "容量配额",
+                    "priority": "中", "age_days": 30,
+                    "bytes": 2048, "aged_bytes": 0, "aged_files": 0,
+                    "files": 1, "directories": 1, "complete": True,
+                    "present": True, "note": "",
+                }],
+            },
+        }
+        page.route(
+            re.compile(r".*/api/security-audit/disk-artifacts(?:\?.*)?$"),
+            lambda route: route.fulfill(
+                status=200, content_type="application/json",
+                body=json.dumps(payload),
+            ),
+        )
+        try:
+            self.goto_shell(page)
+            page.wait_for_function("typeof window.loadDiskArtifactAudit === 'function'")
+            page.evaluate("window.switchPage('security-audit')")
+            page.evaluate(
+                """() => {
+                    state.authRequired = true;
+                    state.elevated = false;
+                    window.__diskElevationCalls = [];
+                    window.requestElevatedAccess = async (purpose) => {
+                        window.__diskElevationCalls.push(purpose);
+                        state.elevated = true;
+                        return true;
+                    };
+                }"""
+            )
+            page.evaluate("window.switchSecurityAuditView('disk')")
+            gate = page.locator(
+                "#audit-disk-table-body [data-click='elevateDiskArtifactAudit']"
+            )
+            expect(gate).to_be_visible()
+            self.assertEqual(disk_requests, [])
+            gate.click()
+            expect(page.locator("#audit-disk-bytes")).to_have_text("2.0 KiB")
+            expect(page.locator("#audit-disk-table-body tr[data-artifact-id='apk']")).to_be_visible()
+            self.assertEqual(
+                page.evaluate("window.__diskElevationCalls"),
+                ["查看磁盘审计"],
+            )
+            self.assertEqual(len(disk_requests), 1)
+
+            # Re-entering after privilege loss must neither fetch nor show the
+            # previously fetched sensitive Controller capacity details.
+            page.evaluate(
+                """async () => {
+                    state.elevated = false;
+                    await window.switchSecurityAuditView('logs');
+                    await window.switchSecurityAuditView('disk');
+                }"""
+            )
+            expect(gate).to_be_visible()
+            expect(page.locator("#audit-disk-bytes")).to_have_text("-")
+            expect(page.locator("#audit-disk-detail")).to_contain_text("请先完成管理员提权")
+            for stat_id in (
+                "audit-disk-controller-bytes", "audit-disk-worker-bytes",
+                "audit-disk-disk-used", "audit-disk-scan-cost", "audit-disk-visited",
+            ):
+                expect(page.locator("#" + stat_id)).to_have_text("-")
+            self.assertEqual(len(disk_requests), 1)
+
+            # Backend 403 following a completed scan must revoke cached metadata.
+            page.evaluate(
+                """async () => {
+                    const previous = window.apiCall;
+                    state.elevated = true;
+                    window.apiCall = async () => {
+                        const error = new Error('Elevation expired');
+                        error.status = 403;
+                        throw error;
+                    };
+                    try {
+                        await window.loadDiskArtifactAudit(true);
+                    } finally {
+                        window.apiCall = previous;
+                    }
+                }"""
+            )
+            expect(gate).to_be_visible()
+            expect(page.locator("#audit-disk-detail")).to_contain_text("请先完成管理员提权")
+            expect(page.locator("#audit-disk-bytes")).to_have_text("-")
+        finally:
+            page.close()
+
     def test_agent_page_quick_action_opens_every_sidebar_page(self):
         page = self.new_page()
         page_errors = []
@@ -551,13 +660,19 @@ class RuntimeAgentTests(RuntimeUiHarness):
                             page_geometry["titleLeft"],
                             delta=0.5,
                         )
-                        self.assertAlmostEqual(page_geometry["titleToContent"], 6, delta=0.5)
+                        self.assertAlmostEqual(
+                            page_geometry["titleToContent"],
+                            1 if page_name in {"report-analysis", "apk-analysis"} else 6,
+                            delta=0.5,
+                        )
                         self.assertAlmostEqual(page_geometry["frameLeft"], 15, delta=0.5)
                         self.assertAlmostEqual(page_geometry["frameRight"], 15, delta=0.5)
                         self.assertAlmostEqual(page_geometry["frameBottom"], 15, delta=0.5)
                         self.assertAlmostEqual(
                             page_geometry["pageTop"] + page_geometry["frameTop"],
-                            page_geometry["contentTop"],
+                            page_geometry["contentTop"] - (
+                                0 if page_name in {"report-analysis", "apk-analysis"} else 5
+                            ),
                             delta=0.5,
                         )
                         self.assertEqual(page_geometry["frameBorder"], "1px")
@@ -668,7 +783,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                 delta=0.5,
                             )
                             self.assertGreater(upload_geometry["bottom"], 15)
-                            self.assertEqual(upload_geometry["borderStyle"], "dashed")
+                            self.assertEqual(upload_geometry["borderStyle"], "solid")
                             self.assertEqual(upload_geometry["borderWidth"], "1px")
                             self.assertEqual(upload_geometry["borderRadius"], "8px")
                             self.assertEqual(

@@ -1,0 +1,59 @@
+/* Canonical UI geometry tokens; typography stays in typography.css.
+   Do not shrink fonts to make labels fit. Keep existing one-line layout contracts. */
+:root {
+    /* One shell-page edge: title, content frame and viewport perimeter.
+       Internal cards/columns keep their own separate spacing tokens. */
+    --ui-page-edge: 12px;
+    --ui-control-height: 32px;
+    --ui-control-height-dense: 28px;
+    --ui-control-height-small: 26px;
+    --ui-segmented-inner-height: 24px; /* 26px capsule + borders */
+    --ui-control-height-large: 40px;
+    /* Component roles preserve intentional density without page-local magic numbers. */
+    --ui-control-height-icon: 24px; /* inline icon/breadcrumb, not ordinary button */
+    --ui-control-height-dialog: 34px; /* compact modal actions */
+    --ui-control-height-dialog-field: 36px; /* report-copy / routed dialog form */
+    /* AOA replay rows fit a 720p viewport: preserve their audited density. */
+    --ui-aoa-command-button-height: 20px;
+    --ui-aoa-command-editor-height: 22px;
+    --ui-aoa-config-control-height: 27px;
+    --ui-aoa-config-control-height-short: 30px;
+    --ui-table-header-height-dense: 36px; /* file browser and compact grids */
+    --ui-table-row-height-dense: 36px; /* embedded compact inventory only */
+    --ui-tab-height: 44px; /* full workbench tab strip */
+    --ui-tab-height-narrow: 38px; /* narrow viewport tab strip */
+    --ui-touch-target-height: 40px;
+    --ui-touch-target-danger-height: 44px;
+    --ui-modal-header-height-dense: 50px;
+    --ui-modal-header-height: 54px;
+    --ui-modal-header-height-roomy: 56px;
+    --ui-modal-close-size: 30px;
+    --ui-table-header-height: 42px;
+    --ui-table-row-height: 44px;
+    --ui-stat-height: 95px;
+    --ui-stat-height-compact: 70px;
+    --ui-card-heading-height: 42px;
+    --ui-modal-actions-min-height: 58px;
+    --ui-spacing-xs: 4px;
+    --ui-spacing-sm: 8px;
+    --ui-spacing-md: 12px;
+    --ui-spacing-lg: 16px;
+    --ui-radius-control: 6px;
+    --ui-radius-card: 8px;
+}
+/* Opt-in semantic primitives for new surfaces. Existing components consume
+   the same tokens in their owning styles, avoiding late global overrides. */
+.ui-control { box-sizing: border-box; min-height: var(--ui-control-height); }
+.ui-control--dense { min-height: var(--ui-control-height-dense); }
+.ui-control--small { min-height: var(--ui-control-height-small); }
+.ui-control--large { min-height: var(--ui-control-height-large); }
+.ui-control--icon { min-height: var(--ui-control-height-icon); }
+.ui-control--dialog { min-height: var(--ui-control-height-dialog); }
+.ui-control--touch { min-height: var(--ui-touch-target-height); }
+.ui-toolbar { display: flex; align-items: center; gap: var(--ui-spacing-sm); min-width: 0; }
+.ui-card-heading { min-height: var(--ui-card-heading-height); display: flex; align-items: center; }
+.ui-stat-card { min-height: var(--ui-stat-height); }
+.ui-stat-card--compact { min-height: var(--ui-stat-height-compact); }
+.ui-nowrap { white-space: nowrap; min-width: 0; }
+.ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
+.ui-control:is(button,select) { white-space: nowrap; }

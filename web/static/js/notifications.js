@@ -238,7 +238,10 @@ function notificationDestination(item) {
     const text = key => typeof data[key] === 'string' ? data[key].trim() : '';
     const jobId = text('cluster_job_id') || text('job_id');
     const reportId = text('report_id');
-    const timestamp = text('report_timestamp') || text('timestamp');
+    // A generic event timestamp is not a report timestamp and must not
+    // redirect unrelated notifications to report management.
+    const timestamp = text('report_timestamp')
+        || ((category === 'report' || category === 'reports') ? text('timestamp') : '');
     const attemptId = text('attempt_id');
     const workerId = text('worker_id');
     const automationRunId = text('automation_run_id') || (

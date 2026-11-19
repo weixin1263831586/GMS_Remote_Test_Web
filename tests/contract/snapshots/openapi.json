@@ -23766,6 +23766,53 @@
           }
         },
         "summary": "Delete Sdk Source"
+      },
+      "put": {
+        "description": "编辑用户注册 SDK 源：元数据更新不重新连接，迁移路径/服务器须探测。\n\nsource_id/provider 代表稳定的检索身份，禁止通过此接口更名/改类型；\nSSH 凭据仅替换时才写入，永远不会随响应返回。",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "title": "Req",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Sdk Source"
       }
     },
     "/api/sdk/read": {
@@ -24012,6 +24059,46 @@
           }
         },
         "summary": "Get Security Audit Detail"
+      }
+    },
+    "/api/security-audit/disk-artifacts": {
+      "get": {
+        "description": "Admin-only read-only inventory of known Controller runtime locations.\n\nNever accepts a user-supplied path or invokes any cleanup operation.\nThe bounded scanner runs in a worker thread to avoid blocking the Web loop.",
+        "parameters": [
+          {
+            "description": "强制重新执行只读磁盘扫描，不使用短期缓存",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "强制重新执行只读磁盘扫描，不使用短期缓存",
+              "title": "Refresh",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Runtime Artifact Disk Audit"
       }
     },
     "/api/security-audit/export": {

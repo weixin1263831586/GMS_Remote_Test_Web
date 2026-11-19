@@ -11,6 +11,7 @@ from foundation.redaction import redact_sensitive_text
 from foundation.uploads import safe_upload_target_path, save_upload_to_path
 
 from .access import principal_has_reports_read as require_permission_reports_read
+from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 from .api_helpers import (
     AnalysisMode,
     APIRouter,
@@ -271,7 +272,7 @@ async def analyze_reports(
 
                 else:
                     try:
-                        await stage_report_uploads(
+                        staged = await stage_report_uploads(
                             all_files, temp_dir, allow_nested=True
                         )
                     except ReportUploadTooLargeError as exc:
@@ -279,26 +280,27 @@ async def analyze_reports(
                     except ValueError as exc:
                         return error_response(str(exc), 400)
 
-                    analyzer = ReportAnalyzer(temp_dir=temp_dir)
-                    xml_path = await asyncio.to_thread(analyzer.file_handler.find_xml_file)
-
-                    if not xml_path:
-                        logger.info("test_result.xml not found, trying HostLog analyzer")
-                        result = await asyncio.to_thread(analyzer.analyze_log_dir, temp_dir)
-                        if not result:
-                            return JSONResponse(status_code=400, content={"success": False, "error": "No test_result.xml or host_log found", "message": f"Received {len(all_files)} files but no valid report files"})
-
-                        result["report_type"] = "log"
-                        result["report_name"] = extract_report_name_from_upload(all_files)
-                        return JSONResponse(content={"success": True, "data": result, "mode": "upload"})
-
-                    result = await asyncio.to_thread(analyzer.analyze_file, xml_path)
+                    # Analyze the *whole* uploaded bundle. The previous XML-only
+                    # path discarded accompanying host_log files, so original
+                    # ModuleListener timestamps could never reach the UI.
+                    paths = [path for path, _size in staged]
+                    result = await asyncio.to_thread(
+                        ReportAnalysisAgent(temp_dir=temp_dir).analyze_paths, paths
+                    )
                     if result:
                         result["report_name"] = extract_report_name_from_upload(all_files)
+                        if not result.get("analysis_sources", {}).get("test_result_xml"):
+                            result["report_type"] = "log"
                         return JSONResponse(content={"success": True, "data": result, "mode": "upload"})
-                    else:
-                        return JSONResponse(status_code=400, content={"success": False, "error": "Cannot parse report file", "message": "test_result.xml invalid or corrupted"})
 
+                    return JSONResponse(status_code=400, content={
+                        "success": False,
+                        "error": "No valid test_result.xml or host_log",
+                        "message": f"收到 {len(all_files)} 个文件，未找到可解析的测试报告或主机日志",
+                    })
+
+    except ReportScanIncompleteError as exc:
+        return error_response(str(exc), 413)
     except Exception as e:
         logger.error("Report analysis failed: %s", redact_sensitive_text(e))
         return error_response("Report analysis failed", 500)

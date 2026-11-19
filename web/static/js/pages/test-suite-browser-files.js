@@ -1,9 +1,15 @@
 function renderSuiteBreadcrumb(path) {
     const breadcrumb = $('suite-browser-breadcrumb');
-    if (!breadcrumb) return;
+    const runActions = $('suite-browser-run-actions');
+    if (!breadcrumb || !runActions) return;
 
     const parts = (path || '').split('/').filter(Boolean);
-    breadcrumb.innerHTML = '';
+    breadcrumb.replaceChildren();
+    runActions.replaceChildren();
+    const suiteRoot = state.suiteBrowser.suiteRoot
+        || getSuiteRootFromToolsPath(state.suiteBrowser.selectedSuitePath);
+    breadcrumb.title = [String(suiteRoot || '').replace(/\/+$/, ''), path || '']
+        .filter(Boolean).join('/');
 
     const rootBtn = document.createElement('button');
     rootBtn.className = 'btn-xs';
@@ -11,7 +17,7 @@ function renderSuiteBreadcrumb(path) {
     rootBtn.addEventListener('click', () => runSuiteBrowserAction(() => loadSuiteBrowserDirectory('')));
     breadcrumb.appendChild(rootBtn);
 
-    // 当前位于运行文件夹 results/<ts> 或 logs/<ts> 时，在面包屑右侧显示互跳按钮：
+    // 当前位于运行文件夹 results/<ts> 或 logs/<ts> 时，在右侧操作区显示互跳按钮：
     // results 显示「跳到 logs」，logs 显示「跳到 results」。无论在目录内浏览多深，
     // 只要路径前缀是 results/<ts> 或 logs/<ts> 即可互跳（保留 <ts>）。
     const runKind = (parts.length >= 2 && (parts[0].toLowerCase() === 'results' || parts[0].toLowerCase() === 'logs'))
@@ -23,8 +29,7 @@ function renderSuiteBreadcrumb(path) {
         sibBtn.className = 'btn-xs';
         sibBtn.textContent = `跳到 ${sibling}`;
         sibBtn.title = `跳转到 ${sibling}/${parts[1]}`;
-        // 面包屑为普通块级布局，float 右靠使按钮固定在右侧。
-        sibBtn.style.cssFloat = 'right';
+        sibBtn.classList.add('suite-run-action');
         sibBtn.addEventListener('click', () => {
             const target = `${sibling}/${parts[1]}`;
             state.suiteBrowser.highlightPath = target;
@@ -34,14 +39,12 @@ function renderSuiteBreadcrumb(path) {
                 showToast(`已跳转到 ${target}`, 'success');
             });
         });
-        breadcrumb.appendChild(sibBtn);
+        runActions.appendChild(sibBtn);
 
-        // 「retry」：跳到测试页并预填该运行的时间戳/测试类型/套件路径，
-        // 与报告管理页 retry 按钮逻辑一致。与互跳按钮同处面包屑右侧。
+        // retry 会预填测试页运行信息；与互跳同处操作区，不占据目录导航。
         const retryBtn = document.createElement('button');
         retryBtn.className = 'btn-xs';
-        retryBtn.style.background = 'var(--primary-gradient)';
-        retryBtn.style.cssFloat = 'right';
+        retryBtn.classList.add('suite-run-action', 'suite-retry-action');
         retryBtn.textContent = 'retry报告';
         retryBtn.title = '跳到测试页并预填该运行信息';
         retryBtn.addEventListener('click', () => {
@@ -59,7 +62,7 @@ function renderSuiteBreadcrumb(path) {
                 source_timestamp: ts
             });
         });
-        breadcrumb.appendChild(retryBtn);
+        runActions.appendChild(retryBtn);
     }
 
     if (parts.length === 0) return;
@@ -82,7 +85,6 @@ function renderSuiteFiles(items) {
     if (!fileList) return;
 
     fileList.innerHTML = '';
-
     if (state.suiteBrowser.currentPath) {
         const parentRow = createSuiteFileRow({
             name: '..',
@@ -143,42 +145,68 @@ async function analyzeSuiteLogDir(relPath) {
     const sidebarItem = document.querySelector('[data-page="report-analysis"]');
     if (sidebarItem) sidebarItem.click();
 
+    const activity = beginReportAnalysisActivity(
+        '正在分析测试套件日志目录',
+        folderName + ' · 正在准备日志并调用服务端解析'
+    );
     setTimeout(async () => {
-        showToast(`正在分析 ${folderName} ...`, 'info');
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+        let controller = null;
         try {
             const suite = _browserSuitesCache.find(item => item.tools_path === suitePath);
             let data;
             if (suite?.worker_id && !isLocalWorkspaceWorker(suite.worker_id)) {
+                setReportAnalysisActivityPhase(activity, '正在获取远端 Worker 日志',
+                    folderName + ' · 正在准备和传输日志目录');
                 const transferId = await createRemoteSuiteTransfer(relPath, true, suite);
+                if (!isReportAnalysisActivityCurrent(activity)) return;
+                setReportAnalysisActivityPhase(activity, '服务端正在解析测试套件日志',
+                    '日志传输已完成，正在提取并统计失败用例');
                 data = await apiCall(
                     `/api/cluster/transfers/${encodeURIComponent(transferId)}/report-analysis`,
                     'POST'
                 );
             } else {
+                controller = new AbortController();
+                currentReportAnalysisFetch = controller;
+                setReportAnalysisActivityPhase(activity, '服务端正在解析测试套件日志',
+                    folderName + ' · 大型日志目录可能需要较长时间');
                 const formData = new FormData();
                 formData.append('suite_path', suitePath);
                 formData.append('path', relPath || '');
                 const resp = await fetch('/api/reports/analyze-log-dir', {
                     method: 'POST',
-                    body: formData
+                    body: formData,
+                    signal: controller.signal
                 });
-                data = await resp.json().catch(() => ({ success: false }));
+                if (!isReportAnalysisActivityCurrent(activity)) return;
+                data = await resp.json();
+                if (!resp.ok && data.success !== false) {
+                    data = {success: false, error: data.error || '服务端解析失败'};
+                }
             }
+            if (!isReportAnalysisActivityCurrent(activity)) return;
             if (!data.success) {
-                notifyOperationResult('报告分析失败', data.message || data.error || '未知错误', 'error', 'report-analysis', { path: relPath });
+                const reason = data.message || data.error || '报告分析失败';
+                finishReportAnalysisActivity(activity, reason);
+                notifyOperationResult('报告分析失败', reason, 'error',
+                    'report-analysis', {path: relPath});
                 return;
             }
             displayReportAnalysis(data.data);
-            notifyOperationResult(
-                '报告分析完成',
-                data.data?.report_name || folderName,
-                'success',
-                'report-analysis',
-                { path: relPath }
-            );
-        } catch (e) {
-            console.error('[Reports] analyzeSuiteLogDir error:', e);
-            notifyOperationResult('报告分析失败', e.message, 'error', 'report-analysis', { path: relPath });
+            finishReportAnalysisActivity(activity);
+            notifyOperationResult('报告分析完成', data.data?.report_name || folderName,
+                'success', 'report-analysis', {path: relPath});
+        } catch (error) {
+            if (!isReportAnalysisActivityCurrent(activity) || error.name === 'AbortError') return;
+            console.error('[Reports] analyzeSuiteLogDir error:', error);
+            finishReportAnalysisActivity(activity, error.message || '请求失败');
+            notifyOperationResult('报告分析失败', error.message || '请求失败',
+                'error', 'report-analysis', {path: relPath});
+        } finally {
+            if (controller && currentReportAnalysisFetch === controller) {
+                currentReportAnalysisFetch = null;
+            }
         }
     }, 300);
 }
@@ -197,23 +225,47 @@ function createSuiteFileRow(item) {
     });
 
     const icon = document.createElement('span');
-    icon.textContent = item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : (item.is_jar ? '🫙' : '📄'));
+    icon.className = 'suite-file-icon';
+    icon.textContent = item.type === 'directory' ? '📁' : (item.is_apk ? '📦' : (item.is_jar ? '☕' : '📄'));
 
     const main = document.createElement('div');
     main.className = 'suite-file-main';
-
-    const name = document.createElement('div');
+    const name = document.createElement('span');
     name.className = 'suite-file-name';
     name.textContent = item.name;
+    name.title = item.name || '';
+    main.append(icon, name);
 
-    main.appendChild(name);
+    // All metadata is in separate table columns; never wrap a filename's
+    // description onto a second line. No modification time is fabricated:
+    // the suite directory API currently supplies type and size only.
+    const description = document.createElement('span');
+    description.className = 'suite-file-description';
+    const extension = (item.name || '').split('.').pop().toLowerCase();
+    const descriptionMap = {
+        xml: 'XML 配置文件',
+        html: 'HTML 测试报告', htm: 'HTML 测试报告',
+        log: '日志文件', txt: '文本文件',
+        json: 'JSON 数据文件', zip: 'ZIP 压缩包',
+        sh: 'Shell 脚本', py: 'Python 脚本'
+    };
+    description.textContent = item.isParent ? '返回上级目录'
+        : item.type === 'directory' ? '文件夹'
+        : item.is_apk ? 'Android 测试应用程序包'
+        : item.is_jar ? 'Java 归档文件'
+        : descriptionMap[extension] || '普通文件';
+    description.title = description.textContent;
 
-    if (item.type !== 'directory') {
-        const meta = document.createElement('div');
-        meta.className = 'suite-file-meta';
-        meta.textContent = `${formatBytes(item.size || 0, true)}${item.is_apk ? ' · APK' : (item.is_jar ? ' · JAR' : '')}`;
-        main.appendChild(meta);
-    }
+    const type = document.createElement('span');
+    type.className = 'suite-file-type';
+    type.textContent = item.type === 'directory' ? '目录'
+        : item.is_apk ? 'APK' : item.is_jar ? 'JAR' : (extension || '文件').toUpperCase();
+    type.dataset.type = item.type === 'directory' ? 'directory'
+        : item.is_apk ? 'apk' : item.is_jar ? 'jar' : 'file';
+
+    const size = document.createElement('span');
+    size.className = 'suite-file-size';
+    size.textContent = item.type === 'directory' ? '—' : formatBytes(item.size || 0, true);
 
     const actions = document.createElement('div');
     actions.className = 'suite-file-actions';
@@ -331,7 +383,9 @@ function createSuiteFileRow(item) {
         });
     }
 
-    row.append(icon, main, actions);
+    row.setAttribute('role', 'row');
+    for (const cell of [main, description, type, size, actions]) cell.setAttribute('role', 'cell');
+    row.append(main, description, type, size, actions);
     return row;
 }
 

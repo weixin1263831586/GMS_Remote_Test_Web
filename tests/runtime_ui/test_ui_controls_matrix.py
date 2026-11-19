@@ -1,0 +1,93 @@
+"""Real-browser geometry checks for newly unified workspaces (no business actions)."""
+
+import json
+import os
+from pathlib import Path
+
+from tests.runtime_ui.harness import RuntimeUiHarness
+
+
+class UiControlsMatrixTests(RuntimeUiHarness):
+    def test_audit_suite_and_apk_controls_keep_one_line_and_correct_density(self):
+        page = self.new_page()
+        failures = []
+        seen = {}
+        try:
+            self.goto_shell(page)
+            # Use a local UI-only elevation fixture so the screenshot records
+            # the underlying workbench, not an unrelated admin gate.
+            page.evaluate("() => { state.elevated = true; state.elevatedUntil = Date.now() + 300000; }")
+            for width, height in ((1440, 900), (1792, 900), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                for name, selector in (
+                    ("security-audit", ".audit-filter-bar .audit-toolbar-button"),
+                    ("test-suites", ".suite-search-field > .btn-xs"),
+                    ("apk-analysis", ".filter-btn[data-apk-tab]"),
+                ):
+                    page.evaluate("(name) => switchPage(name, null)", name)
+                    if name == "apk-analysis":
+                        # Reuse the existing UI fixture setup, no APK processing.
+                        page.evaluate("""() => {
+                          setApkUploadEmpty(false);
+                          document.getElementById('apk-analysis-result').style.display = 'block';
+                          document.getElementById('apk-analysis-status').style.display = 'block';
+                        }""")
+                    page.wait_for_timeout(120)
+                    if page.locator(".modal.show").count():
+                        self.close_initial_modals(page)
+                    measured = page.evaluate("""({name, selector}) => {
+                      const root = document.getElementById('page-' + name);
+                      return [...root.querySelectorAll(selector)]
+                        .filter(el => el.getBoundingClientRect().width > 0
+                                   && el.getBoundingClientRect().height > 0)
+                        .map(el => ({
+                          text: (el.textContent || '').trim().slice(0, 30),
+                          height: el.getBoundingClientRect().height,
+                          whiteSpace: getComputedStyle(el).whiteSpace
+                        }));
+                    }""", {"name": name, "selector": selector})
+                    seen[f"{width}/{name}"] = measured
+                    if not measured:
+                        failures.append(f"{width}px {name}: controls not visible")
+                    for item in measured:
+                        if item["whiteSpace"] != "nowrap":
+                            failures.append(f"{width}px {name}: wraps {item}")
+                        if name == "apk-analysis":
+                            expected = 38 if width <= 850 else 44
+                            if abs(item["height"] - expected) > 1:
+                                failures.append(f"{width}px APK tab height {item} != {expected}")
+                        elif item["height"] > 44:
+                            failures.append(f"{width}px {name}: unexpectedly tall {item}")
+                    # Inputs and their adjacent submit actions must stay aligned;
+                    # a single row must not mix 28px and 32px controls.
+                    pair = page.evaluate("""name => {
+                      const selectors = {
+                        'security-audit': ['#audit-search-input', '.audit-log-filters .audit-toolbar-button'],
+                        'test-suites': ['#suite-file-search', '.suite-search-submit'],
+                        'apk-analysis': ['#apk-file-search', '.apk-search-container > button']
+                      }[name];
+                      const root = document.getElementById('page-' + name);
+                      const [a, b] = selectors.map(s => root.querySelector(s));
+                      const isVisible = el => el && el.getBoundingClientRect().width > 0
+                        && el.getBoundingClientRect().height > 0;
+                      if (!isVisible(a) || !isVisible(b)) return null;
+                      const x = a.getBoundingClientRect(), y = b.getBoundingClientRect();
+                      return { heightDelta: Math.abs(x.height - y.height),
+                        centerDelta: Math.abs((x.top + x.bottom) / 2 - (y.top + y.bottom) / 2) };
+                    }""", name)
+                    # Responsive audit filters intentionally occupy separate rows.
+                    # Only compare centers for controls actually sharing a row.
+                    if pair and (pair["heightDelta"] > 2 or (width >= 768 and pair["centerDelta"] > 2)):
+                        failures.append(f"{width}px {name}: search input / button misaligned {pair}")
+                    target = os.getenv("GMS_UI_PREVIEW_DIR")
+                    if target and width in (1440, 390):
+                        dest = Path(target)
+                        dest.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(dest / f"controls-{name}-{width}.png"))
+            if os.getenv("GMS_UI_PREVIEW_DIR"):
+                (Path(os.environ["GMS_UI_PREVIEW_DIR"]) / "controls-computed.json").write_text(
+                    json.dumps(seen, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            self.assertEqual(failures, [], "\n".join(failures) + f"\nSamples: {seen}")
+        finally:
+            page.close()

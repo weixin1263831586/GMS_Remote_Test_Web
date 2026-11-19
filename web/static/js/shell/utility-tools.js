@@ -337,7 +337,7 @@ async function ut_restoreSyncButtonState() {
             if (!syncTool) continue;
             const cards = document.querySelectorAll('#ut-grid .tool-card, #ut-grid [style*="cursor: pointer"]');
             for (const card of cards) {
-                const titleEl = card.querySelector('div[style*="font-weight: 600"]');
+                const titleEl = card.querySelector('div[style*="font-weight: var(--ui-type-weight-semibold)"]');
                 if (titleEl && titleEl.textContent === syncTool.title) {
                     const btn = card.querySelector('button');
                     if (btn) {
@@ -414,7 +414,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
     if (tool.builtin_id === 'gms-update-radar') {
         actions.push(`
                 <button type="button" class="btn-act act-edit" aria-label="修改" title="修改雷达执行时间、收件人、发送策略和监听任务" data-tools-action="radar-edit"
-                        style="flex: 1; padding: 3px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--lighter-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; line-height: 1;">
+                        style="flex: 1; padding: 3px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--lighter-bg); color: var(--text-primary); cursor: pointer; line-height: 1;">
                     ✏️
                 </button>`);
     }
@@ -422,7 +422,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
     if (isSyncTool) {
         actions.push(`
                 <button type="button" class="btn-act" aria-label="触发扫描" title="${tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes'}" data-tools-action="trigger-sync" data-sync-kind="${tool.action}" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
                     触发扫描
                 </button>`);
     }
@@ -430,19 +430,19 @@ function ut_createToolCard(tool, category, index, cardColor) {
     if (!tool.builtin_id && !isSyncTool && !isShareFirmwareTool && !isDownloadOnlyTool) {
         actions.push(`
                 <button type="button" class="btn-act" aria-label="下载文件" title="下载文件" data-tools-action="download-tool" data-tool-id="${escapeIconAttr(tool.tool_id)}" data-tool-title="${escapeIconAttr(tool.title)}"
-                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
                     下载
                 </button>`);
     }
     if (!tool.builtin_id) {
         actions.push(`
                 <button type="button" class="btn-act act-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
                     ✏️
                 </button>`);
         actions.push(`
                 <button type="button" class="btn-act act-danger" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
                     🗑️
                 </button>`);
     }
@@ -450,7 +450,7 @@ function ut_createToolCard(tool, category, index, cardColor) {
     if (tool.builtin_id) {
         actions.push(`
                 <button type="button" class="btn-act act-danger" aria-label="隐藏此内置工具" title="隐藏此内置工具" data-tools-action="hide-builtin" data-builtin-id="${escapeIconAttr(tool.builtin_id)}" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; font-size: 12px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
                     🗑️
                 </button>`);
     }
@@ -1102,7 +1102,7 @@ async function ut_loadToolDir(subpath) {
 
             if (file.type === 'file') {
                 const size = document.createElement('span');
-                size.style.cssText = 'color: var(--text-muted); font-size: 11px;';
+                size.style.cssText = 'color: var(--text-muted); font-size: var(--ui-type-size-compact);';
                 size.textContent = formatBytes(file.size, true);
                 item.appendChild(size);
             }

@@ -51,7 +51,11 @@ def test_kpis_preserve_existing_metric_ids_and_actions() -> None:
         "api-docs": ("total-apis-count", "get-apis-count", "post-apis-count",
                      "filtered-apis-count", "skills-count"),
         "security-audit": ("audit-total-count", "audit-web-count",
-                           "audit-cli-count", "audit-error-count"),
+                           "audit-cli-count", "audit-error-count",
+                           "audit-mail-total", "audit-mail-success",
+                           "audit-mail-failed", "audit-mail-latest",
+                           "audit-disk-bytes", "audit-disk-attention",
+                           "audit-disk-covered", "audit-disk-aged"),
     }
     for page, ids in expected.items():
         source = (SHELL / "pages" / f"{page}.html").read_text(encoding="utf-8")

@@ -186,6 +186,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
             expect(cluster.locator("#tab-management")).to_be_visible()
             cluster.locator('[data-dash-tab="management"]').press("Home")
             expect(cluster.locator("#tab-dashboard")).to_be_visible()
+            self.close_initial_modals(page)
             cluster.locator('[data-dash-tab="management"]').click()
             expect(cluster.locator("#tab-management")).to_be_visible()
             expect(cluster.locator("#tab-dashboard")).to_be_hidden()
@@ -977,7 +978,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
             self.assertAlmostEqual(
                 library.bounding_box()["width"], before, delta=1
             )
-            page.evaluate("api = window.__originalLibraryApi")
+            page.evaluate("() => { api = window.__originalLibraryApi; }")
         finally:
             page.close()
 

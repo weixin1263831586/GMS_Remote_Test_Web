@@ -8,7 +8,11 @@
             <!-- 下载和解压区域 -->
             <div class="suite-download-section">
                 <div class="suite-download-row">
-                    <div>
+                    <div class="suite-download-label">
+                        <span class="suite-download-symbol" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#download"></use></svg></span>
+                        <span><strong>套件下载</strong></span>
+                    </div>
+                    <div class="suite-download-field">
                         <input type="text" id="suite-download-url" class="combo-box" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" />
                     </div>
                     <button id="btn-download-suite" class="btn-primary" data-click="downloadTestSuite">
@@ -33,21 +37,25 @@
             <div class="suite-browser-layout">
                 <div class="suite-browser-sidebar">
                     <div class="suite-browser-toolbar">
+                        <div class="suite-sidebar-heading">套件列表 <span id="suite-browser-count" class="suite-browser-count">0</span></div>
                         <button class="btn-xs" data-click="refreshTestSuiteBrowser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-                        <span id="suite-browser-count" class="suite-browser-count">0 个套件</span>
                     </div>
-                    <input type="text" id="suite-browser-filter" class="suite-browser-filter" placeholder="筛选套件..."
-                           data-input="filterTestSuiteBrowserList" />
+                    <div class="suite-sidebar-filter">
+                        <input type="text" id="suite-browser-filter" class="suite-browser-filter" placeholder="按名称、类型或路径筛选..."
+                               data-input="filterTestSuiteBrowserList" />
+                    </div>
                     <div id="suite-browser-list" class="suite-browser-list">
                         <div class="suite-empty">正在加载...</div>
                     </div>
+                    <div class="suite-sidebar-footer"><span class="suite-online-dot"></span> 列表来自当前选择的 Worker</div>
                 </div>
 
                 <div class="suite-browser-main">
                     <div class="suite-browser-header">
-                        <div>
+                        <div class="suite-browser-identity">
+                            <span id="suite-browser-type" class="suite-header-type" hidden></span>
                             <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
-                            <div id="suite-browser-path" class="suite-browser-path"></div>
+                            <div id="suite-browser-path" class="suite-browser-path" title=""></div>
                         </div>
                         <div class="suite-browser-actions">
                             <button id="btn-copy-test-report" class="btn-xs" data-click="openReportCopyModal" title="在同一主机或不同主机的测试套件之间复制 Tradefed results 报告">
@@ -61,17 +69,31 @@
                             </button>
                         </div>
                     </div>
-                    <div id="suite-browser-breadcrumb" class="suite-browser-breadcrumb"></div>
-                    <div class="suite-search-bar">
-                        <input type="text" id="suite-file-search" class="suite-file-search"
-                               placeholder="搜索文件/目录，例如 CtsVirtualDevicesCameraTestCases 或 2026.06.26_20.54.21"
-                               data-keydown="handleSuiteFileSearchKeydown" data-r0="event" autocomplete="off" />
-                        <button class="btn-xs" data-click="searchSuiteFiles">搜索</button>
-                        <button class="btn-xs" data-click="clearSuiteFileSearch">清除</button>
+                    <div class="suite-search-bar" role="toolbar" aria-label="文件浏览操作">
+                        <nav id="suite-browser-breadcrumb" class="suite-browser-breadcrumb" aria-label="当前目录导航"></nav>
+                        <div class="suite-search-field">
+                            <input type="text" id="suite-file-search" class="suite-file-search"
+                                   placeholder="搜索文件或目录..." aria-label="搜索套件文件或目录"
+                                   data-keydown="handleSuiteFileSearchKeydown" data-r0="event" autocomplete="off" />
+                            <button class="btn-xs suite-search-submit" data-click="searchSuiteFiles">搜索</button>
+                            <button class="btn-xs" data-click="clearSuiteFileSearch">清除</button>
+                        </div>
+                        <div class="suite-context-actions">
+                            <div id="suite-browser-run-actions" class="suite-run-actions" aria-label="运行结果操作"></div>
+                        </div>
                     </div>
                     <div id="suite-search-results" class="suite-search-results"></div>
-                    <div id="suite-file-list" class="suite-file-list">
-                        <div class="suite-empty">从左侧选择一个测试套件</div>
+                    <div class="suite-file-table" role="table" aria-label="测试套件文件浏览">
+                        <div class="suite-file-table-head" role="row">
+                            <span role="columnheader">文件名称</span>
+                            <span role="columnheader">说明</span>
+                            <span role="columnheader">类型</span>
+                            <span role="columnheader">大小</span>
+                            <span role="columnheader">操作</span>
+                        </div>
+                        <div id="suite-file-list" class="suite-file-list" role="rowgroup">
+                            <div class="suite-empty">从左侧选择一个测试套件</div>
+                        </div>
                     </div>
                 </div>
             </div>

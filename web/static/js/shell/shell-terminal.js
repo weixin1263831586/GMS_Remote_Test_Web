@@ -280,14 +280,14 @@ function initTerminal() {
                 terminalEl.innerHTML = `
                     <div style="color:white;padding:40px;text-align:center;">
                         <div style="font-size:48px;margin-bottom:20px;">❌</div>
-                        <div style="font-size:18px;margin-bottom:10px;">xterm.js 库加载失败</div>
-                        <div style="color:var(--text-muted);font-size:14px;margin-bottom:20px;">
+                        <div style="font-size:var(--ui-type-size-page);margin-bottom:10px;">xterm.js 库加载失败</div>
+                        <div style="color:var(--text-muted);font-size:var(--ui-type-size-card);margin-bottom:20px;">
                             可能原因：<br>
                             1. 网络连接问题<br>
                             2. 静态资源加载失败<br>
                             3. 防火墙阻止
                         </div>
-                        <button type="button" data-action="reload-page" style="padding:10px 20px;font-size:14px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
+                        <button type="button" data-action="reload-page" style="padding:10px 20px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
                             🔄 刷新页面重试
                         </button>
                     </div>

@@ -161,11 +161,157 @@ class ReportAnalysisAgentTests(unittest.TestCase):
         self.assertEqual(result["details"]["soc_platform"], "RK3588")
         self.assertEqual(result["details"]["test_type"], "GTS")
         self.assertEqual(len(result["failures"]), 1)
+        self.assertTrue(result["failures"][0]["raw_log"].startswith(
+            "03-07 08:50:02 I/ModuleListener: FAILURE: "
+        ))
+        self.assertIn("java.lang.AssertionError: expected true", result["failures"][0]["raw_log"])
         self.assertEqual(len(result["analysis_sources"]["host_logs"]), 2)
         self.assertEqual(len(result["analysis_sources"]["device_logs"]), 2)
         self.assertGreaterEqual(result["host_log_errors"]["total_errors"], 1)
         self.assertGreaterEqual(result["device_log_errors"]["total_errors"], 2)
         self.assertEqual(len(result["failures_html"]["failures"]), 1)
+
+    def test_cts_module_listener_full_failure_survives_zip_analysis(self):
+        """The UI receives the original timestamp/prefix AND every stack frame."""
+        from xml.sax.saxutils import escape, quoteattr
+
+        from features.reports import ReportAnalysisAgent
+
+        case_class = "android.server.wm.activity.lifecycle.ActivityLifecycleTopResumedStateTests"
+        method = "testTopPositionSwitchToActivityOnTopTimeoutDifferentProcess"
+        message = (
+            "java.lang.AssertionError: Transition wasn't observed in the expected position: "
+            "Pair{android.server.wm.activity.lifecycle.ActivityLifecycleClientTestBase."
+            "SlowActivity ON_TOP_POSITION_LOST} during transition: launchOnTop"
+        )
+        host_log = (
+            "11-16 17:13:33 I/ModuleListener: [1/1] m10r0800015 "
+            f"android.server.wm.cts {case_class}#{method} FAILURE: {message}\n"
+            "\tat org.junit.Assert.fail(Assert.java:89)\n"
+            "\tat android.server.wm.activity.lifecycle.TransitionVerifier."
+            "assertOrder(TransitionVerifier.java:473)\n"
+            f"\tat {case_class}.{method}(ActivityLifecycleTopResumedStateTests.java:179)"
+        )
+        xml = (
+            '<Result suite_name="CTS" suite_version="17_r3" build_version_release="17">'
+            '<Summary pass="0" failed="1" />'
+            '<Module name="CtsWindowManagerDeviceActivity">'
+            f'<TestCase name="{case_class}">'
+            f'<Test name="{method}" result="fail">'
+            f'<Failure message={quoteattr(message)}>{escape(message)}</Failure>'
+            '</Test></TestCase></Module></Result>'
+        )
+        with TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "report.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("results/test_result.xml", xml)
+                zf.writestr("logs/inv_cts_1/host_log_1.txt", host_log)
+            result = ReportAnalysisAgent(temp_dir=tmp).analyze_path(str(archive))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["failures"][0]["name"], f"{case_class}#{method}")
+        self.assertEqual(result["failures"][0]["raw_log"], host_log)
+        self.assertIn("FAILURE: java.lang.AssertionError", result["failures"][0]["raw_log"])
+        self.assertIn("ActivityLifecycleTopResumedStateTests.java:179", result["failures"][0]["raw_log"])
+
+    def test_multiple_retries_choose_latest_matching_original_entry(self):
+        from features.reports.analysis_agent import ReportAnalysisAgent
+        from features.reports.models import TestFailure
+
+        case = "org.example.Test#fails"
+        xml = [{"name": case, "module": "ModuleA", "reason": "expected true", "raw_log": ""}]
+        first = TestFailure(
+            name=case, module="ModuleA", reason="expected true",
+            raw_log="11-16 17:13:30 I/ModuleListener: FAILURE: expected true",
+        )
+        last = TestFailure(
+            name=case, module="ModuleA", reason="expected true",
+            raw_log="11-16 17:13:33 I/ModuleListener: FAILURE: expected true",
+        )
+        other = TestFailure(
+            name=case, module="ModuleA", reason="different failure",
+            raw_log="11-16 17:13:50 I/ModuleListener: FAILURE: different failure",
+        )
+        ReportAnalysisAgent._attach_original_host_logs(
+            xml, [Mock(failures=[last, other, first])],
+        )
+        self.assertEqual(xml[0]["raw_log"], last.raw_log)
+
+    def test_raw_host_log_must_not_cross_module_boundary(self):
+        from features.reports.analysis_agent import ReportAnalysisAgent
+        from features.reports.models import TestFailure
+
+        case = "org.example.SharedTest#fails"
+        xml = [{"name": case, "module": "ModuleA",
+                "reason": "expected true", "raw_log": ""}]
+        wrong = TestFailure(name=case, module="ModuleB",
+                            reason="expected true", raw_log="WRONG MODULE LOG")
+        ReportAnalysisAgent._attach_original_host_logs(
+            xml, [Mock(failures=[wrong])],
+        )
+        self.assertEqual(xml[0]["raw_log"], "")
+
+        correct = TestFailure(name=case, module="ModuleA",
+                              reason="expected true", raw_log="CORRECT MODULE LOG")
+        ReportAnalysisAgent._attach_original_host_logs(
+            xml, [Mock(failures=[wrong, correct])],
+        )
+        self.assertEqual(xml[0]["raw_log"], "CORRECT MODULE LOG")
+
+    def test_generic_host_suite_name_matches_specific_xml_module(self):
+        from features.reports.analysis_agent import ReportAnalysisAgent
+        from features.reports.models import TestFailure
+
+        case = "org.example.SharedTest#fails"
+        xml = [{"name": case, "module": "GtsSampleTestCases",
+                "reason": "assertion", "raw_log": ""}]
+        host = TestFailure(name=case, module="GTS",
+                           reason="assertion", raw_log="TIMESTAMPED FAILURE BLOCK")
+        ReportAnalysisAgent._attach_original_host_logs(xml, [Mock(failures=[host])])
+        self.assertEqual(xml[0]["raw_log"], "TIMESTAMPED FAILURE BLOCK")
+
+    def test_file_limit_rejects_partial_bundle_before_parsing(self):
+        from features.reports.analysis_agent import (
+            ReportAnalysisAgent,
+            ReportScanIncompleteError,
+        )
+
+        with TemporaryDirectory() as tmp:
+            extra = Path(tmp) / "noise.txt"
+            xml = Path(tmp) / "test_result.xml"
+            extra.write_text("noise", encoding="utf-8")
+            xml.write_text(TEST_XML, encoding="utf-8")
+            with self.assertRaisesRegex(ReportScanIncompleteError, "1 个上限"):
+                ReportAnalysisAgent(temp_dir=tmp, max_files=1).analyze_paths(
+                    [str(extra), str(xml)]
+                )
+
+    def test_nested_archive_limit_is_explicit(self):
+        from features.reports.analysis_agent import (
+            ReportAnalysisAgent,
+            ReportScanIncompleteError,
+        )
+
+        with TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "nested.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("test_result.xml", TEST_XML)
+            with self.assertRaisesRegex(ReportScanIncompleteError, "0 层上限"):
+                ReportAnalysisAgent(temp_dir=tmp, max_depth=0).analyze_path(
+                    str(archive)
+                )
+
+    def test_xml_only_does_not_invent_host_log(self):
+        from features.reports import ReportAnalysisAgent
+
+        with TemporaryDirectory() as tmp:
+            xml = Path(tmp) / "test_result.xml"
+            xml.write_text(TEST_XML, encoding="utf-8")
+            result = ReportAnalysisAgent(temp_dir=tmp).analyze_path(str(xml))
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result["failures"][0]["raw_log"], "")
+        self.assertIn("java.lang.AssertionError", result["failures"][0]["reason"])
 
     def test_report_analyzer_uses_agent_for_nested_archives(self):
         from features.reports import ReportAnalyzer

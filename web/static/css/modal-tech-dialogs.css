@@ -1,9 +1,9 @@
 /* Reference dialog geometry. Controllers retain focus, stacking and visibility. */
 :root {
-  --tech-font-title: 16px;
-  --tech-font-body: 13px;
-  --tech-font-caption: 12px;
-  --tech-control-height: 32px;
+  
+  
+  
+  --tech-control-height: var(--ui-control-height);
   --tech-field-glyph-size: 28px;
   --tech-deep: var(--light-bg, #202027);
   --tech-panel: var(--card-bg, #1b1b23);
@@ -22,7 +22,7 @@
   border-radius: 16px 16px 16px 16px !important;
   overflow: hidden;
   box-shadow: 0 20px 60px rgb(0 0 0 / 42%);
-  font-size: var(--tech-font-body);
+  
   line-height: 1.5;
   max-height: calc(100dvh - 32px);
   min-height: 0;
@@ -39,7 +39,7 @@
 .tech-dialog .tech-frame-accent { stroke: var(--primary-light); stroke-width: 3; stroke-linejoin: miter; }
 .tech-dialog .tech-rule-ticks { stroke: var(--primary-light); stroke-width: 2.5; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) {
-  position: relative; min-height: 56px; padding: 11px 18px 15px; gap: 10px;
+  position: relative; min-height: var(--ui-modal-header-height-roomy); padding: 11px 18px 15px; gap: 10px;
   border-bottom: 1px solid var(--tech-edge-soft); background: transparent !important;
   box-shadow: none; flex-shrink: 0;
 }
@@ -61,28 +61,28 @@
 .tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 24px; height: 24px; }
 .tech-dialog .tech-title-divider { width: 1px; height: 22px; background: var(--tech-edge); flex: none; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {
-  font-size: var(--tech-font-title) !important; font-weight: 650; line-height: 1.35;
+    line-height: 1.35;
   color: var(--text-primary); margin: 0; padding: 0; letter-spacing: .2px;
 }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-title::before { content: none !important; }
 .tech-dialog .tech-header-ticks { display: none; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close {
-  flex: none; width: 30px; min-width: 30px; height: 30px; min-height: 30px;
+  flex: none; width: var(--ui-modal-close-size); min-width: var(--ui-modal-close-size); height: var(--ui-modal-close-size); min-height: var(--ui-modal-close-size);
   border: 1px solid transparent; border-radius: 6px; padding: 0;
-  background: transparent; color: var(--text-primary); font-size: 24px; font-weight: 300;
+  background: transparent; color: var(--text-primary);  
 }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close:hover { background: var(--tech-accent-soft); border-color: var(--tech-edge); }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-body {
-  min-width: 0; min-height: 0; padding: 12px 16px; background: transparent; font-size: var(--tech-font-body);
+  min-width: 0; min-height: 0; padding: 12px 16px; background: transparent; 
 }
-.tech-dialog .tech-intro { margin: 0 0 14px; color: var(--text-secondary); font-size: var(--tech-font-body); line-height: 1.65; }
+.tech-dialog .tech-intro { margin: 0 0 14px; color: var(--text-secondary);  line-height: 1.65; }
 .tech-dialog .tech-section {
   min-width: 0; padding: 12px 14px; border: 1px solid var(--tech-edge-soft);
   border-radius: 12px; background: var(--tech-panel);
 }
 .tech-dialog .tech-section-title {
   display: flex; align-items: center; gap: 10px; margin: 0 0 12px;
-  padding: 0 0 6px; border-bottom: 1px solid var(--tech-edge-soft); font-size: var(--tech-font-body); font-weight: 600; color: var(--text-primary);
+  padding: 0 0 6px; border-bottom: 1px solid var(--tech-edge-soft);   color: var(--text-primary);
 }
 .tech-section-title > .ui-icon { color: var(--tech-bright); width: 20px; height: 20px; }
 .tech-dialog .tech-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-items: start; }
@@ -93,7 +93,7 @@
 }
 .tech-dialog .tech-field-card > label:not(:has(input)) {
   margin: 0; padding: 0 0 0 10px; min-width: 90px; width: auto;
-  border-left: 1px solid var(--tech-edge); color: var(--text-primary); font-size: var(--tech-font-body); font-weight: 600;
+  border-left: 1px solid var(--tech-edge); color: var(--text-primary);  
 }
 .tech-dialog .tech-field-card > label::before { content: none !important; }
 .tech-dialog .tech-field-glyph {
@@ -108,12 +108,12 @@
 .tech-dialog .tech-field-stack > .tech-field-glyph { width: 30px; height: 30px; border-radius: 6px; }
 .tech-dialog .tech-field-stack > .tech-field-glyph .ui-icon { width: 20px; height: 20px; }
 .tech-dialog .tech-field-stack > :not(label):not(.tech-field-glyph) { grid-column: 1 / -1; width: 100%; min-width: 0; }
-.tech-dialog .tech-field-stack > label { min-width: 0 !important; font-size: var(--tech-font-body); }
+.tech-dialog .tech-field-stack > label { min-width: 0 !important;  }
 .tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) {
   min-width: 0; max-width: 100%; box-sizing: border-box;
   padding: 5px 8px; min-height: var(--tech-control-height);
   color: var(--text-primary); background: var(--tech-input); border: 1px solid var(--border-light);
-  border-radius: 6px; font-size: var(--tech-font-body); line-height: 1.5; box-shadow: none;
+  border-radius: 6px;  line-height: 1.5; box-shadow: none;
 }
 .tech-dialog :is(input,select,textarea)::placeholder { color: var(--text-secondary); opacity: 1; }
 .tech-dialog :is(input,select,textarea):disabled { opacity: .5; }
@@ -122,7 +122,7 @@
 .tech-dialog input:is([type=checkbox],[type=radio]) { accent-color: var(--primary-color); width: 17px; height: 17px; flex-shrink: 0; }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer,.agent-access-form-actions) {
   position: relative; flex-shrink: 0; margin: 0; padding: 8px 16px 18px;
-  min-height: 58px; gap: 9px; flex-direction: row; background: transparent !important; border-top: 1px solid var(--tech-edge-soft);
+  min-height: var(--ui-modal-actions-min-height); gap: 9px; flex-direction: row; background: transparent !important; border-top: 1px solid var(--tech-edge-soft);
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions)::before,
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions)::after { content: none !important; }
@@ -133,7 +133,7 @@
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
 .tech-dialog .tech-row-action {
   width: auto; min-height: var(--tech-control-height); height: auto; min-width: 68px; padding: 5px 12px;
-  font-size: var(--tech-font-body); font-weight: 600; line-height: 1.4;
+    line-height: 1.4;
   color: var(--text-primary); border: 1px solid var(--border-light) !important; border-radius: 7px !important;
   background: var(--tech-panel) !important; box-shadow: inset 0 0 12px color-mix(in srgb, var(--primary-color) 12%, transparent);
 }
@@ -147,8 +147,8 @@
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions) :is(.danger,.btn-danger,[style*='var(--danger-color)']) {
   background: #8b3045 !important; border-color: #e7899b !important; box-shadow: none;
 }
-.tech-dialog .modal-info-text { padding: 8px 10px; border-radius: 7px; font-size: var(--tech-font-body); line-height: 1.7; }
-.tech-dialog .tech-notice { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 8px 10px; background: #332a29; border-left: 3px solid #e9b94f; border-radius: 7px; color: #e1cba6; font-size: var(--tech-font-body); }
+.tech-dialog .modal-info-text { padding: 8px 10px; border-radius: 7px;  line-height: 1.7; }
+.tech-dialog .tech-notice { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 8px 10px; background: #332a29; border-left: 3px solid #e9b94f; border-radius: 7px; color: #e1cba6;  }
 .tech-dialog .tech-notice .ui-icon { flex: none; width: 20px; height: 20px; color: var(--tech-bright); }
 /* Reference Tailscale: five dedicated platform rows with a fixed action column. */
 #tailscale-info-modal .modal-content.tech-dialog--tailscale { width: min(820px,calc(100vw - 40px)); max-width: min(820px,calc(100vw - 40px)); height: auto; }
@@ -161,20 +161,20 @@
 }
 #tailscale-info-modal .tech-field-glyph { width: 28px; height: 28px; }
 #tailscale-info-modal .tech-field-glyph :is(.ui-icon,.tech-brand-icon) { width: 20px; height: 20px; }
-#tailscale-info-modal .tech-tailscale-row > label { display: flex; align-items: center; min-width: 0 !important; gap: 12px; margin: 0; font-size: var(--tech-font-body); font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+#tailscale-info-modal .tech-tailscale-row > label { display: flex; align-items: center; min-width: 0 !important; gap: 12px; margin: 0;   color: var(--text-primary); white-space: nowrap; }
 #tailscale-info-modal .tech-tailscale-row > label::before { content: ''; width: 1px; height: 20px; background: var(--tech-edge); flex: none; }
-#tailscale-info-modal .tech-tailscale-row > input { width: 100%; height: var(--tech-control-height); min-height: var(--tech-control-height); font-size: var(--tech-font-body); }
-#tailscale-info-modal .tech-row-action { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 6px 8px; height: var(--tech-control-height); font-size: var(--tech-font-body); }
+#tailscale-info-modal .tech-tailscale-row > input { width: 100%; height: var(--tech-control-height); min-height: var(--tech-control-height);  }
+#tailscale-info-modal .tech-row-action { display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; padding: 6px 8px; height: var(--tech-control-height);  }
 #tailscale-info-modal .tech-row-action .ui-icon { width: 20px; height: 20px; }
-#tailscale-info-modal .tech-tailscale-help { display: flex; align-items: center; gap: 12px; padding: 10px 6px !important; margin: 14px 0 0 !important; background: transparent !important; border: 0 !important; color: var(--text-secondary); font-size: var(--tech-font-caption) !important; }
+#tailscale-info-modal .tech-tailscale-help { display: flex; align-items: center; gap: 12px; padding: 10px 6px !important; margin: 14px 0 0 !important; background: transparent !important; border: 0 !important; color: var(--text-secondary);  }
 #tailscale-info-modal .tech-hint-icon { color: var(--tech-bright); flex: none; }
 #tailscale-info-modal .tech-hint-icon .ui-icon { width: 22px; height: 22px; }
-#tailscale-info-modal .tech-dialog-footer { padding: 8px 16px 18px !important; min-height: 58px; }
-#tailscale-info-modal .tech-dialog-footer > button { min-width: 82px; min-height: var(--tech-control-height); font-size: var(--tech-font-body); }
+#tailscale-info-modal .tech-dialog-footer { padding: 8px 16px 18px !important; min-height: var(--ui-modal-actions-min-height); }
+#tailscale-info-modal .tech-dialog-footer > button { min-width: 82px; min-height: var(--tech-control-height);  }
 #tailscale-info-modal :is(.tech-footer-ticks,.tech-footer-trace) { display: none; }
 @media(max-width: 800px) {
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: 54px; padding: 10px 14px 14px; }
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--tech-font-title) !important; }
+  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: var(--ui-modal-header-height); padding: 10px 14px 14px; }
+  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {  }
   .tech-dialog .tech-title-group { gap: 10px; }
   .tech-dialog .tech-title-glyph { width: 30px; height: 30px; }
   .tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 26px; height: 26px; }
@@ -186,16 +186,16 @@
   #tailscale-info-modal .tech-tailscale-body { padding: 18px !important; }
   #tailscale-info-modal .tech-tailscale-row { grid-template-columns: 34px minmax(0,1fr) 88px; grid-template-areas: 'icon label label' 'input input action'; gap: 10px; padding: 12px; }
   #tailscale-info-modal .tech-field-glyph { grid-area: icon; width: 34px; height: 34px; }
-  #tailscale-info-modal .tech-tailscale-row > label { grid-area: label; font-size: var(--tech-font-body); }
-  #tailscale-info-modal .tech-tailscale-row > input { grid-area: input; font-size: var(--tech-font-body); }
-  #tailscale-info-modal .tech-row-action { grid-area: action; font-size: var(--tech-font-body); }
+  #tailscale-info-modal .tech-tailscale-row > label { grid-area: label;  }
+  #tailscale-info-modal .tech-tailscale-row > input { grid-area: input;  }
+  #tailscale-info-modal .tech-row-action { grid-area: action;  }
 }
 @media(max-width: 480px), (max-height:560px) {
   :is(.modal,.modal-backdrop,.auth-gate) .modal-content.tech-dialog { max-height: calc(100dvh - 16px); }
   .tech-dialog .tech-field-card > label:not(:has(input)) { min-width: 0; }
   .tech-dialog .tech-section { padding: 14px; }
   .tech-dialog .tech-header-ticks { right: 70px; }
-  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px; font-size: var(--tech-font-body); }
+  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px;  }
   .tech-dialog .tech-footer-decoration { left: 18px; width: 38%; }
   #tailscale-info-modal .modal-content.tech-dialog--tailscale { width: calc(100vw - 16px); max-width: calc(100vw - 16px); }
 }
@@ -221,7 +221,7 @@
 }
 .tech-dialog .tech-rule-ticks { stroke: #b975fa; stroke-width: 3; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) {
-  min-height: 50px;
+  min-height: var(--ui-modal-header-height-dense);
   padding: 8px 16px 13px;
   border-bottom-color: #6c468f;
   background: #1b1929 !important;
@@ -238,19 +238,19 @@
 .tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 20px; height: 20px; }
 .tech-dialog .tech-title-divider { height: 20px; width: 1px; background: #a66ee4; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {
-  font-size: var(--tech-font-title) !important; font-weight: 700; letter-spacing: .4px;
+    letter-spacing: .4px;
 }
-.tech-dialog .tech-intro { font-size: var(--tech-font-body); color: #c9c0d9; margin-bottom: 16px; }
+.tech-dialog .tech-intro {  color: #c9c0d9; margin-bottom: 16px; }
 .tech-dialog .tech-section {
   background: #242033; border: 1px solid #62467e; border-radius: 9px;
 }
-.tech-dialog .tech-section-title { font-size: var(--tech-font-body); border-bottom-color: #60467b; }
+.tech-dialog .tech-section-title {  border-bottom-color: #60467b; }
 .tech-dialog .tech-field-card {
   background: #221e31; border-color: #514064; border-radius: 8px;
   padding: 8px 10px; min-height: 44px;
 }
 .tech-dialog .tech-field-card > label:not(:has(input)) {
-  min-width: 115px; font-size: var(--tech-font-body); border-left: 2px solid #ae77e7;
+  min-width: 115px;  border-left: 2px solid #ae77e7;
 }
 .tech-dialog .tech-field-glyph {
   width: var(--tech-field-glyph-size); height: var(--tech-field-glyph-size); border-radius: 8px;
@@ -258,15 +258,15 @@
 }
 .tech-dialog .tech-field-glyph :is(.ui-icon,.tech-brand-icon) { width: 18px; height: 18px; }
 .tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) {
-  font-size: var(--tech-font-body); min-height: var(--tech-control-height); border: 1px solid #82719c;
+   min-height: var(--tech-control-height); border: 1px solid #82719c;
   border-radius: 6px; background: #191625;
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer,.agent-access-form-actions) {
-  padding: 8px 16px 18px; min-height: 58px;
+  padding: 8px 16px 18px; min-height: var(--ui-modal-actions-min-height);
   border-top: 1px solid #62457f; justify-content: flex-end;
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) {
-  font-size: var(--tech-font-body); min-height: var(--tech-control-height); padding: 5px 12px;
+   min-height: var(--tech-control-height); padding: 5px 12px;
   border-color: #a76dd5 !important; border-radius: 7px !important;
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:is(.btn-primary,.primary,[type=submit]) {
@@ -278,15 +278,15 @@
 @media (max-width: 800px) {
   .tech-dialog .tech-field-card > label:not(:has(input)) { min-width: 0; }
   .tech-dialog .tech-title-glyph { width: 28px; height: 28px; }
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: 50px; padding: 8px 14px 13px; }
+  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: var(--ui-modal-header-height-dense); padding: 8px 14px 13px; }
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head)::after { left: 16px; width: 68px; }
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--tech-font-title) !important; }
+  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {  }
   .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer,.agent-access-form-actions) { padding: 8px 14px 18px; }
 }
 @media (max-width: 480px) {
   .tech-dialog .tech-title-group { gap: 8px; }
   .tech-dialog .tech-title-divider { height: 20px; }
-  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--tech-font-body); }
+  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) {  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tech-dialog .tech-frame-accent { filter: none; }
@@ -357,9 +357,9 @@
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer) > button { position: relative; z-index: 1; }
 
 /* Text-bearing controls share one scale even when a feature uses inline sizing. */
-.tech-dialog .modal-title { font-size: var(--tech-font-title) !important; }
+.tech-dialog .modal-title {  }
 .tech-dialog :is(label,input,select,textarea,button:not(.modal-close)) {
-  font-size: var(--tech-font-body) !important;
+  
 }
 
 /* Bottom modal actions always align right, regardless of feature defaults.

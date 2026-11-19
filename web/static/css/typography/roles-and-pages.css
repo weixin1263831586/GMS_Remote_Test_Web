@@ -1,0 +1,463 @@
+/* Semantic defaults for Shell, standalone pages and embedded workspaces.
+   Layout constraints must not reduce standard control text. */
+html[data-ui-type-root] button:not(.modal-close) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root] table :is(th, td) { font-size: var(--ui-type-size-small); }
+:where(html, body) {
+  font-family: var(--ui-type-font-sans);
+  font-size: var(--ui-type-size-body);
+  line-height: var(--ui-type-line-body);
+}
+:where(button, input, select, textarea) { font-family: inherit; }
+:where(pre, code, kbd, samp, .ui-mono, .file-path, .log-text,
+  .log-output, .log-content, .xterm, .xterm-screen) {
+  font-family: var(--ui-type-font-mono);
+}
+:where(.page-stat-value, .workbench-stat-value, .dash-stat-card .num,
+  .stat-card .value, .audit-duration-cell) { font-variant-numeric: tabular-nums; }
+
+/* Compact 14px shell page headings retain the 24px row geometry. */
+.page-content .page-header-row { min-height: var(--ui-type-line-page); }
+.page-content .page-header-row > .section-title {
+  font-size: var(--ui-type-size-page-heading) !important;
+  font-weight: var(--ui-type-weight-medium);
+  line-height: var(--ui-type-line-page);
+  align-items: center;
+  letter-spacing: 0;
+}
+.page-content .page-header-row > .section-title::before { height: var(--ui-type-size-page-heading); }
+.page-content .page-header-row > .section-title .section-title-icon { margin-top: 0; }
+
+/* Test home has a three-panel header instead of the shared page-header-row. */
+html[data-ui-type-root="shell"] #page-test .section-title {
+  font-size: var(--ui-type-size-page-heading);
+  font-weight: var(--ui-type-weight-medium);
+}
+
+.page-content :is(.pane-title, .suite-browser-title, .report-section-head,
+  .audit-panel-heading strong, .audit-side-heading strong,
+  .analysis-upload-title, .workbench-section-title) {
+  font-size: var(--ui-type-size-card) !important;
+  font-weight: var(--ui-type-weight-semibold);
+}
+.page-content :is(.page-stat-value, .workbench-stat .page-stat-value) {
+  font-size: var(--ui-type-size-stat);
+  font-weight: var(--ui-type-weight-semibold);
+}
+.page-content :is(.list-table, .ui-table, .users-table, .audit-table,
+  .agent-access-table) thead th {
+  font-size: var(--ui-type-size-small) !important;
+  font-weight: var(--ui-type-weight-semibold);
+}
+.page-content :is(.list-table, .ui-table, .users-table, .audit-table,
+  .agent-access-table) tbody td {
+  font-size: var(--ui-type-size-small) !important;
+}
+.page-content :is(.entry-field, .combo-box, .suite-browser-filter,
+  .suite-file-search, .apk-search-input) {
+  font-size: var(--ui-type-size-body);
+}
+/* Modal title 16; form text 13; action buttons 12, close glyph untouched. */
+:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog .tech-title-group
+    :is(.modal-title, h2, h3) {
+  font-size: var(--ui-type-size-dialog) !important;
+  font-weight: var(--ui-type-weight-semibold);
+  line-height: var(--ui-type-line-heading);
+}
+:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog
+    :is(label, input:not([type=checkbox]):not([type=radio]), select, textarea) {
+  font-size: var(--ui-type-size-body) !important;
+}
+:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog button:not(.modal-close) {
+  font-size: var(--ui-type-size-small) !important;
+  font-weight: var(--ui-type-weight-medium);
+}
+.tech-dialog :is(.tech-intro, .modal-info-text, .tech-notice) {
+  font-size: var(--ui-type-size-body);
+  line-height: var(--ui-type-line-body);
+}
+.tech-dialog :is(.tech-section-title, .tech-field-card > label,
+  .tech-field-stack > label) { font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog :is(.tech-hint, .tech-tailscale-help, .tech-caption) {
+  font-size: var(--ui-type-size-small);
+}
+/* Routing assignment descriptions are ordinary modal copy, not 12px captions. */
+html[data-ui-type-root="shell"] :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach)
+  .adb-proxy-assignment-info { font-size: var(--ui-type-size-body); }
+:is(.workspace-header, .ats-shell, .page-shell, .architecture-v2)
+    :is(button, input, select, textarea):not(.modal-close) {
+  font-family: var(--ui-type-font-sans);
+}
+:where(.workspace-tabs > .workspace-tab) { font-family: var(--ui-type-font-sans); }
+:where(.ui-status, .status-badge, .badge-mini) { font-size: var(--ui-type-size-compact); }
+/* No forced font-size on xterm, SVG icons, emoji, charts or graphics. */
+
+/* === Canonical typography ownership: standalone feature CSS ===
+   Generated from feature styles, with iframe-root scoping for isolation.
+   Business styles retain only geometry, color and other non-type declarations. */
+/* features/automation/ui/page.css */
+html[data-ui-type-root="automation"] body { font-family: var(--ui-type-font-sans); font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .ats-more-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .worker-dot { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .panel-header { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .step-index { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .step-index.done { font-size: 0; }
+html[data-ui-type-root="automation"] .step-index.done::after { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .panel-description { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="automation"] label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] input,
+html[data-ui-type-root="automation"] select,
+html[data-ui-type-root="automation"] textarea { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .field-hint,
+html[data-ui-type-root="automation"] .field-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="automation"] .build-config-heading { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .build-config-heading span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .build-command-field select { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="automation"] .device-field-title { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] textarea { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="automation"] .advanced-test-options summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .create-run-button { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .stage-nav-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .subtabs-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .empty-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .section-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .log-search { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="automation"] .log-view { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .build-job-source { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .events-heading > span:first-child { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .report-card-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .field-label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .badge { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .events { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .event-line-level { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .event-columns-hint { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] #run-log-links button,
+html[data-ui-type-root="automation"] .log-artifact-link { font: inherit; }
+html[data-ui-type-root="automation"] .pipeline-map > div span { font: 700 var(--ui-type-size-compact) var(--ui-type-font-mono); }
+html[data-ui-type-root="automation"] .pipeline-map > div strong { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .stat-card .stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="automation"] .stat-card .stat-label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .breakdown-row .breakdown-count { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="automation"] .trace-section-title { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .profile-dryrun summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] #dryrun-result { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .history-filters label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .history-pager > span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .history-pager label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .history-help { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="automation"] .run-identifiers,
+html[data-ui-type-root="automation"] .run-retry-source { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .run-retry-source button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .test-outcome { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .resource-checksum { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] .live-progress table,
+html[data-ui-type-root="automation"] .resource-workspace table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="automation"] :where(button, select, input, textarea) { font-family: inherit; }
+html[data-ui-type-root="automation"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="automation"] table th { font-weight: var(--ui-type-weight-semibold); }
+
+/* features/cluster/ui/page.css */
+html[data-ui-type-root="cluster"] h1 { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="cluster"] h2 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="cluster"] th { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="cluster"] .deploy-progress { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] .dash-stat-card .num { font-size: var(--ui-type-size-display-medium); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] .dash-stat-card .label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .dash-stat-card .sub { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .dash-panel-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .dash-test-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .dash-test-row .badge-mini { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] .dash-test-group-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .dash-empty { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .dash-trend-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] :where(button, select, input, textarea) { font-family: inherit; }
+html[data-ui-type-root="cluster"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .dash-stat-card .num { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #cluster-toolbar .stable-action { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .label { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .num { font-size: var(--ui-type-size-display-medium); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .sub { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-panel-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #dashboard .dash-panel-sub { font-weight: var(--ui-type-weight-regular); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-trend-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-resource-table th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .resource-host-name { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #dashboard .resource-host-sub { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .resource-progress strong { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #dashboard .dash-device-legend { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #dashboard .dist-host { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dist-number { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dist-summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-chart-legend { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-group-title { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-row .badge-mini { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-row strong { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .section-head h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #tab-management .heading-count { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #tab-management .cluster-section-note { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] #tab-management .worker-main-name { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #tab-management .worker-subline { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-meta-details { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-service-list .cap { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-memory-percent { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #tab-management .worker-memory-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .cluster-loading-message { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="cluster"] #tab-management .cluster-load-failed { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] #cluster-toolbar #refresh,
+html[data-ui-type-root="cluster"] #tab-management #reload-library { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-main-name { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-subline { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-meta-details { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-actions button { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-summary-state .assessment { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-service-list .cap { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card-metric strong { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-memory-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-counts strong { font-size: var(--ui-type-size-card); }
+
+/* features/devices/ui/page.css */
+html[data-ui-type-root="devices"] .toolbar p,
+html[data-ui-type-root="devices"] .section-heading p { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .count-badge,
+html[data-ui-type-root="devices"] .status-pill { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .port-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="devices"] .port-error { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .identity-badge { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="devices"] .mono { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="devices"] .notice { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="devices"] .terminal .xterm-helpers,
+html[data-ui-type-root="devices"] .terminal .xterm-rows { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="devices"] .modal-hint { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .console-tab .tab-close { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="devices"] .console-sidebar .history-output { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="devices"] :where(button, select, input, textarea) { font-family: inherit; }
+html[data-ui-type-root="devices"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
+
+/* features/redmine/ui/page.css */
+html[data-ui-type-root="redmine"] body { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="redmine"] .header-title { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .muted { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] button { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] header .filter-bar input,
+html[data-ui-type-root="redmine"] header .filter-bar select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] header .btn-group > button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .modal-body label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .modal-body input,
+html[data-ui-type-root="redmine"] .modal-body select,
+html[data-ui-type-root="redmine"] .modal-body textarea { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .redmine-reply-modal textarea { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="redmine"] .redmine-reply-drop { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .redmine-reply-file { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .redmine-reply-file button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] #settingsModal .modal-title { font-size: var(--ui-type-size-dialog); }
+html[data-ui-type-root="redmine"] .filter-bar input,
+html[data-ui-type-root="redmine"] .filter-bar select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .redmine-advanced-sync summary { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .redmine-advanced-sync-body input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .redmine-advanced-sync-body button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .select-add-btn { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="redmine"] .issue-card h3 { font-size: var(--ui-type-size-dialog); }
+html[data-ui-type-root="redmine"] .chip { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="redmine"] .field-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .field-content { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .field-content.error-section { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .field-content.code-section { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .field-content.solution-section,
+html[data-ui-type-root="redmine"] .solution-section { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .rich-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .md-kv-row b { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .attachment-link-item { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .attachment-link-item a { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .attachment-kind { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .patch-dir { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .code-block pre { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .code-block-lang { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .diff-header { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .shell-cmd { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .copy-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .info-table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .info-table th { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .test-info { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .ref-item { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .ref-item a { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .ref-title { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .ref-badge { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .run-item-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .run-item-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .stat-card .value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .stat-card .label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .stats-section h2 { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="redmine"] .dashboard-summary-title { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="redmine"] .dashboard-summary-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .trend-panel h3 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="redmine"] .bar-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-mini { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .issue-mini-right-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-mini a { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .issue-mini-title strong { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .issue-mini-title span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-mini-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .dept-table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .dept-table th { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .dept-table a { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .dept-user-title h2 { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="redmine"] .panel h2 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="redmine"] details summary { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] pre { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .ka-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .settings-subsection-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .setting-help { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .daily-brief-title { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] #singleIssueAnalysisDevice [data-device-toggle] { font: inherit; font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] #singleIssueAnalysisDevice [data-device-options] label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .single-issue-reanalysis-mode { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .single-issue-analysis-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-status { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .daily-brief-metric span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-metric b { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-summary h4 { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-value span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-value b { font-size: var(--ui-type-size-display); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-grid h4,
+html[data-ui-type-root="redmine"] .daily-brief-tool-improvements h4 { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-tool-improvements h4 span { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-stat-table th { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .daily-brief-tool-failed { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .daily-brief-warning { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-analysis-overlay .daily-brief-modal .modal-close { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="redmine"] .daily-brief-analysis-overlay .daily-brief-modal-footer button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-modal-title > span:first-child { font-size: var(--ui-type-size-dialog); }
+html[data-ui-type-root="redmine"] .daily-brief-modal-subject { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="redmine"] .daily-brief-section summary { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .daily-brief-section-md h2.md-h { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="redmine"] .analysis-doc { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .analysis-doc h2.md-h { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="redmine"] .analysis-doc h3.md-h { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="redmine"] .analysis-doc .md-table th { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .analysis-doc code { font: var(--ui-type-size-small) var(--ui-type-font-mono); }
+html[data-ui-type-root="redmine"] .analysis-doc .claim-badge { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .analysis-doc .claim-ref { font: var(--ui-type-size-compact) var(--ui-type-font-mono); }
+html[data-ui-type-root="redmine"] .daily-brief-meta-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .daily-brief-quality-chip { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .daily-brief-sub-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .analysis-timeline { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .analysis-timeline-icon { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-time { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-duration { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-text b { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .analysis-timeline-args { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-fail-reason { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-tool { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-stage { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .analysis-session-tool { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .analysis-timeline-badge { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+@media (max-width:760px) { html[data-ui-type-root="redmine"] .daily-brief-analysis-overlay .daily-brief-modal .modal-close { font-size: var(--ui-type-size-body); } }
+html[data-ui-type-root="redmine"] :where(button, select, input, textarea) { font-family: inherit; }
+html[data-ui-type-root="redmine"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
+
+/* features/redmine/ui/case-library.css */
+html[data-ui-type-root="redmine"] .case-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="redmine"] .case-sig { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .case-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .case-scope { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .case-sources { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .redmine-issue-link { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] #knowledgeBody textarea { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .case-view-toggle button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .workbench-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .kv-line { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .kv-line b { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .mature-hit { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .source-links { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .mini-evidence-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .evidence-line,
+html[data-ui-type-root="redmine"] .reply-line,
+html[data-ui-type-root="redmine"] .attachment-evidence { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .detected-errors { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .workbench-actions button { font-size: var(--ui-type-size-small); }
+
+/* features/redmine/ui/daily-brief-session.css */
+html[data-ui-type-root="redmine"] .issue-session-note { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-session-stream { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .issue-session-context summary { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="redmine"] .issue-session-context-meta { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="redmine"] .issue-session-context pre,
+html[data-ui-type-root="redmine"] .issue-session-tool pre,
+html[data-ui-type-root="redmine"] .issue-session-raw-message pre { font: var(--ui-type-size-small)/1.55 var(--ui-type-font-mono); }
+html[data-ui-type-root="redmine"] .issue-session-avatar { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .issue-session-turn-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-session-final-tag { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="redmine"] .issue-session-message { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .issue-session-tool summary code { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-session-tool-icon { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .issue-session-tool-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="redmine"] .issue-session-tool-hint { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .issue-session-payload-label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .issue-session-raw-header { font-size: var(--ui-type-size-small); }
+
+
+/* Assistant boot/error shell and terminal-failure retry are ordinary UI roles. */
+html[data-ui-type-root="assistant-boot"] #assistant-boot-retry,
+html[data-ui-type-root="shell"] #terminal [data-action="reload-page"] { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="assistant-unconfigured"] body { font-family: var(--ui-type-font-sans); font-size: var(--ui-type-size-body); }
+
+/* Global semantic role overrides moved from typography.css.
+   The entrypoint owns tokens/imports only; this is the authoritative role file. */
+/* === Semantic text roles: authoritative across independent workspaces ===
+   Specific ID-backed selectors are intentional, so a component's role remains
+   consistent regardless of a page-specific layout rule. */
+html[data-ui-type-root="gerrit"] .header-title,
+html[data-ui-type-root="redmine"] .header-title,
+html[data-ui-type-root="cluster"] header h1,
+html[data-ui-type-root="devices"] header h1,
+html[data-ui-type-root="data-table"] header h1,
+html[data-ui-type-root="update-radar"] main > h1 {
+  font-size: var(--ui-type-size-page) !important;
+  font-weight: var(--ui-type-weight-semibold) !important;
+}
+html[data-ui-type-root="cluster"] #dashboard .dash-panel-title,
+html[data-ui-type-root="cluster"] #tab-management .section-head h2,
+html[data-ui-type-root="redmine"] .panel h2,
+html[data-ui-type-root="gerrit"] :is(.trend-panel,.list-section) h2 {
+  font-size: var(--ui-type-size-card) !important;
+  font-weight: var(--ui-type-weight-semibold) !important;
+}
+html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .num,
+html[data-ui-type-root="redmine"] .stat-card .value,
+html[data-ui-type-root="gerrit"] .stat-card .value {
+  font-size: var(--ui-type-size-stat) !important;
+  font-weight: var(--ui-type-weight-semibold) !important;
+  font-variant-numeric: tabular-nums;
+}
+html[data-ui-type-root="cluster"] #cluster-toolbar .stable-action,
+html[data-ui-type-root="redmine"] header .btn-group > button,
+html[data-ui-type-root="gerrit"] header .btn-group > button,
+html[data-ui-type-root="data-table"] :is(header .actions > button, .filters > button),
+html[data-ui-type-root="update-radar"] .workspace-actions > button:not(.workspace-tab) {
+  font-size: var(--ui-type-size-small) !important;
+  font-weight: var(--ui-type-weight-medium) !important;
+}
+html[data-ui-type-root="cluster"] #dashboard .dash-resource-table :is(th,td),
+html[data-ui-type-root="cluster"] #tab-management .cluster-pnl .table-wrap :is(th,td),
+html[data-ui-type-root="redmine"] :is(.dept-table,.info-table) :is(th,td),
+html[data-ui-type-root="gerrit"] :is(.dept-table,.info-table) :is(th,td) {
+  font-size: var(--ui-type-size-small) !important;
+}
+html[data-ui-type-root="shell"] #route-check-dialog .modal-title {
+  font-size: var(--ui-type-size-dialog) !important;
+  font-weight: var(--ui-type-weight-semibold) !important;
+}
+
+/* Device deployment/debug reviews share the same text roles. */
+html[data-ui-type-root="review"] body { font-family: var(--ui-type-font-sans); font-size: var(--ui-type-size-body); line-height: var(--ui-type-line-body); }
+html[data-ui-type-root="review"] h1 { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="review"] button { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-sans); }
+
+/* The desktop emoji glyph is a semantic icon, not normal control text. */
+#page-desktop.page-ui-rework .host-desktop-screen-label { font-size: 17px; }

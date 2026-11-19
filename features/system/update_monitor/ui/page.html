@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-type-root="data-table">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -15,9 +15,11 @@
     }
     button.secondary { background:var(--lighter-bg); }
     button:disabled { opacity:.55; cursor:not-allowed; }
-    .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35); font-size:13px; z-index:9999; display:none; }
+    .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35);  z-index:9999; display:none; }
     .toast.error { background:#3b1118; border-color:#7f1d1d; }
   </style>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-ui-sizing-v2">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 </head>
 <body>
   <header>

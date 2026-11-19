@@ -153,11 +153,11 @@ function renderToolCard(tool, category, index, cardColor) {
             + ' data-drop="handleToolDrop" data-r3="event"',
         actionsHtml: `
                 <button type="button" class="btn-act act-edit btn-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; border-radius: 3px; font-size: 12px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
+                        style="flex: 1; padding: 2px 3px; border-radius: 3px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
                     ✏️
                 </button>
                 <button type="button" class="btn-act act-danger btn-delete" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; border-radius: 3px; font-size: 12px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color);">
+                        style="flex: 1; padding: 2px 3px; border-radius: 3px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color);">
                     🗑️
                 </button>`,
     });

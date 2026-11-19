@@ -1,13 +1,13 @@
 :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --line:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --blue:var(--primary-color); --green:var(--success-color); --amber:var(--warning-color); --violet:var(--primary-light); }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--page-background); color: var(--text); font-family: var(--arch-font); }
+body { margin: 0; background: var(--page-background); color: var(--text);  }
 
 main { margin: 0 auto; padding: 16px; }
-.lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px; font-size: 13px; }
+.lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px;  }
 
 .arch-pane { min-width: 0; }
 section { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
-h2 { margin: 0 0 12px; font-size: 18px; color: var(--blue); }
+h2 { margin: 0 0 12px;  color: var(--blue); }
 .grid { display: grid; gap: 10px; }
 .roles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .workers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -16,8 +16,8 @@ h2 { margin: 0 0 12px; font-size: 18px; color: var(--blue); }
 .card.agent, .card.access { border-top-color: var(--arch-access); }
 .card.worker { border-top-color: var(--arch-worker); }
 .card.source { border-top-color: var(--arch-resource); }
-.card h3 { margin: 0 0 8px; font-size: 15px; }
-.card p, .card li { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.card h3 { margin: 0 0 8px;  }
+.card p, .card li { color: var(--muted);  line-height: 1.6; }
 .card ul { margin: 0; padding-left: 18px; }
 .topology { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--darker-bg) 50%, var(--panel)); }
 .topology-viewport { overflow-x: auto; scrollbar-color: var(--border-light) transparent; }
@@ -28,9 +28,9 @@ h2 { margin: 0 0 12px; font-size: 18px; color: var(--blue); }
 .topology svg {
   display: block; width: 100%; min-width: 1040px; max-width: 1240px; height: auto; margin: 0 auto;
   grid-column: 1; grid-row: 1;
-  font-family: var(--arch-font);
+  
 }
-.note { margin-top: 12px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: color-mix(in srgb, var(--amber) 6%, var(--panel)); font-size: 12px; line-height: 1.7; }
+.note { margin-top: 12px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: color-mix(in srgb, var(--amber) 6%, var(--panel));  line-height: 1.7; }
 code { color: var(--green); }
 @media (max-width: 980px) {
   .roles, .workers, .sources { grid-template-columns: 1fr 1fr; }
@@ -42,7 +42,7 @@ code { color: var(--green); }
 
 /* One font, role palette and line vocabulary for HTML layers and all SVG views. */
 :root {
-  --arch-font: "Noto Sans CJK SC", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  
   --arch-access: #a78bfa;
   --arch-control: #38bdf8;
   --arch-worker: #fbbf24;
@@ -52,8 +52,8 @@ code { color: var(--green); }
   --arch-text: var(--text-primary);
   --arch-node: var(--darker-bg);
 }
-.layers-section { font-family: var(--arch-font); }
-.layers-section .layers-intro { margin: -3px 0 12px; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.layers-section {  }
+.layers-section .layers-intro { margin: -3px 0 12px; color: var(--muted);  line-height: 1.7; }
 .architecture-layers { margin: 0; }
 .arch-layer {
   --layer-color: var(--arch-access);
@@ -78,22 +78,22 @@ code { color: var(--green); }
   background: color-mix(in srgb, var(--layer-color) 12%, var(--panel));
   text-align: center;
 }
-.arch-layer-label strong { font-size: 15px; }
-.arch-layer-label span { font-size: 11px; letter-spacing: .04em; }
-.arch-layer-label small { color: var(--muted); font-size: 11px; }
+.arch-layer-label strong {  }
+.arch-layer-label span {  letter-spacing: .04em; }
+.arch-layer-label small { color: var(--muted);  }
 .arch-layer-content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; min-width: 0; }
 .arch-layer--controller .arch-layer-content, .arch-layer--worker .arch-layer-content { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .arch-layer--resources .arch-layer-content { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .arch-layer-item { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
-.arch-layer-item h3 { margin: 0 0 5px; color: var(--text); font-size: 13px; line-height: 1.5; }
-.arch-layer-item p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
-.arch-layer-bridge { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; padding: 7px 10px; color: var(--muted); font-size: 11px; line-height: 1.6; text-align: center; }
-.arch-layer-bridge strong { color: var(--text); font-weight: 500; }
+.arch-layer-item h3 { margin: 0 0 5px; color: var(--text);  line-height: 1.5; }
+.arch-layer-item p { margin: 0; color: var(--muted);  line-height: 1.6; overflow-wrap: anywhere; }
+.arch-layer-bridge { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 16px; padding: 7px 10px; color: var(--muted);  line-height: 1.6; text-align: center; }
+.arch-layer-bridge strong { color: var(--text);  }
 .arch-integrations { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 10px; }
 .arch-integration { padding: 10px 12px; border: 1px dashed var(--line); border-radius: 8px; }
-.arch-integration h3 { margin: 0 0 5px; color: var(--text); font-size: 13px; }
-.arch-integration p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; }
-.architecture-layers figcaption { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 6%, var(--panel)); color: var(--muted); font-size: 12px; line-height: 1.7; }
+.arch-integration h3 { margin: 0 0 5px; color: var(--text);  }
+.arch-integration p { margin: 0; color: var(--muted);  line-height: 1.7; overflow-wrap: anywhere; }
+.architecture-layers figcaption { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--blue); background: color-mix(in srgb, var(--blue) 6%, var(--panel)); color: var(--muted);  line-height: 1.7; }
 .architecture-layers figcaption strong { color: var(--text); }
 @media (max-width: 1100px) {
   .arch-layer { grid-template-columns: 100px minmax(0, 1fr); }
@@ -108,13 +108,13 @@ code { color: var(--green); }
 }
 
 /* Architecture workflow tabs and diagram legends — aligned with device inventory panels. */
-.arch-flow-intro { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.75; }
+.arch-flow-intro { margin: 0 0 12px; color: var(--muted);  line-height: 1.75; }
 .arch-legend {
   display: grid; grid-template-columns: max-content; align-items: center; gap: 4px;
   grid-column: 2; grid-row: 1; justify-self: end;
   width: max-content; max-width: 100%; margin: 0; padding: 8px 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
-  color: var(--muted); font-size: 11px; line-height: 1.6;
+  color: var(--muted);  line-height: 1.6;
 }
 .arch-legend > span { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
 .arch-legend-line { width: 26px; height: 0; flex: none; border-top: 2px solid var(--arch-data); }
@@ -128,7 +128,7 @@ code { color: var(--green); }
 .arch-role--worker { --role-color: var(--arch-worker); }
 .arch-role--resource { --role-color: var(--arch-resource); }
 .arch-details { margin: 12px 0; border: 1px solid var(--line); border-radius: 10px; padding: 12px 16px; }
-.arch-details > summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.arch-details > summary { cursor: pointer; color: var(--muted);  }
 .arch-details > summary:focus-visible { outline: 2px solid var(--arch-access); outline-offset: 4px; }
 .arch-details section { border: 0; padding: 12px 0 0; margin-bottom: 0; background: none; }
 
@@ -136,37 +136,37 @@ code { color: var(--green); }
 /* System overview topology (static): four stages, separate transport channels, integrations. */
 .arch-system-map,.arch-system-bottom>section{padding:0;overflow:hidden;margin:12px 0;border:1px solid var(--line);border-radius:9px;background:#1b1b24}
 .arch-system-heading{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 14px;border-bottom:1px solid var(--line)}
-.arch-system-map h2,.arch-system-bottom h2{font-size:13px;color:var(--text);font-weight:700;margin:0}
-.arch-system-heading>span{color:var(--muted);font-size:11px}
+.arch-system-map h2,.arch-system-bottom h2{color:var(--text);margin:0}
+.arch-system-heading>span{color:var(--muted);}
 .arch-system-layout{display:grid;grid-template-columns:minmax(0,1fr) 215px;gap:12px;padding:12px}
 .arch-system-graph{min-width:0;background:#181821;border:1px solid #393545;border-radius:8px;padding:12px}
 .arch-system-chain{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:stretch;gap:24px}
 .arch-system-stage{position:relative;min-width:0;background:linear-gradient(150deg,var(--stage-bg),#1b1b26);border:1px solid var(--stage-edge);border-radius:8px;padding:9px}
-.arch-system-stage:not(:last-child)::after{content:"→";position:absolute;right:-20px;top:calc(50% - 17px);color:#b8a8d1;font-size:23px;line-height:34px}
+.arch-system-stage:not(:last-child)::after{content:"→";position:absolute;right:-20px;top:calc(50% - 17px);color:#b8a8d1;line-height:34px}
 .arch-system-stage--access{--stage-edge:#8760b5;--stage-bg:#282039}
 .arch-system-stage--control{--stage-edge:#9979e9;--stage-bg:#32254b}
 .arch-system-stage--worker{--stage-edge:#5597e9;--stage-bg:#1b3350}
 .arch-system-stage--device{--stage-edge:#38b989;--stage-bg:#173a31}
-.arch-system-stage h3{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;min-height:37px;margin:0 0 6px;font-size:12px;font-weight:700;text-align:center;color:#f0eafa}
-.arch-system-stage h3 small{font-size:10px;font-weight:400;color:#bdb8cf}
+.arch-system-stage h3{display:flex;flex-direction:column;gap:2px;align-items:center;justify-content:center;min-height:37px;margin:0 0 6px;text-align:center;color:#f0eafa}
+.arch-system-stage h3 small{color:#bdb8cf}
 .arch-system-stage>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px}
-.arch-system-stage>div span{display:flex;align-items:center;justify-content:center;min-height:28px;text-align:center;line-height:1.35;overflow-wrap:anywhere;font-size:10px;padding:4px;border-radius:5px;background:#1c1c28;border:1px solid #4e455d;color:#e4deec}
-.arch-system-paths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0;font-size:10px;text-align:center;color:#c1bad3}
+.arch-system-stage>div span{display:flex;align-items:center;justify-content:center;min-height:28px;text-align:center;line-height:1.35;overflow-wrap:anywhere;padding:4px;border-radius:5px;background:#1c1c28;border:1px solid #4e455d;color:#e4deec}
+.arch-system-paths{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:10px 0;text-align:center;color:#c1bad3}
 .arch-system-paths span{padding:5px 3px;min-width:0;border-bottom:1px dashed #62567c;overflow-wrap:anywhere}
 .arch-system-channels{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:0 0 10px}
 .arch-system-channel{min-height:62px;padding:9px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;background:var(--channel-bg);border:1px solid var(--channel-border);border-radius:7px}
 .arch-system-channel--usb{--channel-border:#4e9ad8;--channel-bg:#182e40}
 .arch-system-channel--adb{--channel-border:#39bbaa;--channel-bg:#193835}
-.arch-system-channel strong{font-size:12px;color:#edf0fa}
-.arch-system-channel span{font-size:10px;line-height:1.5;color:#c3c9d3}
+.arch-system-channel strong{color:#edf0fa}
+.arch-system-channel span{line-height:1.5;color:#c3c9d3}
 .arch-system-support{padding:9px 11px;border:1px solid #7862a9;background:#29213b;border-radius:7px}
-.arch-system-support strong{display:block;margin-bottom:7px;color:#cfbcff;font-size:11px}
+.arch-system-support strong{display:block;margin-bottom:7px;color:#cfbcff;}
 .arch-system-support>div{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px}
-.arch-system-support>div span{padding:7px 3px;border:1px solid #665181;background:#201b2d;border-radius:5px;text-align:center;color:#ddd3ec;font-size:10px;overflow-wrap:anywhere}
+.arch-system-support>div span{padding:7px 3px;border:1px solid #665181;background:#201b2d;border-radius:5px;text-align:center;color:#ddd3ec;overflow-wrap:anywhere}
 .arch-system-sidebar{min-width:0;display:flex;flex-direction:column;gap:10px}
 .arch-system-sidebar>div{padding:11px;background:#20202b;border:1px solid #3b3947;border-radius:8px}
-.arch-system-sidebar h3{font-size:12px;margin:0 0 8px;color:#edeaf5}
-.arch-system-sidebar p{margin:0 0 8px;color:#bab5c9;font-size:10px;line-height:1.5;display:flex;gap:7px;align-items:flex-start}
+.arch-system-sidebar h3{margin:0 0 8px;color:#edeaf5}
+.arch-system-sidebar p{margin:0 0 8px;color:#bab5c9;line-height:1.5;display:flex;gap:7px;align-items:flex-start}
 .arch-system-sidebar p:last-child{margin:0}
 .arch-system-key{flex:none;display:inline-block;width:17px;height:10px;border-radius:3px;margin-top:2px;background:color-mix(in srgb,var(--key-color) 23%,transparent);border:1px solid var(--key-color)}
 .key-access{--key-color:#8760b5}.key-control{--key-color:#9979e9}.key-worker{--key-color:#5597e9}.key-device{--key-color:#38b989}.key-support{--key-color:#7862a9}
@@ -174,15 +174,15 @@ code { color: var(--green); }
 .arch-system-bottom>section{margin:0}
 .arch-system-bottom h2{padding:10px 13px;border-bottom:1px solid var(--line)}
 .arch-system-table-scroll{overflow-x:auto}
-.arch-system-modules table{width:100%;min-width:535px;border-collapse:collapse;font-size:11px}
+.arch-system-modules table{width:100%;min-width:535px;border-collapse:collapse;}
 .arch-system-modules :is(th,td){padding:8px 10px;text-align:left;border-bottom:1px solid #373440;line-height:1.5}
-.arch-system-modules th{background:#24232e;color:#bdb5cf;font-weight:600}
-.arch-system-modules td:first-child{color:#e0d4ff;font-weight:650;white-space:nowrap}
+.arch-system-modules th{background:#24232e;color:#bdb5cf;}
+.arch-system-modules td:first-child{color:#e0d4ff;white-space:nowrap}
 .arch-system-modules tr:last-child td{border-bottom:0}
 .arch-system-events ol{margin:0;padding:6px 13px;counter-reset:arch-step;list-style:none}
-.arch-system-events li{counter-increment:arch-step;display:flex;align-items:baseline;gap:9px;border-bottom:1px solid #383541;padding:8px 0;font-size:11px;color:#b9b4c6}
+.arch-system-events li{counter-increment:arch-step;display:flex;align-items:baseline;gap:9px;border-bottom:1px solid #383541;padding:8px 0;color:#b9b4c6}
 .arch-system-events li:last-child{border-bottom:0}
-.arch-system-events li::before{content:counter(arch-step,decimal-leading-zero);border-radius:20px;padding:2px 5px;min-width:26px;background:#554280;color:#f5efff;text-align:center;font-size:10px;font-weight:700}
+.arch-system-events li::before{content:counter(arch-step,decimal-leading-zero);border-radius:20px;padding:2px 5px;min-width:26px;background:#554280;color:#f5efff;text-align:center;}
 .arch-system-events li strong{color:#ede9f5;white-space:nowrap}
 .arch-system-events li span{line-height:1.4}
 .arch-legacy-topology{margin:12px 0}

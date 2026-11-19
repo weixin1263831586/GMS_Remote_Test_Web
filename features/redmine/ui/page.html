@@ -1,6 +1,6 @@
 
 <!doctype html>
-<html lang="zh-CN" class="loading-orbit-page">
+<html lang="zh-CN" class="loading-orbit-page" data-ui-type-root="redmine">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -22,6 +22,8 @@
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs"></script>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-ui-sizing-v2">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 </head>
 <body>
 <header class="workspace-header">
@@ -237,7 +239,7 @@
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label for="addDepartmentId">部门 ID</label>
         <input type="text" id="addDepartmentId" placeholder="可选，例如：system-3">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">留空时自动生成 dept-N</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">留空时自动生成 dept-N</div>
       </div>
 
     </div>
@@ -286,22 +288,22 @@
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label for="settingStaleDays">未回复天数阈值 (stale_days)</label>
         <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 20">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">超过/达到此天数未回复的工单标记为过期</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">超过/达到此天数未回复的工单标记为过期</div>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
         <label for="settingWindowDays">统计时间窗口 (window_days)</label>
         <input type="number" id="settingWindowDays" min="0" max="365" placeholder="0 = 不限制">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">只统计最近 N 天内有活动的工单，0 表示不限制</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">只统计最近 N 天内有活动的工单，0 表示不限制</div>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
         <label for="settingCacheTtl">缓存有效期 (秒)</label>
         <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">统计数据缓存时间，期间内重复访问直接返回缓存</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">统计数据缓存时间，期间内重复访问直接返回缓存</div>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label for="settingFreshnessDays">趋势实时拉新窗口 (freshness_days)</label>
         <input type="number" id="settingFreshnessDays" min="1" max="3650" placeholder="默认 180">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
@@ -309,19 +311,19 @@
         <div class="select-with-add" style="width:100%">
           <select id="settingSelfBinding" style="width:100%"></select>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
         <button class="secondary" style="margin-top:6px" type="button" data-click="submitSelfBinding">保存绑定</button>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
         <label for="settingRedmineBaseUrl">Redmine 地址</label>
         <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
         <label for="settingRedmineUser">Redmine 账号</label>
         <input type="text" id="settingRedmineUser" placeholder="Redmine 登录用户名">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
         <label for="settingRedminePass">Redmine 密码</label>
@@ -374,8 +376,8 @@
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">
       <div>
-        <div style="font-size:12px;font-weight:600;color:var(--text-secondary);margin-bottom:6px;">邮件通知（接收方）</div>
-        <div id="emailSenderSummary" class="muted" style="font-size:12px;margin-bottom:6px;">读取发送方配置中…</div>
+        <div style="color:var(--text-secondary);margin-bottom:6px;" data-ui-type-size="small" data-ui-type-weight="semibold">邮件通知（接收方）</div>
+        <div id="emailSenderSummary" class="muted" style="margin-bottom:6px;" data-ui-type-size="small">读取发送方配置中…</div>
         <div class="setting-help">发送方账号是系统级配置（管理员在「系统配置」弹框维护）；这里只决定提醒发给谁——部门逾期提醒按组织架构中各用户的邮箱逐人发送。</div>
       </div>
     </div>
@@ -401,7 +403,7 @@
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
         <label for="trendEndDateInput">结束日期</label>
         <input type="date" id="trendEndDateInput">
-        <div style="font-size:11px;color:var(--muted);margin-top:2px">清空后表示不限；仅填一侧日期也可以</div>
+        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">清空后表示不限；仅填一侧日期也可以</div>
       </div>
 
     </div>
@@ -447,12 +449,12 @@
       <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="hideModal" data-a0="batchImportModal">&times;</button>
     <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
-      <div class="muted" style="font-size:11px;margin-bottom:8px">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
-      <textarea id="batchImportIds" rows="6" placeholder="633454&#10;635211&#10;636612" style="width:100%;font-family:monospace"></textarea>
+      <div class="muted" style="margin-bottom:8px" data-ui-type-size="compact">粘贴工单号(每行一个,可带#号),或直接导入你名下最近的工单。</div>
+      <textarea id="batchImportIds" rows="6" placeholder="633454&#10;635211&#10;636612" style="width:100%;" data-ui-type-font="mono"></textarea>
       <div style="display:flex;gap:16px;margin-top:8px">
         <label><input type="checkbox" id="batchReanalyze" checked> 重新分析(忽略已缓存)</label>
       </div>
-      <div id="batchImportResult" class="muted" style="margin-top:8px;font-size:12px"></div>
+      <div id="batchImportResult" class="muted" style="margin-top:8px;" data-ui-type-size="small"></div>
 
     </div>
 

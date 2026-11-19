@@ -268,7 +268,7 @@ async function draftReply(issueId, matureCaseId) {
   try {
     const data = await api(`/api/redmine-agent/issues/${issueId}/draft-reply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})});
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
-      <textarea id="replyDraftArea" rows="14" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
+      <textarea id="replyDraftArea" rows="14" style="width:100%">${esc(data.reply_draft||'')}</textarea>
       <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
@@ -284,7 +284,7 @@ async function draftAgentReply(issueId, matureCaseId) {
     });
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       ${data.patch_direction ? `<div class="field"><div class="field-label">补丁方向</div>${renderFormattedContent(data.patch_direction, 'field-content')}</div>` : ''}
-      <textarea id="replyDraftArea" rows="16" style="width:100%;font-family:monospace">${esc(data.reply_draft||'')}</textarea>
+      <textarea id="replyDraftArea" rows="16" style="width:100%">${esc(data.reply_draft||'')}</textarea>
       <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
@@ -400,7 +400,7 @@ async function compareCase(issueId) {
     const data = await api(`/api/redmine-agent/issues/${issueId}/evaluate-case`, {method:'POST'});
     setKnowledgeBody(`
       <div class="field"><div class="field-label">Redmine工单</div><div class="field-content">${renderRedmineIssueLink(issueId, {stopPropagation: false})}</div></div>
-      <div class="field"><div class="field-label">评分</div><div class="field-content" style="font-size:20px;font-weight:600">${data.score||0}/100</div></div>
+      <div class="field"><div class="field-label">评分</div><div class="field-content" style="font-size:var(--ui-type-size-display);font-weight:var(--ui-type-weight-semibold)">${data.score||0}/100</div></div>
       ${(data.missing_fields||[]).length?`<div class="field"><div class="field-label">缺失字段</div><div class="field-content">${data.missing_fields.map(esc).join(', ')}</div></div>`:''}
       ${(data.mismatch_fields||[]).length?`<div class="field"><div class="field-label">不一致字段</div><div class="field-content">${data.mismatch_fields.map(m=>`${esc(m.field)}: 内部=${esc(m.internal)} / 参考=${esc(m.reference)}`).join('<br>')}</div></div>`:''}
       ${(data.suggestions||[]).length?`<div class="field"><div class="field-label">优化建议</div><div class="field-content">${data.suggestions.map(esc).join('<br>')}</div></div>`:''}

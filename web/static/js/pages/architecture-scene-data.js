@@ -76,7 +76,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['firmware','固件库 / 共享固件','固件来源','package','access',35,72,223,172,[['正式 / 测试','正式 / 测试版本'],['分支 / 回滚','客户分支 / 回滚'],'机型 / 版本',['路径 / 校验','路径 / 校验信息']]],
    ['detect','设备状态识别','可刷写性','target','access',35,337,219,149,['USB 连接','机型 / 芯片','当前模式','可刷写检查']],
    ['controller','Controller 调度','流程控制','server','control',395,74,304,173,['任务创建','资源归属','策略下发','重试 / 回退']],
-   ['worker','按来源执行','本地 Worker / Win Source','server','worker',855,72,226,172,['本地 Worker',['Windows','Windows Source'],['Fastboot / RK','Fastboot / RK 工具'],'结果 / 回执']],
+   ['worker','按来源执行','本地 Worker / Windows Source','server','worker',855,72,226,172,['本地 Worker',['Windows','Windows Source'],['Fastboot / RK','Fastboot / RK 工具'],'结果 / 回执']],
    ['mode','进入刷机模式','模式识别','chip','channel',326,337,196,149,['ADB','Fastboot','Loader','MaskROM']],
    ['tool','烧写工具','镜像写入','tool','resource',604,337,201,149,[['update.img','update.img 整包'],'分区镜像',['RK / fastboot','fastboot / RK 工具'],'执行回执']],
    ['verify','结果校验 / 回执','日志与状态归档','shield','channel',880,337,201,149,[['镜像校验','镜像 / 版本校验'],'重启 / ADB','失败原因','报告状态']]],

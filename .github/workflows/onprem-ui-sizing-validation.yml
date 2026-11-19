@@ -1,0 +1,126 @@
+name: On-prem Chromium UI geometry and audit regression
+
+on:
+  push:
+    branches: ['audit/**']
+    paths:
+      - 'web/static/css/ui-sizing.css'
+      - 'web/static/css/common.css'
+      - 'web/static/css/common-layout.css'
+      - 'web/shell/components/head.html'
+      - 'web/static/css/common-page.css'
+      - 'web/static/css/common-components.css'
+      - 'web/static/css/device-inventory.css'
+      - 'web/static/css/other-workspaces.css'
+      - 'web/static/css/api-docs-workbench.css'
+      - 'web/static/css/apk-workbench.css'
+      - 'web/static/css/modal-tech-dialogs.css'
+      - 'web/static/css/modal-tech-cases.css'
+      - 'web/static/css/workspace-tabs.css'
+      - 'web/static/css/host-desktop-workspace.css'
+      - 'web/static/css/host-terminal-workspace.css'
+      - 'web/static/js/shell/shell-terminal-workspace.js'
+      - 'web/static/js/shell/shell-workspace.js'
+      - 'tests/runtime_ui/test_desktop_workspace_visual.py'
+      - 'tests/runtime_ui/test_terminal_workspace_visual.py'
+      - 'web/static/css/analysis-workbench-tokens.css'
+      - 'web/static/css/vpn-proxy-panel.css'
+      - 'web/static/css/agent-access.css'
+      - 'features/cluster/ui/page.html'
+      - 'features/gerrit/ui/page.html'
+      - 'features/redmine/ui/page.html'
+      - 'features/system/update_radar/ui/page.html'
+      - 'features/**/ui/*.css'
+      - 'tests/test_typography_contract.py'
+      - 'tests/test_ui_sizing_contract.py'
+      - 'tests/runtime_ui/test_ui_sizing_rendered.py'
+      - 'tests/runtime_ui/test_page_outer_inset.py'
+      - 'tests/runtime_ui/test_header_action_alignment.py'
+      - 'tests/architecture/test_shared_page_edge.py'
+      - 'tests/runtime_ui/test_ui_controls_matrix.py'
+      - 'tests/runtime_ui/test_apk_workbench.py'
+      - 'tests/runtime_ui/test_api_catalog.py'
+      - 'tests/runtime_ui/test_modal_compact_layout.py'
+      - 'tests/runtime_ui/test_outbox_detail_races.py'
+      - 'tests/runtime_ui/test_suite_browser_search_race.py'
+      - 'web/static/js/pages/security-audit.js'
+      - 'web/static/js/pages/audit-disk.js'
+      - 'web/static/css/audit-disk.css'
+      - 'web/shell/pages/security-audit.html'
+      - 'tests/runtime_ui/test_disk_audit_refresh.py'
+      - 'web/static/js/pages/test-suite-browser-list.js'
+      - 'features/reports/analysis_agent.py'
+      - 'features/reports/tests/test_analysis_agent.py'
+      - '.github/workflows/onprem-ui-sizing-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keep one in-progress lab test alive while another audit commit arrives.
+  # Latest pending commit supersedes older pending commit without test starvation.
+  group: onprem-ui-sizing-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  ui-geometry:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 45
+    steps:
+      - name: Confirm registered lab Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          echo "Read-only isolated UI test, no production restart"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+      - name: Prepare isolated Python and Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "$RUNNER_TEMP/gms-ui-sizing-venv"
+          "$RUNNER_TEMP/gms-ui-sizing-venv/bin/python" -m pip install --disable-pip-version-check -r requirements-dev.txt
+          "$RUNNER_TEMP/gms-ui-sizing-venv/bin/python" -m playwright install chromium
+      - name: Verify UI geometry, report evidence and race regressions
+        shell: bash
+        env:
+          GMS_UI_PREVIEW_DIR: ${{ runner.temp }}/gms-sizing-evidence
+          GMS_SKIP_RUNTIME_ENV: "1"
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p "$GMS_UI_PREVIEW_DIR"
+          "$RUNNER_TEMP/gms-ui-sizing-venv/bin/python" -m pytest -q \
+            tests/test_ui_sizing_contract.py \
+            tests/test_typography_contract.py \
+            features/reports/tests/test_analysis_agent.py \
+            tests/runtime_ui/test_ui_sizing_rendered.py \
+            tests/runtime_ui/test_page_outer_inset.py \
+            tests/runtime_ui/test_header_action_alignment.py \
+            tests/architecture/test_shared_page_edge.py \
+            tests/runtime_ui/test_desktop_workspace_visual.py \
+            tests/runtime_ui/test_terminal_workspace_visual.py \
+            tests/runtime_ui/test_ui_controls_matrix.py \
+            tests/runtime_ui/test_modal_compact_layout.py \
+            tests/runtime_ui/test_apk_workbench.py \
+            tests/runtime_ui/test_api_catalog.py \
+            tests/runtime_ui/test_outbox_detail_races.py \
+            tests/runtime_ui/test_disk_audit_refresh.py \
+            tests/runtime_ui/test_suite_browser_search_race.py \
+            --junitxml="$GMS_UI_PREVIEW_DIR/junit.xml"
+      - name: Upload computed geometry and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: onprem-ui-sizing-${{ github.run_id }}
+          path: ${{ runner.temp }}/gms-sizing-evidence/
+          if-no-files-found: warn
+          retention-days: 7

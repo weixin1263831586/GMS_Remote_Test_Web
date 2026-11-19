@@ -1,0 +1,202 @@
+/* Typography declarations originally terminating their CSS rule without ';'. */
+/* features/cluster/ui/page.css */
+html[data-ui-type-root="cluster"] body { font: var(--ui-type-size-body) var(--ui-type-font-sans); }
+html[data-ui-type-root="cluster"] h3 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .section-head h2+p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .card-title { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .cap { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] button,
+html[data-ui-type-root="cluster"] select,
+html[data-ui-type-root="cluster"] input { font-family: inherit; }
+html[data-ui-type-root="cluster"] .hint { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .onboarding-grid label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .dash-test-row .badge-mini { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] #dashboard .resource-host-name { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .resource-summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-device-legend { font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="cluster"] #dashboard .dist-host { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #dashboard .dist-number { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-group-title { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-row strong { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #dashboard .dash-test-row .dev { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .heading-count { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] #tab-management .worker-extra .host-tests { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-actions button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .cluster-pnl > .table-wrap td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .cluster-pnl > .table-wrap th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .section-head-copy p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] #tab-management .worker-host-line .worker-main-name { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="cluster"] #tab-management .worker-host-line .worker-subline { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-meta-details { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-summary-state .assessment { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] #tab-management .worker-usage { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-counts { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-actions button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management #close-job-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-meta-details summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-memory-percent { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card-loading .cluster-loading-message { font-size: var(--ui-type-size-body); }
+
+/* features/devices/ui/page.css */
+html[data-ui-type-root="devices"],
+html[data-ui-type-root="devices"] body { font: var(--ui-type-size-body)/1.45 var(--ui-type-font-sans); }
+html[data-ui-type-root="devices"] button { font: var(--ui-type-size-small)/1.4 var(--ui-type-font-sans); }
+html[data-ui-type-root="devices"] input,
+html[data-ui-type-root="devices"] textarea,
+html[data-ui-type-root="devices"] select { font: var(--ui-type-size-body)/1.4 var(--ui-type-font-sans); }
+html[data-ui-type-root="devices"] h1 { font-size: var(--ui-type-size-display); }
+html[data-ui-type-root="devices"] h2 { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="devices"] h3 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="devices"] .port-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .port-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .compact { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .terminal,
+html[data-ui-type-root="devices"] .history-output { font: var(--ui-type-size-small)/1.45 var(--ui-type-font-mono); }
+html[data-ui-type-root="devices"] .terminal .xterm-helpers,
+html[data-ui-type-root="devices"] .terminal .xterm-rows { font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="devices"] .history-column label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="devices"] #binding-form label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="devices"] .input-row input { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="devices"] .console-sidebar h3 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="devices"] .console-info-grid { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .console-info-grid dd:nth-of-type(2),
+html[data-ui-type-root="devices"] .console-info-grid dd:nth-of-type(3) { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="devices"] .console-activity { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="devices"] .console-other-port { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="devices"] .console-other-port button { font-size: var(--ui-type-size-small); }
+
+/* web/static/css/architecture-layers.css */
+html[data-ui-type-root="architecture"] .arch-system-heading>span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-support strong { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-modules table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-system-modules th { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .arch-system-events li::before { font-weight: var(--ui-type-weight-bold); }
+
+/* web/static/css/architecture-scenes.css */
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-legend li { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-boundaries { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-key { font-size: var(--ui-type-size-compact); }
+@media(max-width:760px) { html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-legend li { font-size: var(--ui-type-size-compact); } }
+
+/* web/static/css/architecture-v2.css */
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node header small { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node--controller header { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-info-panel th { font-weight: var(--ui-type-weight-semibold); }
+
+/* web/static/css/device-deployment-review.css */
+html[data-ui-type-root="shell"] dt { font-weight: var(--ui-type-weight-semibold); }
+
+/* web/static/css/update-radar-settings.css */
+#radar-settings-form input:not([type=checkbox]),#radar-settings-form select,#radar-settings-form textarea { font: inherit; }
+
+/* === Canonical typography ownership: embedded HTML style blocks === */
+/* web/shell/components/head.html [inline <style>] */
+html[data-ui-type-root="shell"] .btn-xs { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] .cluster-mode-toggle .mode-label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .cluster-mode-toggle .mode-text { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .sidebar-settings-tab { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .sidebar-visibility-option .sidebar-description { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .btn-xs,
+html[data-ui-type-root="shell"] body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .btn-xs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .project-guide-hero h3 { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="shell"] .project-guide-hero p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-url { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .project-guide-section h4 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="shell"] .project-guide-steps li { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-steps li::before { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] .project-guide-steps strong { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .project-guide-card h5 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-card p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-flow { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .project-guide-map { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .project-guide-notice { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-example h5 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-example p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .project-guide-zoom-hint { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #guide-image-caption { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .host-input { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] .filter-btn { font-size: var(--ui-type-size-small); }
+
+/* web/shell/shell.html [inline <style>] */
+html[data-ui-type-root="shell"] .usage-cmd { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .usage-chip { font-size: var(--ui-type-size-small); }
+
+/* features/cluster/ui/page.html [inline <style>] */
+html[data-ui-type-root="cluster"] .section-head-copy p { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .checkbox-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .worker-delete { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .worker-redeploy { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .worker-config { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .assessment { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="cluster"] .host-tests { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] .host-warning { font-size: var(--ui-type-size-small); }
+
+/* features/cluster/ui/page.html [inline <style>] */
+html[data-ui-type-root="cluster"] #worker-config-modal .section-head h2 { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="cluster"] .inline-checkbox { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] .job-artifact-link { font: inherit; font-size: var(--ui-type-size-small); }
+
+/* features/gerrit/ui/page.html [inline <style>] */
+html[data-ui-type-root="gerrit"] body { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="gerrit"] .header-title { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="gerrit"] select,
+html[data-ui-type-root="gerrit"] input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="gerrit"] button { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .select-add-btn { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="gerrit"] .stat-card .value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="gerrit"] .stat-card .label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .trend-panel h2,
+html[data-ui-type-root="gerrit"] .list-section h2 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="gerrit"] .dept-hint { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .bar-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .owner-title h2 { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="gerrit"] th,
+html[data-ui-type-root="gerrit"] td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] a { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="gerrit"] .muted { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="gerrit"] .dept-table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .dept-table th { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .gerrit-wiki-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .conn-banner { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="gerrit"] .conn-banner .conn-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="gerrit"] .review-badge { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="gerrit"] .field label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="gerrit"] #routeCheckModal .modal-header h3 { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="gerrit"] :where(button, select, input, textarea) { font-family: inherit; }
+html[data-ui-type-root="gerrit"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
+
+/* features/system/update_radar/ui/page.html [inline <style>] */
+html[data-ui-type-root="update-radar"] body { font: var(--ui-type-size-body)/1.6 var(--ui-type-font-sans); }
+html[data-ui-type-root="update-radar"] button { font-family: inherit; font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="update-radar"] :is(input,select,textarea) { font-family: inherit; font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="update-radar"] h1 { font-size: var(--ui-type-size-display); }
+html[data-ui-type-root="update-radar"] h2 { font-size: var(--ui-type-size-dialog); }
+html[data-ui-type-root="update-radar"] th { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="update-radar"] pre { font-size: var(--ui-type-size-small); }
+
+/* features/system/update_monitor/ui/page.html [inline <style>] */
+html[data-ui-type-root="data-table"] .toast { font-size: var(--ui-type-size-body); }
+
+
+/* Inline authoring maps to semantic roles, never ad-hoc per-element font values. */
+[data-ui-type-size="compact"] { font-size: var(--ui-type-size-compact) !important; }
+[data-ui-type-size="small"] { font-size: var(--ui-type-size-small) !important; }
+[data-ui-type-size="body"] { font-size: var(--ui-type-size-body) !important; }
+[data-ui-type-size="card"] { font-size: var(--ui-type-size-card) !important; }
+[data-ui-type-size="section"] { font-size: var(--ui-type-size-section) !important; }
+[data-ui-type-size="dialog"] { font-size: var(--ui-type-size-dialog) !important; }
+[data-ui-type-size="page"] { font-size: var(--ui-type-size-page) !important; }
+[data-ui-type-size="display"] { font-size: var(--ui-type-size-display) !important; }
+[data-ui-type-size="display-medium"] { font-size: var(--ui-type-size-display-medium) !important; }
+[data-ui-type-size="stat"] { font-size: var(--ui-type-size-stat) !important; }
+[data-ui-type-weight="regular"] { font-weight: var(--ui-type-weight-regular) !important; }
+[data-ui-type-weight="medium"] { font-weight: var(--ui-type-weight-medium) !important; }
+[data-ui-type-weight="semibold"] { font-weight: var(--ui-type-weight-semibold) !important; }
+[data-ui-type-weight="bold"] { font-weight: var(--ui-type-weight-bold) !important; }
+[data-ui-type-font="mono"] { font-family: var(--ui-type-font-mono) !important; }
+[data-ui-type-font="sans"] { font-family: var(--ui-type-font-sans) !important; }

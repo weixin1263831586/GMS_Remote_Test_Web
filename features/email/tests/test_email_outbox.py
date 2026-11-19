@@ -60,6 +60,39 @@ class OutboxStoreTests(unittest.TestCase):
         self.assertEqual(self.store.list(sent=True)["total"], 1)
         self.assertEqual(self.store.list(channel="manual", sent=True)["total"], 1)
 
+    def test_summary_respects_filters_and_pagination(self):
+        self.store.record({
+            "channel": "manual", "owner_id": "u1", "sent": True,
+            "to_addrs": ["alice@example.com"], "subject": "weekly",
+        })
+        self.store.record({
+            "channel": "manual", "owner_id": "u1", "sent": False,
+            "to_addrs": ["alice@example.com"], "subject": "weekly",
+        })
+        self.store.record({
+            "channel": "manual", "owner_id": "u2", "sent": True,
+            "subject": "weekly",
+        })
+        self.store.record({
+            "channel": "ops", "owner_id": "u1", "sent": True,
+            "subject": "alert",
+        })
+        result = self.store.list(owner_id="u1", channel="manual", query="alice",
+                                 limit=1, offset=0)
+        self.assertEqual(len(result["items"]), 1)
+        self.assertEqual(result["total"], 2)
+        self.assertEqual(result["summary"]["total"], 2)
+        self.assertEqual(result["summary"]["success"], 1)
+        self.assertEqual(result["summary"]["failed"], 1)
+        self.assertTrue(result["summary"]["latest_at"].endswith("Z"))
+        failed = self.store.list(owner_id="u1", channel="manual", sent=False)
+        self.assertEqual(failed["summary"]["success"], 0)
+        self.assertEqual(failed["summary"]["failed"], 1)
+        empty = self.store.list(owner_id="u1", query="no-matches")
+        self.assertEqual(empty["summary"], {
+            "total": 0, "success": 0, "failed": 0, "latest_at": "",
+        })
+
     def test_owner_filter_and_detail(self):
         self.store.record({"channel": "manual", "owner_id": "u1", "subject": "a"})
         self.store.record({"channel": "manual", "owner_id": "u2", "subject": "b"})

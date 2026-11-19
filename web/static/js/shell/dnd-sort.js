@@ -325,7 +325,8 @@ function editCategory(oldName, evt) {
     const input = document.createElement('input');
     input.type = 'text';
     input.value = currentName;
-    input.style.cssText = 'font-size: 16px; font-weight: 600; color: var(--text-primary); background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; width: 150px;';
+    input.className = 'tool-category-rename-input';
+    input.style.cssText = 'color: var(--text-primary); background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; padding: 4px 8px; width: 150px;';
 
     // 替换显示
     nameSpan.style.display = 'none';

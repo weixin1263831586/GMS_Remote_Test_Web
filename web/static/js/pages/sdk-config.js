@@ -11,6 +11,7 @@ let agentSdkSourcesLoaded = false;
 let agentSdkSourcesSequence = 0;
 let agentSdkSourcesCache = [];
 let agentSdkUserLiveCache = {};
+let agentSdkEditingSourceId = null;
 
 const AGENT_SDK_PROVIDER_LABELS = {
     local_git: '本机 Git 仓库',
@@ -64,7 +65,7 @@ async function sdkConfigLoadSources(button) {
         agentSdkSourcesLoaded = true;
     } catch (error) {
         if (sequence !== agentSdkSourcesSequence) return;
-        tbody.innerHTML = `<tr><td colspan="7" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要 sdk.read 权限')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要 sdk.read 权限')}</td></tr>`;
     } finally {
         if (sequence === agentSdkSourcesSequence && button) {
             button.disabled = false;
@@ -176,19 +177,116 @@ function sdkConfigRenderSources(tbody, sources) {
                 badge = `<span class="agent-access-status-badge ${ok ? 'ok' : 'bad'}"${title}${verifiedAt ? ` data-verified="${verifiedAt}"` : ''}>${badgeText}</span>`;
             }
             live = badge;
-            action = `<button class="btn-xxs" type="button" data-click="sdkConfigDeleteSource" data-a0="${agentAccessEscape(source.source_id)}">删除</button>`;
+            action = `<div class="sdk-source-actions"><button class="btn-xxs" type="button" data-click="sdkConfigOpenEditSource" data-a0="${agentAccessEscape(source.source_id)}">编辑</button><button class="btn-xxs" type="button" data-click="sdkConfigDeleteSource" data-a0="${agentAccessEscape(source.source_id)}">删除</button></div>`;
         }
         return `<tr>
-            <td>${agentAccessEscape(source.source_id)}</td>
-            <td>${providerLabel}</td>
-            <td>${location}</td>
-            <td>${mode}</td>
+            <td title="${agentAccessEscape(source.source_id)}">${agentAccessEscape(source.source_id)}</td>
+            <td title="${providerLabel}">${providerLabel}</td>
+            <td title="${location}">${location}</td>
+            <td title="${mode}">${mode}</td>
             <td>${androidVersion}</td>
-            <td>${revision}</td>
+            <td title="${agentAccessEscape(source.default_revision || '未设置')}">${revision}</td>
             <td>${live}</td>
             <td>${action}</td>
         </tr>`;
     }).join('');
+}
+
+// ---------- 「编辑 SDK」弹框：独立于批量添加，不需要删除重建源 ----------
+function sdkConfigOpenEditSource(sourceId) {
+    const record = agentSdkUserLiveCache[sourceId];
+    if (!record) {
+        showToast('此源来自部署配置或管理数据尚未加载，无法在此编辑', 'warning');
+        return;
+    }
+    // 从有权限的 manage 接口取原始配置，不能从隐藏 repo_root 的只读列表猜测。
+    agentSdkEditingSourceId = sourceId;
+    const set = (id, value) => {
+        const el = document.getElementById(id);
+        if (el) el.value = String(value ?? '');
+    };
+    set('agent-sdk-edit-id', record.source_id);
+    set('agent-sdk-edit-provider', AGENT_SDK_PROVIDER_LABELS[record.provider] || record.provider);
+    set('agent-sdk-edit-path', record.repo_root);
+    set('agent-sdk-edit-version', record.android_version);
+    set('agent-sdk-edit-revision', record.default_revision);
+    set('agent-sdk-edit-label', record.label);
+    set('agent-sdk-edit-ttl', record.discover_ttl_hours || 24);
+    set('agent-sdk-edit-mode', record.discover_repos === false ? 'false' : 'true');
+    set('agent-sdk-edit-target',
+        record.provider === 'ssh_git'
+            ? `${record.ssh_username}@${record.ssh_host}:${record.ssh_port || 22}`
+            : '');
+    set('agent-sdk-edit-password', ''); // 永远不回填/展示 SSH 口令
+    document.querySelectorAll('.agent-sdk-edit-ssh-only').forEach(el => {
+        el.hidden = record.provider !== 'ssh_git';
+    });
+    ModalManager.open('agent-sdk-edit-modal');
+}
+
+function sdkConfigCloseEditSource() {
+    ModalManager.close('agent-sdk-edit-modal');
+    agentSdkEditingSourceId = null;
+    const password = document.getElementById('agent-sdk-edit-password');
+    if (password) password.value = '';
+}
+
+async function sdkConfigSubmitEdit(event) {
+    event?.preventDefault?.();
+    const sourceId = agentSdkEditingSourceId;
+    const submit = document.getElementById('agent-sdk-edit-submit');
+    const record = sourceId ? agentSdkUserLiveCache[sourceId] : null;
+    if (!record || submit?.disabled || !ModalManager.isOpen('agent-sdk-edit-modal')) return;
+    const get = id => document.getElementById(id)?.value?.trim() || '';
+    const repoRoot = get('agent-sdk-edit-path');
+    const revision = get('agent-sdk-edit-revision');
+    if (!repoRoot.startsWith('/')) {
+        showToast('SDK 根目录必须是绝对路径', 'warning'); return;
+    }
+    if (!revision) {
+        showToast('默认 revision 不能为空', 'warning'); return;
+    }
+    const payload = {
+        repo_root: repoRoot,
+        android_version: get('agent-sdk-edit-version'),
+        default_revision: revision,
+        label: get('agent-sdk-edit-label'),
+        expected_config_fingerprint: record.config_fingerprint || '',
+    };
+    if (record.provider === 'ssh_git') {
+        const target = get('agent-sdk-edit-target');
+        if (!target) { showToast('请填写编译服务器地址', 'warning'); return; }
+        payload.target = target;
+        payload.discover_repos = get('agent-sdk-edit-mode') === 'true';
+        payload.discover_ttl_hours = Number(get('agent-sdk-edit-ttl'));
+        const password = document.getElementById('agent-sdk-edit-password')?.value || '';
+        if (password) payload.password = password;
+    }
+    if (submit) { submit.disabled = true; submit.textContent = '保存中…'; }
+    try {
+        const granted = window.requestElevatedAccess
+            ? await window.requestElevatedAccess(`修改 SDK 源配置：${sourceId}`)
+            : true;
+        if (!granted || !ModalManager.isOpen('agent-sdk-edit-modal')) return;
+        const saved = await apiCall(`/api/sdk/manage/sources/${encodeURIComponent(sourceId)}`,
+            'PUT', payload, {silentToast: true});
+        sdkConfigCloseEditSource();
+        if (saved?.data?.runtime_reload_ok === false) {
+            showToast(
+                saved.warning || `SDK 源「${sourceId}」已保存，但运行时热重载失败，请检查服务日志`,
+                'warning'
+            );
+        } else {
+            showToast(`已更新 SDK 源「${sourceId}」`, 'success');
+        }
+        // 更新后的 Android 版本立即反映在版本统计卡和表格中。
+        agentSdkSourcesLoaded = false;
+        await sdkConfigLoadSources();
+    } catch (error) {
+        showToast(`保存失败：${error.message || '未知错误'}`, 'error');
+    } finally {
+        if (submit) { submit.disabled = false; submit.textContent = '保存修改'; }
+    }
 }
 
 // ---------- 「添加SDK」弹框 ----------
@@ -442,7 +540,11 @@ async function sdkConfigSubmitAdd(event) {
                 source_id: document.getElementById('agent-sdk-add-id')?.value?.trim() || '',
             }, {silentToast: true});
             const created = resp?.data?.source || {};
-            summary = {ok: 1, bad: 0, first: created.source_id || paths[0]};
+            summary = {
+                ok: 1, bad: 0, first: created.source_id || paths[0],
+                reloadOk: resp?.data?.runtime_reload_ok !== false,
+                warning: resp?.warning || '',
+            };
         } else {
             // 批量：一次 SSH 连接探测全部路径；source_id 一律按目录名生成。
             const resp = await apiCall('/api/sdk/manage/sources/batch', 'POST', {
@@ -451,9 +553,16 @@ async function sdkConfigSubmitAdd(event) {
             }, {silentToast: true});
             const created = Array.isArray(resp?.data?.created) ? resp.data.created : [];
             const failed = Array.isArray(resp?.data?.failed) ? resp.data.failed : [];
-            summary = {ok: created.length, bad: failed.length, first: created[0]?.source_id || ''};
+            summary = {
+                ok: created.length, bad: failed.length, first: created[0]?.source_id || '',
+                reloadOk: resp?.data?.runtime_reload_ok !== false,
+                warning: resp?.warning || '',
+            };
         }
-        if (summary.bad) {
+        if (!summary.reloadOk) {
+            showToast(summary.warning ||
+                `已保存 ${summary.ok} 条 SDK 源，但热重载失败，请检查服务日志`, 'warning');
+        } else if (summary.bad) {
             showToast(`已添加 ${summary.ok} 条，${summary.bad} 条失败（详情见列表校验列）`, 'warning');
         } else if (summary.ok > 1) {
             showToast(`已批量添加 ${summary.ok} 个 SDK 源（如「${summary.first}」等），Agent 检索立即可用`, 'success');
@@ -494,8 +603,14 @@ async function sdkConfigDeleteSource(sourceId) {
             ? await window.requestElevatedAccess(`删除 SDK 源码源：${sourceId}`)
             : true;
         if (!granted) return;
-        await apiCall(`/api/sdk/manage/sources/${encodeURIComponent(sourceId)}`, 'DELETE', null, {silentToast: true});
-        showToast(`已删除 SDK 源「${sourceId}」`, 'success');
+        const deleted = await apiCall(`/api/sdk/manage/sources/${encodeURIComponent(sourceId)}`,
+            'DELETE', null, {silentToast: true});
+        if (deleted?.data?.runtime_reload_ok === false) {
+            showToast(deleted.warning ||
+                `SDK 源「${sourceId}」已删除，但热重载失败，请检查服务日志`, 'warning');
+        } else {
+            showToast(`已删除 SDK 源「${sourceId}」`, 'success');
+        }
         delete agentSdkUserLiveCache[sourceId];
         agentSdkSourcesLoaded = false;
         sdkConfigLoadSources();

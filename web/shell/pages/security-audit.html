@@ -4,9 +4,12 @@
                      （.users-view-tabs 通用分段按钮样式）。「历史邮件」为
                      owner 视图（本人邮件台账），管理员可切全量。 -->
                 <div class="users-view-tabs" id="audit-view-tabs" role="tablist" aria-label="安全审计视图" style="display: none;">
-                    <button id="audit-logs-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="auditOutboxToggle" data-a0="false">审计日志</button>
+                    <button id="audit-logs-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="switchSecurityAuditView" data-a0="logs">审计日志</button>
                     <div id="audit-outbox-entry">
-                        <button id="audit-outbox-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="auditOutboxToggle" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 历史邮件</button>
+                        <button id="audit-outbox-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="switchSecurityAuditView" data-a0="outbox"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 历史邮件</button>
+                    </div>
+                    <div id="audit-disk-entry">
+                        <button id="audit-disk-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="switchSecurityAuditView" data-a0="disk"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> 磁盘审计</button>
                     </div>
                 </div>
             {% include 'components/page-header-end.html' %}
@@ -111,53 +114,197 @@
                 </div>
             </div>
 
-            <!-- 历史邮件面板：邮件 outbox 台账（owner 视图；管理员可切全量）。
-                 布局与审计日志同构：筛选栏（含管理员全量开关）+ 全宽块级表格。 -->
-            <div id="audit-outbox-panel" class="audit-mail-workspace" style="display: none;">
+            <!-- 邮件台账复用审计日志的统计卡、筛选栏、左右分栏及侧栏模板。 -->
+            <div id="audit-outbox-panel" class="audit-mail-workspace audit-dashboard" style="display: none;">
+                <div class="audit-stats page-stat-row" aria-label="当前筛选条件下的邮件统计">
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#mail"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">邮件总数</span><strong class="page-stat-value" id="audit-mail-total">-</strong><span class="audit-stat-note">当前筛选邮件记录</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-web">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#check"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">发送成功</span><strong class="page-stat-value" id="audit-mail-success">-</strong><span class="audit-stat-note">发送成功的台账记录</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-error">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#warning"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">发送失败</span><strong class="page-stat-value" id="audit-mail-failed">-</strong><span class="audit-stat-note">发送失败的台账记录</span></span>
+                    </div>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-cli">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">最近记录</span><strong class="page-stat-value audit-mail-recent-value" id="audit-mail-latest">-</strong><span class="audit-stat-note">当前筛选最新记录（UTC）</span></span>
+                    </div>
+                </div>
                 <div class="audit-filter-bar audit-mail-filters" role="search" aria-label="筛选历史邮件">
-                    <select id="email-outbox-channel-filter" class="combo-box" data-change="loadAuditOutbox" data-a0="true">
+                    <select id="email-outbox-channel-filter" class="combo-box" aria-label="邮件通道" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
                         <option value="automation">自动化通知</option>
                         <option value="ops">运维告警</option>
                         <option value="redmine_reminder">Redmine 提醒</option>
+                        <option value="update_radar">更新雷达</option>
                     </select>
-                    <select id="email-outbox-sent-filter" class="combo-box" data-change="loadAuditOutbox" data-a0="true">
+                    <select id="email-outbox-sent-filter" class="combo-box" aria-label="发送结果" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部结果</option>
                         <option value="true">成功</option>
                         <option value="false">失败</option>
                     </select>
                     <input id="email-outbox-search-input" class="entry-field" type="search" aria-label="搜索邮件收件人或主题" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
-                    <button class="btn-xs" data-click="loadAuditOutbox" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                     <label id="email-outbox-all-users-label" style="display: none;">
                         <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户
                     </label>
+                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadAuditOutbox" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" id="audit-mail-export-button" type="button" data-click="exportAuditOutbox"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
                 </div>
-                <section class="audit-mail-panel" aria-label="历史邮件台账">
-                    <div class="audit-panel-header">
-                        <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg><strong>历史邮件台账</strong></div>
-                        <div class="audit-mail-meta"><span class="audit-mail-scope">默认仅显示本人记录</span><strong class="audit-mail-count" aria-live="polite">加载中...</strong></div>
+                <div class="audit-content-grid">
+                    <section class="audit-log-panel audit-mail-panel" aria-label="历史邮件台账">
+                        <div class="audit-panel-header">
+                            <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg><strong>历史邮件台账</strong></div>
+                            <div class="audit-mail-meta"><span class="audit-mail-scope">默认仅显示本人记录</span><strong class="audit-mail-count" aria-live="polite">加载中...</strong></div>
+                        </div>
+                        <div class="audit-table-wrap list-table-wrap audit-mail-table-wrap" role="region" aria-label="邮件台账表格" tabindex="0">
+                            <table class="list-table audit-mail-table">
+                                <thead><tr>
+                                    <th style="width: 160px;">时间 (UTC)</th>
+                                    <th style="width: 165px;">通道</th>
+                                    <th style="width: 240px;">收件人</th>
+                                    <th>主题</th>
+                                    <th style="width: 80px;">结果</th>
+                                </tr></thead>
+                                <tbody id="email-outbox-table-body"><tr><td colspan="5" class="table-placeholder">加载中...</td></tr></tbody>
+                            </table>
+                            <div id="email-outbox-load-more-wrapper" class="table-load-more"></div>
+                        </div>
+                    </section>
+                    <aside class="audit-side-panels" aria-label="邮件台账摘要与说明">
+                        <section class="audit-side-card audit-source-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>邮件结果分布</strong></div>
+                            <div class="audit-source-body">
+                                <div class="audit-source-donut audit-mail-donut" data-empty="true" role="img" aria-label="等待邮件统计数据">
+                                    <div class="audit-donut-center"><strong id="audit-mail-donut-total">-</strong><span>邮件总数</span></div>
+                                </div>
+                                <div class="audit-source-legend">
+                                    <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-web"></span><span>成功</span><strong id="audit-mail-success-legend">-</strong></div>
+                                    <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-cli"></span><span>失败</span><strong id="audit-mail-failed-legend">-</strong></div>
+                                </div>
+                            </div>
+                            <div class="audit-side-footnote">统计范围：当前筛选条件下的全部邮件记录</div>
+                        </section>
+                        <section class="audit-side-card audit-integrity-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg><strong>台账状态</strong></div>
+                            <div class="audit-mail-facts">
+                                <div><span>最新记录（UTC）</span><strong id="audit-mail-status-latest">-</strong></div>
+                                <div><span>数据来源</span><strong>本地发件台账</strong></div>
+                                <div><span>记录保留</span><strong>最近最多 5000 条</strong></div>
+                            </div>
+                            <div class="audit-integrity-count">刷新仅重新读取台账，不会重发邮件</div>
+                        </section>
+                        <section class="audit-side-card audit-notes-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>邮件说明</strong></div>
+                            <ul class="audit-notes-list">
+                                <li>记录系统发送邮件的通道、收件人、主题及结果</li>
+                                <li>筛选、统计和导出均按当前用户可见范围生效</li>
+                                <li>管理员可选择全部用户；普通用户仅查看本人记录</li>
+                                <li>台账仅保存正文预览，不支持从台账重新发送邮件</li>
+                            </ul>
+                        </section>
+                    </aside>
+                </div>
+            </div>
+
+            <!-- 运行产物磁盘审计：只读快照；沿用审计日志 / 历史邮件的布局组件。 -->
+            <div id="audit-disk-panel" class="audit-dashboard audit-disk-workspace" style="display: none;">
+                <div class="audit-stats page-stat-row" aria-label="运行产物磁盘审计统计">
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#chart"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">已统计产物</span><strong class="page-stat-value" id="audit-disk-bytes">-</strong><span class="audit-stat-note">Controller 及已接入本机产物之和</span></span>
                     </div>
-                    <div class="audit-table-wrap list-table-wrap audit-mail-table-wrap">
-                    <table class="list-table audit-mail-table">
-                        <thead>
-                            <tr>
-                                <th style="width: 160px;">时间 (UTC)</th>
-                                <th style="width: 165px;">通道</th>
-                                <th style="width: 240px;">收件人</th>
-                                <th>主题</th>
-                                <th style="width: 80px;">结果</th>
-                            </tr>
-                        </thead>
-                        <tbody id="email-outbox-table-body">
-                            <tr>
-                                <td colspan="5" class="table-placeholder">加载中...</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                    <div id="email-outbox-load-more-wrapper" class="table-load-more"></div>
+                    <button id="audit-disk-attention-card" class="page-stat-card workbench-stat audit-stat-card audit-stat-error audit-disk-stat-action" type="button" aria-pressed="false" aria-label="筛选重点关注：仅显示高关注且存在文件的分类" title="点击筛选重点关注的产物，再次点击恢复全部" data-click="toggleDiskAttentionFilter">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#warning"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">重点关注</span><strong class="page-stat-value" id="audit-disk-attention">-</strong><span class="audit-stat-note">高关注级别且存在文件的分类 · 点击筛选</span></span>
+                    </button>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-web">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#check"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">完整扫描</span><strong class="page-stat-value" id="audit-disk-covered">-</strong><span class="audit-stat-note">分类目录完整扫描数量</span></span>
                     </div>
-                </section>
+                    <div class="page-stat-card workbench-stat audit-stat-card audit-stat-cli">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#clock"></use></svg></span>
+                        <span class="workbench-stat-copy"><span class="page-stat-label">参考超龄大小</span><strong class="page-stat-value" id="audit-disk-aged">-</strong><span class="audit-stat-note">非可删除空间预估</span></span>
+                    </div>
+                </div>
+                <div class="audit-filter-bar audit-disk-filters" role="search" aria-label="筛选磁盘产物">
+                    <select id="audit-disk-group" class="combo-box" aria-label="产物类别" data-change="filterDiskArtifactsByControls">
+                        <option value="">全部类别</option>
+                        <option value="固件">固件</option>
+                        <option value="APK">APK</option>
+                        <option value="测试">测试</option>
+                        <option value="报告">报告</option>
+                        <option value="Agent">Agent</option>
+                        <option value="日志">日志</option>
+                        <option value="其他">其他</option>
+                    </select>
+                    <select id="audit-disk-priority" class="combo-box" aria-label="风险关注级别" data-change="filterDiskArtifactsByControls">
+                        <option value="">全部级别</option>
+                        <option value="高">高关注</option>
+                        <option value="中">中关注</option>
+                        <option value="低">低关注</option>
+                    </select>
+                    <input id="audit-disk-search" class="entry-field" type="search" aria-label="搜索产物和目录" placeholder="搜索产物名称 / 目录 / 策略" data-input="filterDiskArtifactsByControls" />
+                    <button id="audit-disk-refresh-btn" class="btn-xs audit-toolbar-button" type="button" data-click="loadDiskArtifactAudit" data-a0="true" aria-busy="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> <span id="audit-disk-refresh-label">刷新</span></button>
+                </div>
+                <div class="audit-content-grid">
+                    <section class="audit-log-panel audit-disk-table-panel" aria-label="运行产物分类扫描结果">
+                        <div class="audit-panel-header">
+                            <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>运行产物分类</strong></div>
+                            <div class="audit-mail-meta"><span id="audit-disk-scanned-at" role="status" aria-live="polite">等待扫描</span><strong class="audit-mail-count" id="audit-disk-count">-</strong></div>
+                        </div>
+                        <div class="audit-table-wrap list-table-wrap" role="region" aria-label="磁盘产物明细" tabindex="0">
+                            <table class="list-table audit-disk-table">
+                                <thead><tr>
+                                    <th style="width: 220px;">产物类别</th>
+                                    <th>存储位置</th>
+                                    <th id="audit-disk-size-heading" style="width: 126px;" aria-sort="none"><button id="audit-disk-size-sort" class="audit-disk-sort-button" type="button" data-click="toggleDiskArtifactSizeSort" aria-label="按已统计大小排序，首次点击从大到小" title="点击按大小降序或升序排列"><span>已统计大小</span><span id="audit-disk-sort-indicator" aria-hidden="true">↕</span></button></th>
+                                    <th style="width: 85px;">文件数</th>
+                                    <th style="width: 104px;">清理方式</th>
+                                    <th style="width: 96px;">审计状态</th>
+                                </tr></thead>
+                                <tbody id="audit-disk-table-body"><tr><td colspan="6" class="table-placeholder">切换到磁盘审计后加载...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </section>
+                    <aside class="audit-side-panels" aria-label="产物范围和审计说明">
+                        <section class="audit-side-card audit-integrity-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>分类详情</strong></div>
+                            <div class="audit-mail-facts" id="audit-disk-detail" aria-live="polite">
+                                <div><span>提示</span><strong>选择左侧分类查看详情</strong></div>
+                            </div>
+                            <div class="audit-side-footnote">参考超龄文件不能直接判定为垃圾文件</div>
+                        </section>
+                        <section class="audit-side-card audit-source-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>扫描范围</strong></div>
+                            <div class="audit-mail-facts">
+                                <div><span>已接入</span><strong>Controller 数据目录 + 本机 Worker jobs</strong></div>
+                                <div><span>Controller 数据</span><strong id="audit-disk-controller-bytes">-</strong></div>
+                                <div><span>本机 Worker</span><strong id="audit-disk-worker-bytes">-</strong></div>
+                                <div><span>远端 Worker</span><strong>未接入扫描</strong></div>
+                                <div><span>Windows Source</span><strong>未接入扫描</strong></div>
+                                <div><span>系统盘已用</span><strong id="audit-disk-disk-used">-</strong></div>
+                                <div><span>系统盘剩余</span><strong id="audit-disk-free">-</strong></div>
+                                <div><span>扫描耗时</span><strong id="audit-disk-scan-cost">-</strong></div>
+                                <div><span>遍历条目</span><strong id="audit-disk-visited">-</strong></div>
+                            </div>
+                            <div class="audit-side-footnote">系统盘已用空间包含 SDK、固件、套件及系统数据，不等于已统计产物；远端套件未接入</div>
+                        </section>
+                        <section class="audit-side-card audit-notes-card">
+                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>只读审计说明</strong></div>
+                            <ul class="audit-notes-list">
+                                <li>仅扫描服务端预定义目录，不支持输入任意服务器路径</li>
+                                <li>刷新、筛选和查看详情不会修改或删除任何文件</li>
+                                <li>扫描有时间和文件数量上限，超限会标记不完整</li>
+                                <li>包含用户报告、分析证据和共享固件，禁止仅凭文件年龄清理</li>
+                            </ul>
+                        </section>
+                    </aside>
+                </div>
             </div>
         </div>

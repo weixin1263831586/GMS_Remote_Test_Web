@@ -155,3 +155,19 @@ async def verify_security_audit_chain(
             data=result,
         )
     return ApiResponse.success(result)
+
+
+@router.get("/api/security-audit/disk-artifacts")
+@handle_api_errors
+async def get_runtime_artifact_disk_audit(
+    refresh: bool = Query(False, description="强制重新执行只读磁盘扫描，不使用短期缓存"),
+    _admin: CurrentUser | None = Depends(require_elevated_admin_when_auth_required),
+):
+    """Admin-only read-only inventory of known Controller runtime locations.
+
+    Never accepts a user-supplied path or invokes any cleanup operation.
+    The bounded scanner runs in a worker thread to avoid blocking the Web loop.
+    """
+    from features.system.disk_artifacts import cached_disk_artifacts
+
+    return ApiResponse.success(await asyncio.to_thread(cached_disk_artifacts, refresh=refresh))

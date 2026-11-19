@@ -14,8 +14,8 @@
 .aoa-header-status { align-items: center; display: flex; flex: 1; gap: 8px; justify-content: flex-end; }
 /* .btn-xxs 的 display:inline-flex 会覆盖 [hidden]，回放控制按钮仅回放时出现 */
 .aoa-header-status button[hidden] { display: none !important; }
-.aoa-workbench-title { flex: none; font-size: 15px; font-weight: 700; white-space: nowrap; }
-.aoa-muted { color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
+.aoa-workbench-title { flex: none;   white-space: nowrap; }
+.aoa-muted { color: var(--text-secondary);  line-height: 1.5; }
 .aoa-status-pill {
     background: color-mix(in srgb, var(--primary-color) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--primary-color) 35%, var(--border-color));
@@ -24,7 +24,7 @@
     color: var(--text-secondary);
     display: block;
     flex: 0 1 auto;
-    font-size: 11px;
+    
     max-width: 520px;
     min-width: 0;
     overflow: hidden;
@@ -85,10 +85,10 @@
     gap: 6px;
     min-width: 0;
 }
-.aoa-column-heading strong { font-size: 13px; line-height: 20px; white-space: nowrap; }
+.aoa-column-heading strong {  line-height: 20px; white-space: nowrap; }
 .aoa-column-heading > div:first-child > span {
     color: var(--text-secondary);
-    font-size: 11px;
+    
     line-height: 18px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -103,10 +103,10 @@
 #aoa-panel button {
     border-radius: 6px;
     box-shadow: none;
-    font-size: 11px;
+    
     line-height: 18px;
     margin: 0;
-    min-height: 30px;
+    min-height: var(--ui-aoa-config-control-height-short);
     min-width: 0;
     padding: 5px 10px;
     transform: none;
@@ -122,7 +122,7 @@
     border: 1px solid var(--border-color);
     border-radius: 6px;
     color: var(--text-primary);
-    font-size: 11px;
+    
     height: 32px;
     line-height: 20px;
     margin: 0;
@@ -140,12 +140,12 @@
 .aoa-column label, .aoa-field {
     color: var(--text-secondary);
     display: grid;
-    font-size: 11px;
+    
     gap: 5px;
     min-width: 0;
 }
 .aoa-column select, .aoa-column input { box-sizing: border-box; min-width: 0; width: 100%; }
-.aoa-screen-status { color: var(--text-secondary); font-size: 11px; height: 16px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aoa-screen-status { color: var(--text-secondary);  height: 16px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .aoa-screen-stage {
     align-items: center;
     background: var(--darker-bg);
@@ -214,13 +214,13 @@
     color: var(--text-secondary);
     display: flex;
     flex-direction: column;
-    font-size: 12px;
+    
     gap: 6px;
     padding: 20px;
     text-align: center;
 }
-.aoa-screen-empty strong { color: var(--text-primary); font-size: 13px; }
-.aoa-screen-empty .aoa-screen-hint { color: var(--text-muted); font-size: 11px; }
+.aoa-screen-empty strong { color: var(--text-primary);  }
+.aoa-screen-empty .aoa-screen-hint { color: var(--text-muted);  }
 .aoa-gesture-line {
     background: var(--primary-gradient);
     height: 2px;
@@ -245,7 +245,7 @@
 .aoa-config-group, .aoa-target-section { display: grid; flex: none; gap: 10px; min-width: 0; }
 .aoa-config-group { border-bottom: 1px solid var(--border-color); padding-bottom: 12px; }
 .aoa-semantic-tools { display: block; }
-.aoa-semantic-tools summary { cursor: pointer; font-size: 12px; font-weight: 600; line-height: 20px; }
+.aoa-semantic-tools summary { cursor: pointer;   line-height: 20px; }
 .aoa-semantic-tools > :not(summary) { margin-top: 10px; }
 .aoa-semantic-tools textarea, .aoa-semantic-tools > select { box-sizing: border-box; width: 100%; min-width: 0; }
 .aoa-semantic-tools textarea { resize: vertical; max-height: 240px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; }
@@ -253,13 +253,13 @@
 .aoa-target-section { flex: none; }
 .aoa-replay-runner { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(80px, 1fr) auto; }
 .aoa-replay-actions { flex-wrap: nowrap; justify-content: flex-end; }
-.aoa-subheading { font-size: 12px; font-weight: 700; line-height: 20px; }
+.aoa-subheading {   line-height: 20px; }
 .aoa-profile-summary, .aoa-result, .aoa-calibration-status {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
     color: var(--text-secondary);
-    font-size: 11px;
+    
     line-height: 1.5;
     min-width: 0;
     overflow-wrap: anywhere;
@@ -290,7 +290,7 @@
 .aoa-command-list-header, .aoa-command-row {
     align-items: center;
     display: grid;
-    font-size: 11px;
+    
     gap: 6px;
     grid-template-columns: var(--aoa-command-columns);
 }
@@ -298,7 +298,7 @@
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
     flex: none;
-    font-weight: 600;
+    
     line-height: 20px;
     overflow: hidden;
     padding: 5px 9px;
@@ -309,8 +309,8 @@
 .aoa-actions-label { align-items: center; display: flex; gap: 8px; grid-column: 4 / 6; justify-content: flex-end; }
 .aoa-debug-cluster { align-items: center; display: inline-flex; flex: none; gap: 6px; min-width: 0; }
 #aoa-panel .aoa-debug-cluster .aoa-debug-option { gap: 4px; }
-#aoa-panel .aoa-debug-cluster .aoa-debug-option span { font-size: 10px; font-weight: 400; }
-#aoa-panel .aoa-debug-cluster #aoa-debug-end { font-size: 10px; min-height: 20px; padding: 0 6px; }
+#aoa-panel .aoa-debug-cluster .aoa-debug-option span {   }
+#aoa-panel .aoa-debug-cluster #aoa-debug-end {  min-height: 20px; padding: 0 6px; }
 .aoa-command-list {
     flex: 1;
     list-style: none;
@@ -322,7 +322,7 @@
 }
 .aoa-command-list li { border-bottom: 1px solid var(--border-color); border-left: 2px solid transparent; padding: 2px 4px 2px 2px; }
 .aoa-command-list li:last-child { border-bottom: 0; }
-.aoa-command-list code { font-size: 11px; line-height: 18px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--success-color); }
+.aoa-command-list code {  line-height: 18px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--success-color); }
 .aoa-command-row { min-height: 22px; }
 .aoa-command-row > .aoa-command-state { grid-column: 4; grid-row: 1; }
 .aoa-command-row > .aoa-command-actions { grid-column: 5; grid-row: 1; }
@@ -330,13 +330,13 @@
 /* 标定态（定位 → 保存/取消）同编辑模式：5 个按钮跨到状态列，防止删除被 156px 列裁掉。 */
 .aoa-command-row.aoa-command-calibrating > .aoa-command-actions { grid-column: 4 / 6; }
 .aoa-command-row:has(.aoa-command-editor) > .aoa-command-state { visibility: hidden; }
-#aoa-panel input.aoa-command-comment { background: transparent; border-color: transparent; border-left-color: var(--border-color); color: var(--text-secondary); height: 22px; padding: 1px 6px; text-overflow: ellipsis; }
+#aoa-panel input.aoa-command-comment { background: transparent; border-color: transparent; border-left-color: var(--border-color); color: var(--text-secondary); height: var(--ui-aoa-command-editor-height); padding: 1px 6px; text-overflow: ellipsis; }
 #aoa-panel input.aoa-command-comment:focus { background: var(--darker-bg); border-color: var(--primary-color); color: var(--text-primary); }
-.aoa-command-index { color: var(--info-color); flex: none; font-size: 11px; font-variant-numeric: tabular-nums; font-weight: 600; line-height: 18px; min-width: 2ch; text-align: right; }
-#aoa-panel .aoa-command-row button { box-sizing: border-box; flex: none; font-size: 10px; height: 20px; min-height: 20px; padding: 1px 4px; width: 36px; }
+.aoa-command-index { color: var(--info-color); flex: none;  font-variant-numeric: tabular-nums;  line-height: 18px; min-width: 2ch; text-align: right; }
+#aoa-panel .aoa-command-row button { box-sizing: border-box; flex: none;  height: var(--ui-aoa-command-button-height); min-height: var(--ui-aoa-command-button-height); padding: 1px 4px; width: 36px; }
 .aoa-command-list li.aoa-command-active { background: color-mix(in srgb, var(--info-color) 12%, transparent); border-left: 2px solid var(--info-color); padding-left: 2px; }
 .aoa-command-list li.aoa-command-active .aoa-command-index { color: var(--primary-light); }
-.aoa-command-empty { color: var(--text-secondary); font-size: 11px; list-style: none; text-align: center; }
+.aoa-command-empty { color: var(--text-secondary);  list-style: none; text-align: center; }
 .aoa-command-list:has(> .aoa-command-empty) { display: grid; place-items: center; }
 .aoa-command-list .aoa-command-empty { border: 0; line-height: 1.8; padding: 24px 12px; }
 #aoa-panel .aoa-debug-option { align-items: center; cursor: pointer; display: inline-flex; gap: 6px; line-height: 20px; white-space: nowrap; }
@@ -349,7 +349,7 @@
     .aoa-config-column .aoa-form-grid, .aoa-config-column .aoa-device-selectors { gap: 4px; }
     .aoa-config-column .aoa-config-group { padding-bottom: 6px; }
     .aoa-config-column label, .aoa-config-column .aoa-field { gap: 2px; }
-    #aoa-panel .aoa-config-column input, #aoa-panel .aoa-config-column select { height: 30px; }
+    #aoa-panel .aoa-config-column input, #aoa-panel .aoa-config-column select { height: var(--ui-aoa-config-control-height-short); }
     .aoa-config-column > .aoa-result { min-height: 36px; }
 }
 
@@ -390,14 +390,14 @@
     .aoa-command-row:has(.aoa-command-editor) > .aoa-command-actions { grid-column: 2 / -1; }
 }
 
-.aoa-command-state { flex: none; font-size: 11px; color: var(--text-secondary); line-height: 22px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; width: 5.5em; }
+.aoa-command-state { flex: none;  color: var(--text-secondary); line-height: 22px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; width: 5.5em; }
 #aoa-command-list .aoa-command-state[hidden] { display: block; visibility: hidden; }
-.aoa-command-state[data-state="running"] { color: var(--info-color); font-weight: 600; }
+.aoa-command-state[data-state="running"] { color: var(--info-color);  }
 .aoa-command-state[data-state="completed"] { color: var(--success-color); }
 .aoa-command-completed { opacity: .72; }
 .aoa-command-paused { background: color-mix(in srgb, var(--warning-color) 12%, transparent); border-left: 2px solid var(--warning-color); }
 .aoa-command-failed { background: color-mix(in srgb, var(--danger-color) 12%, transparent); border-left: 2px solid var(--danger-color); }
 
 .aoa-command-actions { display: flex; flex: none; gap: 4px; margin-left: auto; }
-.aoa-command-editor { flex: 1; min-width: 0; width: 100%; font: 11px monospace; padding: 2px 4px; }
-#aoa-panel input.aoa-command-editor { height: 22px; padding: 1px 6px; }
+.aoa-command-editor { flex: 1; min-width: 0; width: 100%;  padding: 2px 4px; }
+#aoa-panel input.aoa-command-editor { height: var(--ui-aoa-command-editor-height); padding: 1px 6px; }

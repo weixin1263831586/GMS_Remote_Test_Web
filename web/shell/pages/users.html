@@ -28,7 +28,20 @@
                     </span></div>
                 </div>
 
-                <!-- 用户列表 -->
+                <!-- 用户列表：与设备库存相同的紧凑筛选条。 -->
+                <div class="users-list-toolbar" role="search" aria-label="筛选用户列表">
+                    <div class="users-list-filters">
+                        <input id="users-list-search" class="combo-box" type="search" placeholder="搜索用户 / IP / 设备" aria-label="搜索用户、IP或设备" data-input="filterUsersList">
+                        <select id="users-list-status-filter" class="combo-box" aria-label="筛选用户状态" data-change="filterUsersList">
+                            <option value="">全部状态</option><option value="online">空闲在线</option>
+                            <option value="testing">正在测试</option><option value="offline">离线</option>
+                        </select>
+                    </div>
+                    <div class="users-list-actions">
+                        <span id="users-list-visible-count" role="status" aria-live="polite">正在加载用户…</span>
+                        <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                    </div>
+                </div>
                 <div class="users-table-wrap">
                     <table class="users-table">
                         <thead>
@@ -91,20 +104,16 @@
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
-                    <table class="agent-access-table">
+                    <table class="agent-access-table agent-token-table">
                         <thead>
                             <tr>
-                                <th class="agent-token-col-name">Agent</th>
-                                <th class="agent-token-col-status">状态</th>
-                                <th class="agent-token-col-scopes">授权范围</th>
-                                <th class="agent-token-col-target">访问范围</th>
-                                <th class="agent-token-col-owner">所有者</th>
-                                <th class="agent-token-col-validity">有效期 / 最近使用</th>
-                                <th class="agent-token-col-action">操作</th>
+                                <th>Agent</th><th>Token ID</th><th>状态</th><th>授权数量</th>
+                                <th>权限分类</th><th>Worker 范围</th><th>设备范围</th>
+                                <th>所有者</th><th>到期时间</th><th>最近使用</th><th>操作</th>
                             </tr>
                         </thead>
                         <tbody id="agent-access-tokens">
-                            <tr><td colspan="7" class="agent-access-empty">加载中...</td></tr>
+                            <tr><td colspan="11" class="agent-access-empty">加载中...</td></tr>
                         </tbody>
                     </table>
                     </div>
@@ -127,7 +136,8 @@
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
-                    <table class="agent-access-table">
+                    <table class="agent-access-table sdk-source-table">
+                        <colgroup><col><col><col><col><col><col><col><col></colgroup>
                         <thead>
                             <tr>
                                 <th>源 ID</th>

@@ -107,6 +107,33 @@
             terminalWorkspace.mountingPanes.clear();
             terminalWorkspace.paneGenerations.clear();
         }
+        // Compact terminal states share the desktop pane's one-row hierarchy.
+        // Keep connection actions explicit so delegated controls remain auditable.
+        function hostTerminalEmptyView(index, kind = 'connecting') {
+            const variants = {
+                connecting: {icon: 'refresh', title: '正在连接主机终端', hint: '正在建立 SSH 会话…'},
+                adb: {icon: 'refresh', title: '正在打开 ADB Shell', hint: '正在等待设备 Shell 就绪…'},
+                on_demand: {icon: 'monitor', title: '终端尚未连接', hint: '当前主机已就绪，可按需建立终端连接。', button: '连接此终端'},
+                no_host: {icon: 'monitor', title: '暂无可用主机', hint: '请先在主机集群中接入可用主机。'},
+                offline: {icon: 'warning', title: '主机不可用', hint: '当前主机离线，请检查主机状态。'},
+                invalid: {icon: 'warning', title: 'ADB Shell 目标无效', hint: '设备序列号无效，无法连接。'},
+                error: {icon: 'warning', title: '终端加载失败', hint: 'xterm.js 加载失败，请重试。', button: '重新连接'},
+                authorization: {icon: 'lock', title: '需要管理员认证', hint: '完成提权后才能连接主机终端。', button: '重新尝试连接'},
+            };
+            const view = variants[kind] || variants.connecting;
+            const action = view.button
+                ? `<button type="button" class="btn-xs host-terminal-connect-button" data-click="refreshTerminalWorkspacePane" data-a0="${index}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg>${view.button}</button>`
+                : '';
+            return `<div class="host-workspace-empty host-terminal-placeholder host-terminal-placeholder-${kind}">
+                <div class="host-terminal-placeholder-content">
+                    <span class="host-terminal-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
+                    <strong class="host-terminal-placeholder-title">${view.title}</strong>
+                    <span class="host-terminal-placeholder-hint">${view.hint}</span>
+                    ${action}
+                </div>
+            </div>`;
+        }
+
         function renderTerminalWorkspace() {
             const grid=document.getElementById('terminal-workspace-grid'); if(!grid)return;
             normalizeTerminalWorkspace(); saveTerminalWorkspace();
@@ -169,14 +196,26 @@
             disposeTerminalWorkspace();
             grid.className=`host-workspace-grid layout-${terminalWorkspace.layout}${terminalWorkspace.maximized!==null?' pane-maximized':''}`;
             document.querySelectorAll('[data-terminal-layout]').forEach(b=>b.classList.toggle('active',b.dataset.terminalLayout===terminalWorkspace.layout));
-            grid.innerHTML=terminalWorkspace.panes.map((p,i)=>`<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}">
-                <div class="host-workspace-pane-header"><span data-multi-host-control data-terminal-pane-mode-label style="font-size:11px;">🐧 终端</span>
-                <select data-multi-host-control aria-label="主机" data-change="changeTerminalWorkspaceHost" data-a0="${i}" data-r1="value">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
-                <span class="host-workspace-pane-status" id="terminal-workspace-status-${i}">准备中</span>
-                <button data-multi-host-control data-terminal-pane-host-mode class="btn-xs" data-click="restoreHostTerminalWorkspacePane" data-a0="${i}" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="${p.mode==='adb'?'':'display:none'}">↩ 主机终端</button>
-                <button class="btn-xs host-workspace-refresh-btn" data-click="refreshTerminalWorkspacePane" data-a0="${i}" title="重新连接" aria-label="刷新主机终端">🔄</button>
-                <button data-multi-host-control class="btn-xs" data-click="maximizeTerminalWorkspacePane" data-a0="${i}">${terminalWorkspace.maximized===i?'▦':'⛶'}</button></div>
-                <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}"><div class="host-workspace-empty">${p.mode==='adb'?'正在打开 ADB Shell…':'正在加载终端…'}</div></div></section>`).join('');
+            grid.innerHTML=terminalWorkspace.panes.map((p,i)=>{
+                const host=desktopHosts.find(item=>item.id===p.hostId);
+                const hostName=host?.name||'请选择主机';
+                return `<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}" aria-label="终端 ${i+1}">
+                    <div class="host-workspace-pane-header host-terminal-pane-header">
+                        <div class="host-terminal-identity">
+                            <span class="host-terminal-label" data-terminal-pane-mode-label>🐧 终端</span>
+                            <span class="host-terminal-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
+                            <select class="host-terminal-select" data-multi-host-control aria-label="主机" data-change="changeTerminalWorkspaceHost" data-a0="${i}" data-r1="value">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
+                        </div>
+                        <span class="host-workspace-pane-status host-terminal-status" id="terminal-workspace-status-${i}" role="status" aria-live="polite" title="终端连接状态">准备中</span>
+                        <div class="host-terminal-pane-actions">
+                            <button data-terminal-pane-host-mode class="btn-xs host-terminal-return-button" type="button" data-click="restoreHostTerminalWorkspacePane" data-a0="${i}" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="${p.mode==='adb'?'':'display:none'}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#back"></use></svg>主机终端</button>
+                            <button class="btn-xs host-workspace-refresh-btn host-terminal-icon-button" type="button" data-click="refreshTerminalWorkspacePane" data-a0="${i}" title="重新连接终端" aria-label="重新连接终端 ${i+1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
+                            <button class="btn-xs host-terminal-icon-button" data-multi-host-control type="button" data-click="maximizeTerminalWorkspacePane" data-a0="${i}" title="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦当前终端'}" aria-label="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦终端 '+(i+1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
+                        </div>
+                    </div>
+                    <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}">${hostTerminalEmptyView(i,p.mode==='adb'?'adb':'connecting')}</div>
+                </section>`;
+            }).join('');
             const singleHostModeButton=document.getElementById('terminal-workspace-host-mode-btn');
             if(singleHostModeButton)singleHostModeButton.style.display=terminalWorkspace.panes[0]?.mode==='adb'?'':'none';
             const generation=terminalWorkspace.generation;
@@ -185,7 +224,7 @@
                 const host=desktopHosts.find(item=>item.id===p.hostId);
                 if(i!==autoMountIndex&&host&&!host.offline){
                     const body=document.getElementById(`terminal-workspace-body-${i}`);
-                    if(body)body.innerHTML=`<div class="host-workspace-empty"><button class="btn-xs" data-click="refreshTerminalWorkspacePane" data-a0="${i}">连接此终端</button></div>`;
+                    if(body)body.innerHTML=hostTerminalEmptyView(i,'on_demand');
                     terminalWorkspaceStatus(i,'按需连接');
                     return;
                 }
@@ -196,22 +235,29 @@
         function terminalWorkspaceStatus(i,text,ok=false){
             const color=ok?'var(--success-color)':'var(--text-secondary)';
             const e=document.getElementById(`terminal-workspace-status-${i}`);
-            if(e){e.textContent=text;e.style.color=color;}
+            if(e){
+                e.textContent=text;
+                e.title=text;
+                e.style.color=color;
+                e.classList.toggle('is-connected',ok);
+                e.classList.toggle('is-pending',!ok && /正在|准备中|按需|等待/.test(text));
+                e.classList.toggle('is-error',!ok && /失败|离线|错误|断开|无效/.test(text));
+            }
             const singleStatus=document.getElementById('terminal-workspace-status-single');
             if(singleStatus&&i===0){singleStatus.textContent=text;singleStatus.style.color=color;}
         }
         async function mountTerminalWorkspacePane(index,pane,generation,paneGeneration=terminalWorkspace.paneGenerations.get(index)||0) {
             const body=document.getElementById(`terminal-workspace-body-${index}`),host=desktopHosts.find(h=>h.id===pane.hostId); if(!body)return;
-            if(!host){body.innerHTML='<div class="host-workspace-empty">暂无更多可用主机</div>';terminalWorkspaceStatus(index,'空闲');return;}
-            if(host.offline){body.innerHTML='<div class="host-workspace-empty">主机已离线</div>';terminalWorkspaceStatus(index,'离线');return;}
+            if(!host){body.innerHTML=hostTerminalEmptyView(index,'no_host');terminalWorkspaceStatus(index,'空闲');return;}
+            if(host.offline){body.innerHTML=hostTerminalEmptyView(index,'offline');terminalWorkspaceStatus(index,'离线');return;}
             const terminalMode=pane.mode==='adb'?'adb':'ssh',serialNo=String(pane.serialNo||'').trim();
-            if(terminalMode==='adb'&&!serialNo){body.innerHTML='<div class="host-workspace-empty">设备序列号无效</div>';terminalWorkspaceStatus(index,'连接失败');return;}
+            if(terminalMode==='adb'&&!serialNo){body.innerHTML=hostTerminalEmptyView(index,'invalid');terminalWorkspaceStatus(index,'连接失败');return;}
             const mountToken={generation,paneGeneration};
             const pendingMount=terminalWorkspace.mountingPanes.get(index);
             if(pendingMount&&pendingMount.generation===generation&&pendingMount.paneGeneration===paneGeneration)return;
             terminalWorkspace.mountingPanes.set(index,mountToken);
             terminalWorkspaceStatus(index,terminalMode==='adb'?'正在打开 ADB Shell…':'正在加载终端…');
-            try{await loadXTermScripts();}catch(error){if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML='<div class="host-workspace-empty">xterm.js 加载失败</div>';terminalWorkspaceStatus(index,'加载失败');return;}
+            try{await loadXTermScripts();}catch(error){if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);console.error('[Terminal workspace] xterm.js load failed:',error);if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;body.innerHTML=hostTerminalEmptyView(index,'error');terminalWorkspaceStatus(index,'加载失败');return;}
             if(terminalWorkspace.mountingPanes.get(index)===mountToken)terminalWorkspace.mountingPanes.delete(index);
             if(generation!==terminalWorkspace.generation||paneGeneration!==(terminalWorkspace.paneGenerations.get(index)||0)||currentPage!=='terminal'||!body.isConnected)return;
             // terminal_ 前缀 WS 在认证部署下要求已提权 session（服务端握手
@@ -220,7 +266,7 @@
             // 状态而不是哑失败。
             if(!await ensureTerminalElevation(false,'打开主机终端','主机终端')){
                 if(generation===terminalWorkspace.generation&&paneGeneration===(terminalWorkspace.paneGenerations.get(index)||0)&&currentPage==='terminal'&&body.isConnected){
-                    body.innerHTML='<div class="host-workspace-empty">需要管理员认证后才能打开主机终端</div>';
+                    body.innerHTML=hostTerminalEmptyView(index,'authorization');
                     terminalWorkspaceStatus(index,'等待管理员认证');
                 }
                 return;

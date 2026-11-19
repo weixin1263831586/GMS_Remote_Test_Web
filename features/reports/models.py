@@ -27,6 +27,7 @@ class TestFailure:
     reason: str
     module: str = '未知模块'
     stack_trace: str = ''
+    raw_log: str = ''  # 原样保留匹配的 host_log FAILURE 块，供前端完整展示
 
 
 @dataclass

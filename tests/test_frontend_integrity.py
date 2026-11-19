@@ -260,7 +260,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("scheduleDeferredPagePreload(initialPage)", navigation)
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
-        self.assertIn("test-reports.js?v=20261118-notice-report-focus", shell)
+        self.assertRegex(shell, r'/static/js/pages/test-reports\.js\?v=[A-Za-z0-9_-]+')
         self.assertIn("navigation.js?v=20261112-primary-gradient", shell)
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
@@ -481,8 +481,8 @@ class FrontendIntegrityTests(unittest.TestCase):
             self.assertTrue((components_dir / fragment).is_file(), fragment)
         css = read_text("web/static/css/common.css")
         self.assertIn(".page-header-row", css)
-        # 字形顶 16px 契约：行高 17.2（12px 字号 + 2.6px 半行距收紧）。
-        self.assertIn("line-height: 17.2px", css)
+        # 页面主标题的 18px/24px 语义层级由 typography.css 单点控制。
+        self.assertIn("line-height: var(--ui-type-line-page)", css)
 
         pages = sorted(Path("web/shell/pages").glob("*.html"))
         adopted = [

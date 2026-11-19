@@ -77,6 +77,11 @@
         function displayUsersListAccessMessage(message) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
+            // 权限或加载失败时，不得通过筛选重新呈现旧缓存。
+            usersHasLoaded = false;
+            usersListCache = [];
+            const counter = document.getElementById('users-list-visible-count');
+            if (counter) counter.textContent = '无法读取用户列表';
             tbody.innerHTML = `<tr><td colspan="9" class="users-empty-message">${escapeHtml(message)}</td></tr>`;
         }
 
@@ -142,6 +147,26 @@
         }
 
         // 顶部统计卡为纯展示（与设备/审计页一致），不做点击筛选。
+        // 在本地已授权结果上筛选，10s 自动刷新不会重置筛选条件。
+        function filterUsersList() {
+            if (!usersHasLoaded || usersAccessDenied) return;
+            const query = (document.getElementById('users-list-search')?.value || '').trim().toLowerCase();
+            const status = document.getElementById('users-list-status-filter')?.value || '';
+            const visible = usersListCache.filter(user => {
+                if (status && getUserDisplayStatus(user) !== status) return false;
+                if (!query) return true;
+                const local = user.local_devices?.devices || [];
+                return [
+                    user.client_id, user.ip, user.source_label,
+                    ...(Array.isArray(user.devices) ? user.devices : []),
+                    ...(Array.isArray(local) ? local : []),
+                ].filter(Boolean).join(' ').toLowerCase().includes(query);
+            });
+            const counter = document.getElementById('users-list-visible-count');
+            if (counter) counter.textContent = `显示 ${visible.length} / ${usersListCache.length} 位用户`;
+            renderUsersList(visible);
+        }
+
         function displayUsersList(users) {
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
@@ -155,7 +180,8 @@
             document.getElementById('total-users-count').textContent = totalCount;
             document.getElementById('active-users-count').textContent = activeCount;
             document.getElementById('testing-users-count').textContent = testingCount;
-            renderUsersList(usersListCache);
+            usersHasLoaded = true;
+            filterUsersList();
 
             // 有用户直连设备仍在后台 SSH 枚举（显示"枚举中…"）时，
             // 3 秒后补一次加载，不等 10 秒轮询。
@@ -177,13 +203,11 @@
             const tbody = document.getElementById('users-table-body');
             if (!tbody) return;
             if (users.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="9" class="users-empty-message">
-                            暂无用户
-                        </td>
-                    </tr>
-                `;
+                const filtered = Boolean(document.getElementById('users-list-search')?.value
+                    || document.getElementById('users-list-status-filter')?.value);
+                const message = filtered && usersListCache.length
+                    ? '没有匹配的用户，请调整筛选条件' : '暂无用户';
+                tbody.innerHTML = `<tr><td colspan="9" class="users-empty-message">${message}</td></tr>`;
                 usersHasLoaded = true;
                 return;
             }
@@ -218,9 +242,8 @@
                 const localDevicesStyle = localDevicesPending
                     ? ' color: var(--text-secondary); font-style: italic;'
                     : '';
-                const localDevicesTitle = localInventory && localInventory.available === false && localInventory.error
-                    ? `title="${escapeHtml(localInventory.error)}"`
-                    : '';
+                const localDevicesTitle = `title="${escapeHtml(localInventory?.available === false && localInventory.error
+                    ? localInventory.error : localDevices)}"`;
                 const sourceLabel = user.source_label || '-';
                 const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
                 const removeCell = renderUserRemoveCell(user, normalizedStatus);
@@ -230,29 +253,29 @@
 
                 return `
                     <tr>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
+                        <td title="${escapeHtml(user.client_id || '')}" style="padding: 4px 6px; text-align: center;  ">
                             ${escapeHtml(user.client_id || '')}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
+                        <td title="${escapeHtml(user.ip || '')}" style="padding: 4px 6px; text-align: center;  ">
                             ${escapeHtml(user.ip || '')}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-size: 12px; color: ${sourceColor}; font-weight: 600;">
+                        <td style="padding: 4px 6px; text-align: center;  color: ${sourceColor}; ">
                             ${escapeHtml(sourceLabel)}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;${localDevicesStyle}" ${localDevicesTitle}>
+                        <td style="padding: 4px 6px; text-align: center;  ${localDevicesStyle}" ${localDevicesTitle}>
                             ${escapeHtml(localDevices)}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">
+                        <td title="${escapeHtml(devices)}" style="padding: 4px 6px; text-align: center;  ">
                             ${escapeHtml(devices)}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center;">
-                            <span style="color: ${statusColor}; font-weight: 600; font-size: 12px;">●</span>
-                            <span style="margin-left: 6px; font-size: 12px;">${escapeHtml(statusText)}</span>
+                        <td title="${escapeHtml(statusText)}" style="padding: 4px 6px; text-align: center;">
+                            <span style="color: ${statusColor};  ">●</span>
+                            <span style="margin-left: 6px; ">${escapeHtml(statusText)}</span>
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
+                        <td style="padding: 4px 6px; text-align: center; ">
                             ${createdAt}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; font-size: 12px;">
+                        <td style="padding: 4px 6px; text-align: center; ">
                             ${lastSeen}
                         </td>
                         <td style="padding: 4px 6px; text-align: center;">

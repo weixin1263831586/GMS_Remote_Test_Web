@@ -188,11 +188,13 @@ class ReportAnalyzer:
 
         if lower_path.endswith(UPLOAD_ARCHIVE_EXTENSIONS):
             try:
-                from .analysis_agent import ReportAnalysisAgent
+                from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 
                 result = ReportAnalysisAgent(temp_dir=self.temp_dir).analyze_path(file_path)
                 if result:
                     return result
+            except ReportScanIncompleteError:
+                raise
             except Exception as e:
                 logger.error("ReportAnalysisAgent failed: %s", e)
             return None
@@ -399,7 +401,8 @@ class ReportAnalyzer:
                     'name': f.name,
                     'reason': f.reason,
                     'module': f.module,
-                    'stack_trace': f.stack_trace
+                    'stack_trace': f.stack_trace,
+                    'raw_log': f.raw_log
                 }
                 for f in report.failures
             ]

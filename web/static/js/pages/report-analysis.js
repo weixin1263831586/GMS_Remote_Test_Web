@@ -174,10 +174,10 @@ function initReportAnalysis() {
     });
 
     fileInput.addEventListener('change', async (e) => {
-        if (e.target.files.length > 0) {
-            await handleReportFile(e.target.files[0]);
-            e.target.value = '';
-        }
+        const selected = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (selected.length === 1) await handleReportFile(selected[0]);
+        else if (selected.length > 1) await handleReportFolder(selected);
     });
 
     folderInput.addEventListener('change', async (e) => {
@@ -210,212 +210,95 @@ function extractRedmineDropContext(dataTransfer, url) {
 
 async function handleRedmineAttachment(url, context = {}) {
     const originalUrl = url;
-    const uploadZone = $('report-upload-zone');
-    const content = uploadZone?.querySelector('.report-upload-content');
-    const progress = $('report-upload-progress');
-    const progressFill = $('report-progress-fill');
-
-    if (!progress || !progressFill) return;
-
-    if (currentRedmineRequest) {
-        currentRedmineRequest.abort();
-        currentRedmineRequest = null;
-    }
-
-    // 显示进度
-    if (content) content.style.opacity = '0.5';
-    progress.style.opacity = '1';
-    progressFill.style.width = '10%';
+    const activity = beginReportAnalysisActivity(
+        '正在获取报告附件', '正在验证下载地址，随后由服务器解析报告'
+    );
+    const controller = new AbortController();
+    currentRedmineRequest = controller;
+    const signal = controller.signal;
 
     try {
-        // 首先获取 Redmine 配置（带缓存，减少API调用）
-        let redmineDomain;
-        let redmineBaseUrl;
-
-        try {
-            const redmineConfig = await getRedmineConfig();
-            redmineDomain = redmineConfig.domain;
-            redmineBaseUrl = redmineConfig.base_url || `https://${redmineDomain}`;
-        } catch (configError) {
-            console.error('[Redmine] 配置获取失败:', configError);
-            showToast('❌ Redmine 配置错误，请联系管理员', 'error');
-            // 与外层 catch 一致：恢复上传区 UI，避免进度条卡住
-            if (progress) progress.style.opacity = '0';
-            if (content) content.style.opacity = '1';
-            return;
-        }
-
+        const redmineConfig = await getRedmineConfig();
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+        const redmineDomain = redmineConfig.domain;
+        const redmineBaseUrl = redmineConfig.base_url || `https://${redmineDomain}`;
         const redminePathUrl = /\/(?:issues|attachments)(?:\/|$)/.test(url);
-        const isConfiguredRedmineUrl = url.includes(redmineDomain);
-        if (redminePathUrl && !isConfiguredRedmineUrl) {
+        const isRedmineUrl = url.includes(redmineDomain);
+
+        if (redminePathUrl && !isRedmineUrl) {
             const publicUrl = url.replace(/^https?:\/\/[^/]+/, redmineBaseUrl.replace(/\/$/, ''));
-            notifyOperationResult('报告分析失败', `请使用公网 Redmine 地址：${publicUrl}`, 'warning', 'report-analysis', {
-                source: 'url'
-            });
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-            }, 1000);
+            const message = '请使用公网 Redmine 地址：' + publicUrl;
+            finishReportAnalysisActivity(activity, message);
+            notifyOperationResult('报告分析失败', message, 'warning', 'report-analysis',
+                { source: 'url' });
             return;
         }
 
-        const isRedmineUrl = isConfiguredRedmineUrl;
         if (isRedmineUrl) {
             const attachmentMatch = url.match(/\/attachments\/(\d+)/);
             const issueMatch = url.match(/\/issues\/(\d+)/);
-
-            if (attachmentMatch && !issueMatch) {
-                // 直接的附件 URL，跳过提取步骤，直接使用 analyze-url
-                showToast('📎 检测到 Redmine 附件 URL，直接分析...', 'info');
-            } else if (issueMatch) {
-                // 是问题页面，尝试获取第一个附件
-                showToast('📋 检测到 Redmine 问题页面，正在提取附件...', 'info');
-                progressFill.style.width = '15%';
-
-                try {
-                    const extractResponse = await fetch('/api/reports/extract-redmine-attachment', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ issue_url: url })
-                    });
-
-                    const extractResult = await extractResponse.json();
-
-                    if (extractResult.success && extractResult.attachment_url) {
-                        showToast(`📎 找到附件: ${extractResult.filename || '未知'}`, 'info');
-                        url = extractResult.attachment_url;
-                        context.source_issue_id = context.source_issue_id || issueMatch[1];
-                        context.source_issue_url = context.source_issue_url || originalUrl;
-                        debugLog('[Report Analysis] Found attachment:', extractResult.filename);
-                    } else {
-                        throw new Error(extractResult.error || '无法提取附件');
-                    }
-                } catch (extractError) {
-                    showToast(`❌ ${extractError.message}`, 'error');
-                    setTimeout(() => {
-                        if (progress) progress.style.opacity = '0';
-                        if (content) content.style.opacity = '1';
-                    }, 2000);
-                    return;
+            if (issueMatch && !attachmentMatch) {
+                setReportAnalysisActivityPhase(activity,
+                    '正在获取 Redmine 附件信息', '正在查找问题单关联的测试报告');
+                const extractResponse = await fetch('/api/reports/extract-redmine-attachment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ issue_url: url }),
+                    signal
+                });
+                if (!isReportAnalysisActivityCurrent(activity)) return;
+                const extractResult = await extractResponse.json();
+                if (!extractResponse.ok || !extractResult.success || !extractResult.attachment_url) {
+                    throw new Error(extractResult.error || '无法提取附件');
                 }
+                url = extractResult.attachment_url;
+                context.source_issue_id = context.source_issue_id || issueMatch[1];
+                context.source_issue_url = context.source_issue_url || originalUrl;
             }
-
-            showToast('🔐 检测到 Redmine URL，使用服务器端处理...', 'info');
-            progressFill.style.width = '20%';
-
-            const controller = new AbortController();
-            currentRedmineRequest = controller;
-
-            const response = await fetch('/api/reports/analyze-url', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    url: url,
-                    source_issue_id: context.source_issue_id || '',
-                    source_issue_url: context.source_issue_url || '',
-                    use_redmine_auth: true  // 使用存储的 Redmine 凭证
-                }),
-                signal: controller.signal
-            });
-
-            progressFill.style.width = '70%';
-
-            const result = await response.json();
-
-            progressFill.style.width = '100%';
-
-            if (result.success) {
-                currentRedmineRequest = null;
-                setTimeout(() => {
-                    if (progress) progress.style.opacity = '0';
-                    if (content) content.style.opacity = '1';
-                    displayReportAnalysis(result.data);
-                    notifyOperationResult(
-                        '报告分析完成',
-                        result.filename || '附件分析完成',
-                        'success',
-                        'report-analysis',
-                        { source: 'url', filename: result.filename || '' }
-                    );
-                }, 300);
-            } else {
-                currentRedmineRequest = null;
-                if (result.requires_auth) {
-                    showRedmineAuthDialog(url, uploadZone, content, progress, progressFill, context);
-                } else {
-                    notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                        source: 'url'
-                    });
-                    setTimeout(() => {
-                        if (progress) progress.style.opacity = '0';
-                        if (content) content.style.opacity = '1';
-                    }, 2000);
-                }
-            }
-            return;
         }
 
-        // 非 Redmine URL，使用服务器端下载
-        showToast('正在从 URL 下载附件...', 'info');
-
-        progressFill.style.width = '30%';
-
-        const controller = new AbortController();
-        currentRedmineRequest = controller;
-
+        setReportAnalysisActivityPhase(activity, '服务器正在下载并解析报告',
+            '下载、解压与测试结果统计在服务端执行；大报告可能耗时较长');
         const response = await fetch('/api/reports/analyze-url', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ url: url }),
-            signal: controller.signal
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(isRedmineUrl
+                ? {
+                    url,
+                    source_issue_id: context.source_issue_id || '',
+                    source_issue_url: context.source_issue_url || '',
+                    use_redmine_auth: true
+                }
+                : { url }),
+            signal
         });
-
-        progressFill.style.width = '80%';
-
+        if (!isReportAnalysisActivityCurrent(activity)) return;
         const result = await response.json();
-
-        progressFill.style.width = '100%';
-
-        if (result.success) {
-            currentRedmineRequest = null;
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-                displayReportAnalysis(result.data);
-                notifyOperationResult(
-                    '报告分析完成',
-                    result.filename || '附件分析完成',
-                    'success',
-                    'report-analysis',
-                    { source: 'url', filename: result.filename || '' }
-                );
-            }, 300);
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+        if (response.ok && result.success) {
+            displayReportAnalysis(result.data);
+            finishReportAnalysisActivity(activity);
+            notifyOperationResult('报告分析完成', result.filename || '附件分析完成',
+                'success', 'report-analysis', { source: 'url', filename: result.filename || '' });
+        } else if (result.requires_auth && isRedmineUrl) {
+            finishReportAnalysisActivity(activity);
+            const zone = $('report-upload-zone');
+            showRedmineAuthDialog(url, zone, zone?.querySelector('.report-upload-content'),
+                $('report-upload-progress'), $('report-progress-fill'), context);
         } else {
-            currentRedmineRequest = null;
-            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                source: 'url'
-            });
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-            }, 2000);
+            const reason = result.error || result.message || '服务端报告解析失败';
+            finishReportAnalysisActivity(activity, reason);
+            notifyOperationResult('报告分析失败', reason, 'error', 'report-analysis',
+                { source: 'url' });
         }
     } catch (error) {
-        currentRedmineRequest = null;
-        if (error.name === 'AbortError') {
-            debugLog('请求被取消');
-            return;
-        }
+        if (!isReportAnalysisActivityCurrent(activity) || error?.name === 'AbortError') return;
         console.error('URL attachment analysis error:', error);
-        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { source: 'url' });
-        if (progress) progress.style.opacity = '0';
-        if (content) content.style.opacity = '1';
+        finishReportAnalysisActivity(activity, error.message || '请求失败');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis',
+            { source: 'url' });
+    } finally {
+        if (currentRedmineRequest === controller) currentRedmineRequest = null;
     }
 }
 
@@ -450,7 +333,7 @@ function showRedmineAuthDialog(url, uploadZone, content, progress, progressFill,
                     <button class="btn-xs" data-click="_actCloseRedmineAuthModal">取消</button>
                     <button class="btn-xs btn-primary" data-click="submitRedmineAuth" data-a0="${escapedUrl}">确定</button>
                 </div>
-                <p style="font-size: 11px; color: var(--text-secondary); margin-top: 15px; text-align: center;">
+                <p class="report-redmine-credential-note" style="color: var(--text-secondary); margin-top: 15px; text-align: center;">
                     💾 凭证将被加密存储，下次无需重新输入
                 </p>
             </div>
@@ -479,135 +362,95 @@ function resetReportUploadProgress() {
 async function submitRedmineAuth(url) {
     const username = document.getElementById('redmine-username')?.value;
     const password = document.getElementById('redmine-password')?.value;
-
     if (!username || !password) {
         showToast('请输入用户名和密码', 'warning');
         return;
     }
 
-    // 关闭对话框
     ModalManager.unregisterDynamic('redmine-auth-modal');
-
-    // 显示进度
-    const uploadZone = $('report-upload-zone');
-    const content = uploadZone?.querySelector('.report-upload-content');
-    const progress = $('report-upload-progress');
-    const progressFill = $('report-progress-fill');
-
-    if (content) content.style.opacity = '0.5';
-    progress.style.opacity = '1';
-    progressFill.style.width = '30%';
-
+    const activity = beginReportAnalysisActivity(
+        '服务器正在下载并解析 Redmine 报告',
+        '已提交认证信息，正在服务端下载、解压和统计测试结果'
+    );
+    const controller = new AbortController();
+    currentRedmineRequest = controller;
     try {
-        showToast('⬇️ 正在从 Redmine 下载附件...', 'info');
-
         const response = await fetch('/api/reports/analyze-url', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                url: url,
+                url,
                 source_issue_id: window._pendingRedmineDropContext?.source_issue_id || '',
                 source_issue_url: window._pendingRedmineDropContext?.source_issue_url || '',
                 redmine_username: username,
                 redmine_password: password
-            })
+            }),
+            signal: controller.signal
         });
-
-        progressFill.style.width = '80%';
-
+        if (!isReportAnalysisActivityCurrent(activity)) return;
         const result = await response.json();
-
-        progressFill.style.width = '100%';
-
-        if (result.success) {
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-                displayReportAnalysis(result.data);
-                notifyOperationResult(
-                    '报告分析完成',
-                    result.filename || '附件分析完成',
-                    'success',
-                    'report-analysis',
-                    { source: 'redmine', filename: result.filename || '' }
-                );
-            }, 300);
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+        if (response.ok && result.success) {
+            displayReportAnalysis(result.data);
+            finishReportAnalysisActivity(activity);
+            notifyOperationResult('报告分析完成', result.filename || '附件分析完成',
+                'success', 'report-analysis', { source: 'redmine', filename: result.filename || '' });
         } else {
-            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                source: 'redmine'
-            });
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-            }, 2000);
+            const reason = result.error || result.message || 'Redmine 报告解析失败';
+            finishReportAnalysisActivity(activity, reason);
+            notifyOperationResult('报告分析失败', reason, 'error', 'report-analysis',
+                { source: 'redmine' });
         }
     } catch (error) {
+        if (!isReportAnalysisActivityCurrent(activity) || error?.name === 'AbortError') return;
         console.error('Redmine auth error:', error);
-        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { source: 'redmine' });
-        if (progress) progress.style.opacity = '0';
-        if (content) content.style.opacity = '1';
+        finishReportAnalysisActivity(activity, error.message || '请求失败');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis',
+            { source: 'redmine' });
+    } finally {
+        if (currentRedmineRequest === controller) currentRedmineRequest = null;
     }
 }
 
 async function handleReportFile(file) {
-    const fileName = file?.name || '测试报告';
-    const uploadZone = $('report-upload-zone');
-    const content = uploadZone?.querySelector('.report-upload-content');
-    const progress = $('report-upload-progress');
-    const progressFill = $('report-progress-fill');
-
-    if (!progress || !progressFill) return;
-
-    // 显示进度
-    if (content) content.style.opacity = '0.5';
-    progress.style.opacity = '1';
-    progressFill.style.width = '0%';
+    if (!file) return;
+    const fileName = file.name || '测试报告';
+    const activity = beginReportAnalysisActivity(
+        '正在上传测试报告', fileName + ' · 上传完成后将继续进行服务端解析'
+    );
 
     try {
-        const formData = createFormData(AnalysisMode.UPLOAD, { file: file });
-
+        const formData = createFormData(AnalysisMode.UPLOAD, { file });
         const upload = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
-            progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
-        });
+            setReportAnalysisActivityPhase(
+                activity, '正在上传测试报告 ' + Math.round(percent) + '%',
+                fileName + ' · 此百分比仅代表文件传输', percent
+            );
+        }, activity);
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+
         const result = upload.result;
-
-        progressFill.style.width = '100%';
-
         if (result.success) {
-            setTimeout(() => {
-                if (upload.generation !== reportUploadGeneration) return;
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-                displayReportAnalysis(result.data);
-                notifyOperationResult(
-                    '报告分析完成',
-                    `成功分析 ${fileName}`,
-                    'success',
-                    'report-analysis',
-                    { filename: fileName }
-                );
-            }, 300);
+            displayReportAnalysis(result.data);
+            finishReportAnalysisActivity(activity);
+            notifyOperationResult('报告分析完成', '成功分析 ' + fileName,
+                'success', 'report-analysis', { filename: fileName });
         } else {
-            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                filename: fileName
-            });
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-            }, 1000);
+            const reason = result.error || result.message || '未知错误';
+            finishReportAnalysisActivity(activity, reason);
+            notifyOperationResult('报告分析失败', reason, 'error', 'report-analysis',
+                { filename: fileName });
         }
     } catch (error) {
-        if (error?.name === 'AbortError') return;
+        if (!isReportAnalysisActivityCurrent(activity) || error?.name === 'AbortError') return;
         console.error('Report analysis error:', error);
-        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { filename: fileName });
-        if (progress) progress.style.opacity = '0';
-        if (content) content.style.opacity = '1';
+        finishReportAnalysisActivity(activity, error.message || '请求失败');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis',
+            { filename: fileName });
     }
 }
 
-function postFormDataWithProgress(url, formData, onProgress) {
+function postFormDataWithProgress(url, formData, onProgress, activityToken = null) {
     return new Promise((resolve, reject) => {
         const generation = ++reportUploadGeneration;
         if (currentReportUploadRequest && currentReportUploadRequest.readyState !== 4) {
@@ -637,8 +480,16 @@ function postFormDataWithProgress(url, formData, onProgress) {
         };
 
         xhr.upload.addEventListener('progress', (event) => {
-            if (isCurrent() && event.lengthComputable && onProgress) {
+            if (isCurrent() && event.lengthComputable && event.total > 0 && onProgress) {
                 onProgress((event.loaded / event.total) * 100, event.loaded, event.total);
+            }
+        });
+        xhr.upload.addEventListener('load', () => {
+            if (isCurrent() && activityToken !== null) {
+                setReportAnalysisActivityPhase(
+                    activityToken, '服务端正在解析测试报告',
+                    '文件上传完成，正在解压并统计测试结果；大报告可能耗时较长'
+                );
             }
         });
 
@@ -675,73 +526,45 @@ function postFormDataWithProgress(url, formData, onProgress) {
 }
 
 async function handleReportFolder(files) {
-    const uploadZone = $('report-upload-zone');
-    const content = uploadZone?.querySelector('.report-upload-content');
-    const progress = $('report-upload-progress');
-    const progressFill = $('report-progress-fill');
+    if (!files?.length) return;
+    const fileCount = files.length;
+    const activity = beginReportAnalysisActivity(
+        '正在上传报告文件夹',
+        fileCount + ' 个文件 · 上传完成后将继续进行服务端解析'
+    );
 
-    if (!progress || !progressFill) return;
-
-    // 显示进度
-    if (content) content.style.opacity = '0.5';
-    progress.style.opacity = '1';
-    progressFill.style.width = '0%';
-
-    let fileCount = 0;
     try {
         const formData = new FormData();
         formData.append('mode', 'upload');
-
-        // 添加所有文件到 FormData，保持文件夹结构
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-
-            const filename = file.webkitRelativePath || file.name;
-
-            formData.append('files[]', file, filename);
-            fileCount++;
+        for (const file of files) {
+            formData.append('files[]', file, file.webkitRelativePath || file.name);
         }
-
-        debugLog(`Uploading ${fileCount} files...`);
         const upload = await postFormDataWithProgress('/api/reports/analyze', formData, (percent) => {
-            progressFill.style.width = `${Math.min(95, Math.max(5, percent * 0.95))}%`;
-        });
+            setReportAnalysisActivityPhase(
+                activity, '正在上传报告文件夹 ' + Math.round(percent) + '%',
+                fileCount + ' 个文件 · 此百分比仅代表文件传输', percent
+            );
+        }, activity);
+        if (!isReportAnalysisActivityCurrent(activity)) return;
+
         const result = upload.result;
-
-        progressFill.style.width = '100%';
-
         if (result.success) {
-            setTimeout(() => {
-                if (upload.generation !== reportUploadGeneration) return;
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-                displayReportAnalysis(result.data);
-                notifyOperationResult(
-                    '报告分析完成',
-                    `成功分析 ${fileCount} 个文件`,
-                    'success',
-                    'report-analysis',
-                    { file_count: fileCount }
-                );
-            }, 300);
+            displayReportAnalysis(result.data);
+            finishReportAnalysisActivity(activity);
+            notifyOperationResult('报告分析完成', '成功分析 ' + fileCount + ' 个文件',
+                'success', 'report-analysis', { file_count: fileCount });
         } else {
-            notifyOperationResult('报告分析失败', result.error || '未知错误', 'error', 'report-analysis', {
-                file_count: fileCount
-            });
-            if (result.message) {
-                console.error('Analysis error details:', result.message);
-            }
-            setTimeout(() => {
-                if (progress) progress.style.opacity = '0';
-                if (content) content.style.opacity = '1';
-            }, 1000);
+            const reason = result.error || result.message || '未知错误';
+            finishReportAnalysisActivity(activity, reason);
+            notifyOperationResult('报告分析失败', reason, 'error', 'report-analysis',
+                { file_count: fileCount });
         }
     } catch (error) {
-        if (error?.name === 'AbortError') return;
+        if (!isReportAnalysisActivityCurrent(activity) || error?.name === 'AbortError') return;
         console.error('Report folder analysis error:', error);
-        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis', { file_count: fileCount });
-        if (progress) progress.style.opacity = '0';
-        if (content) content.style.opacity = '1';
+        finishReportAnalysisActivity(activity, error.message || '请求失败');
+        notifyOperationResult('报告分析失败', error.message, 'error', 'report-analysis',
+            { file_count: fileCount });
     }
 }
 
@@ -904,8 +727,14 @@ function displayReportAnalysis(data) {
         const context = document.createElement('div');
         context.className = 'report-summary-context';
         const statLabels = new Set(['总用例数：', '通过：', '失败：', '通过率：']);
+        const sizingRoles = {
+            '总用例数：': 'total', '通过：': 'pass', '失败：': 'fail',
+            '通过率：': 'pass-rate', '测试类型：': 'test-type',
+            '套件版本：': 'suite-version', 'Android版本：': 'android-version'
+        };
         [...summaryDiv.children].forEach(field => {
             const label = field.querySelector('.summary-label')?.textContent?.trim();
+            if (sizingRoles[label]) field.classList.add('report-summary-' + sizingRoles[label]);
             if (label === '测试报告：') {
                 field.classList.add('report-summary-report');
                 field.title = field.querySelector('.summary-value')?.textContent || '';
@@ -969,11 +798,8 @@ function displayReportAnalysis(data) {
             testName.className = 'report-failure-case';
             testName.textContent = failure.name || '未知用例';
             testName.title = testName.textContent;
-            const preview = document.createElement('span');
-            preview.className = 'report-failure-preview';
-            preview.textContent = String(failure.reason || '无失败原因').split(/\r?\n/, 1)[0];
-            preview.title = preview.textContent.slice(0, 300);
-            select.append(top, testName, preview);
+            // 左侧仅显示模块、失败状态和用例名；完整原文交给右侧。
+            select.append(top, testName);
             card.appendChild(select);
             fragment.appendChild(card);
         });
@@ -1848,15 +1674,14 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     // 显示/隐藏由 ModalManager（registerDynamic → open）统一接管，
     // 这里不得写 style.display 覆盖其所有权。
 
-
     let html = `
         <div class="modal-content modal-xl tech-dialog tech-dialog--report-ai"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
             <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
                 <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 class="modal-title">报错分析</h2></div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    ${data.source_code_fetched ? '<span style="font-size: 10px; background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
-                    ${data.ai_enabled === false ? '<span style="font-size: 10px; background: var(--warning-color); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span style="font-size: 10px; background: var(--skill-accent); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
-                    ${data.ai_model ? `<span style="font-size: 10px; background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
+                    ${data.source_code_fetched ? '<span class="ai-report-chip" style="background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
+                    ${data.ai_enabled === false ? '<span class="ai-report-chip" style="background: var(--warning-color); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span class="ai-report-chip" style="background: var(--skill-accent); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
+                    ${data.ai_model ? `<span class="ai-report-chip" style="background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
                     <button type="button" class="modal-close" aria-label="关闭" data-click="closeAIAnalysisModal" data-a0="${modalId}">×</button>
                 </div>
             </div>
@@ -1866,9 +1691,9 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     if (data.source_code_fetched && data.source_url) {
         html += `
             <div style="background: color-mix(in srgb, var(--primary-color) 12%, transparent); border-left: 4px solid var(--primary-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
-                <div style="font-size: 13px; font-weight: 600; margin-bottom: 6px; color: var(--primary-light);">💻 源码信息</div>
-                <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${escapeHtml(data.source_file_path || 'N/A')}</div>
-                <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" style="font-size: 11px; color: var(--primary-light); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                <div class="ai-report-copy-text ai-report-body ai-report-source-heading" style="margin-bottom: 6px; color: var(--primary-light);">💻 源码信息</div>
+                <div class="ai-report-copy-text ai-report-compact" style="color: var(--text-secondary); margin-bottom: 6px;">文件路径: ${escapeHtml(data.source_file_path || 'N/A')}</div>
+                <a href="${escapeHtml(safeReportExternalUrl(data.source_url))}" target="_blank" rel="noopener" class="ai-report-source-link" style="color: var(--primary-light); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
                     🔗 查看源码
                     <svg style="width: 12px; height: 12px;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path>
@@ -1878,12 +1703,11 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
         `;
     }
 
-
     if (data.root_cause) {
         html += `
             <div style="background: color-mix(in srgb, var(--danger-color) 12%, transparent); border-left: 4px solid var(--danger-color); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 8px; color: var(--danger-color);">🎯 根本原因</div>
-                <div style="font-size: 13px; color: var(--text-color); line-height: 1.6;">${escapeHtml(data.root_cause)}</div>
+                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 8px; color: var(--danger-color);">🎯 根本原因</div>
+                <div class="ai-report-copy-text ai-report-body" style="color: var(--text-color); line-height: 1.6;">${escapeHtml(data.root_cause)}</div>
             </div>
         `;
     }
@@ -1891,8 +1715,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     if (data.analysis) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📊 详细分析</div>
-                <div style="font-size: 12px; line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${escapeHtml(data.analysis)}</div>
+                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">📊 详细分析</div>
+                <div class="ai-report-copy-text ai-report-small" style="line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${escapeHtml(data.analysis)}</div>
             </div>
         `;
     }
@@ -1900,12 +1724,12 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     if (data.suggestions && data.suggestions.length > 0) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">💡 解决建议</div>
+                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">💡 解决建议</div>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
                     ${data.suggestions.map((suggestion, idx) => `
                         <div style="display: flex; gap: 10px; align-items: flex-start;">
-                            <span style="background: var(--primary-gradient); color: var(--text-on-accent); width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; flex-shrink: 0;">${idx + 1}</span>
-                            <span style="font-size: 12px; line-height: 1.6; color: var(--text-color);">${escapeHtml(suggestion)}</span>
+                            <span class="ai-report-index" style="background: var(--primary-gradient); color: var(--text-on-accent); width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">${idx + 1}</span>
+                            <span class="ai-report-body" style="line-height: 1.6; color: var(--text-color);">${escapeHtml(suggestion)}</span>
                         </div>
                     `).join('')}
                 </div>
@@ -1916,16 +1740,16 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     if (data.related_docs && data.related_docs.length > 0) {
         html += `
             <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="font-size: 14px; font-weight: 600; margin-bottom: 12px;">📚 相关文档</div>
+                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">📚 相关文档</div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                     ${data.related_docs.map(doc => {
                         const docUrl = safeReportExternalUrl(doc.url);
                         if (!docUrl) return '';
                         return `
                         <a href="${escapeHtml(docUrl)}" target="_blank" rel="noopener" style="display: flex; align-items: center; gap: 10px; padding: 10px; background: var(--darker-bg); border-radius: 6px; text-decoration: none; color: var(--text-color); transition: all 0.2s;">
-                            <span style="font-size: 16px;">📖</span>
-                            <span style="font-size: 12px; flex: 1;">${escapeHtml(doc.title)}</span>
-                            <span style="font-size: 10px; color: var(--primary-color);">查看 →</span>
+                            <span class="ai-report-icon" style="">📖</span>
+                            <span class="ai-report-doc-title" style="flex: 1;">${escapeHtml(doc.title)}</span>
+                            <span class="ai-report-link-hint" style="color: var(--primary-color);">查看 →</span>
                         </a>
                     `;
                     }).join('')}
@@ -1976,7 +1800,7 @@ function copyAIAnalysis(modalId) {
         return;
     }
 
-    const textElements = modal.querySelectorAll('div[style*="font-size"]');
+    const textElements = modal.querySelectorAll(".ai-report-copy-text");
     let text = 'CTS测试失败AI分析报告\n';
     text += '=' .repeat(40) + '\n\n';
 

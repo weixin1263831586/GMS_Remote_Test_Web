@@ -11,7 +11,6 @@
     --report-edge: var(--border-color);
     --report-muted: var(--text-secondary);
 }
-#page-report-analysis .page-header-row > .section-title { font-size: 15px; font-weight: 650; }
 #page-report-analysis.page-ui-rework .report-workbench-upload {
     box-sizing: border-box;
     display: flex;
@@ -55,7 +54,6 @@
     min-height: 200px;
     max-height: 290px;
     width: 100%;
-    border: 1px dashed var(--border-light);
     background: var(--report-stage);
 }
 #page-report-analysis #report-upload-zone:hover {
@@ -100,15 +98,15 @@
 }
 #page-report-analysis .analysis-upload-title {
     color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 600;
+    
+    
     overflow: hidden;
     text-overflow: ellipsis;
 }
 #page-report-analysis .analysis-upload-copy .upload-instructions {
     margin: 5px 0 0;
     color: var(--report-muted);
-    font-size: var(--analysis-control-font-size);
+    
     line-height: 1.5;
 }
 #page-report-analysis .report-upload-content > button,
@@ -126,8 +124,8 @@
     border-radius: 6px;
     background: var(--lighter-bg);
     color: var(--text-primary);
-    font-size: var(--analysis-control-font-size);
-    font-weight: 550;
+    
+    
     white-space: nowrap;
     box-shadow: none;
     transform: none;
@@ -145,7 +143,77 @@
     max-width: min(750px, 95%);
 }
 #page-report-analysis #report-upload-zone.upload-empty .analysis-upload-copy { flex: 0 1 auto; width: auto; }
-#page-report-analysis #report-upload-zone.upload-empty .analysis-upload-title { font-size: 15px; }
+/* Inline state is intentionally not a toast: backend parsing of multi-GB CTS
+   archives can continue for minutes after upload reaches 100%. */
+#page-report-analysis #report-upload-zone.report-analysis-busy .report-upload-content,
+#page-report-analysis #report-upload-zone.report-analysis-error .report-upload-content {
+    display: none;
+}
+#page-report-analysis #report-analysis-activity[hidden] { display: none; }
+#page-report-analysis #report-analysis-activity {
+    box-sizing: border-box;
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-width: 0;
+    max-width: 100%;
+}
+#page-report-analysis .report-analysis-spinner {
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    border: 2px solid var(--report-edge);
+    border-top-color: var(--report-accent);
+    border-radius: 50%;
+    animation: report-analysis-spin 900ms linear infinite;
+}
+#page-report-analysis .report-analysis-activity-copy {
+    min-width: 0;
+    max-width: 65ch;
+}
+#page-report-analysis .report-analysis-activity-title {
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-report-analysis .report-analysis-activity-detail {
+    margin-top: 4px;
+    color: var(--report-muted);
+    overflow-wrap: anywhere;
+}
+#page-report-analysis .report-analysis-activity-time {
+    margin-top: 4px;
+    color: var(--report-accent);
+    font-variant-numeric: tabular-nums;
+}
+#page-report-analysis .report-analysis-cancel {
+    flex: 0 0 auto;
+    height: var(--analysis-control-height);
+    min-height: var(--analysis-control-height);
+    padding: 0 10px;
+    margin: 0 0 0 8px;
+    color: var(--text-primary);
+    border: 1px solid var(--border-light);
+    border-radius: 6px;
+    background: var(--lighter-bg);
+}
+#page-report-analysis #report-upload-zone.report-analysis-error .report-analysis-spinner {
+    display: none;
+}
+#page-report-analysis #report-upload-zone.report-analysis-error .report-analysis-activity-time {
+    color: var(--danger-color);
+}
+@keyframes report-analysis-spin { to { transform: rotate(360deg); } }
+@media (max-width: 700px) {
+    #page-report-analysis #report-analysis-activity { flex-wrap: wrap; gap: 8px; }
+    #page-report-analysis .report-analysis-activity-title { white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #page-report-analysis .report-analysis-spinner { animation: none; border-top-color: var(--report-accent); }
+}
 #page-report-analysis .report-active-file {
     box-sizing: border-box;
     flex: 1 1 62%;
@@ -166,8 +234,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 650;
+    
+    
 }
 #page-report-analysis .report-active-status {
     display: flex;
@@ -175,7 +243,7 @@
     gap: 7px;
     margin-top: 6px;
     color: var(--success-color);
-    font-size: 11px;
+    
 }
 #page-report-analysis .report-active-dot {
     width: 7px;
@@ -252,15 +320,15 @@
 #page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div {
     box-sizing: border-box;
     display: inline-flex;
-    flex: 1 0 100px;
+    flex: 0 0 auto;
     align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 100px;
+    justify-content: flex-start;
+    gap: 7px;
+    min-width: 0;
     min-height: 30px;
     height: 30px;
     margin: 0;
-    padding: 0 10px;
+    padding: 0 9px;
     border: 1px solid var(--report-edge);
     border-radius: 5px;
     background: var(--report-stage);
@@ -268,32 +336,44 @@
 #page-report-analysis #report-summary .report-summary-stats > div {
     min-height: 26px;
 }
+/* Stable single-row widths sized for the larger CTS sample values:
+   3,038,784 cases / 3,036,568 pass / 2,216 fail / 99.93%.
+   Keep a small margin beyond those values, not seven equal flex columns.
+   The final filename chip uses any remaining horizontal space. */
+#page-report-analysis #report-summary .report-summary-total { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-pass { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-fail { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-pass-rate { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-test-type { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-suite-version { flex: 0 0 150px; width: 150px; }
+#page-report-analysis #report-summary .report-summary-android-version { flex: 0 0 150px; width: 150px; }
+/* Report filename remains the flexible last chip and never wraps. */
 #page-report-analysis #report-summary .report-summary-context > .report-summary-report {
-    flex: 1.6 0 155px;
-    min-width: 155px;
+    flex: 1 1 360px;
+    min-width: 300px;
     max-width: none;
+}
+#page-report-analysis #report-summary .report-summary-report > .summary-value {
+    flex: 1 1 auto;
 }
 #page-report-analysis #report-summary .summary-label {
     flex: 0 0 auto;
     margin: 0;
     color: var(--report-muted);
-    font-size: 11px;
+    
     white-space: nowrap;
 }
 #page-report-analysis #report-summary .summary-value {
     min-width: 0;
     margin: 0;
     color: var(--text-primary);
-    font-size: 12px;
-    font-weight: 650;
+    
+    
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
 }
-#page-report-analysis #report-summary .report-summary-context .summary-value {
-    font-size: 11px;
-    font-weight: 600;
-}
+
 #page-report-analysis #report-summary .summary-value.pass { color: var(--success-color); }
 #page-report-analysis #report-summary .summary-value.fail { color: var(--danger-color); }
 #page-report-analysis #report-summary .summary-value.rate { color: var(--report-accent); }
@@ -339,8 +419,8 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    font-size: 12px;
-    font-weight: 650;
+    
+    
     color: var(--text-primary);
 }
 #page-report-analysis #report-details { margin: 0; padding: 0 12px 9px; }
@@ -364,7 +444,7 @@
     background: var(--report-stage);
     border: 1px solid var(--report-edge);
     border-radius: 5px;
-    font-size: 10px;
+    
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -378,7 +458,7 @@
     border: 1px solid var(--border-light);
     border-radius: 6px;
     color: var(--text-primary);
-    font-size: 11px;
+    
 }
 #page-report-analysis #report-failures {
     flex: 1 1 0;
@@ -390,7 +470,7 @@
 #page-report-analysis .report-failure-layout {
     flex: 1 1 0;
     display: grid;
-    grid-template-columns: minmax(255px, .35fr) minmax(0, .65fr);
+    grid-template-columns: minmax(205px, 1fr) minmax(0, 4fr);
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -402,7 +482,7 @@
     min-height: 0;
     max-height: none;
     overflow: auto;
-    padding: 10px;
+    padding: 8px;
     background: var(--report-surface);
     border-right: 1px solid var(--report-edge);
     scrollbar-width: thin;
@@ -410,7 +490,7 @@
 }
 #page-report-analysis #report-failure-list > .report-failure-card {
     box-sizing: border-box;
-    margin: 0 0 6px;
+    margin: 0 0 5px;
     padding: 0;
     border: 1px solid var(--report-edge);
     border-left: 2px solid transparent;
@@ -429,10 +509,10 @@
     display: flex;
     flex-direction: column;
     align-items: stretch;
-    gap: 4px;
+    gap: 5px;
     width: 100%;
     min-width: 0;
-    padding: 11px 12px;
+    padding: 9px 10px;
     text-align: left;
     border: 0;
     background: transparent;
@@ -442,30 +522,23 @@
 #page-report-analysis .report-failure-select:hover { background: rgba(255,255,255,.025); }
 #page-report-analysis .report-failure-select:focus-visible { outline: 2px solid var(--report-accent); outline-offset: -2px; }
 #page-report-analysis .report-failure-module {
-    font-size: 12px;
-    font-weight: 650;
+    
+    
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 #page-report-analysis .report-failure-case {
     color: var(--text-primary);
-    font: 11px/1.5 var(--ui-font-mono, Consolas, monospace);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-#page-report-analysis .report-failure-preview {
-    color: var(--report-muted);
-    font: 10px/1.45 var(--ui-font-mono, Consolas, monospace);
+    
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
 #page-report-analysis .report-failure-status {
     color: var(--danger-color);
-    font-size: 10px;
-    font-weight: 600;
+    
+    
     flex: 0 0 auto;
 }
 #page-report-analysis .report-failure-item-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -497,41 +570,17 @@
     border-bottom: 1px solid var(--report-edge);
     background: var(--report-raised);
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 650;
+    
+    
 }
 #page-report-analysis .report-detail-heading .ui-icon { color: var(--report-accent); }
 #page-report-analysis .report-detail-heading > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#page-report-analysis .report-detail-fields {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
-    padding: 10px 13px;
+#page-report-analysis .report-detail-heading > span:first-of-type { flex: 1 1 auto; min-width: 0; }
+#page-report-analysis .report-detail-heading > .report-detail-source {
     flex: 0 0 auto;
+    margin-left: auto;
+    color: var(--report-muted);
 }
-#page-report-analysis .report-detail-field {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    min-width: 0;
-    flex: 1 1 150px;
-    max-width: 390px;
-    padding: 7px 9px;
-    border: 1px solid var(--report-edge);
-    border-radius: 6px;
-    background: var(--report-surface);
-    font-size: 11px;
-}
-#page-report-analysis .report-detail-field > .report-detail-label { color: var(--report-muted); flex: 0 0 auto; }
-#page-report-analysis .report-detail-field > .report-detail-value {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--ui-font-mono, Consolas, monospace);
-}
-#page-report-analysis .report-detail-field.status > .report-detail-value { color: var(--danger-color); }
 #page-report-analysis .report-stack {
     flex: 1 1 auto;
     min-height: 0;
@@ -542,9 +591,9 @@
     scrollbar-width: thin;
     background: #16161d;
     color: #d5d4dd;
-    font: 11px/1.55 var(--ui-font-mono, Consolas, monospace);
+    
 }
-#page-report-analysis .report-stack-line { display: flex; min-width: max-content; min-height: 18px; }
+#page-report-analysis .report-stack-line { display: flex; min-width: 0; min-height: 18px; }
 #page-report-analysis .report-stack-line:hover { background: rgba(255,255,255,.035); }
 #page-report-analysis .report-stack-number {
     display: inline-block;
@@ -557,7 +606,7 @@
     border-right: 1px solid rgba(255,255,255,.055);
     user-select: none;
 }
-#page-report-analysis .report-stack-text { white-space: pre; }
+#page-report-analysis .report-stack-text { flex: 1 1 0; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* Keep selected-case operations visible at the right of the title rail. */
 #page-report-analysis .report-failure-heading { flex-wrap: nowrap; overflow: hidden; }
 #page-report-analysis .report-failure-header-actions {
@@ -599,7 +648,7 @@
     background: transparent;
 }
 @media (max-width: 1120px) {
-    #page-report-analysis .report-failure-layout { grid-template-columns: minmax(235px,.39fr) minmax(0,.61fr); }
+    #page-report-analysis .report-failure-layout { grid-template-columns: minmax(190px, 1fr) minmax(0, 4fr); }
 }
 @media (max-width: 850px) {
     #page-report-analysis .report-workbench-upload { flex-wrap: wrap; }
@@ -614,13 +663,12 @@
     #page-report-analysis .report-upload-content .analysis-upload-copy { flex: 1 1 calc(100% - 50px); }
     #page-report-analysis .report-upload-content > button { margin-left: 46px; }
     #page-report-analysis .report-section-head { flex-wrap: wrap; height: auto; min-height: var(--analysis-pane-heading-height); padding: 6px 10px; }
-    #page-report-analysis .report-detail-fields { gap: 6px; }
     #page-report-analysis .report-failure-heading { flex-wrap: nowrap; padding: 5px 8px; }
     #page-report-analysis .report-failure-header-actions { gap: 4px; }
     #page-report-analysis .report-failure-header-actions .report-failure-action {
         min-width: 0;
         padding: 0 6px;
-        font-size: 10px;
+        
     }
 }
 @media (prefers-reduced-motion: reduce) {

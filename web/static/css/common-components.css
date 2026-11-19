@@ -10,10 +10,10 @@
 .form-row label {
     width: auto;
     color: var(--text-secondary);
-    font-size: 12px;
+    
     text-align: left;
     white-space: nowrap;
-    font-weight: 600;
+    
     line-height: 30px;
     display: flex;
     align-items: center;
@@ -29,7 +29,7 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-control);
     color: var(--text-primary);
-    font-size: 12px;
+    
     transition: var(--transition-normal);
     height: 30px;
     box-sizing: border-box;
@@ -113,7 +113,7 @@ select option {
     border: 2px dashed var(--border-color);
     border-radius: 6px;
     color: var(--text-secondary);
-    font-size: 11px; /* slightly smaller text */
+     /* slightly smaller text */
     transition: var(--transition-normal);
     cursor: pointer;
     min-height: 20px; /* lower minimum height */
@@ -144,8 +144,8 @@ select option {
 .drop-zone-filename {
     margin-top: 2px;
     color: var(--primary-color);
-    font-weight: 500;
-    font-size: 11px;
+    
+    
     word-break: break-all;
     max-height: 28px;
     overflow: hidden;
@@ -159,7 +159,7 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 6px;
     color: #fff;
-    font-size: 12px;
+    
     cursor: pointer;
     height: 30px;
     box-sizing: border-box;
@@ -229,9 +229,9 @@ select option {
 }
 
 .progress-info {
-    font-size: 11px;
+    
     color: var(--text-muted);
-    font-weight: 500;
+    
     position: relative;
     z-index: 2;
     padding-left: 8px;
@@ -244,8 +244,8 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 6px;
     cursor: pointer;
-    font-size: 11px;
-    font-weight: 600;
+    
+    
     background: var(--light-bg);
     color: #fff;
     transition: var(--transition-fast);
@@ -259,17 +259,17 @@ select option {
 }
 
 .btn-xxs {
-    min-height: 26px;
+    min-height: var(--ui-control-height-small);
     min-width: 80px;
 }
 
 .btn-xs {
     padding: 6px 12px;
-    min-height: 28px;
+    min-height: var(--ui-control-height-dense);
 }
 
 .btn-small {
-    min-height: 26px;
+    min-height: var(--ui-control-height-small);
 }
 
 .btn-xxs:hover, .btn-xs:hover, .btn-small:hover {
@@ -283,7 +283,7 @@ select option {
 .firmware-share-actions .btn-xxs {
     min-width: 0;
     padding: 4px 8px;
-    font-size: 11px;
+    
 }
 
 .btn-xxs:active {
@@ -309,7 +309,7 @@ select option {
     background: var(--primary-gradient);
     color: var(--text-on-accent);
     box-shadow: none;
-    font-weight: 700;
+    
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -332,9 +332,9 @@ select option {
 
 .btn-lg {
     padding: 10px 20px;
-    font-size: 14px;
-    border-radius: 6px;
-    min-height: 40px;
+    
+    border-radius: var(--ui-radius-control);
+    min-height: var(--ui-control-height-large);
 }
 
 /* 跨主机报告拷贝：异步加载和状态提示不改变弹框外框高度。宽度走 modal-l。 */
@@ -345,13 +345,13 @@ select option {
 
 #report-copy-modal select.combo-box {
     display: block;
-    height: 36px;
+    height: var(--ui-control-height-dialog-field);
     padding: 6px 10px;
     line-height: 20px;
 }
 
 #report-copy-modal input[type="text"] {
-    height: 36px;
+    height: var(--ui-control-height-dialog-field);
     box-sizing: border-box;
 }
 
@@ -375,14 +375,14 @@ select option {
     border-radius: 4px;
     background: var(--card-bg);
     color: var(--text-primary);
-    font-size: 13px;
+    
 }
 
 .adb-proxy-section-title {
     margin: 0 0 6px;
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 700;
+    
+    
 }
 
 /* 与 .dx-title-row/.dx-section-head/.dx-list-head 同一规则体（合并选择器） */
@@ -410,7 +410,7 @@ select option {
     border-radius: 4px;
     background: var(--card-bg);
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 
 .adb-proxy-assignment {
@@ -436,7 +436,7 @@ select option {
     margin-left: 6px;
     padding: 1px 6px;
     border-radius: 3px;
-    font-size: 11px;
+    
     white-space: nowrap;
     background: var(--bg-color, var(--darker-bg));
     border: 1px solid var(--border-color);
@@ -461,7 +461,7 @@ select option {
     color: var(--text-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-size: 12px;
+    
 }
 
 .routing-status-connected .adb-proxy-assignment-info,
@@ -554,7 +554,7 @@ select option {
     justify-content: space-between;
     gap: 10px;
     color: var(--text-secondary);
-    font-size: 11px;
+    
 }
 
 .device-routing-modal-content .modal-info-text {
@@ -579,7 +579,7 @@ select option {
     border-radius: 4px;
     background: var(--card-bg);
     color: var(--text-primary);
-    font-size: 13px;
+    
     resize: none;
 }
 
@@ -612,8 +612,8 @@ select option {
     border: none;
     background: transparent;
     color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 600;
+    
+    
     cursor: pointer;
     border-bottom: 2px solid transparent;
     transition: color 0.2s, border-color 0.2s;
@@ -636,9 +636,9 @@ select option {
 }
 
 .dcfg-serial {
-    font-size: 13px;
+    
     color: var(--text-secondary);
-    font-family: "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+    
 }
 
 #device-config-modal .dcfg-body {
@@ -689,7 +689,7 @@ select option {
 }
 
 #device-config-modal .dcfg-empty {
-    font-size: 13px;
+    
     color: var(--text-muted);
     text-align: center;
     display: flex;
@@ -710,8 +710,8 @@ select option {
     align-items: center;
     margin-bottom: 8px;
     flex-shrink: 0;
-    min-height: 34px;
-    max-height: 34px;
+    min-height: var(--ui-control-height-dialog);
+    max-height: var(--ui-control-height-dialog);
     overflow: hidden;
 }
 
@@ -723,7 +723,7 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 5px;
     padding: 4px 8px;
-    font-size: 13px;
+    
 }
 
 #device-config-modal .dcfg-toolbar input#dcfg-package {
@@ -751,7 +751,7 @@ select option {
 }
 
 #device-config-modal .dcfg-toolbar .dcfg-label {
-    font-size: 12px;
+    
     color: var(--text-secondary);
     display: flex;
     align-items: center;
@@ -785,7 +785,7 @@ select option {
 }
 
 #device-config-modal .dcfg-stat {
-    font-size: 12px;
+    
     color: var(--text-secondary);
     margin-bottom: 8px;
     display: none;
@@ -821,8 +821,8 @@ select option {
 }
 
 #device-config-modal .dcfg-tab table td .dcell {
-    font-family: monospace;
-    font-size: 12px;
+    
+    
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -834,9 +834,7 @@ select option {
     color: var(--warning-color);
 }
 
-#device-config-modal .dcfg-status {
-    font-weight: 600;
-}
+
 
 #device-config-modal .dcfg-muted {
     color: var(--text-muted);
@@ -846,15 +844,13 @@ select option {
     color: var(--danger-color);
 }
 
-#device-config-modal .dcfg-hint {
-    font-size: 11px;
-}
+
 
 #device-config-modal .dcfg-type-badge {
     padding: 1px 6px;
     border-radius: 8px;
     background: var(--card-bg);
-    font-size: 11px;
+    
 }
 
 /* ===== override tab (RRO config override) ===== */
@@ -868,7 +864,7 @@ select option {
     flex-wrap: wrap;
     gap: 6px;
     padding: 6px 0;
-    font-size: 12px;
+    
     flex-shrink: 0;
 }
 
@@ -898,14 +894,14 @@ select option {
     border-radius: 4px;
     background: rgba(255, 193, 7, 0.12);
     color: #b8860b;
-    font-size: 12px;
+    
 }
 
 #device-config-modal .dcfg-ovr-warn code {
     background: var(--darker-bg, #000);
     padding: 1px 5px;
     border-radius: 3px;
-    font-size: 11px;
+    
 }
 
 #device-config-modal .dcfg-ovr-add {
@@ -930,14 +926,14 @@ select option {
 
 #device-config-modal .dcfg-ovr-add #dcfg-ovr-value-arr {
     flex: 2 1 200px;
-    font-family: "SF Mono", Consolas, Menlo, monospace;
-    font-size: 12px;
+    
+    
 }
 
 #device-config-modal .dcfg-ovr-preview {
     flex-shrink: 0;
     margin-top: 8px;
-    font-size: 12px;
+    
 }
 
 #device-config-modal .dcfg-ovr-pre {
@@ -947,7 +943,7 @@ select option {
     color: var(--text-secondary);
     padding: 8px 10px;
     border-radius: 4px;
-    font-size: 11px;
+    
     white-space: pre-wrap;
     word-break: break-all;
 }
@@ -969,7 +965,7 @@ select option {
 
 .dcfg-minimized-title {
     min-width: 0;
-    font-size: 12px;
+    
     color: var(--text-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -988,7 +984,7 @@ select option {
 .modal-form-row label {
     min-width: 50px;
     color: var(--text-secondary);
-    font-size: 13px;
+    
 }
 
 
@@ -1006,7 +1002,7 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-primary);
-    font-size: 13px;
+    
 }
 
 .modal-form-row input:focus {
@@ -1034,7 +1030,7 @@ select option {
 #config-modal .modal-title {
     margin: 0;
     color: var(--text-on-accent);
-    font-weight: 700;
+    
     letter-spacing: 0.2px;
 }
 
@@ -1078,8 +1074,8 @@ select option {
     border-bottom: 1px solid color-mix(in srgb, var(--accent, var(--primary-color)) 34%, var(--border-color));
     background: color-mix(in srgb, var(--accent, var(--primary-color)) 16%, var(--light-bg));
     color: var(--text-primary);
-    font-size: 13px;
-    font-weight: 700;
+    
+    
     margin: 0 -14px 12px;
     padding: 9px 14px;
 }
@@ -1097,7 +1093,7 @@ select option {
 .config-section > small {
     color: var(--text-secondary);
     display: block;
-    font-size: 12px;
+    
     line-height: 1.6;
     margin-top: 6px;
 }
@@ -1108,7 +1104,7 @@ select option {
     padding: 10px 12px;
     box-shadow: none;
     color: var(--text-secondary);
-    font-size: 12px;
+    
     line-height: 1.6;
 }
 
@@ -1117,7 +1113,7 @@ select option {
     border-radius: 4px;
     background: var(--darker-bg);
     color: var(--primary-light);
-    font-size: 12px;
+    
 }
 /* 各块区分色：左边框 + 标题竖条同一 accent，扫一眼即知所处区块。 */
 .config-section-accent-deploy { --accent: var(--primary-color); }
@@ -1146,7 +1142,7 @@ select option {
     border-left: 3px solid var(--warning-color);
     border-radius: 4px;
     color: var(--warning-color);
-    font-size: 12px;
+    
     margin-top: 10px;
     overflow-wrap: anywhere;
 }
@@ -1158,7 +1154,7 @@ select option {
     border-left: 3px solid var(--border-light);
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 12px;
+    
     margin-top: 10px;
     overflow-wrap: anywhere;
 }
@@ -1181,8 +1177,8 @@ select option {
     background: rgba(127, 127, 127, 0.08);
     border-radius: 4px;
     color: var(--text-primary);
-    font-size: 12px;
-    font-family: monospace;
+    
+    
     overflow-wrap: anywhere;
 }
 
@@ -1195,7 +1191,7 @@ select option {
 .firmware-file-meta {
     min-height: 18px;
     color: var(--text-secondary);
-    font-size: 12px;
+    
     margin-top: 6px;
     white-space: nowrap;
     overflow: hidden;
@@ -1215,8 +1211,8 @@ select option {
 }
 
 .modal-fieldset-title {
-    font-size: 12px;
-    font-weight: 600;
+    
+    
     letter-spacing: 0.5px;
     color: var(--text-secondary);
     margin-bottom: 8px;
@@ -1237,7 +1233,7 @@ select option {
     border-left: 3px solid var(--primary-color);
     border-radius: 4px;
     color: var(--primary-color);
-    font-size: 16px;
+    
     margin-top: 10px;
     overflow-wrap: anywhere;
 }
@@ -1267,8 +1263,8 @@ select option {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-primary);
-    font-size: 13px;
-    font-family: monospace;
+    
+    
     margin-bottom: 10px;
     word-break: break-all;
 }
@@ -1288,8 +1284,8 @@ select option {
     align-items: center;
     padding: 6px 10px;
     border-bottom: 1px solid var(--border-color);
-    font-size: 12px;
-    font-weight: 600;
+    
+    
     color: var(--text-secondary);
 }
 
@@ -1302,7 +1298,7 @@ select option {
     border-radius: 4px;
     transition: background 0.2s;
     color: var(--text-primary);
-    font-size: 13px;
+    
 }
 
 .file-browser-item:hover {
@@ -1314,9 +1310,7 @@ select option {
     color: var(--text-primary);
 }
 
-.file-browser-icon {
-    font-size: 16px;
-}
+
 
 .file-browser-name {
     min-width: 0;
@@ -1328,7 +1322,7 @@ select option {
 
 .file-browser-meta {
     color: var(--text-muted);
-    font-size: 11px;
+    
     white-space: nowrap;
 }
 
@@ -1339,7 +1333,7 @@ select option {
     background: var(--light-bg);
     border-radius: 4px;
     margin-bottom: 10px;
-    font-size: 12px;
+    
 }
 
 .file-browser-breadcrumb-item {
@@ -1370,8 +1364,8 @@ select option {
     visibility: hidden;
     transition: var(--transition-normal);
     z-index: 13000;
-    font-size: 14px;
-    font-weight: 600;
+    
+    
     min-width: 320px;
     max-width: 520px;
     text-align: center;
@@ -1442,8 +1436,8 @@ select option {
     justify-content: space-between;
     padding: 10px 12px;
     border-bottom: 1px solid var(--border-color);
-    font-size: 14px;
-    font-weight: 700;
+    
+    
 }
 
 .notification-close {
@@ -1454,7 +1448,7 @@ select option {
     background: transparent;
     color: var(--text-secondary);
     cursor: pointer;
-    font-size: 20px;
+    
     line-height: 1;
 }
 
@@ -1497,7 +1491,7 @@ select option {
 }
 .notification-report-focus-label {
     color: var(--text-secondary);
-    font-size: 12px;
+    
     margin-right: 10px;
 }
 
@@ -1518,8 +1512,8 @@ select option {
 .notification-item.error .notification-level-dot { background: var(--danger-color); }
 
 .notification-title {
-    font-size: 12px;
-    font-weight: 700;
+    
+    
     color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1528,7 +1522,7 @@ select option {
 
 .notification-message {
     margin-top: 3px;
-    font-size: 11px;
+    
     color: var(--text-secondary);
     line-height: 1.4;
     word-break: break-word;
@@ -1536,7 +1530,7 @@ select option {
 
 .notification-time {
     margin-top: 5px;
-    font-size: 10px;
+    
     color: var(--text-muted);
 }
 
@@ -1544,7 +1538,7 @@ select option {
     padding: 28px 12px;
     text-align: center;
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 
 /* ==================== Scrollbar ==================== */

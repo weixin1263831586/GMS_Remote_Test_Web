@@ -1,0 +1,291 @@
+/* web/static/css/other-workspaces.css */
+html[data-ui-type-root="shell"] .page-ui-rework .page-header-row > .section-title { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] .page-ui-rework :is(.pane-title, .suite-browser-title, .report-section-head) { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .page-ui-rework .workbench-stat .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .page-ui-rework .workbench-stat .page-stat-label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) thead th { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .page-ui-rework :is(.table-placeholder, .suite-empty) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) .btn-xxs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test.page-ui-rework .test-btn-frame #test-toggle-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test.page-ui-rework .log-tab-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test.page-ui-rework .log-text { font: var(--ui-type-size-small)/1.65 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-desktop.page-ui-rework .host-workspace-title-state,
+html[data-ui-type-root="shell"] #page-terminal.page-ui-rework .host-workspace-title-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-terminal [data-terminal-pane-mode-label] { font-size: var(--ui-type-size-small); white-space: nowrap; }
+html[data-ui-type-root="shell"] #page-security-audit .audit-stat-card .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-stat-card .page-stat-label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-stat-note { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-panel-heading strong,
+html[data-ui-type-root="shell"] #page-security-audit .audit-side-heading strong { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-panel-caption { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-log-table thead th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit.page-ui-rework .audit-log-table tbody td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-operation-cell { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-source-badge,
+html[data-ui-type-root="shell"] #page-security-audit .audit-status-badge { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-donut-center strong { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-donut-center span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-legend-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-legend-row strong { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-side-footnote { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-integrity-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-integrity-summary { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-integrity-count { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-notes-list li { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-filters > label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-count { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-table thead th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit.page-ui-rework .audit-mail-table tbody td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-subject { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-state { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-recent-value.page-stat-value { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-facts > div { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-facts strong { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-security-audit .audit-mail-table-wrap .table-load-more { font-size: var(--ui-type-size-small); }
+@media (max-width: 1350px) { html[data-ui-type-root="shell"] #page-security-audit .audit-donut-center strong { font-size: var(--ui-type-size-page); } }
+@media (max-width: 560px) { html[data-ui-type-root="shell"] #page-security-audit .audit-stat-card .page-stat-value { font-size: var(--ui-type-size-display-medium); } }
+
+/* web/static/css/apk-workbench.css */
+html[data-ui-type-root="shell"] #page-apk-analysis .analysis-upload-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-content .upload-instructions { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-zone.upload-empty .analysis-upload-title { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-content > button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-apk-analysis #apk-analysis-state { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-status-actions > .btn-xs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis .filter-btn[data-apk-tab] { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-search { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-tab-actions .apk-search-container > button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-source-tree-heading { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-tree-item { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-tree-item.dir { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-tree-item.dir::before { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-tree-item.file::before { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-file-tab { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-path { font: var(--ui-type-size-small)/16px var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-content { font: var(--ui-type-size-small)/1.65 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-source-placeholder { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-apk-analysis .apk-source-placeholder strong { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/report-workbench.css */
+html[data-ui-type-root="shell"] #page-report-analysis .analysis-upload-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis .analysis-upload-copy .upload-instructions { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-upload-content > button,
+html[data-ui-type-root="shell"] #page-report-analysis .report-overview-actions > button,
+html[data-ui-type-root="shell"] #page-report-analysis .report-failure-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-upload-zone.upload-empty .analysis-upload-title { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-active-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-active-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-summary .summary-label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-summary .summary-value { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-summary .report-summary-context .summary-value { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-failures-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-details .report-provenance-chip { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-report-analysis #report-details .report-provenance-link { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-failure-module { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-failure-case { font: var(--ui-type-size-compact)/1.5 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-failure-preview { font: var(--ui-type-size-compact)/1.45 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-failure-status { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-detail-heading { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-detail-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-detail-field > .report-detail-value { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-report-analysis .report-stack { font: var(--ui-type-size-compact)/1.55 var(--ui-type-font-mono); }
+@media (max-width: 600px) { html[data-ui-type-root="shell"] #page-report-analysis .report-failure-header-actions .report-failure-action { font-size: var(--ui-type-size-small); } }
+
+/* web/static/css/agent-access.css */
+html[data-ui-type-root="shell"] .agent-access-card-heading h3,
+html[data-ui-type-root="shell"] .agent-access-list-label h3 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-access-card-heading p { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-field { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-field > span:first-child { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-access-field em { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] .agent-access-field small { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-access-input-suffix b { font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] .agent-access-scope-fieldset > legend { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-access-details > summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-details > summary span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-scope-group h4 { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-access-scope-option strong { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] .agent-access-scope-option small { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-form-hint { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #agent-access-code-result { font-size: var(--ui-type-size-display-medium); }
+html[data-ui-type-root="shell"] #agent-access-code-expiry { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-access-code-next { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-list-label > span { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-access-table th { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-access-table td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-token-cell-name strong { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-token-id,
+html[data-ui-type-root="shell"] .agent-token-secondary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-token-cell-acl .agent-token-secondary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-token-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .agent-token-scope-link { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-token-scope-list { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-access-token-scope-list code { font-size: var(--ui-type-size-compact); }
+@media (max-width: 600px) { html[data-ui-type-root="shell"] #agent-access-code-result { font-size: var(--ui-type-size-page); } }
+html[data-ui-type-root="shell"] .agent-access-status-badge { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-sdk-path-empty { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-sdk-path-kind { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-sdk-path-value { font-size: var(--ui-type-size-small); }
+
+/* web/static/css/aoa-workbench.css */
+html[data-ui-type-root="shell"] .aoa-workbench-title { font-size: var(--ui-type-size-section); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] .aoa-muted { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .aoa-status-pill { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .aoa-column-heading strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-column-heading > div:first-child > span { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #aoa-panel button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #aoa-panel input[type="text"],
+html[data-ui-type-root="shell"] #aoa-panel input[type="number"],
+html[data-ui-type-root="shell"] #aoa-panel select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-column label,
+html[data-ui-type-root="shell"] .aoa-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-screen-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .aoa-screen-empty { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .aoa-screen-empty strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-screen-empty .aoa-screen-hint { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-semantic-tools summary { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .aoa-subheading { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] .aoa-profile-summary,
+html[data-ui-type-root="shell"] .aoa-result,
+html[data-ui-type-root="shell"] .aoa-calibration-status { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .aoa-command-list-header,
+html[data-ui-type-root="shell"] .aoa-command-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .aoa-command-list-header { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #aoa-panel .aoa-debug-cluster .aoa-debug-option span { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] #aoa-panel .aoa-debug-cluster #aoa-debug-end { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .aoa-command-list code { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .aoa-command-index { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #aoa-panel .aoa-command-row button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .aoa-command-empty { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .aoa-command-state { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .aoa-command-state[data-state="running"] { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .aoa-command-editor { font: var(--ui-type-size-small) var(--ui-type-font-mono); }
+
+/* web/static/css/device-inventory.css */
+html[data-ui-type-root="shell"] .inventory-stat .page-stat-label { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .inventory-stat .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .inventory-stat small { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .inventory-filters label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .inventory-filters :is(input, select),
+html[data-ui-type-root="shell"] .inventory-footer select { font-family: inherit; font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .inventory-selection-count { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #devices-main-view .device-management-table .ui-name { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #devices-main-view .device-management-table .ui-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #devices-main-view .device-management-table [data-device-field="model"] .ui-name { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] #devices-main-view .device-management-table [data-device-field="soc"] .ui-name { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="shell"] #devices-main-view .device-sort { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #devices-main-view .device-row-actions .btn-xxs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .inventory-footer { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .inventory-footer select { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/workspace-panels.css */
+html[data-ui-type-root="shell"] .agent-conversation-heading strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-sessions-heading strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-session-search .entry-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-session-empty { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-session-main { font: inherit; }
+html[data-ui-type-root="shell"] .agent-session-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-session-meta { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-role { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #agent-input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-step-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .agent-step-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .agent-step-time { font: var(--ui-type-size-compact)/1.5 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #aoa-panel .aoa-column-heading strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #aoa-panel .aoa-command-table th { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] .aoa-operation-heading > strong { font-size: var(--ui-type-size-small); }
+
+/* web/static/css/shell-extra.css */
+html[data-ui-type-root="shell"] .snackbar-icon { font-size: var(--ui-type-size-display); }
+html[data-ui-type-root="shell"] .snackbar-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .snackbar-message { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .snackbar-close { font-size: var(--ui-type-size-page); }
+
+/* web/static/css/auth-dialog.css */
+html[data-ui-type-root="shell"] #auth-gate .auth-field > label { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #auth-gate .auth-help { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #auth-gate .auth-message { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #auth-gate #auth-ssh-warning-link { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #auth-sshd-guide-content { font: var(--ui-type-size-small)/1.6 var(--ui-type-font-mono); }
+
+
+/* API catalog typography moved from other-workspaces.css. */
+html[data-ui-type-root="shell"] #page-api-docs .api-stat .page-stat-value { font-size: var(--ui-type-size-stat); }
+html[data-ui-type-root="shell"] #page-api-docs .api-stat-hint { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-api-docs #api-search-input.entry-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-api-docs .api-search-toolbar .api-action,
+html[data-ui-type-root="shell"] #page-api-docs .api-category-toolbar .filter-btn { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs .api-panel-title strong,
+html[data-ui-type-root="shell"] #page-api-docs .api-side-heading strong { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-api-docs .api-panel-count { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs .api-docs-table thead th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs.page-ui-rework .api-docs-table tbody td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs .api-path { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-api-docs .api-title { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-api-docs .api-method { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-api-docs .api-curl-pre { font: var(--ui-type-size-compact)/1.4 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-api-docs .api-detail-title { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-api-docs .api-detail pre { font: var(--ui-type-size-compact)/1.5 var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #page-api-docs .api-page-footer { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs .api-page-footer select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-api-docs .api-donut-center strong { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-api-docs .api-donut-center span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #page-api-docs .api-method-legend>div { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-api-docs .api-method-legend strong { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] #page-api-docs .api-side-footnote { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-api-docs .api-notes li { font-size: var(--ui-type-size-body); }
+
+/* Newly added suite-workspace text rules (centralized). */
+html[data-ui-type-root="shell"] #page-test-suites .suite-download-label strong { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-download-label small { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-test-suites :is(#btn-download-suite, #btn-extract-suite) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-sidebar-heading { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-browser-count { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-suite-name { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-type-badge { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-sidebar-footer { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-header-type { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-browser-title { font-size: var(--ui-type-size-card) !important; }
+html[data-ui-type-root="shell"] #page-test-suites .suite-browser-path { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-browser-actions .btn-xs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-table-head { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites.page-ui-rework .suite-file-row { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-icon { font-size: var(--ui-type-size-dialog); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-name { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-description,
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-size { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-type { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-file-actions .btn-xs { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-test-suites .suite-browser-footer { font-size: var(--ui-type-size-small); }
+
+/* Reports table is rendered by JavaScript: no inline typography overrides. */
+html[data-ui-type-root="shell"] #reports-table-body td { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #reports-table-body .reports-mono-cell { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #reports-table-body .reports-type-cell { font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] #reports-table-body .reports-metric-cell { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #reports-load-more-wrapper.reports-page-count { font-size: var(--ui-type-size-small); }
+
+/* JS-rendered user/device/suite tables: fonts live here, not in row HTML. */
+html[data-ui-type-root="shell"] #users-table-body td,
+html[data-ui-type-root="shell"] #test-results-tbody td,
+html[data-ui-type-root="shell"] #device-config-modal table :is(th,td) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #users-table-body td:is(:nth-child(1),:nth-child(2),:nth-child(4),:nth-child(5)) { font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] #users-table-body td:nth-child(3),
+html[data-ui-type-root="shell"] #users-table-body td:nth-child(6) span:first-child { font-weight: var(--ui-type-weight-semibold); }
+
+/* Code-shaped identifiers in dynamic dialogs use only the shared mono token. */
+html[data-ui-type-root="shell"] .ui-mono { font-family: var(--ui-type-font-mono); }
+
+/* Dynamic API parameter descriptions are body text, not tiny chart legends. */
+html[data-ui-type-root="shell"] #page-api-docs .api-param-row { font-size: var(--ui-type-size-body); }
+
+/* Dynamically rendered audit evidence uses standard title and code roles. */
+html[data-ui-type-root="shell"] .audit-detail-block-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .audit-detail-block-code { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+
+/* Knowledge cards use semantic heading/body roles regardless of JS rendering. */
+html[data-ui-type-root="shell"] .kb-doc-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .kb-doc-summary { font-size: var(--ui-type-size-body); }

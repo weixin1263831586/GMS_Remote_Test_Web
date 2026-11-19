@@ -55,7 +55,9 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
                         return { left:x+3, right:x+w-3, top:y+3, bottom:y+h-3 };
                     });
                     const paths = [...svg.querySelectorAll('.arch-scene-path')];
-                    if (!paths.some(p => p.getAttribute('d').includes(' Q'))) return false;
+                    // Straight-only routes are intentional; verify segments do
+                    // not intersect nodes without mandating decorative curves.
+                    if (!paths.length) return false;
                     return paths.every(path => {
                         const length = path.getTotalLength();
                         for (let distance=0; distance<=length; distance+=6) {

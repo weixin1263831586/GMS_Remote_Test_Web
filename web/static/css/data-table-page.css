@@ -1,26 +1,27 @@
 /* 数据表格页统一模板（gms-update-monitor 与 mainline-known-issues 共用）；
    页面各自的 inline <style> 只保留特有规则（toast、single-filter、列宽）。 */
-body { margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--text); background:var(--page-background); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+body { margin:0;  color:var(--text); background:var(--page-background); display:flex; flex-direction:column; height:100vh; overflow:hidden; }
 header { padding:12px 24px 10px; background:var(--card); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:14px; align-items:center; flex-wrap:wrap; }
 /* 标题行高 32px 与动作按钮等高：有无动作区的页面头部总高一致，
    底部预留 240px 常量在两页产生相同间隙。 */
-h1 { margin:0 12px 0 0; font-size:17px; line-height:32px; white-space:nowrap; }
-.summary { color:var(--muted); font-size:12px; line-height:1.7; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+h1 { margin:0 12px 0 0;  line-height:32px; white-space:nowrap; }
+.summary { color:var(--muted);  line-height:1.7; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .actions { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
 main { padding:14px 24px 56px; flex:1; overflow:hidden; }
 .filters { display:grid; grid-template-columns:minmax(260px,1fr) 150px 120px 120px 100px; gap:8px; margin-bottom:12px; }
 .tabs-row { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:12px; min-width:0; }
 .tabs { display:flex; gap:6px; flex-wrap:wrap; }
-.tabs button { background:var(--head); font-size:14px; }
+.tabs button { background:var(--head);  }
 .tabs button.active { background:var(--primary); }
-.section-badge { flex:1; min-width:0; text-align:right; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-button { height:32px; border:0; border-radius:6px; padding:0 11px; background:var(--primary-gradient); color:#fff; cursor:pointer; font-family:inherit; font-size:14px; font-weight:600; }
-input, select { height:32px; border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text); font-family:inherit; font-size:14px; }
+.section-badge { flex:1; min-width:0; text-align:right;  color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+button { height:var(--ui-control-height); border:0; border-radius:6px; padding:0 11px; background:var(--primary-gradient); color:#fff; cursor:pointer;    }
+input, select { height:var(--ui-control-height); border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text);   }
 input::placeholder { color:var(--muted); }
 select { appearance:auto; }
-table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card); border:1px solid var(--border); font-size:12px; table-layout:fixed; }
+table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card); border:1px solid var(--border);  table-layout:fixed; }
 th, td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; vertical-align:top; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-th { background:var(--head); }
+th { background:var(--head); height:var(--ui-table-header-height); }
+tbody td:not(.wrap) { height:var(--ui-table-row-height); }
 td.wrap { white-space:normal; overflow:visible; text-overflow:unset; }
 /* 表头/表体拆分布局：滚动只发生在表体，页签/徽标不会被表格内容遮挡。 */
 .table-wrap { overflow:visible; }
@@ -29,14 +30,14 @@ td.wrap { white-space:normal; overflow:visible; text-overflow:unset; }
 .table-split .table-head-table th { border-bottom:1px solid var(--border); }
 .table-split .table-scroll { max-height: calc(100vh - 240px); overflow:auto; }
 .table-split .table-body-table { border:0; }
-.group-row td { background:var(--head); font-weight:600; color:var(--primary-light); }
+.group-row td { background:var(--head);  color:var(--primary-light); }
 .muted { color:var(--muted); }
 a { color:var(--primary-light); text-decoration:none; }
 a:hover { text-decoration:underline; }
-.pager { position:fixed; bottom:8px; right:12px; display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:3px 6px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:100; font-size:11px; }
-.pager button { width:auto; height:22px; font-size:11px; padding:0 8px; font-weight:500; border-radius:4px; }
-.pager .muted { color:var(--muted); font-size:11px; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; }
+.pager { position:fixed; bottom:8px; right:12px; display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:3px 6px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:100;  }
+.pager button { width:auto; height:22px;  padding:0 8px;  border-radius:4px; }
+.pager .muted { color:var(--muted);  }
+code {   }
 @media (max-width: 900px) { .filters { grid-template-columns: 1fr 1fr; } }
 /* 手机宽度（CI E2E 390px 实测 mainline-known-issues / gms-update-monitor
    筛选控件溢出）：公共两列降为单列，控件不再撑破视口。min-width:0

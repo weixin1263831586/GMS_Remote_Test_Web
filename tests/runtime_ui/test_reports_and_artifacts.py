@@ -254,6 +254,244 @@ class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_report_analysis_keeps_status_visible_while_server_is_parsing(self):
+        page = self.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            self.goto_shell(page)
+            states = page.evaluate("""async () => {
+                const OriginalXHR = window.XMLHttpRequest;
+                const requests = [];
+                class FakeXHR {
+                    constructor() {
+                        this.readyState = 0;
+                        this.status = 200;
+                        this.responseText = '';
+                        this.listeners = {};
+                        this.uploadListeners = {};
+                        this.upload = {addEventListener: (type, fn) => {
+                            this.uploadListeners[type] = fn;
+                        }};
+                        requests.push(this);
+                    }
+                    open() { this.readyState = 1; }
+                    send() { this.readyState = 2; }
+                    addEventListener(type, fn) { this.listeners[type] = fn; }
+                    abort() { this.aborted = true; this.listeners.abort?.(); }
+                    complete(response) {
+                        this.readyState = 4;
+                        this.responseText = JSON.stringify(response);
+                        this.listeners.load?.();
+                    }
+                }
+                const snapshot = () => {
+                    const panel = document.getElementById('report-analysis-activity');
+                    const zone = document.getElementById('report-upload-zone');
+                    return {
+                        visible: !panel.hidden && getComputedStyle(panel).display !== 'none',
+                        title: document.getElementById('report-analysis-activity-title').textContent,
+                        detail: document.getElementById('report-analysis-activity-detail').textContent,
+                        time: document.getElementById('report-analysis-activity-time').textContent,
+                        busy: zone.classList.contains('report-analysis-busy'),
+                        failed: zone.classList.contains('report-analysis-error'),
+                        resultVisible: document.getElementById('report-analysis-result').style.display === 'flex'
+                    };
+                };
+                window.XMLHttpRequest = FakeXHR;
+                try {
+                    const first = handleReportFile(new File(['large CTS'], 'large-cts.zip'));
+                    const uploading = snapshot();
+                    requests[0].uploadListeners.progress?.({
+                        lengthComputable: true, loaded: 60, total: 100
+                    });
+                    const progress = snapshot();
+                    requests[0].uploadListeners.load?.();
+                    reportAnalysisActivityStarted = Date.now() - 66000;
+                    updateReportAnalysisElapsed();
+                    const parsing = snapshot();
+                    requests[0].complete({
+                        success: true, data: {
+                            report_name: 'large-cts.zip',
+                            summary: {total: 3038784, pass: 3036568, fail: 2216,
+                                pass_rate: '99.93%'},
+                            details: {test_type: 'CTS', suite_version: '17_r2'},
+                            failures: []
+                        }
+                    });
+                    await first;
+                    const done = snapshot();
+
+                    const failed = handleReportFile(new File(['invalid'], 'invalid.zip'));
+                    requests[1].uploadListeners.load?.();
+                    requests[1].complete({success: false, error: '文件不是有效测试报告'});
+                    await failed;
+                    const errorState = snapshot();
+
+                    const pending = handleReportFile(new File(['pending'], 'pending.zip'));
+                    requests[2].uploadListeners.load?.();
+                    resetReportAnalysis();
+                    requests[2].complete({success: true, data: {
+                        report_name: 'stale.zip', summary: {total: 1}, failures: []
+                    }});
+                    await pending;
+                    const cancelled = snapshot();
+                    return {uploading, progress, parsing, done, errorState, cancelled,
+                        cancelledRequest: requests[2].aborted === true,
+                        currentReportName: window.currentReportName};
+                } finally {
+                    window.XMLHttpRequest = OriginalXHR;
+                    resetReportAnalysis();
+                }
+            }""")
+            self.assertTrue(states["uploading"]["visible"], states)
+            self.assertTrue(states["uploading"]["busy"], states)
+            self.assertIn("上传", states["uploading"]["title"])
+            self.assertIn("60%", states["progress"]["title"])
+            self.assertTrue(states["parsing"]["visible"], states)
+            self.assertTrue(states["parsing"]["busy"], states)
+            self.assertIn("服务端正在解析", states["parsing"]["title"])
+            self.assertIn("01:06", states["parsing"]["time"])
+            self.assertFalse(states["done"]["visible"], states)
+            self.assertTrue(states["done"]["resultVisible"], states)
+            self.assertTrue(states["errorState"]["visible"], states)
+            self.assertTrue(states["errorState"]["failed"], states)
+            self.assertIn("文件不是有效测试报告", states["errorState"]["detail"])
+            self.assertFalse(states["cancelled"]["visible"], states)
+            self.assertTrue(states["cancelledRequest"], states)
+            self.assertEqual(states["currentReportName"], "")
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
+    def test_saved_report_entry_shows_persistent_status_until_result(self):
+        page = self.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""async () => {
+                const originalFetch = window.fetch;
+                const requests = [];
+                window.fetch = (url, opts) => {
+                    if (String(url) !== '/api/reports/analyze') {
+                        return originalFetch(url, opts);
+                    }
+                    return new Promise((resolve, reject) => {
+                        requests.push({resolve, signal: opts.signal});
+                        opts.signal.addEventListener('abort', () =>
+                            reject(new DOMException('cancelled', 'AbortError')));
+                    });
+                };
+                const status = () => ({
+                    visible: !document.getElementById('report-analysis-activity').hidden,
+                    text: document.getElementById('report-analysis-activity-title').textContent,
+                    busy: document.getElementById('report-upload-zone')
+                        .classList.contains('report-analysis-busy'),
+                    name: window.currentReportName || ''
+                });
+                try {
+                    await analyzeReport('2026.10.14_15.28.47.806_5426');
+                    const immediately = status();
+                    await new Promise(resolve => setTimeout(resolve, 370));
+                    const waiting = status();
+                    requests[0].resolve({
+                        ok: true,
+                        json: async () => ({success: true, data: {
+                            report_name: '2026.10.14_15.28.47.806_5426',
+                            summary: {total: 3038784, pass: 3036568, fail: 2216,
+                                pass_rate: '99.93%'},
+                            details: {suite_version: '17_r2'}, failures: []
+                        }})
+                    });
+                    await new Promise(resolve => setTimeout(resolve, 80));
+                    const finished = status();
+
+                    await analyzeReport('2026.10.15_15.28.47.806_5426');
+                    await new Promise(resolve => setTimeout(resolve, 370));
+                    const beforeCancel = status();
+                    resetReportAnalysis();
+                    const afterCancel = status();
+                    return {
+                        immediately, waiting, finished, beforeCancel, afterCancel,
+                        requests: requests.length,
+                        cancelled: requests[1].signal.aborted
+                    };
+                } finally {
+                    window.fetch = originalFetch;
+                    resetReportAnalysis();
+                }
+            }""")
+            self.assertTrue(result["immediately"]["visible"], result)
+            self.assertTrue(result["waiting"]["visible"], result)
+            self.assertTrue(result["waiting"]["busy"], result)
+            self.assertIn("已保存", result["waiting"]["text"])
+            self.assertEqual(result["finished"]["name"], "2026.10.14_15.28.47.806_5426")
+            self.assertFalse(result["finished"]["visible"], result)
+            self.assertTrue(result["beforeCancel"]["visible"], result)
+            self.assertFalse(result["afterCancel"]["visible"], result)
+            self.assertTrue(result["cancelled"], result)
+            self.assertEqual(result["requests"], 2)
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
+    def test_suite_log_entry_does_not_leave_empty_analysis_page(self):
+        page = self.new_page()
+        errors = []
+        page.on("pageerror", lambda error: errors.append(str(error)))
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""async () => {
+                const originalFetch = window.fetch;
+                const oldPath = state.suiteBrowser.selectedSuitePath;
+                const requests = [];
+                state.suiteBrowser.selectedSuitePath = 'fixture-cts-suite';
+                window.fetch = (url, opts) => {
+                    if (String(url) !== '/api/reports/analyze-log-dir') {
+                        return originalFetch(url, opts);
+                    }
+                    return new Promise((resolve, reject) => {
+                        requests.push({resolve, signal: opts.signal});
+                        opts.signal.addEventListener('abort', () =>
+                            reject(new DOMException('cancelled', 'AbortError')));
+                    });
+                };
+                try {
+                    await analyzeSuiteLogDir('logs/2026.10.14_fixture');
+                    const immediately = !document.getElementById('report-analysis-activity').hidden;
+                    await new Promise(resolve => setTimeout(resolve, 370));
+                    const waiting = {
+                        visible: !document.getElementById('report-analysis-activity').hidden,
+                        title: document.getElementById('report-analysis-activity-title').textContent
+                    };
+                    requests[0].resolve({ok: false, json: async () => ({
+                        success: false, error: '目录没有可分析的数据'
+                    })});
+                    await new Promise(resolve => setTimeout(resolve, 80));
+                    const failed = {
+                        visible: !document.getElementById('report-analysis-activity').hidden,
+                        error: document.getElementById('report-analysis-activity-detail').textContent,
+                        className: document.getElementById('report-upload-zone').className
+                    };
+                    return {immediately, waiting, failed, requests: requests.length};
+                } finally {
+                    window.fetch = originalFetch;
+                    state.suiteBrowser.selectedSuitePath = oldPath;
+                    resetReportAnalysis();
+                }
+            }""")
+            self.assertTrue(result["immediately"], result)
+            self.assertTrue(result["waiting"]["visible"], result)
+            self.assertIn("服务端正在解析", result["waiting"]["title"])
+            self.assertTrue(result["failed"]["visible"], result)
+            self.assertIn("目录没有可分析的数据", result["failed"]["error"])
+            self.assertIn("report-analysis-error", result["failed"]["className"])
+            self.assertEqual(result["requests"], 1)
+            self.assert_no_page_errors(errors)
+        finally:
+            page.close()
+
     def test_chunk_upload_retries_and_preserves_actionable_errors(self):
         page = self.new_page()
         page_errors = []

@@ -37,7 +37,8 @@ LAYOUT = """content => {
     frame: !!content.querySelector('.tech-frame'),
     typographyMismatches: [...content.querySelectorAll('.modal-title,label,input,select,textarea,button:not(.modal-close)')]
       .filter(visible).flatMap(el => {
-        const wanted = el.classList.contains('modal-title') ? '16px' : '13px';
+        const wanted = el.classList.contains('modal-title') ? '16px'
+          : el.tagName === 'BUTTON' ? '12px' : '13px';
         const actual = getComputedStyle(el).fontSize;
         return actual === wanted ? [] : [{element: el.id || el.tagName, wanted, actual}];
       }),
@@ -187,7 +188,16 @@ class ModalRedesignTests(RuntimeUiHarness):
                         const rail = box(header);
                         const min = box(header.querySelector('.test-results-minimize'));
                         const close = box(header.querySelector('.test-results-header-actions > .modal-close'));
+                        const svg = header.querySelector(':scope > .tech-header-rule');
+                        const ruleRect = box(svg);
+                        const line = svg.querySelector('path').getBBox();
+                        const lineEnd = ruleRect.left + (line.x + line.width) * ruleRect.width / 1000;
                         return {
+                            minimizeWidth: min.width,
+                            minimizeHeight: min.height,
+                            closeWidth: close.width,
+                            closeHeight: close.height,
+                            decorationClearance: min.left - lineEnd,
                             topInset: min.top - outer.top,
                             bottomInset: rail.bottom - min.bottom,
                             rightInset: outer.right - close.right,
@@ -201,6 +211,11 @@ class ModalRedesignTests(RuntimeUiHarness):
                     self.assertGreaterEqual(bounds["topInset"], 10, bounds)
                     self.assertGreaterEqual(bounds["bottomInset"], 9, bounds)
                     self.assertGreaterEqual(bounds["rightInset"], 12, bounds)
+                    self.assertEqual(bounds["minimizeWidth"], 30, bounds)
+                    self.assertEqual(bounds["minimizeHeight"], 30, bounds)
+                    self.assertEqual(bounds["closeWidth"], 30, bounds)
+                    self.assertEqual(bounds["closeHeight"], 30, bounds)
+                    self.assertGreaterEqual(bounds["decorationClearance"], 8, bounds)
                     self.assertGreaterEqual(bounds["minCloseGap"], 6, bounds)
                     self.assertLessEqual(bounds["centerDelta"], 1.5, bounds)
                     self.assertTrue(bounds["closeInside"], bounds)

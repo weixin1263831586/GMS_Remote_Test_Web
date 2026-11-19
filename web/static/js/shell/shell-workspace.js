@@ -146,6 +146,40 @@
             });
         }
 
+        // Presentational placeholders only. Desktop connections remain owned by
+        // mountHostWorkspaceDesktop and are never recreated by a status update.
+        function hostWorkspaceEmptyView(index, kind = 'connecting', message = '') {
+            const variants = {
+                connecting: {icon: 'refresh', title: '正在连接远程桌面', hint: '正在准备 noVNC 会话，请稍候…'},
+                on_demand: {icon: 'monitor', title: '桌面尚未连接', hint: '此主机已就绪，可按需建立远程桌面连接。',
+                    action: 'refreshHostWorkspacePane', button: '连接此桌面'},
+                closed: {icon: 'monitor', title: '桌面尚未打开', hint: '该窗格已关闭，重新打开后可建立远程会话。',
+                    action: 'reopenHostWorkspacePane', button: '重新打开桌面'},
+                offline: {icon: 'warning', title: '主机不可用', hint: '当前主机离线或无法访问，请检查主机状态。'},
+                authorization: {icon: 'lock', title: '需要管理员认证', hint: '完成管理员提权后才能打开该主机桌面。',
+                    action: 'refreshHostWorkspacePane', button: '重新尝试连接'},
+                error: {icon: 'warning', title: '远程桌面连接失败', hint: message || '请检查网络和主机连接状态。',
+                    action: 'refreshHostWorkspacePane', button: '重新连接'},
+            };
+            const view = variants[kind] || variants.connecting;
+            const icon = '<svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg>';
+            // Explicit action bindings remain discoverable by the UI contract
+            // scanner and by the event delegation bridge.
+            const action = view.action === 'refreshHostWorkspacePane'
+                ? `<button class="btn-xs host-desktop-connect-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
+                : view.action === 'reopenHostWorkspacePane'
+                    ? `<button class="btn-xs host-desktop-connect-button" type="button" data-click="reopenHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
+                    : '<span class="host-desktop-waiting" aria-hidden="true"></span>';
+            return `<div class="host-workspace-empty host-desktop-placeholder host-desktop-placeholder-${kind}">
+                <div class="host-desktop-placeholder-content">
+                    <span class="host-desktop-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
+                    <strong class="host-desktop-placeholder-title">${view.title}</strong>
+                    <span class="host-desktop-placeholder-hint">${escapeHtml(view.hint)}</span>
+                    ${action}
+                </div>
+            </div>`;
+        }
+
         function renderHostWorkspace() {
             const grid = document.getElementById('host-workspace-grid');
             if (!grid) return;
@@ -186,37 +220,42 @@
                 button.classList.toggle('active', button.dataset.workspaceLayout === hostWorkspace.layout);
             });
             grid.classList.toggle('pane-maximized', hostWorkspace.maximized !== null);
-            grid.innerHTML = hostWorkspace.panes.map((pane, index) => `
-                <section class="host-workspace-pane${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}">
+            grid.innerHTML = hostWorkspace.panes.map((pane, index) => {
+                const host = desktopHosts.find(item => item.id === pane.hostId);
+                const hostName = pane.type === 'empty' ? '桌面未打开' : host?.name || '请选择主机';
+                return `
+                <section class="host-workspace-pane${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}" aria-label="桌面 ${index + 1}">
                     <div class="host-workspace-pane-header">
-                        <span data-multi-host-control style="font-size:11px;">🖥️ 桌面</span>
-                        <select data-multi-host-control aria-label="主机" data-change="changeHostWorkspacePaneHost" data-a0="${index}" data-r1="value"${pane.type === 'empty' ? ' disabled' : ''}>
-                            ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
-                        </select>
-                        <span class="host-workspace-pane-status" id="host-workspace-status-${index}">准备中</span>
-                        <button class="btn-xs host-workspace-refresh-btn" data-click="refreshHostWorkspacePane" data-a0="${index}" title="重新连接" aria-label="刷新主机桌面">🔄</button>
-                        <button data-multi-host-control class="btn-xs" data-click="maximizeHostWorkspacePane" data-a0="${index}" title="${hostWorkspace.maximized === index ? '恢复布局' : '单屏显示'}">${hostWorkspace.maximized === index ? '▦' : '⛶'}</button>
-                        <button data-multi-host-control class="btn-xs" data-click="closeHostWorkspacePane" data-a0="${index}" title="关闭">×</button>
+                        <div class="host-desktop-identity">
+                            <span class="host-desktop-screen-label" aria-hidden="true">🖥️</span>
+                            <span class="host-desktop-type-label">桌面</span>
+                            <span class="host-desktop-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
+                            <select class="host-desktop-select" data-multi-host-control aria-label="主机" data-change="changeHostWorkspacePaneHost" data-a0="${index}" data-r1="value"${pane.type === 'empty' ? ' disabled' : ''}>
+                                ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
+                            </select>
+                        </div>
+                        <span class="host-workspace-pane-status host-desktop-status" id="host-workspace-status-${index}" role="status" aria-live="polite" title="桌面连接状态">准备中</span>
+                        <div class="host-desktop-pane-actions">
+                            <button class="btn-xs host-workspace-refresh-btn host-desktop-icon-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}" title="重新连接桌面" aria-label="重新连接桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
+                            <button data-multi-host-control class="btn-xs host-desktop-icon-button" type="button" data-click="maximizeHostWorkspacePane" data-a0="${index}" title="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦当前桌面'}" aria-label="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦桌面 ' + (index + 1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
+                            <button data-multi-host-control class="btn-xs host-desktop-icon-button host-desktop-close" type="button" data-click="closeHostWorkspacePane" data-a0="${index}" title="关闭此桌面窗格" aria-label="关闭桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#close"></use></svg></button>
+                        </div>
                     </div>
                     <div class="host-workspace-pane-body" id="host-workspace-body-${index}">
-                        <div class="host-workspace-empty">${pane.type === 'empty' ? '桌面未打开' : '正在连接桌面…'}</div>
+                        ${hostWorkspaceEmptyView(index, pane.type === 'empty' ? 'closed' : 'connecting')}
                     </div>
-                </section>`).join('');
+                </section>`;
+            }).join('');
             // Give remote single-session VNC servers time to release the old
             // iframe socket. The generation guard also cancels mounts from a
             // superseded render, preventing duplicate connections.
-            const autoMountIndex = hostWorkspace.maximized ?? 0;
+            // A multi-host layout is intended to show all selected desktops
+            // simultaneously. Each pane has its own host identity, so lazily
+            // suppressing panes 1-3 silently changed the previous workflow.
+            // When the desktop page is hidden, the generation/currentPage
+            // guard still defers every connection until the page is shown.
             hostWorkspace.panes.forEach((pane, index) => {
                 const paneGeneration = hostWorkspace.paneGenerations.get(index) || 0;
-                const host = desktopHosts.find(item => item.id === pane.hostId);
-                if (index !== autoMountIndex && pane.type !== 'empty' && host && !host.offline) {
-                    const body = document.getElementById(`host-workspace-body-${index}`);
-                    if (body) {
-                        body.innerHTML = `<div class="host-workspace-empty"><button class="btn-xs" data-click="refreshHostWorkspacePane" data-a0="${index}">连接此桌面</button></div>`;
-                    }
-                    setHostWorkspaceStatus(index, '按需连接');
-                    return;
-                }
                 setTimeout(() => {
                     if (generation === hostWorkspace.renderGeneration && currentPage === 'desktop') {
                         mountHostWorkspacePane(index, pane, generation, paneGeneration);
@@ -230,6 +269,9 @@
             const status = document.getElementById(`host-workspace-status-${index}`);
             if (!status) return;
             status.textContent = text;
+            status.classList.toggle('is-connected', connected);
+            status.classList.toggle('is-pending', !connected && /正在|准备中|按需/.test(text));
+            status.classList.toggle('is-error', !connected && /失败|离线|错误/.test(text));
             status.style.color = connected ? 'var(--success-color)' : 'var(--text-secondary)';
             // 单机模式下 pane header 被隐藏，状态文字和刷新按钮移到标题栏；
             // pane 0 是单机唯一的桌面，同步更新标题栏的镜像状态。
@@ -246,12 +288,12 @@
             if (paneGeneration !== (hostWorkspace.paneGenerations.get(index) || 0)) return;
             const host = desktopHosts.find(item => item.id === pane.hostId);
             if (pane.type === 'empty') {
-                body.innerHTML = `<div class="host-workspace-empty"><button class="btn-xs" data-click="reopenHostWorkspacePane" data-a0="${index}">重新打开桌面</button></div>`;
+                body.innerHTML = hostWorkspaceEmptyView(index, 'closed');
                 setHostWorkspaceStatus(index, '未打开');
                 return;
             }
             if (!host || host.offline) {
-                body.innerHTML = '<div class="host-workspace-empty">主机不可用或已离线</div>';
+                body.innerHTML = hostWorkspaceEmptyView(index, 'offline');
                 setHostWorkspaceStatus(index, '离线');
                 return;
             }
@@ -310,7 +352,7 @@
                     index, body, generation, expectedHostId, paneGeneration
                 )) return;
                 if (!granted) {
-                    body.innerHTML = '<div class="host-workspace-empty">需要管理员认证后才能打开主机桌面</div>';
+                    body.innerHTML = hostWorkspaceEmptyView(index, 'authorization');
                     setHostWorkspaceStatus(index, '等待管理员认证');
                     return;
                 }
@@ -342,7 +384,7 @@
                 if (error?.status === 401 || /Authentication required/i.test(error?.message || '')) {
                     showAuthGate(false);
                 }
-                body.innerHTML = `<div class="host-workspace-empty">${escapeHtml(error.message)}</div>`;
+                body.innerHTML = hostWorkspaceEmptyView(index, 'error', error.message);
                 setHostWorkspaceStatus(index, '连接失败');
             }
         }
@@ -493,7 +535,7 @@
             disposeHostWorkspaceInstance(index);
             const paneGeneration = (hostWorkspace.paneGenerations.get(index) || 0) + 1;
             hostWorkspace.paneGenerations.set(index, paneGeneration);
-            body.innerHTML = '<div class="host-workspace-empty">正在连接桌面…</div>';
+            body.innerHTML = hostWorkspaceEmptyView(index, 'connecting');
             setHostWorkspaceStatus(index, '正在连接桌面…');
             mountHostWorkspacePane(index, pane, hostWorkspace.renderGeneration, paneGeneration);
         }

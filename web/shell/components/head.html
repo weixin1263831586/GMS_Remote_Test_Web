@@ -4,27 +4,31 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-        <link rel="stylesheet" href="/static/css/common.css?v=20261113-orbit-stage" data-shell-styles>
+        <link rel="stylesheet" href="/static/css/common.css?v=20261119-segmented-header-align-26" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-components.css?v=20261118-notice-focus" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261116-route-corners" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-page.css?v=20261118-audit-shared-tabs" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261119-unified-page-edge-12" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-page.css?v=20261119-unified-page-edge-12" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261116-sdk-autoheight" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261118-red-reboot-power" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261119-title-icon-gap-8" data-shell-styles>
     <link rel="stylesheet" href="/static/css/device-inventory.css?v=20261112-inventory-v2" data-shell-styles>
     <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261114-agent-chat-align" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261118-audit-layout-v2" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261118-shared-controls" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261118-shared-controls" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261118-muted-workbench" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261118-muted-report" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261118-muted-report" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261119-solid-analysis-frame" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/host-desktop-workspace.css?v=20261119-balanced-frame" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/host-terminal-workspace.css?v=20261119-terminal-console" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/audit-disk.css?v=20261119-disk-interactions" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/api-docs-workbench.css?v=20261119-api-audit-layout" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261119-solid-analysis-frame" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261119-solid-analysis-frame" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261119-solid-analysis-frame" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261118-compact-tailscale" data-shell-styles>
     <link rel="stylesheet" href="/static/css/auth-dialog.css?v=20261117-compact-dialogs" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261118-firmware-share-fit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/vpn-proxy-panel.css?v=20261118-windows-brand-match" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-unified-page-edge-12" data-shell-styles>
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261119-page-heading-14" data-shell-styles>
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
     <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261112-primary-gradient">
@@ -48,9 +52,9 @@
     <script src="/static/js/shell/device-inventory.js?v=20261112-inventory" defer></script>
     <script src="/static/js/shell/shell-client-identity.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-host-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-workspace.js?v=20260930-shell-split" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-terminal-workspace.js?v=20260930-shell-split" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-user-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-workspace.js?v=20261119-compact-pane-v2" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-terminal-workspace.js?v=20261119-terminal-console" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-user-management.js?v=20261119-users-single-row" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-management.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-groups.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-uiaction.js?v=20261117-safe-ui-hierarchy" defer data-shell-runtime></script>
@@ -117,7 +121,7 @@
     <script src="/static/js/pages/test-suite-browser-list.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/test-suite-browser-report-copy.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/test-suite-browser-results.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-files.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser-files.js?v=20261119-analysis-status" defer></script>
     <script src="/static/js/pages/test-suite-browser-devices.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/pages/firmware-aoa-preflight.js?v=20261105-preflight-v1" defer></script>
     <script src="/static/js/pages/firmware-burn.js?v=20261117-compact-dialogs" defer></script>
@@ -130,38 +134,40 @@
     <script src="/static/js/pages/vpn-control.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261118-text-only-test-toggle" defer></script>
-    <script src="/static/js/pages/test-reports.js?v=20261118-notice-report-focus" defer></script>
-    <script src="/static/js/pages/report-analysis.js?v=20261117-color-folder-choice" defer></script>
-    <script src="/static/js/pages/report-failure-workbench.js?v=20261118-report-split" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20261119-analysis-status" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20261119-multifile-hostlog" defer></script>
+    <script src="/static/js/pages/report-analysis-activity.js?v=20261119-shared-status-v2" defer></script>
+    <script src="/static/js/pages/report-failure-workbench.js?v=20261119-hostlog-source" defer></script>
     <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
     <script src="/static/js/pages/agent-questions.js?v=20261110-project-agent" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20261112-agent-sessions" defer></script>
-    <script src="/static/js/pages/agent-access.js?v=20261114-users-view-tabs" defer></script>
-    <script src="/static/js/pages/sdk-config.js?v=20261114-users-view-tabs" defer></script>
-    <script src="/static/js/pages/api-docs.js?v=20261116-aligned-corner-path" defer></script>
+    <script src="/static/js/pages/agent-access.js?v=20261119-users-single-row" defer></script>
+    <script src="/static/js/pages/sdk-config.js?v=20261119-sdk-reload-write-outcomes" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20261119-report-cancel" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
-    <script src="/static/js/pages/security-audit.js?v=20261118-mail-ledger-v2" defer></script>
+    <script src="/static/js/pages/security-audit.js?v=20261119-disk-inventory" defer></script>
+    <script src="/static/js/pages/audit-disk.js?v=20261119-disk-interactions" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
     <script src="/static/js/navigation.js?v=20261112-primary-gradient" defer crossorigin="anonymous"></script>
 
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
 <script src="/static/js/shell/shell-early-boot.js" fetchpriority="high"></script>
     <style>
-        .btn-xs { padding: 4px 10px; font-size: 11px; background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s; font-weight: 500; }
+        .btn-xs { padding: 4px 10px;  background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 3px; color: var(--text-primary); cursor: pointer; transition: all 0.2s;  }
         .btn-xs:hover { background: var(--border-color); transform: translateY(-1px); }
         .sidebar-brand { cursor: pointer; user-select: none; }
         .sidebar-brand:focus { outline: 2px solid var(--primary-color); outline-offset: 3px; border-radius: 4px; }
         .cluster-mode-toggle { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 8px; padding: 6px 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 6px; cursor: pointer; transition: all 0.2s; }
         .cluster-mode-toggle:hover { border-color: var(--primary-color); }
-        .cluster-mode-toggle .mode-label { font-size: 11px; color: var(--text-secondary); }
+        .cluster-mode-toggle .mode-label {  color: var(--text-secondary); }
         .cluster-mode-toggle .mode-switch { position: relative; width: 36px; height: 18px; background: var(--border-color); border-radius: 9px; transition: background 0.2s; flex-shrink: 0; }
         .cluster-mode-toggle .mode-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; background: white; border-radius: 50%; transition: transform 0.2s; }
         .cluster-mode-toggle.active .mode-switch { background: var(--primary-gradient); }
         .cluster-mode-toggle.active .mode-switch::after { transform: translateX(18px); }
-        .cluster-mode-toggle .mode-text { font-size: 11px; font-weight: 600; }
+        .cluster-mode-toggle .mode-text {   }
         #sidebar-visibility-modal .modal-body { overflow: hidden; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
         .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
-        .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary); font-weight: 600; cursor: pointer; }
+        .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary);  cursor: pointer; }
         .sidebar-settings-tab:hover { color: var(--text-primary); border-color: var(--border-color); }
         .sidebar-settings-tab.active { color: white; background: var(--primary-gradient); }
         .sidebar-settings-panel { min-height: 0; flex: 1; }
@@ -172,7 +178,7 @@
         .sidebar-visibility-option input { margin: 0; }
         .sidebar-visibility-option .sidebar-icon { width: 22px; display: inline-flex; justify-content: center; }
         .sidebar-visibility-option .sidebar-text { flex: 0 0 106px; min-width: 0; white-space: nowrap; }
-        .sidebar-visibility-option .sidebar-description { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); font-size: 11px; line-height: 1.45; font-weight: 400; }
+        .sidebar-visibility-option .sidebar-description { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary);  line-height: 1.45;  }
         body.workspace-scope-single #page-desktop .host-workspace-layouts,
         body.workspace-scope-single #page-terminal .host-workspace-layouts,
         body.workspace-scope-single [data-multi-host-control],
@@ -266,7 +272,7 @@
             min-width: 24px;
             padding: 1px 6px;
             border-radius: 3px;
-            font-size: 10px;
+            
         }
         body.workspace-scope-cluster #page-desktop .host-workspace-pane-header .host-workspace-refresh-btn,
         body.workspace-scope-cluster #page-terminal .host-workspace-pane-header .host-workspace-refresh-btn {
@@ -290,35 +296,35 @@
         .reports-host-filter { min-width: 190px; justify-content: flex-end; }
         .project-guide { overflow-y: auto; padding: 0 4px 4px 0; color: var(--text-primary); }
         .project-guide-hero { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border: 1px solid rgba(102,126,234,0.45); border-radius: 10px; background: linear-gradient(135deg, rgba(102,126,234,0.18), rgba(118,75,162,0.10)); }
-        .project-guide-hero h3 { margin: 0 0 5px; font-size: 18px; }
-        .project-guide-hero p { margin: 0; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
-        .project-guide-url { display: inline-flex; align-items: center; white-space: nowrap; padding: 8px 12px; border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); text-decoration: none; font-family: monospace; font-size: 12px; }
+        .project-guide-hero h3 { margin: 0 0 5px;  }
+        .project-guide-hero p { margin: 0; color: var(--text-secondary);  line-height: 1.6; }
+        .project-guide-url { display: inline-flex; align-items: center; white-space: nowrap; padding: 8px 12px; border: 1px solid var(--primary-color); border-radius: 6px; color: var(--primary-color); text-decoration: none;   }
         .project-guide-url:hover { background: rgba(102,126,234,0.12); }
         .project-guide-section { margin-top: 16px; }
-        .project-guide-section h4 { margin: 0 0 9px; font-size: 14px; }
+        .project-guide-section h4 { margin: 0 0 9px;  }
         .project-guide-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; counter-reset: guide-step; }
-        .project-guide-steps li { position: relative; min-height: 72px; padding: 10px 10px 10px 38px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); font-size: 11px; line-height: 1.55; color: var(--text-secondary); counter-increment: guide-step; }
-        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-gradient); color: #fff; display: grid; place-items: center; font-size: 11px; font-weight: 700; }
-        .project-guide-steps strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 2px; }
+        .project-guide-steps li { position: relative; min-height: 72px; padding: 10px 10px 10px 38px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg);  line-height: 1.55; color: var(--text-secondary); counter-increment: guide-step; }
+        .project-guide-steps li::before { content: counter(guide-step); position: absolute; top: 10px; left: 10px; width: 20px; height: 20px; border-radius: 50%; background: var(--primary-gradient); color: #fff; display: grid; place-items: center;   }
+        .project-guide-steps strong { display: block; color: var(--text-primary);  margin-bottom: 2px; }
         .project-guide-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
         .project-guide-card { padding: 12px 14px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
-        .project-guide-card h5 { margin: 0 0 7px; font-size: 13px; }
-        .project-guide-card p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; }
-        .project-guide-flow { color: var(--text-primary); font-weight: 600; }
-        .project-guide-map { width: 100%; border-collapse: collapse; font-size: 11px; }
+        .project-guide-card h5 { margin: 0 0 7px;  }
+        .project-guide-card p { margin: 0; color: var(--text-secondary);  line-height: 1.7; }
+        .project-guide-flow { color: var(--text-primary);  }
+        .project-guide-map { width: 100%; border-collapse: collapse;  }
         .project-guide-map th, .project-guide-map td { padding: 8px 10px; border: 1px solid var(--border-color); text-align: left; vertical-align: top; }
         .project-guide-map th { width: 25%; color: var(--text-primary); background: var(--darker-bg); }
         .project-guide-map td { color: var(--text-secondary); }
-        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--warning-color); border-radius: 4px; background: color-mix(in srgb, var(--warning-color) 10%, transparent); color: var(--text-secondary); font-size: 11px; line-height: 1.65; }
+        .project-guide-notice { margin-top: 10px; padding: 10px 12px; border-left: 3px solid var(--warning-color); border-radius: 4px; background: color-mix(in srgb, var(--warning-color) 10%, transparent); color: var(--text-secondary);  line-height: 1.65; }
         .project-guide-gallery { display: grid; grid-template-columns: 1fr; gap: 12px; }
         .project-guide-example { min-width: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--darker-bg); display: flex; flex-direction: column; gap: 6px; }
         .project-guide-example-header { order: 1; display: flex; align-items: baseline; gap: 8px; margin: 3px 2px 4px; min-width: 0; }
-        .project-guide-example h5 { margin: 0; font-size: 13px; flex-shrink: 0; }
-        .project-guide-example p { margin: 0; color: var(--text-secondary); font-size: 11px; line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+        .project-guide-example h5 { margin: 0;  flex-shrink: 0; }
+        .project-guide-example p { margin: 0; color: var(--text-secondary);  line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
         .project-guide-example .project-guide-image-button { order: 2; }        .project-guide-image-button { position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; cursor: zoom-in; }
         .project-guide-image-button:hover { border-color: var(--primary-color); }
         .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; object-position: top center; }
-        .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78); font-size: 10px; pointer-events: none; }
+        .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78);  pointer-events: none; }
         #guide-image-modal { z-index: 10050; }
         #guide-image-modal .modal-header { gap: 12px; }
         .guide-image-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
@@ -327,7 +333,7 @@
         .guide-image-viewport.actual-size { align-items: flex-start; justify-content: flex-start; }
         #guide-image-preview { display: block; max-width: 100%; max-height: 100%; width: auto; height: auto; cursor: zoom-in; }
         #guide-image-preview.actual-size { max-width: none; max-height: none; align-self: flex-start; cursor: zoom-out; }
-        #guide-image-caption { color: var(--text-secondary); font-size: 11px; line-height: 1.5; text-align: center; flex-shrink: 0; }
+        #guide-image-caption { color: var(--text-secondary);  line-height: 1.5; text-align: center; flex-shrink: 0; }
         @media (max-width: 760px) {
             .project-guide-hero { align-items: flex-start; flex-direction: column; }
             .project-guide-url { white-space: normal; }
@@ -337,10 +343,10 @@
         }
         #terminal { width: 100%; height: 100%; }
         .host-input-group { display: flex; gap: 8px; align-items: center; }
-        .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary); font-size: 15px; font-family: monospace; }
+        .host-input { flex: 1; padding: 10px; border: 1px solid var(--border-color); border-radius: 3px; background: var(--darker-bg); color: var(--text-primary);   }
         .host-input:focus { outline: none; border-color: var(--primary-color); }
         .host-input::placeholder { color: var(--text-secondary); }
-        .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary); font-size: 12px; cursor: pointer; transition: all 0.2s; }
+        .filter-btn { padding: 6px 12px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); color: var(--text-primary);  cursor: pointer; transition: all 0.2s; }
         .filter-btn:hover { background: var(--darker-bg); border-color: var(--primary-color); }
         .filter-btn.active { background: var(--primary-gradient); color: white; border-color: var(--primary-color); }
         #page-architecture .architecture-container { background: transparent; border-radius: 8px; border: 0; padding: 0; flex: 1; min-height: 0; overflow: hidden; }

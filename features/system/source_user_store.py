@@ -326,6 +326,99 @@ class UserSourceStore:
             self._write(sources)
         return dict(record)
 
+    def update(
+        self, source_id: str, *, fields: dict[str, Any],
+        expected_fingerprint: str = "", updated_by: str = "",
+    ) -> dict[str, Any]:
+        """原地修改源配置；保留 source_id、加密凭据和创建信息。
+
+        全程持跨进程锁；指纹防止旧编辑弹框覆盖另一管理员的新修改。
+        与新增不同，Android 版本显式清空时不重新从目录猜测。
+        """
+        allowed = {
+            "repo_root", "ssh_host", "ssh_port", "ssh_username",
+            "ssh_password", "default_revision", "android_version", "label",
+            "discover_repos", "discover_ttl_hours",
+        }
+        if not fields or set(fields) - allowed:
+            raise UserSourceStoreError("SDK 源更新字段为空或包含不允许修改的字段", status_code=422)
+        with self._thread_lock, self._locked():
+            sources = self._load()
+            current = sources.get(source_id)
+            if current is None:
+                raise UserSourceStoreError(
+                    f"SDK 源 '{source_id}' 未在用户注册表中", status_code=404
+                )
+            if (expected_fingerprint and
+                    str(current.get("config_fingerprint") or "") != expected_fingerprint):
+                raise UserSourceStoreError(
+                    "SDK 源配置已被其他操作更新，请刷新列表后重试", status_code=409
+                )
+            record = dict(current)
+            location_changed = False
+            if "repo_root" in fields:
+                record["repo_root"] = validate_repo_root(fields["repo_root"])
+                location_changed = record["repo_root"] != current["repo_root"]
+            if "default_revision" in fields:
+                record["default_revision"] = _clean_text(
+                    fields["default_revision"], field="默认 revision", max_length=128,
+                )
+            for field, length in (("android_version", 128), ("label", 120)):
+                if field in fields:
+                    value = str(fields[field] if fields[field] is not None else "").strip()
+                    if len(value) > length or any(c in value for c in ("\x00", "\r", "\n")):
+                        raise UserSourceStoreError(f"{field} 内容非法或过长", status_code=422)
+                    record[field] = value
+            if current["provider"] == "ssh_git":
+                if any(key in fields for key in ("ssh_host", "ssh_port", "ssh_username")):
+                    connection = validate_connection(
+                        fields.get("ssh_host", record["ssh_host"]),
+                        fields.get("ssh_username", record["ssh_username"]),
+                        fields.get("ssh_port", record["ssh_port"]),
+                    )
+                    location_changed |= any(
+                        connection[key] != current[key] for key in connection
+                    )
+                    record.update(connection)
+                if "discover_repos" in fields:
+                    if not isinstance(fields["discover_repos"], bool):
+                        raise UserSourceStoreError("检索模式必须是布尔值", status_code=422)
+                    record["discover_repos"] = fields["discover_repos"]
+                if "discover_ttl_hours" in fields:
+                    try:
+                        ttl = int(fields["discover_ttl_hours"])
+                    except (TypeError, ValueError) as exc:
+                        raise UserSourceStoreError("缓存时长必须为整数", status_code=422) from exc
+                    if not 1 <= ttl <= 168:
+                        raise UserSourceStoreError("缓存时长需在 1-168 小时之间", status_code=422)
+                    record["discover_ttl_hours"] = ttl
+                if "ssh_password" in fields:
+                    password = str(fields["ssh_password"] or "")
+                    if len(password) > 128 or any(c in password for c in ("\x00", "\r", "\n")):
+                        raise UserSourceStoreError("SSH 口令内容非法或过长", status_code=422)
+                    if password:
+                        record["ssh_password_enc"] = encrypt_secret(password)
+                    else:
+                        record.pop("ssh_password_enc", None)
+                    location_changed = True
+            elif any(key in fields for key in (
+                "ssh_host", "ssh_port", "ssh_username", "ssh_password",
+                "discover_repos", "discover_ttl_hours",
+            )):
+                raise UserSourceStoreError("本机 SDK 源不支持 SSH 参数", status_code=422)
+            record["updated_at"] = _utcnow_iso()
+            record["updated_by"] = str(updated_by or "").strip()[:64]
+            # 即便同一秒连续更新，也要确保旧路径后台校验无法写回。
+            record["config_fingerprint"] = _config_fingerprint(
+                record, f"{record['updated_at']}:{os.urandom(8).hex()}",
+            )
+            if location_changed:
+                record.pop("last_verified_at", None)
+                record.pop("last_verified_ok", None)
+            sources[source_id] = record
+            self._write(sources)
+        return dict(record)
+
     def delete(self, source_id: str) -> dict[str, Any]:
         with self._thread_lock, self._locked():
             sources = self._load()

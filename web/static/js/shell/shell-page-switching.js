@@ -47,7 +47,7 @@
             architecture: '查看平台模块、数据流和核心组件关系。',
             websites: '按分类维护常用站点、图标和链接。',
             tools: '维护可下载工具条目，从服务器白名单工具目录下载脚本或二进制工具。',
-            'security-audit': '查看页面访问、API 调用、请求摘要、响应摘要和耗时，辅助追踪操作记录。',
+            'security-audit': '查看安全审计日志、历史邮件及只读运行产物磁盘占用，辅助追踪操作和磁盘堆积风险。',
             'gms-assistant': '打开外部/内置 GMS 知识助手入口。',
             automation: '把 Gerrit 触发、构建产物、设备选择、烧写、测试执行和结果回写串成自动化测试站流程。',
             cluster: '查看 Controller/Worker、设备、套件、运行任务和部署状态，管理持久化 Cluster Job。',
@@ -743,12 +743,12 @@
 
             if (pageName === 'security-audit') {
                 if (!securityAuditState.loaded) await loadSecurityAudit(true);
-                if (sessionStorage.getItem('gms_audit_view') === 'outbox'
-                        && typeof auditOutboxToggle === 'function'
+                const savedAuditView = sessionStorage.getItem('gms_audit_view');
+                if (['outbox', 'disk'].includes(savedAuditView)
+                        && typeof switchSecurityAuditView === 'function'
                         && state.elevated) {
-                    // F5 恢复「历史邮件」页签；审计记录要求提权，未提权会话
-                    // 不自动恢复，保持默认「审计日志」页签的提权提示占位。
-                    await auditOutboxToggle(true);
+                    // F5 恢复「历史邮件 / 磁盘审计」视图；未提权时保留日志授权提示。
+                    await switchSecurityAuditView(savedAuditView);
                 }
             }
             if (pageName === 'devices') {

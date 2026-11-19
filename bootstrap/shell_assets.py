@@ -22,7 +22,7 @@ STYLES_PATH = "css/shell-style.css"
 _STYLESHEET = re.compile(
     r'<link rel="stylesheet" href="(/static/css/[a-z0-9-]+\.css)(?:\?[^\"]*)?" data-shell-styles>'
 )
-_CSS_IMPORT = re.compile(r'@import\s+url\("(/static/css/[a-z0-9-]+\.css)(?:\?[^\"]*)?"\)\s*;')
+_CSS_IMPORT = re.compile(r'@import\s+url\("(/static/css/(?:[a-z0-9-]+/)*[a-z0-9-]+\.css)(?:\?[^\"]*)?"\)\s*;')
 _CSS_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 # head.html 中 script/link 标签引用的静态资源 URL（含可选的旧手工 ?v= 标记）。
 # 早期这些版本号靠人工维护日期标签，忘记 bump 就会让浏览器继续用旧缓存；

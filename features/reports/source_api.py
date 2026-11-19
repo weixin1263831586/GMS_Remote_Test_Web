@@ -10,6 +10,7 @@ from foundation.outbound import (
 )
 from foundation.redaction import redact_sensitive_text
 
+from .analysis_agent import ReportScanIncompleteError
 from .api_helpers import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
     COMPILED_REDMINE_ISSUE_PATTERN,
@@ -360,6 +361,8 @@ async def analyze_report_from_url(request: Request):
 
             return JSONResponse(content={"success": True, "data": result, "filename": filename, "mode": "url"})
 
+    except ReportScanIncompleteError as exc:
+        return error_response(str(exc), 413)
     except Exception as e:
         logger.error(
             "[Report Analysis] URL analysis failed: %s",

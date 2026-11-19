@@ -411,8 +411,8 @@ async function showConfig() {
             <small id="config-email-status">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
             <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
                 <button class="btn-xxs" id="email-outbox-refresh-btn" type="button">↻ 刷新历史邮件</button>
-                <label style="margin:0;font-size:12px;">通道:
-                    <select id="email-outbox-channel" style="font-size:12px;">
+                <label class="email-outbox-filter-label" style="margin:0;">通道:
+                    <select id="email-outbox-channel" >
                         <option value="">全部</option>
                         <option value="manual">手动发送</option>
                         <option value="automation">自动化通知</option>
@@ -421,8 +421,8 @@ async function showConfig() {
                         <option value="update_radar">GMS更新雷达</option>
                     </select>
                 </label>
-                <label style="margin:0;font-size:12px;">结果:
-                    <select id="email-outbox-sent" style="font-size:12px;">
+                <label class="email-outbox-filter-label" style="margin:0;">结果:
+                    <select id="email-outbox-sent" >
                         <option value="">全部</option>
                         <option value="true">成功</option>
                         <option value="false">失败</option>
@@ -438,7 +438,7 @@ async function showConfig() {
         <!-- 客户端 SSH 凭据管理（增删独立于上方静态配置，即时生效） -->
         <div class="config-section config-section-accent-creds">
             <div class="config-section-title">客户端 SSH 凭据</div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background: var(--darker-bg);">
                         <th style="padding:5px 6px;text-align:left;">设备主机</th>
@@ -468,7 +468,7 @@ async function showConfig() {
                     启用静态路由
                 </label>
             </div>
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background: var(--darker-bg);">
                         <th style="padding:5px 6px;text-align:left;">目标网段</th>
@@ -563,7 +563,7 @@ async function loadEmailOutbox() {
                 <td style="padding:4px 6px;white-space:nowrap;">${state}</td>
             </tr>`;
         }).join('');
-        listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:12px;">
+        listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:var(--darker-bg,#222);">
                 <th style="padding:4px 6px;text-align:left;">时间(UTC)</th>
                 <th style="padding:4px 6px;text-align:left;">通道</th>
@@ -571,7 +571,7 @@ async function loadEmailOutbox() {
                 <th style="padding:4px 6px;text-align:left;">主题/预览</th>
                 <th style="padding:4px 6px;text-align:left;">结果</th>
             </tr></thead><tbody>${rows}</tbody></table>
-            <div style="padding:4px 6px;color:var(--text-muted,#888);font-size:11px;">共 ${data.total} 条，显示最近 ${items.length} 条</div>`;
+            <div class="history-mail-count" style="padding:4px 6px;color:var(--text-muted,#888);">共 ${data.total} 条，显示最近 ${items.length} 条</div>`;
     } catch (error) {
         listEl.innerHTML = `<div style="padding:14px;text-align:center;color:var(--error-color,#f44336);">加载历史邮件失败: ${escapeJsAttr(error.message)}</div>`;
     }
@@ -827,8 +827,8 @@ function renderStaticRoutesTable(routes) {
     }
     tbody.innerHTML = routes.map(route => `
         <tr data-destination="${escapeHtml(route.destination)}" data-gateway="${escapeHtml(route.gateway)}" style="border-bottom: 1px solid var(--border-color);">
-            <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.destination)}</td>
-            <td style="padding:5px 6px;font-family:monospace;">${escapeHtml(route.gateway)}</td>
+            <td class="ui-mono" style="padding:5px 6px;">${escapeHtml(route.destination)}</td>
+            <td class="ui-mono" style="padding:5px 6px;">${escapeHtml(route.gateway)}</td>
             <td style="padding:5px 6px;text-align:center;">
                 <button class="btn-xxs" type="button" data-action="delete-static-route">删除</button>
             </td>

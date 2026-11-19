@@ -88,7 +88,7 @@
                     `;
                 }).join('');
             }
-            tree.innerHTML = `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${kbState.currentParent ? '' : 'border-color:var(--primary-color);'}" data-click="kbSelectFolder" data-a0="">全部文档</button>` + (render('', 0) || '<div class="suite-empty" style="font-size:12px;padding:8px;">暂无目录</div>');
+            tree.innerHTML = `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${kbState.currentParent ? '' : 'border-color:var(--primary-color);'}" data-click="kbSelectFolder" data-a0="">全部文档</button>` + (render('', 0) || '<div class="suite-empty" data-ui-type-size="body" style="padding:8px;">暂无目录</div>');
         }
 
         async function kbLoadDocs() {
@@ -119,8 +119,8 @@
                 }
                 box.innerHTML = docs.map(doc => `
                     <div class="report-failure-card" data-doc-id="${kbEsc(doc.doc_id)}" style="cursor:pointer;margin-bottom:8px;${doc.doc_id === kbState.currentDocId ? 'border-color:var(--primary-color);' : ''}" data-click="kbOpenDoc" data-a0="${kbEsc(doc.doc_id)}">
-                        <div style="font-weight:600;margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
-                        <div style="font-size:12px;color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
+                        <div class="kb-doc-title" style="margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
+                        <div class="kb-doc-summary" style="color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
                         <div style="margin-top:6px;">${(doc.tags || []).map(t => `<span class="badge">${kbEsc(t)}</span>`).join(' ')}</div>
                     </div>
                 `).join('');
@@ -272,7 +272,7 @@
             const versions = data.versions || [];
             const info = document.getElementById('kb-side-info');
             if (!info) return;
-            info.innerHTML = `<div style="font-weight:600;margin-bottom:8px;">版本历史</div>` + (versions.length
+            info.innerHTML = `<div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:8px;">版本历史</div>` + (versions.length
                 ? versions.map(version => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border-color);">
                     <span style="flex:1;">v${version.version_no} · ${kbEsc(version.created_at)}<br>${kbEsc(version.title)}</span>
                     <button class="btn-xs" data-version-id="${kbEsc(version.version_id)}" data-click="kbRestoreVersion" data-r0="dataset.versionId">恢复</button>
@@ -342,7 +342,7 @@
             if (info) {
                 const contexts = Array.isArray(data.contexts) ? data.contexts : [];
                 const sources = contexts.length ? `
-                    <div style="font-weight:600;margin-top:10px;margin-bottom:6px;">来源</div>
+                    <div style="font-weight:var(--ui-type-weight-semibold);margin-top:10px;margin-bottom:6px;">来源</div>
                     ${contexts.map((ctx, i) => `
                         <div style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
                             <button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}" style="margin-bottom:4px;">[${i + 1}] ${kbEsc(ctx.title || '无标题')}</button>
@@ -351,7 +351,7 @@
                     `).join('')}
                 ` : '';
                 info.innerHTML = `
-                    <div style="font-weight:600;margin-bottom:6px;">问答结果 ${data.mode === 'ai' && data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
+                    <div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:6px;">问答结果 ${data.mode === 'ai' && data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
                     <div style="white-space:pre-wrap;color:var(--text-color);line-height:1.6;">${kbEsc(data.answer || '')}</div>
                     ${sources}
                 `;

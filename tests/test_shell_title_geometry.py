@@ -1,7 +1,7 @@
 """页面标题几何回归：主机桌面/主机终端左上角标题必须与其他页面对齐。
 
 Desktop/Terminal 的页级标题走 `.page-header-row > .section-title` 公共
-几何（显式 line-height:17.2px、标题盒顶对齐）；本回归保证今后调整主机
+几何（共享的 24px 标题行盒、标题盒顶对齐）；本回归保证今后调整主机
 布局按钮（右侧 24px 控件）时不会把左侧标题推偏。
 """
 
@@ -52,7 +52,7 @@ class ShellTitleGeometryTests(RuntimeUiHarness):
                 )
                 self.assertAlmostEqual(
                     offsets[page_name]["lineHeight"], offsets["users"]["lineHeight"],
-                    msg=f"{page_name} 标题行高应回归公共几何（17.2px）",
+                    msg=f"{page_name} 标题行高应与公共字体规范一致",
                 )
         finally:
             page.close()

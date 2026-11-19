@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-type-root="shell">
 {% include 'components/head.html' %}
 <body class="workspace-scope-pending">
     <div id="auth-gate" class="auth-gate" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -250,8 +250,8 @@
 
 <style>
 /* 使用实例弹框重复内联样式收敛（.copy-chip 的 hover/transition 在 common-page.css） */
-.usage-cmd { color: #4ec9b0; font-family: 'Monaco', 'Menlo', monospace; font-size: 12px; padding-right: 70px; display: block; }
-.usage-chip { position: absolute; right: 4px; top: 4px; color: var(--text-muted); font-size: 12px; cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); }
+.usage-cmd { color: #4ec9b0;   padding-right: 70px; display: block; }
+.usage-chip { position: absolute; right: 4px; top: 4px; color: var(--text-muted);  cursor: pointer; padding: 4px 8px; border-radius: 3px; background: var(--border-color); }
 </style>
 
     {% include 'dialogs/usage-examples.html' %}
@@ -259,7 +259,7 @@
     {% include 'dialogs/report-diagnosis.html' %}
     <div id="report-diagnosis-minimized" style="display: none; position: fixed; right: 18px; bottom: 18px; z-index: 10001; align-items: center; gap: 10px; max-width: min(520px, calc(100vw - 36px)); padding: 10px 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.32);">
         <button type="button" class="btn-xs btn-primary" data-click="restoreReportDiagnosisWorkbench"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bot"></use></svg> 报错诊断</button>
-        <div id="report-diagnosis-minimized-title" style="font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;"></div>
+        <div id="report-diagnosis-minimized-title" style="color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" data-ui-type-size="small"></div>
         <button type="button" class="btn-xxs" data-click="closeReportDiagnosisWorkbench">关闭</button>
     </div>
 </body>

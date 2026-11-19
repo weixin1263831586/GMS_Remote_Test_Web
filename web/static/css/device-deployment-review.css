@@ -1,13 +1,13 @@
 @import url("/static/css/theme.css?v=20261112-purple-surfaces");
-body{margin:0;background:var(--page-background);color:var(--text-primary);font:16px/1.6 system-ui,sans-serif}
+body{margin:0;background:var(--page-background);color:var(--text-primary);}
 main{max-width:760px;margin:48px auto;padding:32px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:16px}
 h1{margin-top:0}dl{display:grid;grid-template-columns:90px 1fr;gap:12px}
-dt{font-weight:600}dd{margin:0;overflow-wrap:anywhere}
-button{padding:12px 20px;border:0;border-radius:8px;background:var(--primary-gradient);color:white;font:inherit;cursor:pointer}
+dt{}dd{margin:0;overflow-wrap:anywhere}
+button{padding:12px 20px;border:0;border-radius:8px;background:var(--primary-gradient);color:white;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}a{margin-left:20px;color:var(--primary-light)}
 @media(max-width:600px){main{margin:16px;padding:20px}dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:12px}}
 #review-login-modal .modal-content{box-sizing:border-box;padding:28px;overflow:auto}
-#review-login-modal .modal-content h2{margin-top:0}#review-login-modal .modal-content label{display:block;font-weight:600;margin-top:12px}
-#review-login-modal .modal-content input{box-sizing:border-box;width:100%;font:inherit;padding:10px;border:1px solid var(--border-color);border-radius:8px;background:var(--darker-bg);color:var(--text-primary)}
+#review-login-modal .modal-content h2{margin-top:0}#review-login-modal .modal-content label{display:block;margin-top:12px}
+#review-login-modal .modal-content input{box-sizing:border-box;width:100%;padding:10px;border:1px solid var(--border-color);border-radius:8px;background:var(--darker-bg);color:var(--text-primary)}
 #review-login-error{color:var(--danger-color);min-height:1.6em}#review-login-cancel{background:var(--lighter-bg);color:var(--text-primary)}
 body.modal-open{overflow:hidden}#review-login-open{margin:12px 0;background:var(--lighter-bg);color:var(--text-primary)}

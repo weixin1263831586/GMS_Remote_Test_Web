@@ -1,33 +1,23 @@
 <div class="container page-content page-ui-rework" id="page-api-docs">
-            {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📡</span> 系统接口{% include 'components/page-header-end.html' %}
-
-            <!-- API统计卡片 -->
-            <div class="page-stat-row">
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-primary" id="total-apis-count">-</div>
-                    <div class="page-stat-label">API总数</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-success" id="get-apis-count">-</div>
-                    <div class="page-stat-label">GET接口</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-warning" id="post-apis-count">-</div>
-                    <div class="page-stat-label">POST接口</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-info" id="filtered-apis-count">-</div>
-                    <div class="page-stat-label">筛选结果</div></span></div>
-                <div class="page-stat-card workbench-stat"><span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg></span><span class="workbench-stat-copy">
-                    <div class="page-stat-value tone-skill" id="skills-count">-</div>
-                    <div class="page-stat-label">Skill总数</div></span></div>
-            </div>
-
-            <!-- 搜索栏 -->
-            <div class="api-toolbar">
-                <input type="text" id="api-search-input" placeholder="🔍 搜索API路径或说明..." data-input="debounceFilterApiDocs">
-            </div>
-
-            <div class="api-toolbar">
-                <div class="api-filter-row">
-                    <button class="filter-btn active" data-category="all" data-click="filterByCategory" data-a0="all">
+  {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📡</span> 系统接口{% include 'components/page-header-end.html' %}
+  <div class="api-dashboard">
+    <div class="page-stat-row api-stat-grid" aria-label="接口统计">
+      <div class="page-stat-card workbench-stat api-stat api-stat-total"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">API 总数</span><strong id="total-apis-count" class="page-stat-value">-</strong><span class="api-stat-hint">当前完整接口清单</span></span></div>
+      <div class="page-stat-card workbench-stat api-stat api-stat-get"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#check"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">GET 接口</span><strong id="get-apis-count" class="page-stat-value">-</strong><span class="api-stat-hint">读取类操作</span></span></div>
+      <div class="page-stat-card workbench-stat api-stat api-stat-post"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">POST 接口</span><strong id="post-apis-count" class="page-stat-value">-</strong><span class="api-stat-hint">提交类操作</span></span></div>
+      <div class="page-stat-card workbench-stat api-stat api-stat-filtered"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">筛选结果</span><strong id="filtered-apis-count" class="page-stat-value">-</strong><span class="api-stat-hint">符合当前筛选条件</span></span></div>
+      <div class="page-stat-card workbench-stat api-stat api-stat-skill"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">Skill 总数</span><strong id="skills-count" class="page-stat-value">-</strong><span class="api-stat-hint">已关联的独立 Skill</span></span></div>
+    </div>
+    <div class="api-search-toolbar" role="search" aria-label="查找系统接口">
+      <label class="api-search-box" for="api-search-input"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg>
+        <input id="api-search-input" class="entry-field" type="search" placeholder="搜索 API 路径、接口说明或 Skill..." data-input="debounceFilterApiDocs" aria-label="搜索系统接口">
+      </label>
+      <button class="btn-xs api-action" type="button" data-click="loadApiDocs" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+      <button class="btn-xs api-action api-action-accent" type="button" data-click="exportApiDocsCsv"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
+    </div>
+    <div class="api-category-toolbar">
+      <div class="api-category-chips" aria-label="业务分类">
+        <button class="filter-btn active" data-category="all" data-click="filterByCategory" data-a0="all">
                         <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg> 全部分类
                     </button>
                     <button class="filter-btn" data-category="test" data-click="filterByCategory" data-a0="test">
@@ -69,35 +59,60 @@
                     <button class="filter-btn" data-category="usbip" data-click="filterByCategory" data-a0="usbip">
                         <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> USB/IP
                     </button>
-                    <div class="api-filter-spacer"></div>
-                    <button class="filter-btn tone-primary" data-click="showUsageExamples">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 使用实例
-                    </button>
-                    <button class="filter-btn tone-success" data-click="copySkillInstallCommand" title="复制可在任意 Linux 主机执行的一键安装或更新命令">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 安装/更新命令
-                    </button>
-                    <button class="filter-btn" data-click="downloadSkillsZip" title="仅下载 ZIP，用于离线部署或备份">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 离线包
-                    </button>
-                </div>
-            </div>
-
-            <!-- API列表 -->
-            <div class="list-table-wrap">
-                <table class="list-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 25%;">API接口</th>
-                            <th style="width: 20%;">接口说明</th>
-                            <th style="width: 20%;">skill方法(点击自动复制)</th>
-                            <th style="width: 35%;">使用方法(点击自动复制)</th>
-                        </tr>
-                    </thead>
-                    <tbody id="api-docs-table-body">
-                        <tr>
-                            <td colspan="4" class="table-placeholder">加载中...</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
+                    
+      </div>
+      <div class="api-category-actions">
+        <button class="filter-btn api-action" type="button" data-click="showUsageExamples"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 使用实例</button>
+        <button class="filter-btn api-action api-action-install" type="button" data-click="copySkillInstallCommand" title="复制 Skill 一键安装或更新命令"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 安装/更新命令</button>
+        <button class="filter-btn api-action" type="button" data-click="downloadSkillsZip" title="下载离线部署 ZIP"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 离线包</button>
+      </div>
+    </div>
+    <div class="api-body-grid">
+      <section class="api-list-panel" aria-label="接口列表">
+        <div class="list-table-wrap api-table-scroll" role="region" aria-label="API 接口表格" tabindex="0">
+          <table class="list-table api-docs-table">
+            <thead><tr><th style="width:78px;">请求方法</th><th style="width:25%;">API 接口</th><th style="width:25%;">接口说明</th><th style="width:19%;">Skill 方法（点击复制）</th><th>使用方法（点击复制）</th></tr></thead>
+            <tbody id="api-docs-table-body"><tr><td colspan="5" class="table-placeholder">加载中...</td></tr></tbody>
+          </table>
         </div>
+        <div class="api-page-footer" id="api-docs-pagination" aria-label="接口列表分页"></div>
+      </section>
+      <aside class="api-side-panels" aria-label="接口统计与说明">
+        <section class="api-side-card">
+          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> <strong>请求方法分布</strong></div>
+          <div class="api-chart-body">
+            <div class="api-method-donut" id="api-docs-method-donut" data-empty="true" role="img" aria-label="等待接口统计">
+              <div class="api-donut-center"><strong id="api-docs-donut-total">-</strong><span>API 总数</span></div>
+            </div>
+            <div class="api-method-legend">
+              <div><span class="api-dot api-dot-get"></span><span>GET</span><strong id="api-docs-legend-get">-</strong></div>
+              <div><span class="api-dot api-dot-post"></span><span>POST</span><strong id="api-docs-legend-post">-</strong></div>
+              <div><span class="api-dot api-dot-delete"></span><span>DELETE</span><strong id="api-docs-legend-delete">-</strong></div>
+              <div><span class="api-dot api-dot-other"></span><span>其他</span><strong id="api-docs-legend-other">-</strong></div>
+            </div>
+          </div>
+          <div class="api-side-footnote">按完整清单统计，不随筛选变化</div>
+        </section>
+        <section class="api-side-card">
+          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> <strong>快捷筛选</strong></div>
+          <div class="api-method-buttons" id="api-docs-method-actions">
+            <button class="btn-xs active" type="button" data-method="all" data-click="filterApiDocsMethod" data-a0="all" aria-pressed="true">全部方法</button>
+            <button class="btn-xs" type="button" data-method="GET" data-click="filterApiDocsMethod" data-a0="GET" aria-pressed="false">GET</button>
+            <button class="btn-xs" type="button" data-method="POST" data-click="filterApiDocsMethod" data-a0="POST" aria-pressed="false">POST</button>
+            <button class="btn-xs" type="button" data-method="DELETE" data-click="filterApiDocsMethod" data-a0="DELETE" aria-pressed="false">DELETE</button>
+          </div>
+        </section>
+        <section class="api-side-card api-side-notes">
+          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> <strong>接口说明</strong></div>
+          <ul class="api-notes">
+            <li>接口列表来自 Controller OpenAPI 元数据</li>
+            <li>分类、请求方法和关键词可组合筛选</li>
+            <li>点击 Skill 名称和 curl 命令可以复制</li>
+            <li>展开行可查看完整命令、参数和响应</li>
+            <li>安装命令只复制，不会在网页直接执行</li>
+          </ul>
+        </section>
+      </aside>
+    </div>
+  </div>
+</div>

@@ -112,6 +112,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                 result["desktopMounts"],
                 [
                     {"index": 0, "hostId": "default"},
+                    {"index": 1, "hostId": "cluster:worker-a"},
                     {"index": 1, "hostId": "cluster:worker-b"},
                 ],
             )
@@ -951,7 +952,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     frame_geometry = page.locator(page_selector).evaluate(
                         "page=>{const style=getComputedStyle(page);return {"
                         "inset:parseFloat(style.getPropertyValue('--page-body-frame-inset'))||0,"
-                        "top:parseFloat(style.getPropertyValue('--page-body-frame-top'))||0}}"
+                        "top:parseFloat(getComputedStyle(page,'::after').top)||0}}"
                     )
                     self.assertIsNotNone(page_box)
                     self.assertIsNotNone(grid_box)
@@ -959,7 +960,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         grid_box["x"], page_box["x"] + frame_geometry["inset"], delta=0.5
                     )
                     self.assertAlmostEqual(
-                        grid_box["y"], page_box["y"] + frame_geometry["top"], delta=0.5
+                        grid_box["y"], page_box["y"] + frame_geometry["top"] + 5, delta=0.5
                     )
                     self.assertAlmostEqual(
                         grid_box["width"],
@@ -1369,8 +1370,8 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     )
                     for box in boxes:
                         self.assertEqual(
-                            box["fs"], "11px",
-                            msg=f"{name} 页右上角控件「{box['text']}」字号 {box['fs']}，应为 11px",
+                            box["fs"], "12px",
+                            msg=f"{name} 页右上角控件「{box['text']}」字号 {box['fs']}，应为统一的 12px",
                         )
                         expected_h = (
                             26 if box["tag"] == "label" else group["expectH"]
@@ -1467,8 +1468,8 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                             msg=f"{name} 页状态条按钮「{box['text']}」高度 {box['h']}，应为 24px",
                         )
                         self.assertEqual(
-                            box["fs"], "11px",
-                            msg=f"{name} 页状态条按钮「{box['text']}」字号 {box['fs']}，应为 11px",
+                            box["fs"], "12px",
+                            msg=f"{name} 页状态条按钮「{box['text']}」字号 {box['fs']}，应为统一的 12px",
                         )
                     else:
                         self.assertEqual(

@@ -222,8 +222,8 @@ class AttachmentAnalysisMixin:
         except Exception:
             return ""
         try:
-            # bundled_tesseract_cmd() and configure_bundled_tesseract() are both
-            # cached after the first call, so this per-image check stays cheap.
+            # OCR engine selection is cached; the shared configurator also
+            # resets library paths when falling back to system Tesseract.
             cmd = configure_usable_tesseract()
             if cmd:
                 import pytesseract.pytesseract as _pt

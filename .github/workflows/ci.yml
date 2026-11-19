@@ -11,8 +11,8 @@ name: CI
 #   browser-e2e ─┘
 on:
   push:
-    # 全仓库校验分支使用与 main 相同门禁；结束后移除分支规则。
-    branches: [main, audit/global-current-1cd4167-20261118]
+    # 所有 audit/ 审核分支与 main 使用相同门禁，避免绑定临时分支。
+    branches: [main, 'audit/**']
   pull_request:
     branches: [main]
 

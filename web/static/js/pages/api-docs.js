@@ -158,32 +158,32 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
             </div>
             <div class="modal-body">
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">Redmine Issue ID</label>
+                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">Redmine Issue ID</label>
                     <input type="text" id="${issueInputId}" data-redmine-issue-input placeholder="输入 Redmine Issue ID"
-                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 14px; font-family: 'Courier New', monospace;">
+                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); ">
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">回复内容</label>
+                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">回复内容</label>
                     <textarea id="${replyTextId}" data-redmine-reply-text rows="10" placeholder="输入回复内容..."
-                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); font-size: 13px; font-family: 'Courier New', monospace; white-space: pre-wrap; resize: vertical;"></textarea>
+                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); white-space: pre-wrap; resize: vertical;"></textarea>
                 </div>
                 <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; color: var(--text-primary);">📎 附件</label>
+                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">📎 附件</label>
                     <input type="file" id="${fileInputId}" data-redmine-files multiple
                            style="display: none;"
                            data-change="updateRedmineFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
                     <div id="${fileInputId}-drop" class="redmine-drop-zone tech-upload-zone" role="button" tabindex="0" data-keydown="_actClickById" data-key="13,32" data-prevent data-redmine-drop
                          data-click="_actClickById" data-a0="${fileInputId}"
-                         style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; font-size: 12px; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
+                         style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
                         📎 拖拽文件到此处，或点击选择文件
                     </div>
                     <div id="${fileListId}" style="margin-top: 8px;"></div>
                 </div>
                 <div style="display: flex; gap: 10px; justify-content: flex-end;">
                     <button data-click="_actCloseModal" data-a0="${modalId}"
-                            style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">取消</button>
+                            style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; ">取消</button>
                     <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}"
-                            style="padding: 8px 16px; background: var(--primary-gradient); color: var(--text-on-accent); border: none; border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;">确认并发送</button>
+                            style="padding: 8px 16px; background: var(--primary-gradient); color: var(--text-on-accent); border: none; border-radius: 6px; cursor: pointer; ">确认并发送</button>
                 </div>
             </div>
         </div>
@@ -314,6 +314,7 @@ function resetReportAnalysis() {
     currentReportUploadRequest = null;
     if (currentRedmineRequest) currentRedmineRequest.abort();
     currentRedmineRequest = null;
+    clearReportAnalysisActivity();
 
     const resultDiv = ensureReportAnalysisResultStructure();
     const uploadZone = $('report-upload-zone');
@@ -403,7 +404,7 @@ async function sendReportAnalysisEmail() {
         ${failures.map((f, i) => `
             <div style="border:1px solid #eee;border-radius:6px;padding:10px;margin-bottom:8px;">
                 <div><b>${i + 1}. ${esc(f.name || '未知用例')}</b> <span style="color:#888;">[${esc(f.module || '未知模块')}]</span></div>
-                <pre style="white-space:pre-wrap;background:#fafafa;padding:8px;margin-top:6px;font-size:12px;border-radius:4px;">${esc(f.reason || '无失败原因')}</pre>
+                <pre style="white-space:pre-wrap;background:#fafafa;padding:8px;margin-top:6px;font-size:var(--ui-type-size-small);border-radius:4px;">${esc(f.reason || '无失败原因')}</pre>
             </div>
         `).join('')}
     ` : '<p style="color:#888;">无失败用例 🎉</p>';
@@ -411,7 +412,7 @@ async function sendReportAnalysisEmail() {
     const body = `
         <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;color:#222;max-width:760px;">
             <h2 style="margin:0 0 12px;">📊 测试报告分析：${esc(reportName)}</h2>
-            <table style="border-collapse:collapse;font-size:13px;">${summaryHtml}</table>
+            <table style="border-collapse:collapse;font-size:var(--ui-type-size-body);">${summaryHtml}</table>
             ${failureHtml}
         </div>`;
 
@@ -442,15 +443,12 @@ async function sendReportAnalysisEmail() {
 
 function filterByCategory(category) {
     currentCategoryFilter = category;
-
-    // 更新按钮状态
-    document.querySelectorAll('[data-category]').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.dataset.category === category) {
-            btn.classList.add('active');
-        }
+    apiDocsPage = 1;
+    document.querySelectorAll('#page-api-docs [data-category]').forEach(btn => {
+        const active = btn.dataset.category === category;
+        btn.classList.toggle('active',active);
+        btn.setAttribute('aria-pressed',String(active));
     });
-
     applyFilters();
 }
 
@@ -470,12 +468,12 @@ function debounceFilterApiDocs() {
  */
 function applyFilters() {
     const searchInput = $('api-search-input');
-    const searchTerm = searchInput ? searchInput.value.toLowerCase() : '';
+    const searchTerm = searchInput ? searchInput.value.trim().toLowerCase() : '';
 
     const filteredApis = allApiDocs.filter(api => {
         const matchesSearch = !searchTerm ||
-            (api.path && api.path.toLowerCase().includes(searchTerm)) ||
-            (api.description && api.description.toLowerCase().includes(searchTerm));
+            [api.path,api.title,api.description,api.skill,api.method].some(
+                value => String(value || '').toLowerCase().includes(searchTerm));
 
         const matchesCategory = currentCategoryFilter === 'all' || api.category === currentCategoryFilter;
 
@@ -485,6 +483,7 @@ function applyFilters() {
     });
 
     // 筛选结果保持原有顺序（allApiDocs已排序），无需重新排序
+    apiDocsFiltered = filteredApis;
     displayApiDocs(filteredApis);
 
     const filteredCountEl = $('filtered-apis-count');
@@ -497,6 +496,7 @@ function applyFilters() {
  * 筛选API文档（搜索框使用）
  */
 function filterApiDocs() {
+    apiDocsPage = 1;
     applyFilters();
 }
 
@@ -516,8 +516,9 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
 
         const now = Date.now();
         if (!forceRefresh && apiDocsCache && (now - apiDocsCacheTime) < API_DOCS_CACHE_DURATION) {
-            displayApiDocs(apiDocsCache);
+            allApiDocs = apiDocsCache;
             updateApiStats(apiDocsCache);
+            applyFilters();
             return;
         }
 
@@ -543,8 +544,8 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
             allApiDocs = sortedApis;
             apiDocsCacheTime = now;
 
-            displayApiDocs(sortedApis);
             updateApiStats(sortedApis);
+            applyFilters();
         } else {
             throw new Error('Invalid response format: missing or invalid apis field');
         }
@@ -555,7 +556,7 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
         if (tbody && !hadRenderedDocs) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="4" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                    <td colspan="5" style="padding: 40px; text-align: center; color: var(--danger-color);">
                         ❌ 加载失败: ${escapeHtml(e.message)}
                     </td>
                 </tr>
@@ -590,6 +591,7 @@ function updateApiStats(apis) {
     if (postEl) postEl.textContent = postCount;
     if (filteredEl) filteredEl.textContent = totalCount;
     if (skillsCountEl) skillsCountEl.textContent = skillsCount;
+    updateApiMethodDistribution(apis);
 }
 
 function createBadge(text, colorVar, size = 'xs') {
@@ -721,8 +723,8 @@ function generateParamsHtml(details) {
         const typeBadge = createBadge(param.type, 'primary-color');
 
         parts.push(`
-            <div style="margin-bottom: 4px; font-size: 10px;">
-                <span style="font-family: monospace; font-weight: 600; color: var(--primary-color);">${escapeHtml(param.name)}</span>
+            <div class="api-param-row" style="margin-bottom: 4px;">
+                <span class="ui-mono" style="font-weight: var(--ui-type-weight-semibold); color: var(--primary-color);">${escapeHtml(param.name)}</span>
                 ${typeBadge} ${requiredBadge}
                 <span style="color: var(--text-secondary); margin-left: 4px;">${escapeHtml(param.desc)}</span>
                 <span style="color: var(--text-secondary);">${escapeHtml(param.in || '')}</span>
@@ -733,128 +735,157 @@ function generateParamsHtml(details) {
     return parts.join('');
 }
 
+
+let apiDocsPage = 1;
+let apiDocsPageSize = 20;
+let apiDocsFiltered = [];
+
+function filterApiDocsMethod(method) {
+    currentMethodFilter = method;
+    apiDocsPage = 1;
+    document.querySelectorAll('#api-docs-method-actions [data-method]').forEach(btn => {
+        const selected = btn.dataset.method === method;
+        btn.classList.toggle('active',selected);
+        btn.setAttribute('aria-pressed',String(selected));
+    });
+    applyFilters();
+}
+
+function updateApiMethodDistribution(apis) {
+    const total = apis.length;
+    const count = method => apis.filter(api => String(api.method).toUpperCase() === method).length;
+    const get = count('GET'), post = count('POST'), del = count('DELETE');
+    const other = total - get - post - del;
+    const label = n => n.toLocaleString('zh-CN') + ' (' + (total ? (n*100/total).toFixed(1) : '0.0') + '%)';
+    const set = (id,value) => { const el = document.getElementById(id); if(el) el.textContent = value; };
+    set('api-docs-donut-total',total.toLocaleString('zh-CN'));
+    set('api-docs-legend-get',label(get));
+    set('api-docs-legend-post',label(post));
+    set('api-docs-legend-delete',label(del));
+    set('api-docs-legend-other',label(other));
+    const donut = document.getElementById('api-docs-method-donut');
+    if (!donut) return;
+    const degrees = n => String(total ? n*360/total : 0) + 'deg';
+    donut.dataset.empty = String(total === 0);
+    donut.style.setProperty('--api-get-end',degrees(get));
+    donut.style.setProperty('--api-post-end',degrees(get+post));
+    donut.style.setProperty('--api-delete-end',degrees(get+post+del));
+    donut.setAttribute('aria-label','API 共 '+total+' 条，GET '+get+'、POST '+post+'、DELETE '+del+'、其他 '+other);
+}
+
+function changeApiDocsPageSize(size) {
+    const count = Number(size && size.value || size);
+    if (![20,50,100].includes(count)) return;
+    apiDocsPageSize = count; apiDocsPage = 1;
+    displayApiDocs(apiDocsFiltered);
+}
+
+function goApiDocsPage(page) {
+    const pages = Math.max(1,Math.ceil(apiDocsFiltered.length/apiDocsPageSize));
+    const next = Math.max(1,Math.min(Number(page)||1,pages));
+    if (next === apiDocsPage) return;
+    apiDocsPage = next;
+    displayApiDocs(apiDocsFiltered);
+    const scroll = document.querySelector('#page-api-docs .api-table-scroll');
+    if (scroll) scroll.scrollTop = 0;
+}
+
+function renderApiDocsPager(total) {
+    const footer = document.getElementById('api-docs-pagination');
+    if (!footer) return;
+    const pages = Math.max(1,Math.ceil(total/apiDocsPageSize));
+    const start = total ? (apiDocsPage-1)*apiDocsPageSize+1 : 0;
+    const end = Math.min(total,apiDocsPage*apiDocsPageSize);
+    const visible = new Set([1,pages]);
+    for (let p=apiDocsPage-1;p<=apiDocsPage+1;p++) if(p>=1 && p<=pages) visible.add(p);
+    const numbers = [...visible].sort((a,b)=>a-b);
+    const nav = [];
+    numbers.forEach((p,i) => {
+        if (i && p-numbers[i-1]>1) nav.push('<span aria-hidden="true">…</span>');
+        nav.push('<button type="button" data-api-page="'+p+'"'+(p===apiDocsPage?' class="active" aria-current="page"':'')+'>'+p+'</button>');
+    });
+    footer.innerHTML = '<div class="api-page-info"><span>共 '+total.toLocaleString('zh-CN')+' 条 · '+start+'–'+end+' 条</span>'
+        +'<label for="api-docs-page-size">每页</label><select id="api-docs-page-size" aria-label="每页显示条数">'
+        +[20,50,100].map(n=>'<option value="'+n+'"'+(n===apiDocsPageSize?' selected':'')+'>'+n+'</option>').join('')
+        +'</select></div><nav class="api-page-actions" aria-label="接口分页">'
+        +'<button type="button" data-api-page="1" aria-label="首页"'+(apiDocsPage===1?' disabled':'')+'>«</button>'
+        +'<button type="button" data-api-page="'+(apiDocsPage-1)+'" aria-label="上一页"'+(apiDocsPage===1?' disabled':'')+'>‹</button>'
+        +nav.join('')
+        +'<button type="button" data-api-page="'+(apiDocsPage+1)+'" aria-label="下一页"'+(apiDocsPage===pages?' disabled':'')+'>›</button>'
+        +'<button type="button" data-api-page="'+pages+'" aria-label="尾页"'+(apiDocsPage===pages?' disabled':'')+'>»</button></nav>';
+    footer.querySelector('select')?.addEventListener('change',ev=>changeApiDocsPageSize(ev.target));
+    footer.querySelectorAll('button[data-api-page]').forEach(el => el.addEventListener('click',()=>goApiDocsPage(el.dataset.apiPage)));
+}
+
+function apiCsvCell(v) {
+    const raw = String(v == null ? '' : v).replace(/\r\n?/g,'\n');
+    const safe = /^\s*[=+\-@]/.test(raw) ? "'"+raw : raw;
+    return '"'+safe.replace(/"/g,'""')+'"';
+}
+
+function exportApiDocsCsv() {
+    const rows = [['请求方法','API 接口','接口说明','Skill 方法','curl 示例','分类'].map(apiCsvCell).join(',')];
+    apiDocsFiltered.forEach(api => {
+        const details = getApiDetails(api);
+        rows.push([api.method,api.path,details.title,api.skill||'',generateCurlCommand(api,details).full,
+            getCategoryName(api.category)].map(apiCsvCell).join(','));
+    });
+    const url = URL.createObjectURL(new Blob(['\ufeff'+rows.join('\r\n')+'\r\n'],{type:'text/csv;charset=utf-8'}));
+    try {
+        const anchor = document.createElement('a');
+        anchor.href=url; anchor.download='gms-api-catalog-'+new Date().toISOString().slice(0,10)+'.csv';
+        document.body.appendChild(anchor); anchor.click(); anchor.remove();
+        showToast('已导出当前筛选的 '+apiDocsFiltered.length+' 个接口','success');
+    } finally { URL.revokeObjectURL(url); }
+}
+
 function displayApiDocs(apis) {
     const tbody = document.getElementById('api-docs-table-body');
     if (!tbody) return;
-
-    const htmlParts = [];
-    apis.forEach((api, index) => {
-        const methodClass = api.method === 'GET' ? 'color: var(--success-color);' :
-                           api.method === 'POST' ? 'color: var(--warning-color);' :
-                           api.method === 'WebSocket' ? 'color: var(--primary-color);' :
-                           'color: var(--text-secondary);';
-
-        const categoryBadge = getCategoryName(api.category);
-
-        const details = getApiDetails(api);
-        const curlCmdObj = generateCurlCommand(api, details);
-        const paramsHtml = generateParamsHtml(details);
-
-        // 将curl命令存储到data属性中,避免在onclick中直接传递复杂字符串
-        const escapedCurlCmd = escapeHtml(curlCmdObj.full || '').replace(/'/g, '&#39;');
-        const displayCurlCmd = curlCmdObj.display;
-
-        htmlParts.push(`
-            <tr style="border-bottom: 1px solid var(--border-color); ${index % 2 === 0 ? 'background: var(--bg-color);' : 'background: var(--light-bg);'}">
-                <!-- Column 1: API Interface -->
-                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 25%;">
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                        <span style="${methodClass} font-weight: 700; font-size: 13px; min-width: 90px; display: inline-block;">${api.method}</span>
-                        <span style="font-family: monospace; font-size: 12px; color: var(--text-primary); word-break: break-all;">${escapeHtml(api.path || '')}</span>
-                    </div>
-                </td>
-
-                <!-- Column 2: Description -->
-                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div style="font-size: 11px; color: var(--text-primary); font-weight: 600; line-height: 1.3;">
-                            ${escapeHtml(details.title)}
-                        </div>
-                    </div>
-                </td>
-
-                <!-- Column 3: Skill Usage -->
-                <td style="padding: 4px 8px; border-right: 1px solid var(--border-color); text-align: left; vertical-align: middle; width: 20%;">
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <div class="api-skill-copy" style="font-size: 11px; font-weight: 600; line-height: 1.3; cursor: pointer; transition: all 0.2s;"
-                             data-click="copySkillCommand" data-r0="el"
-                             title="点击复制 skill 命令">
-                            ${api.skill ? escapeHtml(api.skill) : '<span style="color: var(--text-secondary);">-</span>'}
-                        </div>
-                    </div>
-                </td>
-
-                <!-- Column 4: Usage Method -->
-                <td style="padding: 4px 8px; text-align: left; vertical-align: middle; width: 35%;">
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <!-- Curl Command Row -->
-                        <div style="display: flex; align-items: center; gap: 6px;">
-                            <pre
-                                 data-cmd="${escapedCurlCmd}"
-                                 style="margin: 0; padding: 2px 6px; font-family: 'Monaco', 'Menlo', monospace; font-size: 11px; overflow-x: auto; white-space: nowrap; cursor: pointer; transition: all 0.2s; line-height: 1.3; display: block; flex: 1; background: transparent; border: none; text-overflow: ellipsis;"
-                                 class="api-curl-pre"
-                                 data-click="copyCurlCommandFromData" data-r0="el"
-                                 title="点击复制 curl 命令">${escapeHtml(displayCurlCmd)}</pre>
-                            <button
-                                id="expand-btn-${index}"
-                                data-click="toggleApiDetails" data-a0="${index}"
-                                style="background: var(--primary-gradient); color: white; border: none; padding: 2px 6px; border-radius: 3px; cursor: pointer; font-size: 12px; font-weight: 600; min-width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; transition: all 0.2s; flex-shrink: 0;"
-                                title="点击展开/收起详情">
-                                <span id="expand-icon-${index}">▶</span>
-                            </button>
-                        </div>
-
-                        <!-- Expandable Details (Hidden by Default) -->
-                        <div id="api-details-${index}" style="display: none;">
-                            <div style="border-top: 1px solid var(--border-color); padding-top: 8px; margin-top: 4px;">
-                                <!-- Full Curl Command -->
-                                <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-primary);">📜 完整curl命令:</div>
-                                <pre style="font-family: 'Monaco', 'Menlo', monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; white-space: pre-wrap; word-break: break-all; cursor: pointer;" data-click="copyPreWithFlash" data-r0="el" title="点击复制">${escapeHtml(curlCmdObj.full)}</pre>
-
-                                <!-- Title with star if core API -->
-                                <div style="font-size: 12px; font-weight: 700; color: var(--primary-color); margin-bottom: 6px;">
-                                    ${details.usage.includes('⭐核心接口') ? '### ' : ''}${escapeHtml(details.title)} ${details.usage.includes('⭐核心接口') ? '⭐核心接口' : ''}
-                                </div>
-
-                                <!-- HTTP Method and Path -->
-                                <div style="font-family: monospace; font-size: 11px; color: var(--text-primary); background: var(--darker-bg); padding: 6px; border-radius: 4px; margin-bottom: 8px; font-weight: 600;">
-${api.method} ${api.path || ''}
-${details.content_type ? 'Content-Type: ' + escapeHtml(details.content_type) : ''}
-                                </div>
-
-                                <!-- Parameters -->
-                                <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px; color: var(--text-primary);">📋 请求参数说明:</div>
-                                ${paramsHtml}
-
-                                <!-- Response Example -->
-                                <div style="margin-top: 12px; font-size: 11px; font-weight: 600; margin-bottom: 4px; color: var(--text-secondary);">📤 响应示例:</div>
-                                <div style="font-family: monospace; font-size: 10px; color: var(--success-color); background: var(--darker-bg); padding: 6px; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(formatJsonResponse(details.response))}</div>
-                            </div>
-                        </div>
-                    </div>
-                </td>
-            </tr>
-        `);
-    });
-
-    tbody.innerHTML = htmlParts.join('');
+    const pages = Math.max(1,Math.ceil(apis.length/apiDocsPageSize));
+    apiDocsPage = Math.min(apiDocsPage,pages);
+    const start=(apiDocsPage-1)*apiDocsPageSize;
+    const page = apis.slice(start,start+apiDocsPageSize);
+    tbody.innerHTML = page.map((api,i)=>{
+        const id=start+i, method=String(api.method||'').toUpperCase();
+        const methodStyle=['GET','POST','DELETE'].includes(method)?method.toLowerCase():'other';
+        const details=getApiDetails(api), curl=generateCurlCommand(api,details);
+        const commandAttr=escapeHtml(curl.full||'').replace(/'/g,'&#39;');
+        const path=escapeHtml(api.path||''), title=escapeHtml(details.title||'');
+        return [
+            '<tr class="api-row">',
+            '<td><span class="api-method api-method-'+methodStyle+'">'+escapeHtml(method||'-')+'</span></td>',
+            '<td><div class="api-path" title="'+path+'">'+path+'</div></td>',
+            '<td><div class="api-title" title="'+title+'">'+title+'</div></td>',
+            '<td><div class="api-skill-copy" title="点击复制 Skill" data-click="copySkillCommand" data-r0="el">'+(api.skill?escapeHtml(api.skill):'-')+'</div></td>',
+            '<td><div class="api-command-line">',
+            '<pre class="api-curl-pre" data-click="copyCurlCommandFromData" data-r0="el" data-cmd="'+commandAttr+'" title="点击复制完整 curl 命令">'+escapeHtml(curl.display)+'</pre>',
+            '<button class="api-expand-btn" type="button" id="expand-btn-'+id+'" data-click="toggleApiDetails" data-a0="'+id+'" aria-label="展开接口详情" aria-controls="api-details-'+id+'" aria-expanded="false"><span id="expand-icon-'+id+'">▶</span></button>',
+            '</div><div class="api-detail" id="api-details-'+id+'" hidden>',
+            '<div class="api-detail-title">完整 curl 命令（点击复制）</div><pre data-click="copyPreWithFlash" data-r0="el">'+escapeHtml(curl.full)+'</pre>',
+            '<div class="api-detail-title">'+title+'</div><div>'+escapeHtml(method)+' '+path+'</div>',
+            details.content_type?'<div>Content-Type: '+escapeHtml(details.content_type)+'</div>':'',
+            '<div class="api-detail-title">请求参数</div>'+generateParamsHtml(details),
+            '<div class="api-detail-title">响应示例</div><pre>'+escapeHtml(formatJsonResponse(details.response))+'</pre>',
+            '</div></td></tr>'
+        ].join('');
+    }).join('') || '<tr><td colspan="5" class="table-placeholder">当前筛选条件下没有匹配的接口</td></tr>';
+    renderApiDocsPager(apis.length);
 }
 
 window.toggleApiDetails = function(index) {
-    const detailsDiv = document.getElementById(`api-details-${index}`);
-    const iconSpan = document.getElementById(`expand-icon-${index}`);
-    const button = document.getElementById(`expand-btn-${index}`);
-
-    if (detailsDiv.style.display === 'none') {
-        detailsDiv.style.display = 'block';
-        iconSpan.textContent = '▼';
-        button.style.background = 'var(--warning-color)';
-    } else {
-        detailsDiv.style.display = 'none';
-        iconSpan.textContent = '▶';
-        button.style.background = 'var(--primary-gradient)';
-    }
+    const details=document.getElementById('api-details-'+index);
+    const icon=document.getElementById('expand-icon-'+index);
+    const button=document.getElementById('expand-btn-'+index);
+    if (!details||!icon||!button) return;
+    details.hidden=!details.hidden;
+    button.setAttribute('aria-expanded',String(!details.hidden));
+    icon.textContent=details.hidden?'▶':'▼';
 };
+window.filterApiDocsMethod=filterApiDocsMethod;
+window.changeApiDocsPageSize=changeApiDocsPageSize;
+window.goApiDocsPage=goApiDocsPage;
+window.exportApiDocsCsv=exportApiDocsCsv;
 
 /**
  * 从data属性复制curl命令到剪贴板（自动添加jq格式化，但跳过纯文本端点）

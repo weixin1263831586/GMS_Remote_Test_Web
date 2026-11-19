@@ -52,8 +52,9 @@ def audit(args):
     add("vpn_branch", rc == 0 and branch == "master", "local branch master" if branch == "master" else "local branch not master")
     rc, head = cmd("git", "-C", str(args.vpn_root), "rev-parse", "HEAD")
     report["local_vpn_sha"] = head if rc == 0 else ""
+    report["reviewed_vpn_sha"] = args.master_sha
     add("vpn_revision", rc == 0 and head == args.master_sha,
-        "local SHA matches GitHub master" if head == args.master_sha else "local version differs from GitHub master")
+        "local SHA matches reviewed vpn-proxy/master revision" if head == args.master_sha else "local checkout differs from reviewed vpn-proxy/master revision")
     rc, dirty = cmd("git", "-C", str(args.vpn_root), "status", "--porcelain")
     add("vpn_worktree", True if rc == 0 and not dirty else None,
         "clean" if rc == 0 and not dirty else "local uncommitted edits or status unavailable")
@@ -87,7 +88,11 @@ def audit(args):
 
     for name, unit in UNITS.items():
         _, response = cmd("systemctl", "is-active", unit)
-        add("service_" + name, response == "active", "%s: %s" % (unit, response or "unknown"))
+        if name == "installer" and config.get("installer_enabled") is False:
+            add("service_" + name, None,
+                "%s: optional installer explicitly disabled" % unit)
+        else:
+            add("service_" + name, response == "active", "%s: %s" % (unit, response or "unknown"))
 
     port = config.get("stats_port", 17898)
     if not isinstance(port, int) or not (1 <= port <= 65535):

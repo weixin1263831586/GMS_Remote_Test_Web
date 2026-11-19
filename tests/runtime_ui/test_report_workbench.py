@@ -19,11 +19,11 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
             ))
             self.assertEqual(
                 page.locator("#report-file-input").get_attribute("accept"),
-                ".xml,.zip,.rar,.tar,.tar.gz",
+                ".xml,.zip,.rar,.tar,.tar.gz,.txt,.log",
             )
 
             page.evaluate("""() => displayReportAnalysis({
-                report_name: 'Redmine-48231-cts_20261118.zip',
+                report_name: 'Redmine-48231-2026.11.16_17.04.22.327_8108_CtsWindowManagerDeviceActivity.zip',
                 summary: {total: 17, pass: 15, fail: 2, pass_rate: '88.24%'},
                 details: {
                     test_type: 'CTS', suite_version: '16_r2',
@@ -47,6 +47,21 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
             expect(page.get_by_role("button", name="清除")).to_be_visible()
             self.assertEqual(page.locator(".report-overview-line").count(), 1)
             expect(page.locator("#report-failure-list .report-failure-card")).to_have_count(2)
+            expect(page.locator("#report-failure-list .report-failure-preview")).to_have_count(0)
+            expect(page.locator("#report-failure-detail .report-detail-fields")).to_have_count(0)
+            expect(page.locator("#report-failure-detail .report-detail-source")).to_contain_text(
+                "未发现原始 host_log"
+            )
+            self.assertIsNotNone(page.locator("#report-file-input").get_attribute("multiple"))
+            page.evaluate("""() => {
+                window.currentReportAnalysisData.analysis_sources = {
+                    host_logs: ['logs/inv_1/host_log_1.txt']
+                };
+                selectReportFailure(0);
+            }""")
+            expect(page.locator("#report-failure-detail .report-detail-source")).to_contain_text(
+                "已发现 host_log，但未匹配该用例"
+            )
             expect(page.locator("#report-failure-detail")).to_be_visible()
             expect(page.locator("#report-failure-detail .report-stack")).to_contain_text("Example.java:42")
             expect(page.locator("#report-failure-header-actions .report-failure-action")).to_have_count(3)
@@ -55,8 +70,22 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                 page.locator("#report-failure-header-actions .report-failure-action.diagnose").get_attribute("data-a0"),
                 "0",
             )
+            page.evaluate("""() => {
+                window.currentReportAnalysisData.failures[1].raw_log = [
+                    '11-16 17:13:33 I/ModuleListener: [1/1] m10r0800015 '
+                        + 'CtsSecurityTestCases com.example.PackageSignatureTest#testSignature '
+                        + 'FAILURE: SecurityException: invalid signature',
+                    ' at Verify.java:88'
+                ].join('\\n');
+            }""")
             page.locator('[data-report-failure-index="1"]').click()
             expect(page.locator("#report-failure-detail .report-stack")).to_contain_text("Verify.java:88")
+            expect(page.locator("#report-failure-detail .report-stack")).to_contain_text(
+                "11-16 17:13:33 I/ModuleListener:"
+            )
+            expect(page.locator("#report-failure-detail .report-stack")).to_contain_text("FAILURE:")
+            expect(page.locator("#report-failure-detail .report-detail-source")).to_have_count(0)
+            expect(page.locator("#report-failure-detail .report-detail-fields")).to_have_count(0)
             expect(page.locator("#report-failure-detail .report-detail-heading")).to_contain_text(
                 "PackageSignatureTest"
             )
@@ -95,8 +124,15 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                                 + '#report-summary .report-summary-context > div'
                             )].map(node => ({
                                 top: node.getBoundingClientRect().top,
-                                height: node.getBoundingClientRect().height
+                                height: node.getBoundingClientRect().height,
+                                width: node.getBoundingClientRect().width,
+                                labelWidth: node.querySelector('.summary-label').getBoundingClientRect().width,
+                                valueWidth: node.querySelector('.summary-value').getBoundingClientRect().width
                             })),
+                            reportValueFits: (() => {
+                                const value = document.querySelector('.report-summary-report .summary-value');
+                                return value.scrollWidth <= value.clientWidth + 2;
+                            })(),
                             actionTop: rect('.report-overview-actions').top,
                             summaryWidth: rect('#report-summary').width,
                             summaryContentRight: rect('#report-summary .report-summary-report').right,
@@ -115,10 +151,18 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                             rootOverflow: document.documentElement.scrollWidth - innerWidth
                         };
                     }""")
-                    self.assertEqual(metrics["control"], "29px", metrics)
+                    self.assertEqual(metrics["control"], "32px", metrics)
                     self.assertLessEqual(metrics["summaryHeight"], 46, metrics)
                     self.assertLessEqual(metrics["overviewHeight"], 50, metrics)
                     self.assertGreaterEqual(len(metrics["summaryItems"]), 8, metrics)
+                    # Seven semantic fields keep stable widths; the report
+                    # filename alone absorbs the remaining horizontal space.
+                    expected = (150, 150, 150, 150, 150, 150, 150)
+                    for item, width_px in zip(metrics["summaryItems"][:7], expected):
+                        self.assertAlmostEqual(item["width"], width_px, delta=1, msg=metrics)
+                    if width == 1792:
+                        self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 440, metrics)
+                        self.assertTrue(metrics["reportValueFits"], metrics)
                     self.assertLessEqual(
                         max(item["top"] for item in metrics["summaryItems"])
                         - min(item["top"] for item in metrics["summaryItems"]), 1, metrics
@@ -135,6 +179,13 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     self.assertLessEqual(metrics["listSameRow"], 2, metrics)
                     self.assertGreater(metrics["listWidth"], 180, metrics)
                     self.assertGreater(metrics["detailWidth"], 220, metrics)
+                    self.assertLessEqual(
+                        metrics["listWidth"] / (metrics["listWidth"] + metrics["detailWidth"]),
+                        0.24, metrics
+                    )
+                    self.assertEqual(page.locator(
+                        "#report-failure-detail .report-stack-text"
+                    ).first.evaluate("el => getComputedStyle(el).whiteSpace"), "pre-wrap")
                     self.assertTrue(metrics["resultsWithinPage"], metrics)
                     self.assertLessEqual(metrics["rootOverflow"], 2, metrics)
                     preview_dir = os.getenv("GMS_UI_PREVIEW_DIR")
@@ -152,6 +203,45 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                 "element => element.classList.contains('upload-empty')"
             ))
             self.assert_no_page_errors(page_errors)
+        finally:
+            page.close()
+
+    def test_large_cts_counts_fit_fixed_single_row_summary_chips(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('report-analysis', null)")
+            page.evaluate("""() => displayReportAnalysis({
+                report_name: '2026.10.14_15.28.47.806_5426',
+                summary: {total: 3038784, pass: 3036568, fail: 2216, pass_rate: '99.93%'},
+                details: {test_type: 'CTS', suite_version: '17_r2', android_version: '17'},
+                failures: [{module: 'CtsAppOps2TestCases',
+                            name: 'android.app.appops2.cts.AppOpsLoggingTest#requestInstall',
+                            reason: 'java.lang.IndexOutOfBoundsException'}]
+            })""")
+            expected = (
+                (".report-summary-total", 150, "3038784"),
+                (".report-summary-pass", 150, "3036568"),
+                (".report-summary-fail", 150, "2216"),
+                (".report-summary-pass-rate", 150, "99.93%"),
+                (".report-summary-test-type", 150, "CTS"),
+                (".report-summary-suite-version", 150, "17_r2"),
+                (".report-summary-android-version", 150, "17"),
+            )
+            for selector, width_px, value in expected:
+                cell = page.locator("#report-summary " + selector)
+                expect(cell).to_have_count(1)
+                expect(cell.locator(".summary-value")).to_have_text(value)
+                geom = cell.evaluate("""el => ({
+                    width: el.getBoundingClientRect().width,
+                    valueFits: el.querySelector('.summary-value').scrollWidth
+                        <= el.querySelector('.summary-value').clientWidth + 1
+                })""")
+                self.assertAlmostEqual(geom["width"], width_px, delta=1, msg=geom)
+                self.assertTrue(geom["valueFits"], (selector, geom))
+            self.assertEqual(page.locator("#report-summary").evaluate(
+                "el => getComputedStyle(el).flexWrap"
+            ), "nowrap")
         finally:
             page.close()
 

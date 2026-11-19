@@ -573,7 +573,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         actions = {
             'root': "renderSuiteBreadcrumb(''); document.querySelector('#suite-browser-breadcrumb button').click();",
             'sibling': """renderSuiteBreadcrumb('results/fixture');
-                Array.from(document.querySelectorAll('#suite-browser-breadcrumb button'))
+                Array.from(document.querySelectorAll('#suite-browser-run-actions button'))
                     .find(button => button.textContent === '跳到 logs').click();""",
             'suite': "renderTestSuiteBrowserList(); document.querySelector('.suite-suite-item').click();",
         }

@@ -40,15 +40,15 @@
     --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.38);
     --shadow-glow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 28%, transparent);
 
-    --radius-control: 6px;
-    --radius-surface: 8px;
+    --radius-control: var(--ui-radius-control);
+    --radius-surface: var(--ui-radius-card);
 
     --transition-fast: all 0.15s ease;
     --transition-normal: all 0.25s ease;
 }
 
 body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    
     background: var(--page-background);
     color: var(--text-primary);
     line-height: 1.6;
@@ -81,7 +81,7 @@ body {
     position: absolute;
     top: 8px;
     right: 12px;
-    font-size: 24px;
+    
     line-height: 1;
     color: var(--text-secondary);
     cursor: pointer;
@@ -94,8 +94,8 @@ body {
 
 .auth-title {
     margin-bottom: 16px;
-    font-size: 18px;
-    font-weight: 700;
+    
+    
 }
 
 .auth-row {
@@ -107,12 +107,12 @@ body {
 
 .auth-row label {
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
+    
+    
 }
 
 .auth-row input {
-    height: 34px;
+    height: var(--ui-control-height-dialog);
     padding: 6px 8px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -122,7 +122,7 @@ body {
 
 .auth-help {
     color: var(--text-muted);
-    font-size: 11px;
+    
     line-height: 1.45;
 }
 
@@ -130,7 +130,7 @@ body {
     min-height: 18px;
     margin-bottom: 12px;
     color: var(--danger-color);
-    font-size: 12px;
+    
 }
 
 /* 登录层内“本机未开启 SSH 服务”的提前提示。 */
@@ -142,7 +142,7 @@ body {
     border-radius: 4px;
     background: rgba(229, 185, 79, 0.08);
     color: var(--text-primary);
-    font-size: 12px;
+    
     line-height: 1.5;
 }
 
@@ -183,8 +183,8 @@ body {
 }
 
 .sidebar-brand {
-    font-size: 16px;
-    font-weight: 700;
+    
+    
     color: var(--text-on-accent);
     letter-spacing: 0.2px;
     position: relative;
@@ -204,7 +204,7 @@ body {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    font-size: 13px;
+    
 }
 
 .notification-toggle:hover {
@@ -222,9 +222,9 @@ body {
     border-radius: 999px;
     background: var(--danger-color);
     color: #fff;
-    font-size: 10px;
+    
     line-height: 16px;
-    font-weight: 700;
+    
 }
 
 .client-info-panel {
@@ -242,8 +242,8 @@ body {
     gap: 4px;
     margin-bottom: 4px;
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
+    
+    
 }
 
 .client-account-switch-trigger {
@@ -252,8 +252,8 @@ body {
     border: 0;
     background: transparent;
     color: inherit;
-    font: inherit;
-    font-weight: inherit;
+    
+    
     cursor: pointer;
 }
 
@@ -305,8 +305,8 @@ body {
     border-radius: 999px;
     background: var(--success-color);
     color: #062b1b;
-    font-size: 10px;
-    font-weight: 700;
+    
+    
 }
 
 .client-account-switch-option small {
@@ -315,7 +315,7 @@ body {
 
 .client-identity-line {
     color: var(--text-primary);
-    font-size: 10px;
+    
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -360,7 +360,7 @@ body {
 .drag-handle {
     cursor: grab;
     padding: 2px 4px;
-    font-size: 12px;
+    
     line-height: 1;
     color: var(--text-muted);
     opacity: 0;
@@ -403,7 +403,7 @@ body {
     padding: 5px 6px;
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 13px;
+    
     transition: var(--transition-normal);
     border-radius: 7px;
     margin-bottom: 1px;
@@ -435,7 +435,7 @@ body {
 .sidebar-item.active {
     background: color-mix(in srgb, var(--primary-color) 16%, transparent);
     color: var(--primary-light);
-    font-weight: 600;
+    
 }
 
 .sidebar-item.active::before {
@@ -443,7 +443,7 @@ body {
 }
 
 .sidebar-icon {
-    font-size: 18px;
+    
     width: 22px;
     height: 22px;
     display: inline-flex;
@@ -476,8 +476,8 @@ body {
 }
 
 .sidebar-text {
-    font-weight: 500;
-    font-size: 14px;
+    
+    
     line-height: 24px;
     vertical-align: middle;
     display: inline-flex;
@@ -489,7 +489,7 @@ body {
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: 15px;
+    padding: var(--ui-page-edge);
     overflow: hidden;
     flex: 1;
     min-width: 0;
@@ -550,7 +550,7 @@ body {
     padding: 20px;
     color: var(--text-secondary);
     background: var(--card-bg);
-    font-size: 13px;
+    
     text-align: center;
     pointer-events: none;
 }
@@ -652,12 +652,19 @@ body {
     }
 }
 
-/* 除测试工作台外，仅统一标题下方的内容外框；左上角标题保持在框外。 */
+/* 除测试工作台外，标题下方的公共外框由统一标题行几何推导；
+   标题仍留在框外。窄屏有两行标题的页面只设置标题高度变量。 */
 .main-container > .page-content:not(#page-test) {
-    --page-body-frame-inset: 15px;
-    --page-body-frame-top: 40px;
+    --page-body-frame-inset: var(--ui-page-edge);
+    --page-body-frame-top: calc(
+        var(--page-body-frame-inset) +
+        var(--page-header-row-height, var(--ui-type-line-page)) + 1px
+    );
     position: relative;
 }
+
+/* All breakpoints retain the same 12px page inset.
+   Only internal responsive layouts change; page edges never shrink. */
 
 .main-container > .page-content:not(#page-test)::after {
     content: '';
@@ -720,8 +727,8 @@ body {
     border-radius: 5px;
     background: var(--success-color);
     color: #fff;
-    font-size: 13px;
-    font-weight: 500;
+    
+    
     cursor: pointer;
 }
 
@@ -763,8 +770,20 @@ body {
     min-height: 0;
 }
 
-.host-workspace-layouts { display:flex; align-items:center; gap:0; flex-wrap:nowrap; }
-.host-workspace-layouts > .btn-xs { padding:2px 7px; min-height:24px; font-size:11px; border-radius:0; box-shadow:none; transform:none; }
+.host-workspace-layouts { display:flex; align-items:stretch; gap:0; flex-wrap:nowrap; }
+.host-workspace-layouts > .btn-xs {
+    /* Both layout tabs and Users/Audit tabs live in a 26px title action row.
+       The old 24px host buttons sat 2px lower because the row aligns its
+       children on the bottom; use the canonical height instead. */
+    box-sizing: border-box;
+    height: var(--ui-control-height-small);
+    min-height: var(--ui-control-height-small);
+    max-height: var(--ui-control-height-small);
+    padding: 2px 7px;
+    border-radius: 0;
+    box-shadow: none;
+    transform: none;
+}
 .host-workspace-layouts > .btn-xs:first-child { border-radius:4px 0 0 4px; }
 .host-workspace-layouts > .btn-xs:last-child { border-radius:0 4px 4px 0; }
 .host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
@@ -777,8 +796,8 @@ body {
 .host-workspace-pane { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; background:var(--light-bg); border:1px solid var(--border-color); border-radius:7px; }
 .host-workspace-pane:focus-within { border-color:var(--primary-color); }
 .host-workspace-pane-header { flex:0 0 auto; min-height:34px; padding:4px 6px; display:flex; align-items:center; gap:6px; background:var(--darker-bg); border-bottom:1px solid var(--border-color); }
-.host-workspace-pane-header select { min-width:0; max-width:180px; padding:3px 5px; background:var(--light-bg); border:1px solid var(--border-color); border-radius:3px; color:var(--text-primary); font-size:11px; }
-.host-workspace-pane-status { margin-left:auto; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:10px; color:var(--text-secondary); }
+.host-workspace-pane-header select { min-width:0; max-width:180px; padding:3px 5px; background:var(--light-bg); border:1px solid var(--border-color); border-radius:3px; color:var(--text-primary);  }
+.host-workspace-pane-status { margin-left:auto; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;  color:var(--text-secondary); }
 .host-workspace-pane-body { position:relative; flex:1; min-height:0; overflow:hidden; background:var(--darker-bg); }
 .host-workspace-pane-body iframe, .host-workspace-terminal { width:100%; height:100%; border:0; }
 .host-workspace-empty { height:100%; display:flex; align-items:center; justify-content:center; color:var(--text-secondary); }
@@ -806,14 +825,14 @@ body {
 .control-row label {
     min-width: 80px;
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 
 .status-label {
     padding: 4px 10px;
     border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
+    
+    
     background: var(--darker-bg);
     color: var(--text-muted);
 }
@@ -868,17 +887,17 @@ body {
 }
 
 .placeholder-icon {
-    font-size: 64px;
+    
     opacity: 0.3;
 }
 
 .placeholder-text {
-    font-size: 16px;
+    
     color: var(--text-secondary);
 }
 
 .placeholder-hint {
-    font-size: 12px;
+    
     color: var(--text-muted);
 }
 
@@ -899,11 +918,11 @@ body {
 .vnc-display-info {
     padding: 4px 10px;
     border-radius: 4px;
-    font-size: 11px;
-    font-weight: 600;
+    
+    
     background: var(--darker-bg);
     color: var(--info-color);
-    font-family: monospace;
+    
 }
 
 .placeholder-instructions {
@@ -911,7 +930,7 @@ body {
     padding: 15px;
     background: var(--darker-bg);
     border-radius: 4px;
-    font-size: 12px;
+    
     color: var(--text-secondary);
     line-height: 1.8;
 }
@@ -927,8 +946,8 @@ body {
     background: var(--primary-gradient);
     color: var(--text-primary);
     border-radius: 3px;
-    font-family: monospace;
-    font-size: 11px;
+    
+    
     cursor: pointer;
 }
 
@@ -948,8 +967,8 @@ body {
 
 /* ==================== Section Title ==================== */
 .section-title {
-    font-size: 12px;
-    font-weight: 700;
+    
+    
     color: var(--text-secondary);
     margin-bottom: 6px;
     text-transform: uppercase;
@@ -969,36 +988,34 @@ body {
 }
 
 /* ==================== Page Header Row（组件化标题行） ==================== */
-/* 结构单点：components/page-header{,-actions,-end}.html——页面只保留标题
-   文本与动作内容，标题行几何不得再写页内联样式（历史上 22 页各自微调
-   导致字形顶漂移 17/19.4/28px 三种落点）。几何契约（1440x960）：
-   标题盒顶 15px、字形顶 16px（行高 17.2 收紧半行距）、盒高保持 19.2px
-   使「盒底→内容顶 6px」与内容顶位置（--page-body-frame-top）不受行高
-   调整影响；装饰条顶对齐后与 14px 字形恰好垂直居中。 */
+/* 结构单点：components/page-header{,-actions,-end}.html。
+   页面标题统一由 typography.css 提供 14px 字号、500 字重 / 24px 行盒；
+   动作区绝对定位，页面正文框架按单一公共组件计算布局。 */
 .page-header-row {
     align-items: flex-start;
     display: flex;
     gap: 10px;
     justify-content: space-between;
     margin-bottom: 6px;
-    min-height: 19.2px;
+    min-height: var(--ui-type-line-page);
     position: relative;
 }
 .page-header-row > .section-title {
+    /* Single spacing source for page-heading icons and text. */
+    gap: 6px;
     align-items: flex-start;
     align-self: stretch;
     color: var(--text-primary);
-    line-height: 17.2px;
+    line-height: var(--ui-type-line-page);
     margin: 0;
 }
+/* APK's narrower image icon has a separate 8px icon-to-label gap. */
+#page-apk-analysis .page-header-row > .section-title {
+    gap: 8px;
+}
 .page-header-actions {
-    /* 绝对定位：动作区不参与标题行高度——历史上 in-flow 动作内容会把
-       行撑高、字形顶与内容顶随之漂移。行高因此全站统一为标题盒自然
-       高度 19.2px。子容器一律 in-flow（本模板是右上角唯一定位源），
-       交叉轴底边对齐 + 容器高钉 26px：26px 控件顶 15 底 41（贴内容
-       框顶 40.19，视觉无缝）；28px 分段容器（users 页签）向上溢出 2px
-       得同一底边；24px 状态条用下方 margin 补偿保持标题顶对齐契约。
-       控件之间不留空隙（gap:0）。 */
+    /* 动作区不参与标题自然高度。顶部按钮保留紧凑 26px 控件框、
+   与页面标题同顶对齐；不得由单个页面另加标题行几何。 */
     position: absolute;
     top: 0;
     right: 0;
@@ -1007,11 +1024,22 @@ body {
     display: flex;
     flex-wrap: wrap;
     gap: 0;
-    height: 26px;
+    height: var(--ui-control-height-small);
     justify-content: flex-end;
 }
 /* 24px 单机状态条/占位条：保持与标题字形顶对齐（顶 15 底 39）的
    历史几何契约（runtime_ui 用例断言其 y == 标题 y）。 */
+/* Same outer height and top edge for the two segmented-action templates:
+   Desktop/Terminal (layout buttons) and Users/Audit (view tabs).
+   Other title actions keep their existing controls and responsive behavior. */
+.page-header-actions > :is(.host-workspace-layouts, .users-view-tabs) {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    align-self: flex-start;
+    height: var(--ui-control-height-small);
+    min-height: var(--ui-control-height-small);
+    max-height: var(--ui-control-height-small);
+}
 .page-header-actions > .host-workspace-title-state { margin-bottom: 2px; }
 /* devices 页签组保持单行 flex（旧内联样式迁移；id/role 保留供
    快照与脚本引用）。控件之间不留空隙，与动作区统一。 */
@@ -1030,8 +1058,7 @@ body {
     color: #fff;
     border-color: var(--primary-color);
 }
-/* 带图标标题（APK分析）：图标随行盒顶对齐，向下补偿半行距使其与
-   14px 字形（行盒内居中偏移 1.6px）垂直居中。 */
+/* 标题图标沿公共 24px 行盒居中，具体字号由 typography.css 管理。 */
 .page-header-row > .section-title .section-title-icon { margin-top: 1.6px; }
 /* 拉丁混排标题（Gerrit/Redmine）保持输入原样，不吃基类 uppercase。 */
 #page-gerrit-dashboard .page-header-row > .section-title,
@@ -1050,9 +1077,9 @@ body {
 .page-header-actions :is(button, select),
 #page-devices #devices-view-tabs :is(button, select) {
     box-sizing: border-box;
-    font-size: 11px;
-    min-height: 26px;
-    max-height: 26px;
+    
+    min-height: var(--ui-control-height-small);
+    max-height: var(--ui-control-height-small);
     white-space: nowrap;
 }
 .page-header-actions label {
@@ -1063,8 +1090,8 @@ body {
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 26px;
-    font-size: 11px;
+    height: var(--ui-control-height-small);
+    
     white-space: nowrap;
     cursor: pointer;
 }
@@ -1076,13 +1103,15 @@ body {
 .page-stat-card {
     background: var(--light-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     flex: 1;
+    min-height: var(--ui-stat-height);
+    min-width: 0;
     line-height: 1.6;
     padding: 15px;
 }
-.page-stat-card > .page-stat-value { display: block; font-size: 24px; font-weight: bold; }
-.page-stat-card > .page-stat-label { display: block; color: var(--text-secondary); font-size: 12px; margin-top: 5px; }
+.page-stat-card > .page-stat-value { display: block;   }
+.page-stat-card > .page-stat-label { display: block; color: var(--text-secondary);  margin-top: 5px; }
 .page-stat-value.tone-primary { color: var(--primary-color); }
 .page-stat-value.tone-success { color: var(--success-color); }
 .page-stat-value.tone-warning { color: var(--warning-color); }
@@ -1112,7 +1141,7 @@ body {
     border-bottom: 1px solid var(--border-color);
     background: var(--darker-bg);
     color: var(--text-secondary);
-    font-size: 13px;
+    
     text-align: center;
 }
 .list-table th[data-click] { cursor: pointer; }
@@ -1145,13 +1174,13 @@ td.table-placeholder {
     grid-template-columns: 130px 120px minmax(180px, 1fr) auto auto;
 }
 #email-outbox-all-users-label {
-    font-size: 12px;
+    
     white-space: nowrap;
 }
 #email-outbox-all-users { vertical-align: middle; }
 #devices-scope-hint {
     color: var(--text-secondary);
-    font-size: 12px;
+    
 }
 #device-group-filter {
     width: 150px;
@@ -1169,7 +1198,7 @@ td.table-placeholder {
     border-radius: 4px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    font-size: 11px;
+    
 }
 .page-header-actions label input[type="checkbox"] { cursor: pointer; }
 
@@ -1200,13 +1229,12 @@ td.table-placeholder {
 }
 .pane-bar.spread { justify-content: space-between; }
 .pane-bar.end { align-items: flex-end; }
-.pane-title { font-size: 13px; font-weight: 600; }
 .pane-label {
     padding: 8px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--text-secondary);
-    font-size: 12px;
-    font-weight: 600;
+    
+    
 }
 .pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .pane-foot {
@@ -1218,11 +1246,11 @@ td.table-placeholder {
 .pane-foot > .btn-xs { flex: 1; }
 .pane-foot.single > .btn-xs { flex: none; width: 100%; }
 .pane-grow { flex: 1; min-width: 0; }
-.pane-icon-btn { padding: 1px 6px; font-size: 10px; }
+.pane-icon-btn { padding: 1px 6px;  }
 
 /* 页面标题行公共规范：24px 动作按钮点击目标（只看关注/外部知识库共用）。 */
 .page-title-row { display:flex; align-items:center !important; justify-content:space-between; }
-.page-title-row .btn-xxs, .page-title-row .btn-xs, .page-title-action { flex:0 0 auto; min-width:0; min-height:24px; padding:2px 8px; font-size:11px; line-height:16px; margin:0; }
+.page-title-row .btn-xxs, .page-title-row .btn-xs, .page-title-action { flex:0 0 auto; min-width:0; min-height:24px; padding:2px 8px;  line-height:16px; margin:0; }
 
 /* 参数设置区。 */
 .input-container {
@@ -1385,7 +1413,7 @@ td.table-placeholder {
     min-height: 26px;
     height: 26px;
     padding: 0 6px;
-    font-size: 11px;
+    
 }
 
 /* 分组开关按钮激活态 */
@@ -1426,7 +1454,7 @@ td.table-placeholder {
     width: 14px;
     text-align: center;
     color: var(--text-secondary);
-    font-size: 11px;
+    
 }
 
 .device-group-color {
@@ -1438,8 +1466,8 @@ td.table-placeholder {
 }
 
 .device-group-name {
-    font-weight: 600;
-    font-size: 13px;
+    
+    
     color: var(--text-primary);
     flex: 1;
     min-width: 0;
@@ -1449,8 +1477,8 @@ td.table-placeholder {
 }
 
 .device-group-count {
-    font-size: 11px;
-    font-weight: 600;
+    
+    
     color: var(--text-on-accent);
     background: var(--primary-gradient);
     border-radius: 10px;
@@ -1466,7 +1494,7 @@ td.table-placeholder {
 
 .device-group-header .btn-xxs {
     padding: 2px 5px;
-    font-size: 11px;
+    
     line-height: 1;
 }
 
@@ -1495,7 +1523,7 @@ td.table-placeholder {
     gap: 6px;
     padding: 3px 4px;
     cursor: pointer;
-    font-size: 13px;
+    
     border-radius: 3px;
 }
 
@@ -1510,7 +1538,7 @@ td.table-placeholder {
 
 .group-pick-off {
     color: var(--text-muted);
-    font-size: 11px;
+    
 }
 
 .device-scrollable-frame {
@@ -1560,9 +1588,9 @@ td.table-placeholder {
 }
 
 .device-id {
-    font-weight: 600;
+    
     color: var(--text-primary);
-    font-size: 12px;
+    
     line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1571,12 +1599,12 @@ td.table-placeholder {
 
 .device-model {
     color: var(--text-secondary);
-    font-size: 10px;
+    
 }
 
 .device-source {
     color: var(--text-secondary);
-    font-size: 10px;
+    
     line-height: 1.4;
     max-width: 150px;
     overflow: hidden;
@@ -1587,8 +1615,8 @@ td.table-placeholder {
 .device-status {
     padding: 3px 8px;
     border-radius: 10px;
-    font-size: 10px;
-    font-weight: 600;
+    
+    
     background: color-mix(in srgb, var(--success-color) 20%, transparent);
     color: var(--success-color);
     display: inline-flex;
@@ -1614,7 +1642,7 @@ td.table-placeholder {
 }
 
 .lock-status {
-    font-size: 10px;
+    
     color: var(--danger-color);
     margin-top: 2px;
     display: flex;
@@ -1624,7 +1652,7 @@ td.table-placeholder {
 
 .empty-message {
     color: var(--text-muted);
-    font-size: 12px;
+    
     text-align: center;
     padding: 20px;
 }
@@ -1644,7 +1672,7 @@ td.table-placeholder {
     width: 75px;
     min-width: 75px;
     box-sizing: border-box;
-    font-weight: 600;
+    
     box-shadow: var(--shadow-sm);
 }
 
@@ -1682,8 +1710,8 @@ td.table-placeholder {
 .vpn-status-label {
     padding: 2px 6px;
     border-radius: 4px;
-    font-size: 10px;
-    font-weight: 600;
+    
+    
     background: var(--darker-bg);
     color: var(--text-secondary);
     margin-left: 6px;
@@ -1749,8 +1777,8 @@ td.table-placeholder {
     padding: 12px;
     overflow-y: scroll;
     overflow-x: auto;
-    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-    font-size: 12px;
+    
+    
     line-height: 1.7;
     color: #e8e8f0;
     word-wrap: break-word;
@@ -1785,7 +1813,7 @@ td.table-placeholder {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-secondary);
-    font-size: 10px;
+    
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }

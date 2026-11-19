@@ -2,7 +2,7 @@ name: Read-only VPN proxy deployment and GMS integration check
 
 on:
   push:
-    branches: [audit/global-current-1cd4167-20261118]
+    branches: ['audit/**']
     paths:
       - .github/workflows/audit-vpn-proxy-host-validation.yml
       - tools/scripts/testing/audit_vpn_proxy_host.py
@@ -71,7 +71,7 @@ jobs:
           "$RUNNER_TEMP/vpn-check-venv/bin/python" tools/scripts/testing/audit_vpn_proxy_host.py \
             --vpn-root "$HOME/vpn-proxy" \
             --gms-root "$HOME/GMS_Remote_Test_Web" \
-            --master-sha "0066c998c856a0cef86ffa7184e2e46cf3fa83b7" \
+            --master-sha "49afc4d7d18dab278e4ccb89ac678025792eaf84" \
             --output "$RUNNER_TEMP/vpn-proxy-host-report.json"
           result=$?
           echo "$result" > "$RUNNER_TEMP/vpn-proxy-host-report.exit"

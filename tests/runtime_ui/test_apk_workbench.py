@@ -41,11 +41,21 @@ class RuntimeApkWorkbenchTests(RuntimeUiHarness):
             expect(page.locator('#apk-file-viewer')).to_be_visible()
             expect(page.locator('#apk-file-path')).to_contain_text('Sample.java')
 
+            # The status pane uses a 0.3s fadeIn/translate animation. Measure
+            # its settled layout rather than the intermediate frame, while
+            # preserving the original side-by-side geometry assertion.
+            page.wait_for_timeout(380)
+
             for width, height in ((1792, 856), (1440, 900), (1280, 800)):
                 with self.subTest(viewport=(width, height)):
                     page.set_viewport_size({'width': width, 'height': height})
                     metrics = page.evaluate("""() => {
-                        const box = name => document.querySelector(name).getBoundingClientRect();
+                        // The shell also contains a hidden report-analysis upload
+                        // frame. Never measure that first global match.
+                        const scope = document.querySelector('#page-apk-analysis');
+                        const box = name => (
+                            name === '#page-apk-analysis' ? scope : scope.querySelector(name)
+                        ).getBoundingClientRect();
                         const root = box('#page-apk-analysis');
                         const intake = box('.apk-intake-row');
                         const upload = box('.analysis-upload-frame');
@@ -57,6 +67,12 @@ class RuntimeApkWorkbenchTests(RuntimeUiHarness):
                         return {
                             outerOverflow: document.documentElement.scrollWidth - innerWidth,
                             sameTaskRow: Math.abs(upload.top - status.top),
+                            uploadTop: upload.top,
+                            statusTop: status.top,
+                            uploadHeight: upload.height,
+                            statusHeight: status.height,
+                            uploadEmpty: document.getElementById('apk-upload-zone').classList.contains('upload-empty'),
+                            intakeGridColumns: getComputedStyle(document.querySelector('.apk-intake-row')).gridTemplateColumns,
                             tabBelowIntake: tabBar.top >= intake.bottom - 1,
                             workbenchInside: workbench.bottom <= root.bottom + 2,
                             treeAndViewerSameTop: Math.abs(tree.top - viewer.top),

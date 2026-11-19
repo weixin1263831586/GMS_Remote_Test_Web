@@ -134,7 +134,7 @@ async function agentAccessReload(button) {
         refreshButton.textContent = '刷新中…';
     }
     if (!agentAccessLoaded) {
-        container.innerHTML = '<tr><td colspan="7" class="agent-access-empty">正在加载接入凭据…</td></tr>';
+        container.innerHTML = '<tr><td colspan="11" class="agent-access-empty">正在加载接入凭据…</td></tr>';
     }
     try {
         const [tokensResp, scopesResp] = await Promise.all([
@@ -153,7 +153,7 @@ async function agentAccessReload(button) {
     } catch (error) {
         debugLog('[AgentAccess] load failed:', error);
         if (!agentAccessLoaded) {
-            container.innerHTML = `<tr><td colspan="7" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要管理员会话')}</td></tr>`;
+            container.innerHTML = `<tr><td colspan="11" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要管理员会话')}</td></tr>`;
         } else {
             showToast(`Agent Token 刷新失败：${error.message}`, 'error');
         }
@@ -444,7 +444,7 @@ function agentAccessRenderTokens(tokens) {
             document.getElementById('agent-access-search')?.value
             || document.getElementById('agent-access-status-filter')?.value
         );
-        container.innerHTML = `<tr><td colspan="7" class="agent-access-empty">${filtersActive ? '没有匹配的接入凭据，请调整搜索或筛选条件。' : '尚无 Agent 接入。点击「创建配对码」，完成目标服务器的安装与配对。'}</td></tr>`;
+        container.innerHTML = `<tr><td colspan="11" class="agent-access-empty">${filtersActive ? '没有匹配的接入凭据，请调整搜索或筛选条件。' : '尚无 Agent 接入。点击「创建配对码」，完成目标服务器的安装与配对。'}</td></tr>`;
         return;
     }
     const statusLabels = {active: '有效', expired: '已过期', revoked: '已吊销'};
@@ -455,31 +455,23 @@ function agentAccessRenderTokens(tokens) {
             : String(token.scopes || '').split(',').filter(Boolean);
         const scopesText = scopes.length ? scopes.join(', ') : '无授权范围';
         const groupLabels = [...new Set(scopes.map(scope => agentAccessScopeGroup(scope).label))];
-        const workers = token.allowed_workers === '*' || !token.allowed_workers ? '全部 Worker' : 'Worker：' + token.allowed_workers;
-        const devices = token.allowed_devices === '*' || !token.allowed_devices ? '全部设备' : '设备：' + token.allowed_devices;
+        const workers = token.allowed_workers === '*' || !token.allowed_workers ? '全部 Worker' : token.allowed_workers;
+        const devices = token.allowed_devices === '*' || !token.allowed_devices ? '全部设备' : token.allowed_devices;
         const revokeButton = status === 'active'
             ? `<button class="btn-xxs btn-danger" type="button" data-agent-token-id="${agentAccessEscape(token.id)}">吊销</button>`
             : '—';
         return `
             <tr>
-                <td class="agent-token-cell-name" title="${agentAccessEscape(token.name || '')}">
-                    <strong>${agentAccessEscape(token.name || '未命名 Agent')}</strong>
-                    <code class="agent-token-id" title="${agentAccessEscape(token.id || '')}">${agentAccessEscape(token.id || '—')}</code>
-                </td>
+                <td class="agent-token-cell-name" title="${agentAccessEscape(token.name || '')}"><strong>${agentAccessEscape(token.name || '未命名 Agent')}</strong></td>
+                <td title="${agentAccessEscape(token.id || '')}"><code class="agent-token-id">${agentAccessEscape(token.id || '—')}</code></td>
                 <td><span class="agent-token-status ${status}">${statusLabels[status]}</span></td>
-                <td class="agent-token-cell-scopes" title="${agentAccessEscape(scopesText)}">
-                    <button class="agent-token-scope-link" type="button" data-click="agentAccessShowScopes" data-a0="${agentAccessEscape(token.id)}">${scopes.length} 项权限</button>
-                    <span class="agent-token-secondary">${agentAccessEscape(groupLabels.join(' · ') || '未授权')}</span>
-                </td>
-                <td class="agent-token-cell-acl">
-                    <span title="${agentAccessEscape(token.allowed_workers || '*')}">${agentAccessEscape(workers)}</span>
-                    <span class="agent-token-secondary" title="${agentAccessEscape(token.allowed_devices || '*')}">${agentAccessEscape(devices)}</span>
-                </td>
+                <td title="${agentAccessEscape(scopesText)}"><button class="agent-token-scope-link" type="button" data-click="agentAccessShowScopes" data-a0="${agentAccessEscape(token.id)}">${scopes.length} 项权限</button></td>
+                <td title="${agentAccessEscape(groupLabels.join(' · ') || '未授权')}">${agentAccessEscape(groupLabels.join(' · ') || '未授权')}</td>
+                <td title="${agentAccessEscape(workers)}">${agentAccessEscape(workers)}</td>
+                <td title="${agentAccessEscape(devices)}">${agentAccessEscape(devices)}</td>
                 <td title="${agentAccessEscape(token.owner_user_id || '')}">${agentAccessEscape(token.owner_user_id || '—')}</td>
-                <td class="agent-token-cell-date" title="创建：${agentAccessFormatDate(token.created_at)}；到期：${agentAccessFormatDate(token.expires_at)}">
-                    <span>${token.expires_at ? agentAccessFormatShortDate(token.expires_at) + ' 到期' : '长期有效'}</span>
-                    <span class="agent-token-secondary" title="${agentAccessFormatDate(token.last_used_at)}">· ${token.last_used_at ? '最近 ' + agentAccessFormatShortDate(token.last_used_at, true) : '尚未使用'}</span>
-                </td>
+                <td title="${agentAccessEscape(agentAccessFormatDate(token.expires_at))}">${token.expires_at ? agentAccessFormatShortDate(token.expires_at) : '长期有效'}</td>
+                <td title="${agentAccessEscape(agentAccessFormatDate(token.last_used_at))}">${token.last_used_at ? agentAccessFormatShortDate(token.last_used_at, true) : '尚未使用'}</td>
                 <td>${revokeButton}</td>
             </tr>`;
     }).join('');

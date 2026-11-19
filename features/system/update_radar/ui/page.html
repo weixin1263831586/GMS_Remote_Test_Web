@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-ui-type-root="update-radar">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,16 +8,16 @@
   <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
   <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
   <style>
-    *{box-sizing:border-box}body{margin:0;background:var(--page-background);color:var(--text-primary);font:13px/1.6 system-ui,sans-serif}
-    button,input,select,textarea{font:inherit}button{cursor:pointer;border:1px solid var(--border-color);border-radius:6px;background:var(--lighter-bg);color:var(--text-primary);padding:5px 12px}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--primary-gradient)}
-    main{max-width:1500px;margin:auto;padding:18px 16px}h1{font-size:20px;margin:0 0 6px}h2{font-size:16px;margin:0 0 12px}p{margin:6px 0}.muted{color:var(--text-secondary)}
+    *{box-sizing:border-box}body{margin:0;background:var(--page-background);color:var(--text-primary);}
+    button,input,select,textarea{}button{min-height:var(--ui-control-height);white-space:nowrap;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;background:var(--lighter-bg);color:var(--text-primary);padding:5px 12px}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--primary-gradient)}
+    main{max-width:1500px;margin:auto;padding:18px 16px}h1{margin:0 0 6px}h2{margin:0 0 12px}p{margin:6px 0}.muted{color:var(--text-secondary)}
     .panel{background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:16px;margin-top:16px;min-width:0}.scope,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.scope span{border:1px solid var(--border-color);background:var(--light-bg);border-radius:6px;padding:4px 10px}
     .status{white-space:pre-wrap;color:var(--primary-light)}#message{min-height:24px;white-space:pre-wrap}#message[data-error=true],.error{color:var(--danger-color)}
-    .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border-color)}th{font-weight:500;color:var(--text-secondary)}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px}
-    form{max-width:850px;display:grid;gap:16px}label{display:grid;gap:5px}label.check{display:flex;align-items:center;gap:8px}input:not([type=checkbox]),select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);color:var(--text-primary)}textarea{min-height:85px;resize:vertical}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{color:var(--text-secondary)}
+    .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border-color)}th{color:var(--text-secondary)}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px}
+    form{max-width:850px;display:grid;gap:16px}label{display:grid;gap:5px}label.check{display:flex;align-items:center;gap:8px}input:not([type=checkbox]),select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);color:var(--text-primary)}input:not([type=checkbox]),select{min-height:var(--ui-control-height)}textarea{min-height:85px;resize:vertical}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{color:var(--text-secondary)}
     .category-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}.count{padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg)}.count strong{display:block;margin-bottom:4px}
-    details{border:1px solid var(--border-color);border-radius:6px;margin-top:8px;padding:10px}summary{cursor:pointer;overflow-wrap:anywhere}.diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dark-bg);border-radius:6px;padding:12px;font-size:12px;max-height:440px;overflow:auto}a{color:var(--primary-light)}[hidden]{display:none!important}
-    @media(max-width:700px){.category-counts,.form-row,.diff{grid-template-columns:1fr}.panel{padding:12px}.workspace-actions{overflow-x:auto}.workspace-actions button{flex:none}button,input,select{min-height:40px}}
+    details{border:1px solid var(--border-color);border-radius:6px;margin-top:8px;padding:10px}summary{cursor:pointer;overflow-wrap:anywhere}.diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dark-bg);border-radius:6px;padding:12px;max-height:440px;overflow:auto}a{color:var(--primary-light)}[hidden]{display:none!important}
+    @media(max-width:700px){.category-counts,.form-row,.diff{grid-template-columns:1fr}.panel{padding:12px}.workspace-actions{overflow-x:auto}.workspace-actions button{flex:none}button,input,select{min-height:var(--ui-touch-target-height)}}
   </style>
   <!-- .modal/.modal-content/.modal-header 基础档位在 modal.css（shell 同源）；
        缺它时关闭弹框移除 .show 后元素仍按默认 display 可见。 -->
@@ -31,6 +31,8 @@
   <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
   <script src="/gms-update-radar/page.js?v=20261116-aligned-corner-path" defer></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs" defer></script>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-ui-sizing-v2">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 </head>
 <body>
 <header class="workspace-header">

@@ -12,7 +12,7 @@
         console.error('[Boot] 核心脚本未加载完成，页面初始化中止');
         const bootBanner = document.createElement('div');
         bootBanner.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;'
-            + 'background:#b3261e;color:#fff;padding:10px 16px;font-size:14px;'
+            + 'background:#b3261e;color:#fff;padding:10px 16px;font-size:var(--ui-type-size-card);'
             + 'text-align:center;line-height:1.6;';
         bootBanner.textContent = '页面核心脚本加载失败（网络错误），功能暂不可用。'
             + '请刷新重试；若反复出现，请关闭本站多余标签页并检查本机网络代理/端口占用后重启浏览器。';

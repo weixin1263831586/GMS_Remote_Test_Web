@@ -169,7 +169,7 @@ function renderReportsPagination() {
     } else if (reportsLoadedItems.length) {
         wrapper.textContent = `已显示全部 ${reportsLoadedItems.length} 条报告`;
         wrapper.style.color = 'var(--text-secondary)';
-        wrapper.style.fontSize = '12px';
+        wrapper.classList.add('reports-page-count');
     }
 }
 
@@ -381,22 +381,22 @@ function displayTestReports(reports) {
         tr.dataset.reportName = report.report_name || '';
 
         tr.innerHTML = `
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(displayClient)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 700; font-size: 13px; color: ${typeColor};">${escapeHtml(testType)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;">${escapeHtml(workerId)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-family: monospace; font-size: 12px;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
-            <td style="padding: 4px 6px; text-align: center; color: var(--success-color); font-weight: 600; font-size: 13px;">${escapeHtml(passCount)}</td>
-            <td style="padding: 4px 6px; text-align: center; color: var(--danger-color); font-weight: 600; font-size: 13px;">${escapeHtml(failCount)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px;">${escapeHtml(totalCount)}</td>
-            <td style="padding: 4px 6px; text-align: center; font-weight: 600; font-size: 13px; ${passRateStyle}">${escapeHtml(passRate)}</td>
+            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(displayClient)}</td>
+            <td class="reports-type-cell" style="padding: 4px 6px; text-align: center; color: ${typeColor};">${escapeHtml(testType)}</td>
+            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
+            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(workerId)}</td>
+            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
+            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; color: var(--success-color);">${escapeHtml(passCount)}</td>
+            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; color: var(--danger-color);">${escapeHtml(failCount)}</td>
+            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(totalCount)}</td>
+            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; ${passRateStyle}">${escapeHtml(passRate)}</td>
             <td style="padding: 4px 6px; text-align: center;">
-                <button class="btn-xxs" data-action="analyze" style="margin: 2px; font-size: 12px;">📈 分析</button>
-                <button class="btn-xxs" data-action="retry" style="background: var(--primary-gradient); margin: 2px; font-size: 12px;">🔄 retry</button>
-                <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; font-size: 12px;">results</button>
-                <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; font-size: 12px;">logs</button>
-                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; font-size: 12px;">⬇️ 下载</button>
-                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; font-size: 12px;">🗑️ 删除</button>
+                <button class="btn-xxs" data-action="analyze" style="margin: 2px; ">📈 分析</button>
+                <button class="btn-xxs" data-action="retry" style="background: var(--primary-gradient); margin: 2px; ">🔄 retry</button>
+                <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; ">results</button>
+                <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; ">logs</button>
+                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; ">⬇️ 下载</button>
+                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; ">🗑️ 删除</button>
             </td>
         `;
 
@@ -721,34 +721,52 @@ async function analyzeReport(timestamp, reportId = '') {
             sidebarItem.click();
         }
 
-        // 等待页面切换完成后，自动加载并分析报告
+        const activity = beginReportAnalysisActivity(
+            '正在解析已保存的测试报告',
+            '报告 ' + timestamp + ' · 正在由服务端读取并统计结果'
+        );
+        // Keep the status visible during page navigation and throughout the
+        // potentially long-running server request.
         setTimeout(async () => {
-            showToast('正在分析报告...', 'info');
-
-            const formData = createFormData(AnalysisMode.SAVED, {
-                report_timestamp: timestamp,
-                report_id: reportId || reportRow?.dataset.reportId || ''
-            });
-            const resp = await fetch('/api/reports/analyze', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await resp.json();
-
-            if (!data.success) {
-                notifyOperationResult('报告分析失败', data.error || '未知错误', 'error', 'report-analysis', { timestamp });
-                return;
+            if (!isReportAnalysisActivityCurrent(activity)) return;
+            const controller = new AbortController();
+            currentReportAnalysisFetch = controller;
+            try {
+                const formData = createFormData(AnalysisMode.SAVED, {
+                    report_timestamp: timestamp,
+                    report_id: reportId || reportRow?.dataset.reportId || ''
+                });
+                const resp = await fetch('/api/reports/analyze', {
+                    method: 'POST',
+                    body: formData,
+                    signal: controller.signal
+                });
+                if (!isReportAnalysisActivityCurrent(activity)) return;
+                const data = await resp.json();
+                if (!isReportAnalysisActivityCurrent(activity)) return;
+                if (!resp.ok || !data.success) {
+                    const reason = data.error || data.message || '报告分析失败';
+                    finishReportAnalysisActivity(activity, reason);
+                    notifyOperationResult('报告分析失败', reason, 'error',
+                        'report-analysis', { timestamp });
+                    return;
+                }
+                displayReportAnalysis(data.data);
+                finishReportAnalysisActivity(activity);
+                notifyOperationResult(
+                    '报告分析完成',
+                    data.data?.report_name || data.data?.test_result?.test_name || '报告分析完成',
+                    'success', 'report-analysis', { timestamp }
+                );
+            } catch (error) {
+                if (!isReportAnalysisActivityCurrent(activity) || error.name === 'AbortError') return;
+                console.error('[Reports] Error analyzing saved report:', error);
+                finishReportAnalysisActivity(activity, error.message || '请求失败');
+                notifyOperationResult('报告分析失败', error.message || '请求失败',
+                    'error', 'report-analysis', { timestamp });
+            } finally {
+                if (currentReportAnalysisFetch === controller) currentReportAnalysisFetch = null;
             }
-
-            // 使用与手动上传相同的显示函数，保持布局一致
-            displayReportAnalysis(data.data);
-            notifyOperationResult(
-                '报告分析完成',
-                data.data?.report_name || data.data?.test_result?.test_name || '报告分析完成',
-                'success',
-                'report-analysis',
-                { timestamp }
-            );
         }, 300);
     } catch (e) {
         console.error('[Reports] Error analyzing report:', e);
@@ -760,6 +778,17 @@ async function analyzeReport(timestamp, reportId = '') {
 // ==================== 安装指南弹窗 ====================
 
 function showInstallGuide(title, guide) {
+    const modal = document.getElementById('install-guide-modal');
+    if (!modal) return;
+    const heading = modal.querySelector('#install-guide-title');
+    const content = modal.querySelector('#install-guide-content');
+    const dynamic = modal.querySelector('#install-guide-dynamic');
+    const defaults = modal.querySelector('#install-guide-default-steps');
+    const instructions = String(guide || '').trim();
+    if (heading) heading.textContent = String(title || 'usbipd 安装指南');
+    if (content) content.textContent = instructions;
+    if (dynamic) dynamic.hidden = !instructions;
+    if (defaults) defaults.hidden = Boolean(instructions);
     ModalManager.open('install-guide-modal');
 }
 

@@ -68,6 +68,20 @@ async function elevateSecurityAuditView() {
     await loadSecurityAudit(true);
 }
 
+// Use the same elevation prompt as the log view for the read-only disk tab.
+function diskArtifactAuditGateHtml() {
+    return securityAuditGateHtml().replace(
+        'data-click="elevateSecurityAuditView"',
+        'data-click="elevateDiskArtifactAudit"'
+    );
+}
+
+async function elevateDiskArtifactAudit() {
+    const granted = await requestElevatedAccess('查看磁盘审计');
+    if (!granted) return;
+    await loadDiskArtifactAudit(true);
+}
+
 async function loadSecurityAudit(reset = false) {
     const tbody = $('security-audit-table-body');
     if (!tbody) return;
@@ -365,8 +379,8 @@ function renderAuditDetailBlock(title, content, options = {}) {
     const text = isJson ? formatAuditJson(content) : String(content || '-');
     return `
         <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
-            <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary);">${escapeHtml(title)}</div>
-            <pre style="margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-size: 11px; line-height: 1.45; color: var(--text-secondary);">${escapeHtml(text)}</pre>
+            <div class="audit-detail-block-title" style="margin-bottom: 8px; color: var(--text-primary);">${escapeHtml(title)}</div>
+            <pre class="audit-detail-block-code" style="margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.45; color: var(--text-secondary);">${escapeHtml(text)}</pre>
         </div>
     `;
 }
@@ -494,6 +508,7 @@ const auditOutboxState = {
     loading: false,
     hasMore: false,
     loaded: false,
+    requestGeneration: 0,
 };
 
 const AUDIT_OUTBOX_CHANNEL_LABELS = {
@@ -501,40 +516,42 @@ const AUDIT_OUTBOX_CHANNEL_LABELS = {
     automation: '自动化',
     ops: '运维告警',
     redmine_reminder: 'Redmine',
+    update_radar: '更新雷达',
 };
 
-function auditOutboxPanelIsOpen() {
-    const panel = document.getElementById('audit-outbox-panel');
-    return !!panel && panel.style.display !== 'none';
-}
-
-async function auditOutboxToggle(show) {
-    const panel = document.getElementById('audit-outbox-panel');
-    const mainView = document.getElementById('audit-main-view');
-    const tabs = document.getElementById('audit-view-tabs');
-    if (!panel || !mainView) return;
-    const visible = show !== undefined ? Boolean(show) : !auditOutboxPanelIsOpen();
-
-    panel.style.display = visible ? 'flex' : 'none';
-    mainView.style.display = visible ? 'none' : '';
-    try { sessionStorage.setItem('gms_audit_view', visible ? 'outbox' : 'logs'); } catch (_error) {}
-    // 左上角页面标题保持「🛡️ 安全审计」不变：视图切换由页签 active 态表达。
-
-    const logsTab = document.getElementById('audit-logs-tab');
-    const outboxTab = document.getElementById('audit-outbox-tab');
-    logsTab?.classList.toggle('active', !visible);
-    outboxTab?.classList.toggle('active', visible);
-    logsTab?.setAttribute('aria-selected', String(!visible));
-    outboxTab?.setAttribute('aria-selected', String(visible));
-
-    // 「查看全部用户」仅 admin 可见（服务端 admin_view 仍会二次校验）。
+async function switchSecurityAuditView(view) {
+    const selected = ['logs', 'outbox', 'disk'].includes(view) ? view : 'logs';
+    const views = {
+        logs: document.getElementById('audit-main-view'),
+        outbox: document.getElementById('audit-outbox-panel'),
+        disk: document.getElementById('audit-disk-panel'),
+    };
+    if (!views.logs || !views.outbox || !views.disk) return;
+    for (const [name, element] of Object.entries(views)) {
+        element.style.display = name === selected ? 'flex' : 'none';
+    }
+    for (const [name, id] of [
+        ['logs', 'audit-logs-tab'], ['outbox', 'audit-outbox-tab'], ['disk', 'audit-disk-tab']
+    ]) {
+        const tab = document.getElementById(id);
+        tab?.classList.toggle('active', name === selected);
+        tab?.setAttribute('aria-selected', String(name === selected));
+    }
+    try { sessionStorage.setItem('gms_audit_view', selected); } catch (_error) {}
     const allUsersLabel = document.getElementById('email-outbox-all-users-label');
     if (allUsersLabel) {
-        allUsersLabel.style.display =
-            (state.currentUser?.role === 'admin') ? 'inline-flex' : 'none';
+        allUsersLabel.style.display = state.currentUser?.role === 'admin' ? 'inline-flex' : 'none';
     }
+    if (selected === 'outbox' && !auditOutboxState.loaded) await loadAuditOutbox(true);
+    if (selected === 'disk' && (
+        !diskArtifactAuditState.loaded || (state.authRequired && !state.elevated)
+    )) await loadDiskArtifactAudit(true);
+    if (selected === 'logs' && !securityAuditState.loaded) await loadSecurityAudit(true);
+}
 
-    if (visible && !auditOutboxState.loaded) await loadAuditOutbox(true);
+// Backward-compatible entry for code that used the earlier two-tab page.
+async function auditOutboxToggle(show) {
+    return switchSecurityAuditView(show ? 'outbox' : 'logs');
 }
 
 function getAuditOutboxFilterParams(reset = false) {
@@ -613,6 +630,8 @@ function renderAuditOutboxRows(items, { append = false } = {}) {
 
 // ==================== 历史邮件详情弹框（同审计日志详情模板） ====================
 
+let outboxDetailRequestGeneration = 0;
+
 function ensureOutboxDetailModal() {
     let modal = $('outbox-detail-modal');
     if (modal) return modal;
@@ -641,12 +660,13 @@ function ensureOutboxDetailModal() {
 }
 
 function closeOutboxDetailModal() {
+    ++outboxDetailRequestGeneration;
     ModalManager.close('outbox-detail-modal');
 }
 
 function renderOutboxDetailField(label, value) {
     return `
-        <div style="display: grid; grid-template-columns: 96px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px dashed var(--border-color); font-size: 12px;">
+        <div style="display: grid; grid-template-columns: 96px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px dashed var(--border-color); font-size: var(--ui-type-size-small);">
             <div style="color: var(--text-secondary);">${escapeHtml(label)}</div>
             <div style="color: var(--text-primary); word-break: break-all;">${value}</div>
         </div>
@@ -655,12 +675,14 @@ function renderOutboxDetailField(label, value) {
 
 async function showOutboxDetail(emailId) {
     if (!emailId) return;
+    const generation = ++outboxDetailRequestGeneration;
     const modal = ensureOutboxDetailModal();
     const body = $('outbox-detail-body');
     ModalManager.open('outbox-detail-modal');
     body.innerHTML = '加载中...';
     try {
         const result = await apiCall(`/api/email/outbox/${encodeURIComponent(emailId)}`);
+        if (generation !== outboxDetailRequestGeneration) return;
         const entry = result.data || {};
         const sentBadge = entry.sent
             ? '<span style="color: var(--success-color);">✓ 成功</span>'
@@ -690,6 +712,7 @@ async function showOutboxDetail(emailId) {
             ${errorBlock}
         `;
     } catch (error) {
+        if (generation !== outboxDetailRequestGeneration) return;
         body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
@@ -697,49 +720,152 @@ async function showOutboxDetail(emailId) {
 window.showOutboxDetail = showOutboxDetail;
 window.closeOutboxDetailModal = closeOutboxDetailModal;
 
+function updateAuditOutboxSummary(summary) {
+    const total = Number(summary.total || 0);
+    const success = Number(summary.success || 0);
+    const failed = Number(summary.failed || 0);
+    const latest = formatOutboxTime(summary.latest_at) || '-';
+    const setText = (id, value) => {
+        const el = $(id);
+        if (el) el.textContent = value;
+    };
+    const countText = (value) => value.toLocaleString('zh-CN');
+    setText('audit-mail-total', countText(total));
+    setText('audit-mail-success', countText(success));
+    setText('audit-mail-failed', countText(failed));
+    setText('audit-mail-latest', latest);
+    setText('audit-mail-status-latest', latest);
+    setText('audit-mail-donut-total', countText(total));
+    const percentage = (value) => total ? (value * 100 / total).toFixed(1) : '0.0';
+    setText('audit-mail-success-legend', countText(success) + ' (' + percentage(success) + '%)');
+    setText('audit-mail-failed-legend', countText(failed) + ' (' + percentage(failed) + '%)');
+    const donut = document.querySelector('#audit-outbox-panel .audit-mail-donut');
+    if (donut) {
+        donut.dataset.empty = String(total === 0);
+        donut.style.setProperty('--audit-web-end', String(total ? success * 360 / total : 0) + 'deg');
+        donut.style.setProperty('--audit-cli-end', '360deg');
+        donut.setAttribute('aria-label', '邮件共 ' + total + ' 条，成功 ' + success + ' 条，失败 ' + failed + ' 条');
+    }
+}
+
+function auditOutboxCsvCell(value) {
+    const raw = String(value == null ? '' : value).replace(/\r\n?/g, '\n');
+    // Avoid spreadsheet formula evaluation when exporting user-controlled mail fields.
+    const safe = /^\s*[=+\-@]/.test(raw) ? "'" + raw : raw;
+    return '"' + safe.replace(/"/g, '""') + '"';
+}
+
+async function exportAuditOutbox() {
+    const button = $('audit-mail-export-button');
+    if (button?.disabled) return;
+    if (button) button.disabled = true;
+    const filters = getAuditOutboxFilterParams();
+    const columns = ['时间 (UTC)', '通道', '收件人', '主题', '结果', '发送者', '失败原因'];
+    const lines = [columns.map(auditOutboxCsvCell).join(',')];
+    try {
+        let offset = 0;
+        const pageSize = 200;
+        // The store retains at most 5,000 entries; use the same server-side
+        // owner/role checks for every exported page.
+        while (offset < 5000) {
+            const params = new URLSearchParams(filters);
+            params.set('limit', String(pageSize));
+            params.set('offset', String(offset));
+            const response = await apiCall('/api/email/outbox?' + params.toString());
+            const data = response?.data || {};
+            const items = Array.isArray(data.items) ? data.items : [];
+            for (const item of items) {
+                lines.push([
+                    formatOutboxTime(item.created_at),
+                    AUDIT_OUTBOX_CHANNEL_LABELS[item.channel] || item.channel || '',
+                    (item.to_addrs || []).join('; '),
+                    item.subject || '',
+                    item.sent ? '成功' : '失败',
+                    item.username || '系统',
+                    item.error || '',
+                ].map(auditOutboxCsvCell).join(','));
+            }
+            offset += items.length;
+            if (!items.length || offset >= Number(data.total || 0)) break;
+        }
+        const blob = new Blob(['\ufeff' + lines.join('\r\n') + '\r\n'], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = 'email-outbox-' + new Date().toISOString().slice(0, 10) + '.csv';
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+        showToast('已导出当前筛选条件下的邮件台账', 'success');
+    } catch (error) {
+        showToast('导出历史邮件失败: ' + error.message, 'error');
+    } finally {
+        if (button) button.disabled = false;
+    }
+}
+
 async function loadAuditOutbox(reset = false, append = false) {
     const tbody = $('email-outbox-table-body');
     if (!tbody) return;
-    if (auditOutboxState.loading) return;
+    if (auditOutboxState.loading && !reset) return;
+    const generation = reset
+        ? ++auditOutboxState.requestGeneration
+        : auditOutboxState.requestGeneration;
+    const offset = reset ? 0 : auditOutboxState.offset;
     auditOutboxState.loading = true;
-    if (reset && !append) {
-        tbody.innerHTML = `
-            <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--text-secondary);">加载中...</td></tr>`;
+    tbody.setAttribute('aria-busy', 'true');
+    if (reset && !append && !auditOutboxState.loaded) {
+        tbody.innerHTML = '<tr><td colspan="5" class="table-placeholder">加载中...</td></tr>';
     }
     try {
         const params = getAuditOutboxFilterParams(reset);
-        const result = await apiCall(`/api/email/outbox?${params.toString()}`);
-        const data = result?.data || {};
+        params.set('offset', String(offset));
+        const response = await apiCall('/api/email/outbox?' + params.toString());
+        if (generation !== auditOutboxState.requestGeneration) return;
+        const data = response?.data || {};
         const items = Array.isArray(data.items) ? data.items : [];
-        auditOutboxState.hasMore = (auditOutboxState.offset + auditOutboxState.limit) < (data.total || 0);
-        auditOutboxState.offset += items.length;
+        const total = Number(data.total || 0);
+        auditOutboxState.hasMore = offset + items.length < total;
+        auditOutboxState.offset = offset + items.length;
         auditOutboxState.loaded = true;
         const mailCount = document.querySelector('#audit-outbox-panel .audit-mail-count');
-        if (mailCount) mailCount.textContent = `共 ${Number(data.total || 0).toLocaleString('zh-CN')} 条`;
+        if (mailCount) mailCount.textContent = '共 ' + total.toLocaleString('zh-CN') + ' 条';
+        const scope = document.querySelector('#audit-outbox-panel .audit-mail-scope');
+        if (scope) scope.textContent = $('email-outbox-all-users')?.checked ? '管理员全量视图' : '仅显示本人记录';
+        updateAuditOutboxSummary(data.summary || {total});
         renderAuditOutboxRows(items, { append });
         const wrapper = $('email-outbox-load-more-wrapper');
         if (wrapper) {
             wrapper.innerHTML = auditOutboxState.hasMore
-                ? `<button class="btn-xs" data-click="loadAuditOutboxMore">加载更多（共 ${data.total} 条）</button>`
+                ? '<button class="btn-xs" type="button" data-click="loadAuditOutboxMore">加载更多（共 ' + total + ' 条）</button>'
                 : (items.length ? '<span class="audit-mail-list-complete">已显示全部记录 · 点击记录查看详情</span>' : '');
         }
     } catch (error) {
+        if (generation !== auditOutboxState.requestGeneration) return;
         if (!append) {
             const mailCount = document.querySelector('#audit-outbox-panel .audit-mail-count');
             if (mailCount) mailCount.textContent = '加载失败';
-            tbody.innerHTML = `
-                <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--danger-color);">
-                    加载历史邮件失败: ${escapeHtml(error.message)}
-                </td></tr>`;
+            tbody.innerHTML = '<tr><td colspan="5" class="table-placeholder">加载历史邮件失败: '
+                + escapeHtml(error.message) + '</td></tr>';
+        } else {
+            showToast('加载更多历史邮件失败: ' + error.message, 'error');
         }
     } finally {
-        auditOutboxState.loading = false;
+        if (generation === auditOutboxState.requestGeneration) {
+            auditOutboxState.loading = false;
+            tbody.setAttribute('aria-busy', 'false');
+        }
     }
 }
 
 async function loadAuditOutboxMore() {
-    await loadAuditOutbox(false, true);
+    if (!auditOutboxState.loading && auditOutboxState.hasMore) {
+        await loadAuditOutbox(false, true);
+    }
 }
+
+window.exportAuditOutbox = exportAuditOutbox;
 
 // 页签容器随登录就绪显示（模板与 users-view-tabs 一致）。
 function auditViewTabsEnsureVisible() {
@@ -755,3 +881,6 @@ window.addEventListener('gms:auth-ready', auditViewTabsEnsureVisible);
 window.auditOutboxToggle = auditOutboxToggle;
 window.loadAuditOutbox = loadAuditOutbox;
 window.loadAuditOutboxMore = loadAuditOutboxMore;
+
+
+// 磁盘审计详情与刷新逻辑独立载入 audit-disk.js。

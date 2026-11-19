@@ -1,0 +1,70 @@
+name: Read-only GMS host runtime-artifact inventory
+
+on:
+  push:
+    branches: ['audit/main-full-review-e9357d8-20261118']
+    paths:
+      - '.github/workflows/audit-disk-live-readonly.yml'
+      - 'tools/scripts/testing/scan_live_artifacts.py'
+      - 'tools/scripts/testing/verify_live_disk_inventory.py'
+      - 'features/system/disk_artifacts.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: read-only-artifact-inventory-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan-on-dedicated-runner:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    steps:
+      - name: Confirm dedicated Runner identity (never touch lab devices)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          echo "Dedicated on-prem Runner confirmed; read-only host filesystem inventory"
+
+      - name: Checkout read-only inventory script
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+
+      - name: Scan actual Controller artifact roots without modifying files
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          python3 -B tools/scripts/testing/scan_live_artifacts.py \
+            --host-root "$HOME/GMS_Remote_Test_Web" \
+            --max-entries 3000000 --max-seconds 150 \
+            --output "$RUNNER_TEMP/gms-readonly-artifact-inventory.json"
+
+      - name: Validate page inventory against independent live host scan
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          python3 -B tools/scripts/testing/verify_live_disk_inventory.py \
+            --host-root "$HOME/GMS_Remote_Test_Web" \
+            --reference "$RUNNER_TEMP/gms-readonly-artifact-inventory.json" \
+            --output "$RUNNER_TEMP/gms-page-disk-audit-validation.json"
+
+      - name: Upload aggregated read-only inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gms-readonly-artifact-inventory-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/gms-readonly-artifact-inventory.json
+            ${{ runner.temp }}/gms-page-disk-audit-validation.json
+          if-no-files-found: warn
+          retention-days: 1

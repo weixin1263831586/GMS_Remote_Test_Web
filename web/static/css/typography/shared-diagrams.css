@@ -1,0 +1,274 @@
+/* === Canonical typography ownership: shared components and controls === */
+/* web/static/css/ui-foundations.css */
+#page-test .test-action-icon { font-size: 1.1em; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+#page-test .adb-button-frame .reboot-icon { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+#page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs { font-size: var(--ui-type-size-small); }
+#page-test.page-ui-rework .adb-button-frame .test-action-icon { font-size: 1.08em; }
+.page-title-icon { font-size: var(--ui-type-size-page-heading); }
+.ui-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+.ui-meta { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-regular); }
+.ui-mono, pre, code, .xterm, .log-content, .log-output, .file-path,
+.suite-browser-path, .apk-file-path, #client-identity,
+#script-path, #device-host, #local-server, #test-module, #test-case, #retry-result,
+input[id$="-path"] { font-family: var(--ui-type-font-mono); }
+.ui-status { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
+.btn-xxs, .btn-xs, .btn-small { font-weight: var(--ui-type-weight-medium); }
+:is(.list-table, .ui-table) th { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+:is(.list-table, .ui-table) tbody td { font-size: var(--ui-type-size-small); }
+.device-sort { font: inherit; }
+.device-sort + .device-sort { font-size: var(--ui-type-size-body); }
+.device-row-actions .btn-xxs { font-size: var(--ui-type-size-small); }
+
+/* web/static/css/modal.css */
+.modal-title { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-semibold); }
+.modal-close { font: inherit; font-size: var(--ui-type-size-display-medium); font-weight: var(--ui-type-weight-semibold); }
+
+/* web/static/css/modal-tech.css */
+:is(.modal, .modal-backdrop) .modal-content :is(.modal-title, .modal-header > h2, .modal-header > h3, .modal-head > h2, .section-head h2) { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-bold); }
+#tailscale-info-modal .modal-form-row label { font-weight: var(--ui-type-weight-semibold); }
+#username-detect-modal .modal-form-row label { font-weight: var(--ui-type-weight-semibold); }
+
+/* web/static/css/modal-tech-dialogs.css */
+:is(.modal,.modal-backdrop,.auth-gate) .modal-content.tech-dialog { font-size: var(--ui-type-size-body); }
+:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
+:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close { font-size: var(--ui-type-size-stat); font-weight: 300; }
+:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-body { font-size: var(--ui-type-size-body); }
+.tech-dialog .tech-intro { font-size: var(--ui-type-size-body); }
+.tech-dialog .tech-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog .tech-field-card > label:not(:has(input)) { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog .tech-field-stack > label { font-size: var(--ui-type-size-body); }
+.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) { font-size: var(--ui-type-size-body); }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
+.tech-dialog .tech-row-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog .modal-info-text { font-size: var(--ui-type-size-body); }
+.tech-dialog .tech-notice { font-size: var(--ui-type-size-body); }
+#tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); }
+#tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); }
+#tailscale-info-modal .tech-tailscale-help { font-size: var(--ui-type-size-small) !important; }
+#tailscale-info-modal .tech-dialog-footer > button { font-size: var(--ui-type-size-small); }
+@media(max-width: 800px) { :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; } }
+@media(max-width: 800px) { #tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); } }
+@media(max-width: 800px) { #tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); } }
+@media(max-width: 800px) { #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); } }
+@media(max-width: 480px), (max-height:560px) { .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); } }
+:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog .tech-intro { font-size: var(--ui-type-size-body); }
+.tech-dialog .tech-section-title { font-size: var(--ui-type-size-body); }
+.tech-dialog .tech-field-card > label:not(:has(input)) { font-size: var(--ui-type-size-body); }
+.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) { font-size: var(--ui-type-size-body); }
+.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); }
+@media (max-width: 800px) { :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; } }
+@media (max-width: 480px) { .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); } }
+.tech-dialog .modal-title { font-size: var(--ui-type-size-dialog) !important; }
+.tech-dialog :is(label,input,select,textarea) { font-size: var(--ui-type-size-body) !important; }
+.tech-dialog button:not(.modal-close) { font-size: var(--ui-type-size-small) !important; }
+
+/* web/static/css/modal-tech-cases.css */
+.tech-form-section > .tech-section-title { font-size: var(--ui-type-size-body); }
+.tech-dialog--username-detect .modal-ssh-info { font-size: var(--ui-type-size-body); }
+.tech-dialog--device-password #device-host-display,
+.tech-dialog--firmware-share-password #firmware-share-password-host { font-family: var(--ui-type-font-mono); }
+.tech-dialog--report-copy .modal-body > .modal-info-text { font-size: var(--ui-type-size-body); }
+:is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .tech-title-glyph { font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; font-size: var(--ui-type-size-display-medium); }
+:is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .adb-proxy-assignments { font-size: var(--ui-type-size-body); }
+.tech-dialog--usbip-attach .usbip-transport-state { font-size: var(--ui-type-size-small); }
+:is(.tech-dialog--adb-proxy,.tech-dialog--usbip-attach) .modal-info-text { font-size: var(--ui-type-size-body); }
+.device-routing-notes { font-size: var(--ui-type-size-body); }
+.report-import-choice > strong { font-size: var(--ui-type-size-dialog); }
+.report-import-choice > span { font-size: var(--ui-type-size-body); }
+.report-import-choice > .report-choice-folder-icon { font-size: 34px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
+#route-check-dialog .modal-title { font-size: var(--ui-type-size-dialog); }
+#route-check-dialog .route-check-form label { font-size: var(--ui-type-size-body); }
+#route-check-dialog .route-check-form input[type=text] { font-size: var(--ui-type-size-body); }
+#route-check-dialog .route-check-form small { font-size: var(--ui-type-size-small); }
+#route-check-dialog .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small); }
+@media(max-width: 700px) { #route-check-dialog .modal-title { font-size: var(--ui-type-size-dialog); } }
+#username-detect-modal .modal-ssh-info { font-size: var(--ui-type-size-body); }
+.dx-summary-card > span { font-size: var(--ui-type-size-small); }
+.dx-summary-card > strong { font-size: var(--ui-type-size-dialog); }
+.tech-dialog--report-diagnosis .dx-hero { font-size: var(--ui-type-size-small); }
+#route-check-dialog .route-probe-results .tech-section-title { font-size: var(--ui-type-size-body); }
+#route-check-dialog .tech-notice { font-size: var(--ui-type-size-body); }
+#firmware-share-modal .firmware-share-table thead th { font-weight: var(--ui-type-weight-semibold); }
+#firmware-share-modal .firmware-share-path { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+.tech-dialog--tool #emoji-picker-row > label { font-size: var(--ui-type-size-body); }
+#username-detect-modal .tech-form-section--username-detect .tech-field-card > label { font-size: var(--ui-type-size-body); }
+#username-detect-modal .modal-ssh-info { font-size: var(--ui-type-size-body); }
+#tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); }
+#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); }
+#report-diagnosis-modal .tech-diagnosis-panel-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+#firmware-modal .firmware-target-list { font-size: var(--ui-type-size-body); }
+#firmware-modal .firmware-file-meta { font-size: var(--ui-type-size-small); }
+#firmware-modal #firmware-aoa-hint { font-size: var(--ui-type-size-small); }
+#route-check-dialog .modal-content.tech-dialog--route-check .modal-title { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { font-size: var(--ui-type-size-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { font-size: var(--ui-type-size-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small) !important; }
+.tech-dialog--ui-control .ui-control-serial { font-size: var(--ui-type-size-small); }
+.tech-dialog--ui-control .ui-control-panel-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--ui-control .ui-ctrl-el { font-size: var(--ui-type-size-body); }
+.tech-dialog--ui-control .ui-ctrl-el-meta { font-size: var(--ui-type-size-small); }
+#file-browser-modal .file-browser-location-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+#file-browser-modal .file-browser-path { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-mono); }
+#file-browser-modal .file-browser-worker-row > label { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/workspace-tabs.css */
+.workspace-tabs > .workspace-tab { font: var(--ui-type-weight-semibold) var(--ui-type-size-small)/1.4 var(--ui-type-font-sans); }
+
+/* web/static/css/loading-orbit.css */
+.loading-orbit .loading-orbit-text,
+.embedded-frame-skeleton .loading-orbit-text { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/update-radar-settings.css */
+#radar-settings-modal .radar-hint { font-size: var(--ui-type-size-small); }
+#radar-settings-form label { font-size: var(--ui-type-size-body); }
+#radar-settings-form legend { font-size: var(--ui-type-size-body); }
+#radar-settings-feedback { font-size: var(--ui-type-size-small); }
+
+/* web/static/css/vpn-proxy-panel.css */
+.tech-dialog--vpn-proxy .vpn-proxy-panel-heading strong { font-size: var(--ui-type-size-body); }
+.tech-dialog--vpn-proxy .vpn-proxy-stat span { font-size: var(--ui-type-size-compact); }
+.tech-dialog--vpn-proxy .vpn-proxy-stat strong { font-size: var(--ui-type-size-body); }
+.tech-dialog--vpn-proxy th, .tech-dialog--vpn-proxy td { font-size: var(--ui-type-size-small); }
+.tech-dialog--vpn-proxy th { font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--vpn-proxy .vpn-proxy-client-state { font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--vpn-proxy .vpn-proxy-install-glyph { font-size: var(--ui-type-size-page); }
+.tech-dialog--vpn-proxy .vpn-proxy-install-row label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--vpn-proxy .vpn-proxy-install-row input { font: var(--ui-type-size-body)/1.4 var(--ui-type-font-mono); }
+.tech-dialog--vpn-proxy .vpn-proxy-hint { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/apk-analysis.css */
+html[data-ui-type-root="shell"] #apk-tab-manifest > details > summary { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #apk-raw-xml { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] #apk-file-name { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #apk-analysis-state { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .apk-section-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+
+/* web/static/css/device-deployment-review.css */
+html[data-ui-type-root="shell"] button { font-family: inherit; }
+html[data-ui-type-root="shell"] #review-login-modal .modal-content label { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] #review-login-modal .modal-content input { font-family: inherit; font-size: var(--ui-type-size-body); }
+
+/* === Canonical typography ownership: diagrams and independent data tables === */
+/* web/static/css/architecture-layers.css */
+html[data-ui-type-root="architecture"] body { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="architecture"] .lead { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] h2 { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="architecture"] .card h3 { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="architecture"] .card p,
+html[data-ui-type-root="architecture"] .card li { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .topology svg { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="architecture"] .note { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .layers-section { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="architecture"] .layers-section .layers-intro { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-layer-label strong { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="architecture"] .arch-layer-label span { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-layer-label small { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-layer-item h3 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-layer-item p { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-layer-bridge { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-layer-bridge strong { font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="architecture"] .arch-integration h3 { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-integration p { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-layers figcaption { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-flow-intro { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-legend { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-details > summary { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-system-map h2,
+html[data-ui-type-root="architecture"] .arch-system-bottom h2 { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .arch-system-stage:not(:last-child)::after { font-size: var(--ui-type-size-stat); }
+html[data-ui-type-root="architecture"] .arch-system-stage h3 { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .arch-system-stage h3 small { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-regular); }
+html[data-ui-type-root="architecture"] .arch-system-stage>div span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-paths { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-channel strong { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-system-channel span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-support>div span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .arch-system-sidebar h3 { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .arch-system-sidebar p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-system-modules td:first-child { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .arch-system-events li { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .arch-system-events li::before { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/architecture-v2.css */
+html[data-ui-type-root="architecture"] .architecture-v2 .lead { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-heading h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-hint { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-intro { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-edge-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node header { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node header small { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node-grid span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-aside-card h3 { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-aside-card p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-info-panel h2 { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-info-panel table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-info-panel td:first-child { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li::before { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-mini p { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-step { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-legend>span { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-details>summary { font-size: var(--ui-type-size-body); }
+
+/* web/static/css/architecture-scenes.css */
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title strong { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title small { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-node--control[data-scene-node="controller"] .arch-scene-title strong,
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-node--control[data-scene-node="control"] .arch-scene-title strong { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-chip { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-sidecard h3 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-legend li { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-key { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-boundaries { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-panel .arch-v2-intro { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card h2 { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card td,
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card th { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card th { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel h2,
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card h2 { font-size: var(--ui-type-size-card); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card :is(th,td) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title strong { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title small { font-size: var(--ui-type-size-compact); }
+
+/* web/static/css/data-table-page.css */
+html[data-ui-type-root="data-table"] body { font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="data-table"] h1 { font-size: var(--ui-type-size-page); }
+html[data-ui-type-root="data-table"] .summary { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] .tabs button { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] .section-badge { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] button { font-family: inherit; font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="data-table"] input,
+html[data-ui-type-root="data-table"] select { font-family: inherit; font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="data-table"] table { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] .group-row td { font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="data-table"] .pager { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] .pager button { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="data-table"] .pager .muted { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="data-table"] code { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+
+
+/* Dynamic AI report dialog text: copy targets semantic classes, not inline font styles. */
+.tech-dialog--report-ai .ai-report-chip,
+.tech-dialog--report-ai .ai-report-index { font-size: var(--ui-type-size-compact); }
+.tech-dialog--report-ai .ai-report-index { font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--report-ai .ai-report-card { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--report-ai :is(.ai-report-body,.ai-report-small,.ai-report-doc-title) { font-size: var(--ui-type-size-body); }
+.tech-dialog--report-ai .ai-report-compact { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
+.tech-dialog--report-ai .ai-report-source-link,
+.tech-dialog--report-ai .ai-report-link-hint { font-size: var(--ui-type-size-small); }
+.tech-dialog--report-ai .ai-report-icon { font-size: var(--ui-type-size-dialog); }
+
+.tech-dialog--report-ai .ai-report-source-heading { font-weight: var(--ui-type-weight-semibold); }
+
+/* Generated Redmine authentication notice is a normal readable modal note. */
+.tech-dialog .report-redmine-credential-note { font-size: var(--ui-type-size-body); }
+
+/* Minimize glyph is an icon-sized exception; business CSS owns only geometry. */
+#test-results-modal .test-results-minimize-glyph { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-medium); }

@@ -150,7 +150,7 @@ function renderIssueCard(item) {
     <h3>
       ${renderRedmineIssueLink(item.issue_id, {stopPropagation: false})}
       <span>${title}</span>
-      <span style="margin-left:auto;font-size:12px;color:var(--muted)">${esc(item.priority_name || '-')}</span>
+      <span style="margin-left:auto;font-size:var(--ui-type-size-small);color:var(--muted)">${esc(item.priority_name || '-')}</span>
     </h3>
 
     <div class="field-label">📋 基本信息</div>

@@ -10,29 +10,29 @@
                     <section class="tech-form-section tech-form-section--ut-tool" aria-label="工具信息"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg>工具信息</h3><div class="modal-form-row tech-structured-row tech-field-card">
                         <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#grid"></use></svg></span>
                         <label for="ut-tool-category">分类:</label>
-                        <select id="ut-tool-category" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;">
+                        <select id="ut-tool-category" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" data-ui-type-size="body">
                         </select>
                     </div>
                     <div class="modal-form-row tech-structured-row tech-field-card">
                         <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#edit"></use></svg></span>
                         <label for="ut-tool-title">工具名称:</label>
-                        <input type="text" id="ut-tool-title" placeholder="例如：Gerrit Patch工具" maxlength="30" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                        <input type="text" id="ut-tool-title" placeholder="例如：Gerrit Patch工具" maxlength="30" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" data-ui-type-size="body" />
                     </div>
                     <div class="modal-form-row tech-structured-row tech-field-card">
                         <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#star"></use></svg></span>
                         <label for="ut-tool-icon">图标 (Emoji):</label>
-                        <input type="text" id="ut-tool-icon" placeholder="例如：📦" maxlength="4" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                        <input type="text" id="ut-tool-icon" placeholder="例如：📦" maxlength="4" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" data-ui-type-size="body" />
                     </div>
                     <div class="modal-form-row tech-structured-row tech-field-card">
                         <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#info"></use></svg></span>
                         <label for="ut-tool-desc">说明:</label>
-                        <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px; resize: vertical;"></textarea>
+                        <textarea id="ut-tool-desc" placeholder="工具的功能说明，鼠标悬停时显示" rows="3" style="width: 100%; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);  resize: vertical;" data-ui-type-size="body"></textarea>
                     </div>
                     <div class="modal-form-row tech-structured-row tech-field-card">
                         <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" focusable="false" aria-hidden="true"><use href="/static/icons/ui.svg#folder"></use></svg></span>
                         <label for="ut-tool-filepath">文件路径 (tools/):</label>
                         <div style="display: flex; gap: 6px; align-items: center;">
-                            <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit-patch（可下载工具的稳定 ID）" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 13px;" />
+                            <input type="text" id="ut-tool-filepath" placeholder="例如：gerrit-patch（可下载工具的稳定 ID）" style="flex: 1; padding: 8px; background: var(--darker-bg); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" data-ui-type-size="body" />
                             <button class="btn-xxs" data-click="ut_browseFiles" style="white-space: nowrap; padding: 6px 10px; flex-shrink: 0;">浏览</button>
                         </div>
                     </div></section>
