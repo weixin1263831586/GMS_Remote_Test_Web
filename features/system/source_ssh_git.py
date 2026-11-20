@@ -465,9 +465,9 @@ class SSHGitProvider(LocalGitProvider):
 
     def _shard_grep_command(
         self, query: str, path_grep: str, repos: tuple[str, ...],
-        per_repo_timeout: int = 0,
+        per_repo_timeout: int = 0, revision: str = "HEAD",
     ) -> str:
-        """单分片固定模板：逐仓先解析 HEAD SHA，再在该 commit 上 grep。
+        """单分片固定模板：逐仓先解析请求 revision 的 commit，再 grep。
 
         rev-parse 与 grep 在同一循环体先后执行，结果头/记录引用同一个
         SHA（审核 P1）：编译服务器在搜索期间移动 HEAD 不影响本批证据的
@@ -482,11 +482,13 @@ class SSHGitProvider(LocalGitProvider):
         per_repo_guard = (
             f"timeout {int(per_repo_timeout)} " if per_repo_timeout > 0 else ""
         )
+        # Caller validates pinned revisions; pass only a quoted commit expression.
+        rev = shlex.quote(f"{revision}^{{commit}}")
         return (
             "in_q=" + shlex.quote(query) + "; "
             "in_f=" + (shlex.quote(path_grep) if path_grep else "''") + "; "
             + self._repos_stdin(repos)
-            + "c=$(git --no-optional-locks -C \"$r\" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) "
+            + f"c=$(git --no-optional-locks -C \"$r\" rev-parse --verify {rev} 2>/dev/null) "
             "|| { printf '@@GMS_SDK_INCOMPLETE@@\\n'; continue; }; "
             "printf '@@GMS_SDK_REPO@@%s\\t%s\\n' \"$r\" \"$c\"; "
             f"{per_repo_guard}"
@@ -744,30 +746,45 @@ class SSHGitProvider(LocalGitProvider):
 
     def _run_shard(
         self, shard: tuple[str, ...], query: str, path_grep: str,
+        *, deadline: float | None = None, revision: str = "HEAD",
     ) -> CommandResult:
-        """一个分片 = 一条独立 SSH 连接上的一条串行循环命令（ADR 0004 层）。
-
-        分片连接不与主连接池共享（SSHManager 池按 destination 复用，
-        分片之间并行、各自开一条连接）；命令仍是固定模板。
-        """
-        manager = self._new_shard_manager()
+        """Bound SSH connection acquisition and execution by the same deadline."""
+        remaining = (
+            SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if deadline is None
+            else max(0.0, deadline - time.monotonic())
+        )
+        if remaining <= 0:
+            return CommandResult(timed_out=True, code=-1)
+        permit = self._server_limit()
+        if not permit.acquire(timeout=remaining):
+            return CommandResult(timed_out=True, code=-1)
         try:
+            remaining = (
+                SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if deadline is None
+                else max(0.0, deadline - time.monotonic())
+            )
+            if remaining <= 0:
+                return CommandResult(timed_out=True, code=-1)
+            manager = self._new_shard_manager()
             with manager.connection(self._connection_config()) as ssh:
                 return manager.execute_command(
                     ssh,
                     self._shard_grep_command(
                         query, path_grep, shard,
-                        per_repo_timeout=SSH_GIT_PER_REPO_TIMEOUT_SECONDS,
+                        per_repo_timeout=min(
+                            SSH_GIT_PER_REPO_TIMEOUT_SECONDS, max(1, int(remaining))
+                        ),
+                        revision=revision,
                     ),
-                    timeout=SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS,
+                    timeout=max(1, int(remaining)),
                 )
         except RuntimeError as exc:
             raise SourceProviderError(
-                "无法连接 SDK 源服务器 "
-                f"{self.config.ssh_host}:{self.config.ssh_port}（SSH 连接失败）；"
-                "请检查 sdk_sources.ssh_git 配置、网络与凭据",
+                f"无法连接 SDK 源服务器 {self.config.ssh_host}:{self.config.ssh_port}",
                 status_code=502,
             ) from exc
+        finally:
+            permit.release()
 
     def _search_multi(
         self, revision: str, query: str, filter_value: str, limit: int,
