@@ -151,7 +151,7 @@
 #page-apk-analysis .apk-upload-content > button {
     flex: 0 0 auto;
     width: auto;
-    min-height: var(--analysis-control-height);
+    min-height: var(--ui-control-height);
     max-width: 100%;
     margin: 0;
     padding: 6px 11px;
@@ -249,8 +249,8 @@
     display: flex;
     align-items: center;
     flex-wrap: nowrap;
-    min-height: calc(var(--analysis-tab-height) + 2px);
-    height: calc(var(--analysis-tab-height) + 2px);
+    min-height: calc(var(--ui-tab-height) + 2px);
+    height: calc(var(--ui-tab-height) + 2px);
     min-width: 0;
     gap: 12px;
     margin-bottom: 8px;
