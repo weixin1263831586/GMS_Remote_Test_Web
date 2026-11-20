@@ -54,7 +54,15 @@ class SimilarityAnalysisMixin:
                     continue
                 search_row = {**row, "source": "redmine_subject", "matched_term": term}
                 score, reason, details = self._score_reference(issue_payload, failures, search_row)
-                score += 25  # bonus for Redmine direct match
+                # Subject search only establishes a candidate, not a shared
+                # failure identity. Previously every Redmine hit received +25,
+                # allowing same-SoC/module but different test failures to be
+                # promoted to high similarity without assertion evidence.
+                # Award a limited bonus only for concrete test/error overlap.
+                bonus = (20 if details.get("same_test_case") else
+                         10 if details.get("keyword_overlap", 0) >= 0.4 else 0)
+                score += bonus
+                details["redmine_direct_match_bonus"] = bonus
                 reason = "；".join(dict.fromkeys([reason, f"Redmine主题搜索命中 {term}"]))[:500]
                 current = candidates.get(ref_id)
                 if not current or score > current["score"]:
