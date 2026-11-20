@@ -1,0 +1,44 @@
+name: Redmine diagnosis correctness regressions
+on:
+  push:
+    branches: [ui/unify-page-edge-8px-20261120]
+    paths:
+      - 'features/redmine/**'
+      - 'features/kkagent/**'
+      - '.github/workflows/ui-redmine-diagnosis-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: redmine-diagnosis-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  diagnostic-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+      - name: Install pinned test requirements
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile features/redmine/history_search.py features/redmine/client.py \
+            features/redmine/analysis_similarity.py features/redmine/daily_brief_report.py \
+            features/redmine/kkagent/claim_review.py
+      - name: Redmine history, evidence and native review regressions
+        env:
+          GMS_SKIP_RUNTIME_ENV: "1"
+        run: |
+          python -m pytest -q \
+            features/redmine/tests/test_history_remote_contract.py \
+            features/redmine/tests/test_client_search_hardening.py \
+            features/redmine/tests/test_repository_search.py \
+            features/redmine/tests/test_daily_brief_execution_view.py \
+            features/redmine/tests/test_daily_brief_review_regressions.py \
+            features/redmine/tests/kkagent/test_claim_review.py \
+            features/redmine/tests/kkagent/test_evidence_gate.py
