@@ -142,6 +142,20 @@ class ReportingAnalysisMixin:
             lines.append("- 未解析到报告失败项")
 
         lines.extend(["", "## 历史记录"])
+        if len(journals) > 15:
+            # Keep earlier journal identity and chronology visible instead of
+            # silently dropping all but the last 15 replies from exported docs.
+            # Full historical notes remain in Redmine/the evidence snapshot;
+            # the earlier rows here are an INDEX, not a claim of full coverage.
+            lines.append("### 较早回复索引（正文请以 Redmine 原始回复为准）")
+            for position, journal in enumerate(journals[:-15], 1):
+                preview = " ".join(_doc_line(journal.get("notes")).split())[:160]
+                lines.append(
+                    f"- journal #{journal.get('id') or position} · "
+                    f"{journal.get('created_on') or '-'} · "
+                    f"{journal.get('user') or '-'}：{preview or '无文字回复'}"
+                )
+            lines.extend(["", "### 最近 15 条详细记录"])
         for journal in journals[-15:]:
             lines.extend([
                 f"### {journal.get('created_on')} {journal.get('user')}",
