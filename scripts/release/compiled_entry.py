@@ -76,15 +76,18 @@ def _certificates(root: Path, host: str) -> None:
     from cryptography import x509
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import rsa
-    from cryptography.x509.oid import NameOID
+    from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
     certs = root / "configs/secrets/certs"
     key_path, cert_path = certs / "gms-local.key", certs / "gms-local.crt"
-    if key_path.exists() != cert_path.exists():
-        raise RuntimeError("partial HTTPS key/certificate pair; refusing regeneration")
-    if key_path.exists():
+    ca_key_path, ca_path = certs / "gms-local-ca.key", certs / "gms-local-ca.crt"
+    required = (key_path, cert_path, ca_key_path, ca_path)
+    if any(path.exists() for path in required):
+        if not all(path.is_file() and not path.is_symlink() for path in required):
+            raise RuntimeError("incomplete HTTPS/CA certificate set; refusing unsafe regeneration")
         return
-    key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    ca_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
+    tls_key = rsa.generate_private_key(public_exponent=65537, key_size=3072)
     names = [x509.DNSName("localhost")]
     try:
         names.append(x509.IPAddress(ipaddress.ip_address(host)))
@@ -93,18 +96,32 @@ def _certificates(root: Path, host: str) -> None:
             raise RuntimeError("host must be an IP address or DNS hostname")
         names.append(x509.DNSName(host))
     names.append(x509.IPAddress(ipaddress.ip_address("127.0.0.1")))
-    subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
     now = datetime.now(timezone.utc)
-    cert = (x509.CertificateBuilder()
-        .subject_name(subject).issuer_name(issuer)
-        .public_key(key.public_key()).serial_number(x509.random_serial_number())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "GMS Instance CA")])
+    tls_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, host)])
+    ca_cert = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name)
+        .public_key(ca_key.public_key()).serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=1095))
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(x509.KeyUsage(
+            digital_signature=True, content_commitment=False, key_encipherment=False,
+            data_encipherment=False, key_agreement=False, key_cert_sign=True,
+            crl_sign=True, encipher_only=False, decipher_only=False), critical=True)
+        .sign(ca_key, hashes.SHA256()))
+    server_cert = (x509.CertificateBuilder().subject_name(tls_name).issuer_name(ca_name)
+        .public_key(tls_key.public_key()).serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
         .not_valid_after(now + timedelta(days=365))
+        .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.SubjectAlternativeName(names), critical=False)
-        .sign(key, hashes.SHA256()))
-    _write_private(key_path, key.private_bytes(serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
-    _write_private(cert_path, cert.public_bytes(serialization.Encoding.PEM))
+        .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+        .sign(ca_key, hashes.SHA256()))
+    for path, key in ((ca_key_path, ca_key), (key_path, tls_key)):
+        _write_private(path, key.private_bytes(serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+    _write_private(ca_path, ca_cert.public_bytes(serialization.Encoding.PEM))
+    _write_private(cert_path, server_cert.public_bytes(serialization.Encoding.PEM))
 
 
 def _bootstrap(root: Path, host: str, port: int) -> None:
@@ -181,7 +198,7 @@ def _bootstrap(root: Path, host: str, port: int) -> None:
         from scripts.sanitize_release_config import sanitize_product_config
         _save_json(config, sanitize_product_config(_read_json(example)))
 
-    cert_pem = (private / "certs/gms-local.crt").read_text(encoding="utf-8")
+    cert_pem = (private / "certs/gms-local-ca.crt").read_text(encoding="utf-8")
     run_home = Path.home()
     worker_config = data_root / "local-worker/config.json"
     if not worker_config.exists():
