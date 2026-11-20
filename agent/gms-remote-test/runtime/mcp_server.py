@@ -113,6 +113,7 @@ def _load_typed_tools(name):
 
 
 mcp_deployment_tools = _load_typed_tools("mcp_deployment_tools")
+mcp_repair_policy = _load_typed_tools("mcp_repair_policy")
 mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 version_guard = _load_typed_tools("version_guard")
 
@@ -2142,6 +2143,10 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     )
 
 
+_REPAIR_ISSUED_SEARCHES: set[str] = set()
+_REPAIR_ISSUED_READS: set[str] = set()
+
+
 def tools() -> list[dict[str, Any]]:
     all_tools = _all_tools()
     if _SERVICE_TOKEN_MODE:
@@ -2171,6 +2176,11 @@ def tools() -> list[dict[str, Any]]:
             if tool["name"] in always
             or bool(_TOOLSETS.get(tool["name"], {"core"}) & requested)
         ]
+    policy = mcp_repair_policy.current_policy()
+    all_tools = [
+        tool for tool in all_tools
+        if mcp_repair_policy.tool_visible(tool["name"], policy)
+    ]
     return [_decorate_tool(tool) for tool in all_tools]
 
 
@@ -3079,6 +3089,16 @@ def handle(message: dict[str, Any]) -> None:
                 request_id,
                 error={"code": -32601, "message": f"Unknown tool: {name}"},
             )
+            return
+        violation = mcp_repair_policy.authorize(
+            name, arguments, mcp_repair_policy.current_policy(),
+            _REPAIR_ISSUED_SEARCHES, _REPAIR_ISSUED_READS,
+        )
+        if violation:
+            response(request_id, {
+                "content": [{"type": "text", "text": violation}],
+                "isError": True,
+            })
             return
         try:
             result = handler(arguments)
