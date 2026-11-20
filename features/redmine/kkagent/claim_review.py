@@ -151,8 +151,18 @@ def structured_review_actions(value: Any, findings: list[str]) -> list[dict[str,
             target = str(item.get("target") or "")[:180]
             if kind not in _REVIEW_ACTIONS:
                 continue
-            if kind == "targeted_source" and not _REPO_TARGET_RE.search(target):
-                kind, target = "mark_unverified", ""
+            if kind == "targeted_source":
+                # The reviewer may append a commit or explanatory text. The
+                # execution policy accepts only a normalized, exact file path.
+                match = _REPO_TARGET_RE.search(target)
+                file_path = match.group(0) if match else ""
+                components = file_path.split("/")
+                if (len(components) < 3 or any(
+                    component in {"", ".", "..", ".git"} for component in components
+                )):
+                    kind, target = "mark_unverified", ""
+                else:
+                    target = file_path
             supplied.append({
                 "action": kind, "target": target,
                 "reason": str(item.get("reason") or "")[:160],

@@ -52,6 +52,23 @@ def test_structured_review_actions_restrict_unproven_claims_and_source_scope():
 
 
 
+def test_review_target_normalizes_file_path_without_broadening_scope():
+    actions = structured_review_actions({
+        "actions": [{"action": "targeted_source", "target": (
+            "frameworks/base/core/java/android/app/Activity.java @ "
+            + "a" * 40
+        )}]
+    }, [])
+    assert actions[0]["action"] == "targeted_source"
+    assert actions[0]["target"] == "frameworks/base/core/java/android/app/Activity.java"
+
+    for unsafe in ("frameworks/base/../private.txt", "frameworks/base", "unknown"):
+        result = structured_review_actions({
+            "actions": [{"action": "targeted_source", "target": unsafe}]
+        }, [])
+        assert result[0]["action"] == "mark_unverified"
+
+
 def test_structured_review_actions_accepts_json_stream_message():
     findings = ["缺少源码 frameworks/base/core/java/android/app/Activity.java"]
     actions = [
