@@ -764,8 +764,21 @@ class KkAgentRedmineAnalyzer:
                 for call in merged.tool_calls
             )
             gap_state = (tuple(findings), evidence_state)
-            if gap_state == previous_gap:
-                # No new evidence or changed findings: do not enlarge the search.
+            # Formatting repairs can retry within their own small budget:
+            # they need no new evidence and the second prompt requests a full
+            # report. Only identical *factual/evidence* gaps should converge.
+            formatting_only = not review_pending and (
+                not native_summary or all(
+                    any(token in str(finding).lower() for token in (
+                        "schema", "missing field", "invalid field",
+                        "模型未生成最终", "last round", "final report",
+                        "incomplete_ai_output", "report output",
+                    ))
+                    for finding in findings
+                )
+            )
+            if gap_state == previous_gap and not formatting_only:
+                # No new evidence or changed factual findings: stop broadening.
                 if progress is not None:
                     progress.stage_changed("复核缺口无新增证据，停止重复取证")
                 break
