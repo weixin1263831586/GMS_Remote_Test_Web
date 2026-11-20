@@ -19,7 +19,9 @@ from typing import Any
 from . import daily_brief_cancellation as cancellation
 from .ai_execution_ledger import AIExecutionLedger
 from .daily_brief_analysis_events import (
-    event_store_for_repository, mask_secrets, start_analysis_progress,
+    event_store_for_repository,
+    mask_secrets,
+    start_analysis_progress,
 )
 from .daily_brief_models import (
     DailyBriefIssue,
