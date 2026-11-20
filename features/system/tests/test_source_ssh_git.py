@@ -454,7 +454,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
             grep_stdout=self._grep_stdout(),
         ))
         self.provider.search(self.COMMIT_FB, "run", repo_scope="frameworks/base")
-        grep = [command for command in self.executed if " grep " in command][0]
+        grep = next(command for command in self.executed if " grep " in command)
         self.assertIn(self.COMMIT_FB + "^{commit}", grep)
         self.assertNotIn("'HEAD^{commit}'", grep)
 
