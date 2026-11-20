@@ -506,6 +506,7 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stderr(chunk)
 
         readers = asyncio.ensure_future(_pump_stderr())
+        last_checkpoint_state: tuple[Any, ...] | None = None
         try:
             assert process.stdout is not None
             while True:
@@ -540,6 +541,14 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stdout(line)
                 if not consume_line(trace, line, on_event=tap.on_event):
                     continue
+                if progress is not None and hasattr(progress, "checkpoint"):
+                    state = (
+                        trace.session_id,
+                        tuple((call.tool_call_id, call.status) for call in trace.tool_calls),
+                    )
+                    if trace.session_id and state != last_checkpoint_state:
+                        progress.checkpoint(trace)
+                        last_checkpoint_state = state
             deadline = _ANALYSIS_DEADLINE.get()
             remaining = (deadline - time.monotonic()) if deadline is not None else float("inf")
             if remaining <= 0:
