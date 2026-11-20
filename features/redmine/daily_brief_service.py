@@ -841,22 +841,13 @@ class DailyBriefService:
         if progress is not None:
             progress.snapshot_hash = run.snapshot_hash
             progress.lease_token = str((job_lease or {}).get("lease_token") or "")
-        # The previous lease is evidence only. This Worker must own a fresh
-        # running lease and the immutable snapshot before it can resume.
         from .daily_brief_resume import valid_resume_trace
         resumed = valid_resume_trace(
             checkpoint, job_lease, previous_status=previous_status,
             attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
         )
 
-        # AI 逻辑调用账本（receipt）：同一逻辑键（owner+purpose+provider+
-        # issue+证据快照+设备/hint+prompt+analyzer+model）存在活跃 receipt
-        # 时拒绝重复发送。挡的是页面重复点击、job lease 丢失后的 worker
-        # 重试这类重复 AI 调用；证据变化（快照/设备/hint 任一不同）或上次
-        # 已终态时正常放行新 attempt。input_hash 由 begin() 内部折成
-        # sha256——字段名叫 hash，存储也必须是 hash（敏感 hint 不落明文）。
-        # analyzer_version 取 agent 包版本：analyzer 实现升级而 prompt/model
-        # 不变时逻辑键也必须变化，否则错误 dedupe。
+        # Receipt admission and checkpoint resumption are a single fenced path.
         receipt_args = dict(
             owner_id=self.owner_id,
             purpose="daily_brief_issue",
