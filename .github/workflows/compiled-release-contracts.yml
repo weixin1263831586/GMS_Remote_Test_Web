@@ -2,7 +2,8 @@ name: Compiled independent release contracts
 on:
   push:
     branches:
-      - ui/unify-page-edge-8px-20261120
+      - main
+      - 'ui/**'
     paths:
       - 'scripts/release/**'
       - 'tests/test_compiled_release.py'
