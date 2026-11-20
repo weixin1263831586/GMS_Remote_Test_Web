@@ -84,7 +84,7 @@ if ! $YES; then
 fi
 [[ "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "invalid hostname"
 [[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT > 0 && 10#$PORT <= 65535)) || fail "invalid port"
-[[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$?$ ]] || fail "invalid user"
+[[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "invalid user"
 if ! id "$RUN_USER" >/dev/null 2>&1; then
  [[ "$RUN_USER" == gms-web ]] || fail "user $RUN_USER does not exist"
  useradd --system --create-home --home-dir /var/lib/gms-web --shell /usr/sbin/nologin gms-web
