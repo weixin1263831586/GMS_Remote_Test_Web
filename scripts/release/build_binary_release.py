@@ -71,6 +71,9 @@ def _copy_allowed(
     # Tool bundles (e.g. Tesseract) contain SONAME symlinks to files in the
     # same directory. Preserve usability without ever packaging a link that
     # escapes the explicitly selected source tree.
+    if not source.exists() and not source.is_symlink():
+        # Some optional host tools are absent on the trusted build machine.
+        return
     if allowed_root is None:
         allowed_root = (source if source.is_dir() and not source.is_symlink()
                         else source.parent).resolve(strict=True)
@@ -81,6 +84,9 @@ def _copy_allowed(
             raise RuntimeError(f"broken or cyclic release asset symlink: {source}") from exc
         if not resolved.is_file() or not resolved.is_relative_to(allowed_root):
             raise RuntimeError(f"release asset symlink escapes allowed tree: {source}")
+        if (resolved.suffix.lower() in FORBIDDEN_SOURCE_ENDINGS
+                or resolved.name.startswith(".env")):
+            raise RuntimeError(f"release asset symlink resolves to source or secret: {source}")
     elif not source.exists():
         return
     if source.is_dir():
