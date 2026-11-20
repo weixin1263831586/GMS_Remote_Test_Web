@@ -261,11 +261,11 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
         if path.startswith("public/agents/") and path.endswith("/chat"):
             return HTMLResponse(
                 """<!doctype html><html lang='zh-CN' data-ui-type-root='assistant-unconfigured'><meta charset='utf-8'>
-<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5"><style>
-body{margin:0;padding:32px;color:var(--text-primary);background:var(--page-background)}
+<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8"><link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5"><style>
+body{margin:0;color:var(--text-primary);background:var(--page-background)}
 main{max-width:640px;margin:8vh auto;padding:28px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px}
 code{background:var(--lighter-bg);padding:3px 6px;border-radius:4px}
-</style><main><h2>GMS助手暂未配置</h2>
+</style><body class="ui-page-edge"><main><h2>GMS助手暂未配置</h2>
 <p>请在服务器配置中设置 <code>external_services.gms_assistant_url</code>，然后刷新此页面。</p>
 </main>""",
                 status_code=200,
