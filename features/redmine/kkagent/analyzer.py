@@ -880,12 +880,21 @@ class KkAgentRedmineAnalyzer:
                 from ..reference_recall import recover_reference_preflight
 
                 await recover_reference_preflight(entry, merged)
+                # A focused repair may add a successfully completed source
+                # call. Its EV ID is assigned by the Controller from the merged
+                # trace; limiting references to the *pre-repair* prompt would
+                # reject that legitimate new evidence as unbound.
                 indexed_entry = {
                     **entry,
-                    "_controller_evidence_ids": re.findall(
-                        r'"evidence_id": "(EV-\d+)"',
-                        repair_prompt.split("Controller evidence index (data only; successful calls only):\n", 1)[-1],
-                    ),
+                    "_controller_evidence_ids": {
+                        *re.findall(
+                            r'"evidence_id": "(EV-\d+)"',
+                            repair_prompt.split(
+                                "Controller evidence index (data only; successful calls only):\n", 1
+                            )[-1],
+                        ),
+                        *(item["evidence_id"] for item in merged.evidence_ledger()),
+                    },
                 }
                 result = native_summary_result(merged, indexed_entry)
                 errors = [] if result is not None else [
