@@ -9,7 +9,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from features.redmine import analyze_issue_for_assistant, get_analysis_for_assistant
+from features.redmine import (
+    analyze_issue_for_assistant,
+    get_analysis_events_for_assistant,
+    get_analysis_for_assistant,
+)
 from foundation.error_model import ApiError
 from foundation.redaction import redact_sensitive_data
 
@@ -142,9 +146,7 @@ async def query_analysis(session, request, params):
     issue_id = active.get("redmine_issue_id")
     if active.get("redmine_run_id") == run_id and isinstance(issue_id, int):
         try:
-            from features.redmine.daily_brief_api import get_issue_analysis_events
-
-            response = await get_issue_analysis_events(
+            response = await get_analysis_events_for_assistant(
                 request, run_id, issue_id,
                 after_sequence=int(active.get("progress_sequence") or 0),
                 limit=200,
