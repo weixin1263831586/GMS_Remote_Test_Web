@@ -1,0 +1,73 @@
+name: Native GMS compiled release smoke
+on:
+  push:
+    branches: [ui/unify-page-edge-8px-20261120]
+    paths:
+      - '.github/workflows/compiled-release-native-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gms-native-release-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-smoke:
+    name: Nuitka compilation and disposable production startup
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 80
+    steps:
+      - name: Confirm isolated lab runner
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test "$(uname -m)" = "x86_64"
+          # No production service restart or local host config/data copy.
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Build dependencies in temporary venv
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/gms-nuitka-venv"
+          source "$RUNNER_TEMP/gms-nuitka-venv/bin/activate"
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install 'nuitka>=2.7,<3' ordered-set zstandard
+          command -v gcc
+      - name: Create ephemeral CI signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "GNUPGHOME=$RUNNER_TEMP/gms-test-gnupg" >> "$GITHUB_ENV"
+          mkdir -p "$RUNNER_TEMP/gms-test-gnupg"
+          chmod 700 "$RUNNER_TEMP/gms-test-gnupg"
+          GNUPGHOME="$RUNNER_TEMP/gms-test-gnupg" gpg --batch --pinentry-mode loopback \
+            --passphrase '' --quick-generate-key \
+            'GMS ephemeral CI only <noreply@example.invalid>' ed25519 sign 1d
+          key=$(GNUPGHOME="$RUNNER_TEMP/gms-test-gnupg" gpg --with-colons \
+            --list-secret-keys | awk -F: '$1=="fpr" {print $10; exit}')
+          test -n "$key"
+          echo "GMS_RELEASE_SIGNING_KEY=$key" >> "$GITHUB_ENV"
+      - name: Compile and run native production smoke (isolated)
+        shell: bash
+        run: |
+          set -euo pipefail
+          source "$RUNNER_TEMP/gms-nuitka-venv/bin/activate"
+          export GNUPGHOME="$RUNNER_TEMP/gms-test-gnupg"
+          nice -n 15 ionice -c 3 \
+            python scripts/release/build_binary_release.py \
+              --version "ci-${GITHUB_SHA:0:8}" \
+              --dist-dir "$RUNNER_TEMP/gms-compiled-artifacts"
+          pkg=$(find "$RUNNER_TEMP/gms-compiled-artifacts" -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "$pkg"
+          (cd "$(dirname "$pkg")" && sha256sum -c "$(basename "$pkg").sha256")
+          gpg --verify "$pkg.sig" "$pkg"
+          # CI ephemeral signature is NOT a customer release; no artifact upload.
