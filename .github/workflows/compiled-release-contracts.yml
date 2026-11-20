@@ -6,6 +6,12 @@ on:
       - 'ui/**'
     paths:
       - 'scripts/release/**'
+      - 'scripts/*.sh'
+      - 'features/**/ui/**'
+      - 'web/static/**'
+      - 'web/shell/**'
+      - 'web/templates/architecture.html'
+      - 'docs/architecture/*.mmd'
       - 'tests/test_compiled_release.py'
       - 'tests/test_github_release_install.py'
       - 'README.md'
