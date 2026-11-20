@@ -1,12 +1,19 @@
-name: Read-only kkagent Daily Brief evidence audit 2026-11-20
+name: Read-only kkagent Daily Brief evidence audit
 on:
   workflow_dispatch:
+    inputs:
+      brief_date:
+        description: "Redmine brief local date YYYY-MM-DD; empty means today"
+        required: false
+        type: string
 permissions:
   contents: read
 jobs:
   onprem-readonly:
     runs-on: [self-hosted, linux, x64]
     timeout-minutes: 12
+    env:
+      BRIEF_AUDIT_DATE: ${{ github.event.inputs.brief_date }}
     steps:
       - name: Summarize today's local kkagent metadata without exporting private Redmine contents
         shell: bash
@@ -16,9 +23,12 @@ jobs:
           test "$(id -un)" = "hcq"
           test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
           python3 - <<'PY'
-          import collections, json, re, sqlite3
+          import collections, datetime, json, os, re, sqlite3
           from pathlib import Path
-          date="2026-11-20"
+          from zoneinfo import ZoneInfo
+          date=os.getenv("BRIEF_AUDIT_DATE") or datetime.datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+          if not re.fullmatch(r"20\\d{2}-[01]\\d-[0-3]\\d",date):
+              raise SystemExit("invalid date (use YYYY-MM-DD)")
           paths=sorted((Path.home()/"GMS_Remote_Test_Web/data/redmine/by_user").glob("*/daily_brief.sqlite3"))
           print("AUDIT_DATE="+date)
           print("DATABASE_COUNT="+str(len(paths)))
@@ -140,9 +150,12 @@ jobs:
           test "$RUNNER_NAME" = "ats-041055-64g"
           test "$(id -un)" = "hcq"
           python3 - <<'PY'
-          import collections, json, re, sqlite3
+          import collections, datetime, json, os, re, sqlite3
           from pathlib import Path
-          date="2026-11-20"
+          from zoneinfo import ZoneInfo
+          date=os.getenv("BRIEF_AUDIT_DATE") or datetime.datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+          if not re.fullmatch(r"20\\d{2}-[01]\\d-[0-3]\\d",date):
+              raise SystemExit("invalid date (use YYYY-MM-DD)")
           paths=sorted((Path.home()/"GMS_Remote_Test_Web/data/redmine/by_user").glob("*/daily_brief.sqlite3"))
           def obj(x):
               try:
