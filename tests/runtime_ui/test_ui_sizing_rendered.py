@@ -114,11 +114,16 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                                 throw Error('Missing shared utilities page structure');
                               }
                               // Selectors survive initToolsPageBody(), which deletes data-* attrs.
-                              // Stable fixture: isolate frame geometry from data and scrollbars.
+                              // Render many real category-section elements to exercise the
+                              // same overflow and scrollbar geometry as populated pages.
                               const category = document.createElement('section');
                               category.className = 'category-section';
                               category.textContent = 'geometry fixture';
-                              grid.replaceChildren(category);
+                              grid.replaceChildren(category,
+                                ...Array.from({length: 36}, () => category.cloneNode(true)));
+                              const scroll = root.querySelector('.tools-scroll');
+                              scroll.scrollTop = 0;
+                              const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
                               const frame = getComputedStyle(root, '::after');
                               const rootRect = root.getBoundingClientRect();
                               const cardRect = category.getBoundingClientRect();
@@ -132,7 +137,10 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                               return {
                                 top: cardRect.top - outer.top,
                                 left: cardRect.left - outer.left,
-                                right: outer.right - cardRect.right,
+                                right: outer.right - cardRect.right - scrollbarWidth,
+                                renderedRight: outer.right - cardRect.right,
+                                scrollbarWidth,
+                                scrollable: scroll.scrollHeight > scroll.clientHeight,
                                 footerBottom: outer.bottom - footerRect.bottom,
                                 headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
                                 hostPadding: getComputedStyle(host).padding,
@@ -146,6 +154,11 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                         evidence[f"{name}-{width}"] = geometry
                         for side in ("top", "left", "right", "footerBottom"):
                             self.assertAlmostEqual(geometry[side], 8, delta=0.6, msg=str(geometry))
+                        self.assertTrue(geometry["scrollable"], msg=str(geometry))
+                        self.assertAlmostEqual(
+                            geometry["renderedRight"] - geometry["scrollbarWidth"],
+                            8, delta=0.6, msg=str(geometry),
+                        )
                         self.assertAlmostEqual(geometry["headerMarginBottom"], 1, delta=0.1)
                         self.assertEqual(geometry["hostPadding"], "8px")
                         self.assertEqual(geometry["gridPadding"], "0px")
