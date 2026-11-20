@@ -13,7 +13,7 @@ from .source_provider_contract import SourceProviderError, _COMMIT_RE
 
 
 def search_scoped(
-    self, revision: str, query: str, path_filter: str, limit: int, scope: str,
+    provider, revision: str, query: str, path_filter: str, limit: int, scope: str,
 ) -> dict[str, Any]:
     """Search exactly one verified child repo; never imply global absence."""
     root = provider.config.repo_root.rstrip("/")
