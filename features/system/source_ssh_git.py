@@ -702,28 +702,77 @@ class SSHGitProvider(LocalGitProvider):
         *,
         path_filter: str = "",
         limit: int = SEARCH_DEFAULT_LIMIT,
+        repo_scope: str = "",
+        permission_scope: str = "",
     ) -> dict[str, Any]:
+        """Search one explicit repository or all repositories, without changing path_filter.
+
+        Only pinned commits can be cached beyond the request: HEAD is mutable.
+        Concurrent identical requests share a Future, including error propagation.
+        Cache keys include caller permission, source/SSH endpoint and scope.
+        """
         if not str(query or "").strip():
             raise SourceProviderError("query 不能为空", status_code=422)
         limit = max(1, min(int(limit or SEARCH_DEFAULT_LIMIT), SEARCH_MAX_LIMIT))
         filter_value = str(path_filter or "").strip().lower()
-        if self._multi:
-            return self._search_multi(revision, str(query), filter_value, limit)
+        scope = _safe_repo_path(repo_scope) if repo_scope else ""
+        revision = str(revision or "").strip() or self.config.default_revision
+        if scope and not self._multi:
+            raise SourceProviderError("单仓源无需 repo_scope", status_code=422)
+        if not self._multi and not scope:
+            return self._search_single(revision, str(query), filter_value, limit)
+        key = (
+            permission_scope, self.config.source_id, self.config.ssh_host,
+            self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
+            revision, str(query), filter_value, scope, limit,
+        )
+        pinned = bool(scope and _COMMIT_RE.fullmatch(revision))
+        with self._search_lock:
+            if pinned and key in self._pinned_search_cache:
+                return copy.deepcopy(self._pinned_search_cache[key])
+            future = self._inflight_searches.get(key)
+            owner = future is None
+            if owner:
+                future = Future()
+                self._inflight_searches[key] = future
+        if not owner:
+            # A follower also has a bound wait; no indefinite queue on a stuck query.
+            return copy.deepcopy(future.result(timeout=SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS + 2))
+        try:
+            if scope:
+                payload = self._search_scoped(revision, str(query), filter_value, limit, scope)
+            else:
+                payload = self._search_multi(revision, str(query), filter_value, limit)
+                payload["scope"] = "all_repositories"
+                payload["searched_scope"] = "all_repositories"
+                payload["global_coverage_complete"] = payload["coverage_complete"]
+            with self._search_lock:
+                if pinned and payload.get("coverage_complete"):
+                    if len(self._pinned_search_cache) >= 128:
+                        self._pinned_search_cache.pop(next(iter(self._pinned_search_cache)))
+                    self._pinned_search_cache[key] = copy.deepcopy(payload)
+            future.set_result(payload)
+            return copy.deepcopy(payload)
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            with self._search_lock:
+                self._inflight_searches.pop(key, None)
+
+    def _search_single(
+        self, revision: str, query: str, filter_value: str, limit: int,
+    ) -> dict[str, Any]:
         self._verify_repo()
         commit = self.resolve_commit(revision)
-        # 与 local_git 相同的 -z -n -I 记录流；-I 在远端跳过二进制。
         command = self._git_command(
             "grep", "--fixed-strings", "--ignore-case", "--no-color",
             "--no-heading", "--no-break", "--no-column", "--full-name",
-            "-z", "-n", "-I", "-e", str(query), commit, "--",
+            "-z", "-n", "-I", "-e", query, commit, "--",
         )
         result = self._run_remote(command, SSH_GIT_GREP_TIMEOUT_SECONDS)
         if result.timed_out:
             matches, scanned, limited = [], 0, True
-        elif result.code == -1:
-            raise SourceProviderError(
-                f"git grep 执行失败: {_stderr_tail(result)}", status_code=502
-            )
         elif result.code not in (0, 1):
             raise SourceProviderError(
                 f"git grep 失败: {_stderr_tail(result)}", status_code=502
@@ -735,6 +784,85 @@ class SSHGitProvider(LocalGitProvider):
         for match in matches:
             match.update(source_id=self.config.source_id, commit=commit)
         return self._search_payload(commit, matches, scanned, limited)
+
+    def _search_scoped(
+        self, revision: str, query: str, path_filter: str, limit: int, scope: str,
+    ) -> dict[str, Any]:
+        """Search exactly one verified child repo; never imply global absence."""
+        root = self.config.repo_root.rstrip("/")
+        candidate = root + "/" + scope
+        if not self.config.discover_repos:
+            allowed = {self._repo_rel(r): r for r in self._repos}
+            if scope not in allowed:
+                raise SourceProviderError(
+                    "repo_scope 未配置为有效子仓，请从已注册子仓中选择完整路径",
+                    status_code=422,
+                )
+            candidate = allowed[scope]
+        else:
+            # Direct validation avoids a cold 180-second full SDK discovery scan.
+            stdout = self._run_command_checked(
+                self._git_command("rev-parse", "--show-toplevel", repo=candidate),
+                "repo_scope 子仓校验", SSH_GIT_DEFAULT_TIMEOUT_SECONDS,
+                error_status=422,
+            ).strip()
+            if stdout.rstrip("/") != candidate.rstrip("/"):
+                raise SourceProviderError(
+                    "repo_scope 必须精确指向 Git 子仓根目录", status_code=422
+                )
+        pinned = bool(_COMMIT_RE.fullmatch(revision))
+        if not pinned and not _is_head_label(revision, self.config.default_revision):
+            raise SourceProviderError(
+                "多仓子仓范围仅支持 HEAD 或固定 40 位 commit", status_code=422
+            )
+        deadline = time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        result = self._run_shard(
+            (candidate,), query, "", deadline=deadline,
+            revision=revision if pinned else "HEAD",
+        )
+        if result.timed_out:
+            matches, scanned, limited = [], 0, True
+        elif result.code not in (0, 1):
+            raise SourceProviderError(
+                f"指定子仓 git grep 失败: {_stderr_tail(result)}", status_code=502
+            )
+        else:
+            matches, scanned, limited = _parse_multi_output(
+                result.stdout, path_filter, limit, strip_root=self.config.repo_root
+            )
+        # Even zero-hit searches must report the real SHA pinned by the SSH shard.
+        headers = [
+            line[len(_REPO_SEP):].partition("\t")[2].strip()
+            for line in result.stdout.splitlines() if line.startswith(_REPO_SEP)
+        ]
+        commit = next((value for value in headers if _COMMIT_RE.fullmatch(value)), "")
+        if not commit and not limited:
+            limited = True
+        kept = []
+        for match in matches:
+            if match.get("repo") != scope or match.get("commit") != commit:
+                limited = True
+                continue
+            match.update(
+                source_id=self.config.source_id,
+                result_id=self._make_result_id(match["path"], commit),
+            )
+            kept.append(match)
+        payload = self._multi_payload(
+            revision, kept, scanned, limited,
+            repos_total=1, repos_pending=0 if commit else 1,
+        )
+        payload.update(
+            scope="repository", repo_scope=scope, searched_scope=scope,
+            searched_repos=[scope], commit=commit, revision_is_head=not pinned,
+            global_coverage_complete=False, coverage_scope="selected_repository",
+        )
+        if not kept:
+            payload["hint"] = (
+                "仅在指定子仓检索，零命中不代表全 SDK 不存在；"
+                "如需全库结论，请取消 repo_scope 并确认 coverage_complete"
+            )
+        return payload
 
     # ------------------------------------------------------------- multi search
 
