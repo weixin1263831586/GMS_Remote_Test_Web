@@ -17,7 +17,6 @@
     input { min-width:260px; }
     button { height:var(--ui-control-height); border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary-gradient);  cursor:pointer;  }
     button.secondary { background:var(--lighter-bg); }
-    main { padding:0; }
 
     .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     /* Redmine 同构：筛选与操作按钮整体右对齐聚在 Tab 行右侧，按钮组
@@ -36,7 +35,7 @@
     .select-with-add select { padding-right:28px; min-width:180px; }
     .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted);  padding:0 6px; line-height:1; cursor:pointer; height:var(--ui-control-height-icon); min-width:22px; }
     .select-add-btn:hover { color:var(--text); background:transparent; }
-    .tab-content { display:none; padding:var(--ui-spacing-lg); }
+    .tab-content { display:none; }
     .tab-content.active { display:block; }
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:var(--ui-spacing-md); }
     .stat-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); height:var(--ui-stat-height); min-height:var(--ui-stat-height); padding:14px; text-align:center; }
@@ -165,7 +164,7 @@
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
 <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261118-compact-tailscale">
 <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261118-firmware-share-fit">
-<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261116-tab-focus-ring">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-single-edge-template">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs"></script>
@@ -203,15 +202,15 @@
   <button class="secondary" data-click="checkGerritRoute"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查路由</button>
 </div>
 <main>
-  <section id="tab-personal" class="tab-content active">
+  <section id="tab-personal" class="tab-content active ui-page-edge">
     <div id="personalStatus" class="muted status-line"></div>
     <div id="personalContent"></div>
   </section>
-  <section id="tab-department" class="tab-content">
+  <section id="tab-department" class="tab-content ui-page-edge">
     <div id="departmentStatus" class="muted status-line"></div>
     <div id="departmentContent"></div>
   </section>
-  <section id="tab-query" class="tab-content">
+  <section id="tab-query" class="tab-content ui-page-edge">
     <div id="status" class="muted status-line">加载中...</div>
     <div class="wrap"><table class="ui-table"><thead><tr><th>变更</th><th>项目</th><th>分支</th><th>状态</th><th>Owner</th><th>更新时间</th></tr></thead><tbody id="rows"></tbody></table></div>
   </section>
