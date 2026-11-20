@@ -202,8 +202,14 @@ def source_version_matches(context, target_version, entry):
     source_version = str(context.get("suite_version") or "")
     if source_version:
         return bool(target_version) and version(source_version) == version(target_version)
-    reported_revision = str(entry.get("source_revision") or "")
-    return bool(reported_revision) and reported_revision == str(context.get("commit") or context.get("revision") or "")
+    reported_revision = str(entry.get("source_revision") or "").strip()
+    source_commit = str(context.get("commit") or "").strip()
+    # A moving label such as HEAD/main or an OpenGrok requested_revision is
+    # not proof that the code matches the exact build. Only immutable commit
+    # IDs may confirm a causal/ownership claim against the target source.
+    if not re.fullmatch(r"(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})", reported_revision):
+        return False
+    return reported_revision.lower() == source_commit.lower()
 
 
 def apply_review(result, review):
