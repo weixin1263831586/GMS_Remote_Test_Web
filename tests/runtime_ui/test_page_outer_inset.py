@@ -1,4 +1,4 @@
-"""Every shell page uses the same 12px outer inset at every viewport size.
+"""Every shell page uses the same 8px outer inset at every viewport size.
 
 This checks the actual loaded CSS in Chromium, including the canonical
 page-content padding and the shared (title-excluding) body frame. Internal
@@ -13,7 +13,7 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class UnifiedPageOuterInsetTests(RuntimeUiHarness):
-    def test_all_shell_pages_share_12px_perimeter_at_all_breakpoints(self):
+    def test_all_shell_pages_share_8px_perimeter_at_all_breakpoints(self):
         page = self.new_page()
         matrix = {}
         try:
@@ -69,7 +69,7 @@ class UnifiedPageOuterInsetTests(RuntimeUiHarness):
                     }"""
                 )
                 matrix[str(width)] = measured
-                self.assertEqual(measured["token"], "12px", width)
+                self.assertEqual(measured["token"], "8px", width)
                 self.assertGreaterEqual(len(measured["samples"]), 20, width)
                 ids = {item["id"] for item in measured["samples"]}
                 self.assertTrue(
@@ -81,30 +81,30 @@ class UnifiedPageOuterInsetTests(RuntimeUiHarness):
                 for item in measured["samples"]:
                     with self.subTest(viewport=width, page=item["id"]):
                         self.assertEqual(item["display"], "flex", item)
-                        self.assertEqual(item["padding"], ["12px"] * 4, item)
+                        self.assertEqual(item["padding"], ["8px"] * 4, item)
                         if item["hasHeader"]:
                             self.assertAlmostEqual(
-                                item["titleOffset"], 12, delta=0.75,
+                                item["titleOffset"], 8, delta=0.75,
                                 msg=str(item),
                             )
                         if item["id"] != "page-test":
                             self.assertEqual(
                                 [item["frame"][edge]
                                  for edge in ("right", "bottom", "left")],
-                                ["12px"] * 3,
+                                ["8px"] * 3,
                                 item,
                             )
                             # Body-frame top is derived from title geometry.
                             # The header can wrap on mobile; independent route
                             # geometry tests cover that after page activation.
                             self.assertGreaterEqual(
-                                item["frameBorderY"], 12, item,
+                                item["frameBorderY"], 8, item,
                             )
             target = os.getenv("GMS_UI_PREVIEW_DIR")
             if target:
                 output = Path(target)
                 output.mkdir(parents=True, exist_ok=True)
-                (output / "unified-page-edge-12px.json").write_text(
+                (output / "unified-page-edge-8px.json").write_text(
                     json.dumps(matrix, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )

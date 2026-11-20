@@ -47,6 +47,7 @@ class UiSizingContractTests(unittest.TestCase):
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {
+            "page-edge": 8,
             "control-height": 32,
             "control-height-dense": 28,
             "control-height-small": 26,

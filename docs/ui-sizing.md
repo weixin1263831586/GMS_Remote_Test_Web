@@ -5,6 +5,7 @@
 
 | 角色 | 变量 | 基准 |
 | --- | --- | --- |
+| 页面外围四边（所有 Shell 页面，桌面与移动端） | `--ui-page-edge` | 8px |
 | 普通按钮、筛选输入、选择框 | `--ui-control-height` | 32px |
 | 表格行内操作 | `--ui-control-height-dense` | 28px |
 | Shell 页头/密集微控件 | `--ui-control-height-small` | 26px |
@@ -26,6 +27,8 @@
 | 移动端触控目标（普通/危险） | `--ui-touch-target-height` / `--ui-touch-target-danger-height` | 40 / 44px |
 | AOA 命令行按钮/编辑框（720p 特例） | `--ui-aoa-command-button-height` / `--ui-aoa-command-editor-height` | 20 / 22px |
 | AOA 配置列（正常/低视口） | `--ui-aoa-config-control-height` / `--ui-aoa-config-control-height-short` | 27 / 30px |
+
+Shell 页面的标题内边距、内容区域外框四周留白统一使用 `--ui-page-edge: 8px`。只调整页面外围间距，卡片、表格、终端、弹框等内部组件保留各自的间距规范。独立 iframe 的内部工具栏与工作区不额外叠加同一层页面边距。
 
 ## 设计边界
 
@@ -55,7 +58,8 @@
 
 运行 `python -m pytest -q tests/test_ui_sizing_contract.py
 tests/test_typography_contract.py`；布局回归运行
-`python -m pytest -q tests/test_shell_title_geometry.py
+`python -m pytest -q tests/runtime_ui/test_page_outer_inset.py
+ tests/test_shell_title_geometry.py
 tests/runtime_ui/test_workspaces.py`。建议在桌面宽度 1440/1792px
 逐页复核标题右侧按钮不换行、KPI 等高、表头对齐及弹框按钮不裁切。
 自托管 Chromium 完整矩阵使用 `.github/workflows/onprem-ui-sizing-validation.yml`，

@@ -663,7 +663,7 @@ body {
     position: relative;
 }
 
-/* All breakpoints retain the same 12px page inset.
+/* All breakpoints retain the same 8px page inset.
    Only internal responsive layouts change; page edges never shrink. */
 
 .main-container > .page-content:not(#page-test)::after {
