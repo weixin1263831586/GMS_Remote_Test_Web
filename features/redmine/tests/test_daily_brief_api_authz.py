@@ -171,7 +171,7 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
         self.assertEqual(
             set(payload["events"][0]),
             {"sequence", "event_type", "stage", "tool_name", "status",
-             "summary", "duration_ms", "created_at"},
+             "summary", "duration_ms", "attempt_no", "created_at"},
         )
         incremental = self.client.get(
             f"/api/redmine-agent/daily-brief/runs/{run.run_id}/issues/652654/events"
