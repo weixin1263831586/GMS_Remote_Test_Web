@@ -11,7 +11,10 @@ from typing import Any
 from . import source_ssh_git as src
 from .source_local_git import LocalGitProvider
 from .source_provider_contract import (
-    _COMMIT_RE, SourceProviderError, _make_signed_id, _safe_repo_path,
+    _COMMIT_RE,
+    SourceProviderError,
+    _make_signed_id,
+    _safe_repo_path,
     decode_signed_id,
 )
 
