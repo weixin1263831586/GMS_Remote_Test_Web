@@ -98,7 +98,7 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
         from features.redmine.daily_brief_report import issue_payload
         from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
 
-        trace = KkAgentTrace(history_search_count=2, distinct_history_search_count=2)
+        trace = KkAgentTrace()
         trace.tool_calls = [
             ToolTrace(tool_call_id="a", tool_name="gms_rt_redmine_issue_fetch",
                       tool_input={"issue_id": 123}, status="succeeded",
