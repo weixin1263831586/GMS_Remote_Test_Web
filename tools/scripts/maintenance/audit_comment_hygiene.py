@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Report stale debugging narratives in tracked source comments and docstrings.
+"""Check tracked source comments and docstrings for stale debugging narratives.
 
-Audit-only: no files are modified. Dates in business fixtures, cache-busting
-URLs, migrations and actual runtime strings are not treated as comments.
+No files are modified. CI fails on high-confidence historical comments, but
+only reports ambiguous references to previous runtime state for human review.
+Business fixture dates and normal runtime strings are not treated as comments.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ CODE_SUFFIXES = {".py", ".js", ".css", ".html", ".sh", ".ts", ".tsx", ".rs"}
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", "actions-runner", "dist", "target"}
 MARKERS = (
     ("screenshot-timestamp", re.compile(r"20\d{6,12}.{0,30}(?:截图|复现|修复|排查|实测)|(?:截图|复现|修复|排查|实测).{0,30}20\d{6,12}")),
-    ("version-changelog", re.compile(r"^\s*(?:v\d{1,3}|版本\d{1,3})\s*[:：]\s*")),
+    ("version-changelog", re.compile(r"^\s*(?:v\d{1,3}|版本\d{1,3})(?:\s+|[:：])")),
     ("debugging-history", re.compile(r"(?:截图复现|夜批实测|首跑实测|某次截图|本次截图|修复前|修复过程|之前的实现|之前的代码|当时修复|遗留修复|临时排查|仅供临时|目测探针)")),
 )
 # These expressions identify review candidates, not unconditional deletions.
@@ -104,7 +105,7 @@ def main() -> int:
     print(f"COMMENT_AUDIT_SUMMARY | {counts} | findings={len(matches)}")
     if len(matches) > 400:
         print(f"COMMENT_AUDIT_TRUNCATED | {len(matches) - 400} further results")
-    return 0
+    return 1 if counts["high"] else 0
 
 
 if __name__ == "__main__":
