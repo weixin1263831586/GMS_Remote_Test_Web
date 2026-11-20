@@ -161,7 +161,6 @@ html[data-ui-type-root="shell"] .report-failure-title code { font-family: var(--
 html[data-ui-type-root="shell"] .report-failure-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .report-failure-reason-label { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .log-progress-text { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #route-check-dialog .modal-title { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] #route-check-dialog .modal-close { font-size: var(--ui-type-size-display); }
 html[data-ui-type-root="shell"] #route-check-dialog .route-check-form label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] #route-check-dialog .route-check-form input[type="text"] { font-size: var(--ui-type-size-body); }
@@ -293,7 +292,7 @@ html[data-ui-type-root="shell"] .redmine-file-item { font-size: var(--ui-type-si
 html[data-ui-type-root="shell"] .redmine-file-remove { font-size: var(--ui-type-size-card); }
 html[data-ui-type-root="shell"] .apk-search-input { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .agent-chat-empty { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] .agent-role { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="shell"] .agent-role { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .agent-time { font-size: var(--ui-type-size-compact); font-family: var(--ui-type-font-mono); }
 html[data-ui-type-root="shell"] .agent-message-body { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .agent-plan-key { font-size: var(--ui-type-size-small); }
