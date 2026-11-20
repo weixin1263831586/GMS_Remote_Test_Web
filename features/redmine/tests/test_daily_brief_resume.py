@@ -7,7 +7,9 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
 from features.redmine.daily_brief_resume import (
-    ResumeReceiptBusyError, admit_resume_receipt, valid_resume_trace,
+    ResumeReceiptBusyError,
+    admit_resume_receipt,
+    valid_resume_trace,
 )
 
 

@@ -18,8 +18,8 @@ from foundation.config import settings
 
 from .daily_brief_analysis_events import event_store_for_repository, mask_secrets
 from .daily_brief_owner_policy import is_daily_brief_owner_eligible
-from .daily_brief_resume import ResumeReceiptBusyError
 from .daily_brief_repository import TERMINAL_RUN_STATUSES, DailyBriefRepository
+from .daily_brief_resume import ResumeReceiptBusyError
 from .daily_brief_service import DailyBriefService
 from .users import _now
 
