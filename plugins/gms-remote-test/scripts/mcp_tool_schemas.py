@@ -1619,10 +1619,12 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "signed result_id for gms_rt_sdk_read. Omit revision to "
                 "use the source's default_revision automatically (an "
                 "unknown source errors with the available source list). "
-                "Full-SDK sources grep 1000+ repos over SSH and one call "
-                "can take 1-4 minutes: issue it and wait, do not retry on "
-                "timeout with identical arguments — narrow with path (e.g. "
-                "frameworks/base) instead."
+                "For multi-repo SDKs, use repo_scope (e.g. frameworks/base) "
+                "to search ONLY that child repo. The legacy path argument only "
+                "filters/ranks results and does NOT reduce repository scanning. "
+                "A scoped zero-hit is not proof of full-SDK absence; inspect "
+                "searched_scope and global_coverage_complete. For a known "
+                "result_id use gms_rt_sdk_read to read the pinned commit file."
             ),
             "inputSchema": {
                 "type": "object",
@@ -1655,7 +1657,24 @@ ALL_TOOLS: list[dict[str, Any]] = [
                             "provide exactly one of query/keywords, never both."
                         ),
                     },
-                    "path": {"type": "string", "description": "Path substring filter."},
+                    "path": {
+                        "type": "string",
+                        "description": "Legacy result path substring filter; does not reduce scanned repositories.",
+                    },
+                    "repo_scope": {
+                        "type": "string",
+                        "maxLength": 256,
+                        "description": (
+                            "Exact SDK child Git repository path, e.g. frameworks/base. "
+                            "Searches only that repo, never claims global coverage."
+                        ),
+                    },
+                    "budget_seconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600,
+                        "description": "One shared search deadline for discovery, SSH queue and grep.",
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
