@@ -130,7 +130,17 @@ _REPO_TARGET_RE = re.compile(
 
 
 def structured_review_actions(value: Any, findings: list[str]) -> list[dict[str, str]]:
-    """Bound review action plan; no source tool without a concrete target."""
+    """Read the review's actual JSON action plan, defaulting to conservative fixes.
+
+    kkagent emits the review as a JSON *string*.  Treating only dicts as valid
+    silently discards the structured actions and can turn a rewrite-only review
+    into an unintended new source search.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            value = None
     proposed = value.get("actions") if isinstance(value, dict) else []
     supplied = []
     if isinstance(proposed, list):
