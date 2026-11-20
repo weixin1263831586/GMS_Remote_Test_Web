@@ -45,7 +45,7 @@ class ShellTitleGeometryTests(RuntimeUiHarness):
             for page_name in ("desktop", "terminal", "users", "reports"):
                 self.assertIsNotNone(offsets[page_name], f"{page_name} 缺少 .section-title")
             for page_name in ("desktop", "terminal"):
-                # 允许 ≤1px 误差；修复前 host 页 offset 比标准页大约 2px。
+                # 各页面标题垂直偏移允许 1px 的渲染误差。
                 self.assertAlmostEqual(
                     offsets[page_name]["offset"], offsets["users"]["offset"], delta=1,
                     msg=f"{page_name} 标题相对页面顶部的偏移应与标准页一致",
