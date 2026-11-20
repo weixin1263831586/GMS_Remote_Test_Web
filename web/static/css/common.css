@@ -1000,6 +1000,11 @@ body {
     min-height: var(--ui-type-line-page);
     position: relative;
 }
+/* Gerrit iframe must begin on the shared frame's top border: the normal 6px
+   header gap leaves a second horizontal seam 5px below that border. */
+#page-gerrit-dashboard > .page-header-row {
+    margin-bottom: 1px;
+}
 .page-header-row > .section-title {
     /* Single spacing source for page-heading icons and text. */
     gap: 6px;
