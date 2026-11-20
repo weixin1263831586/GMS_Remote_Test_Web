@@ -176,14 +176,16 @@ class SSHGitProviderTests(unittest.TestCase):
             )(command, timeout)
 
         provider = _make_provider(_FakeSSHGateway(handler))
-        with unittest.mock.patch("features.system.source_ssh_git.Future", ObservedFuture):
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                first = executor.submit(provider.search, "main", "run")
-                self.assertTrue(started.wait(3))
-                second = executor.submit(provider.search, "main", "run")
-                self.assertTrue(waiter_started.wait(3))
-                release.set()
-                self.assertEqual(first.result(timeout=5), second.result(timeout=5))
+        with (
+            unittest.mock.patch("features.system.source_ssh_git.Future", ObservedFuture),
+            ThreadPoolExecutor(max_workers=2) as executor,
+        ):
+            first = executor.submit(provider.search, "main", "run")
+            self.assertTrue(started.wait(3))
+            second = executor.submit(provider.search, "main", "run")
+            self.assertTrue(waiter_started.wait(3))
+            release.set()
+            self.assertEqual(first.result(timeout=5), second.result(timeout=5))
         self.assertEqual(len(calls), 1)
 
     def test_readonly_guard_rejects_write_subcommands(self):
