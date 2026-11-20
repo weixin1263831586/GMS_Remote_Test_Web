@@ -999,12 +999,12 @@ body {
     min-height: var(--ui-type-line-page);
     position: relative;
 }
-/* Single top boundary for full-height content surfaces. The shared frame is
-   positioned 1px below the 24px page-heading row; an ordinary 6px margin
-   creates a second seam 5px lower down. Includes the report table surface. */
-:is(#page-devices-console, #page-reports, #page-architecture,
-    #page-automation, #page-cluster, #page-redmine-agent,
-    #page-gerrit-dashboard) > .page-header-row {
+/* Single top boundary for full-height surfaces: iframe, report table, and
+   desktop/terminal workspaces. The shared frame begins 1px below the 24px
+   page-heading row; a 6px margin would leave a second seam 5px below it. */
+:is(#page-desktop, #page-terminal, #page-devices-console, #page-reports,
+    #page-architecture, #page-automation, #page-cluster,
+    #page-redmine-agent, #page-gerrit-dashboard) > .page-header-row {
     margin-bottom: 1px;
 }
 .page-header-row > .section-title {
