@@ -857,8 +857,8 @@ class DailyBriefService:
             analyzer_version=analyzer_version(),
             input_hash={
                 "snapshot_hash": run.snapshot_hash,
-                "device_serial": config.get("device_serial", ""),
-                "analysis_hint": config.get("analysis_hint", ""),
+                "device_serial": entry.get("device_serial", config.get("device_serial", "")),
+                "analysis_hint": entry.get("analysis_hint", config.get("analysis_hint", "")),
                 **({"output_style": "summary"} if run.output_style == "summary" else {}),
             },
         )

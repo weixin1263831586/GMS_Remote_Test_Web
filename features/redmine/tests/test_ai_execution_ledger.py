@@ -304,6 +304,58 @@ def test_cancelled_heartbeat_leaves_no_further_refreshes(tmp_path):
     asyncio.run(run())
 
 
+@pytest.mark.parametrize("specified, configured", [
+    ({"device_serial": "DUT-1", "analysis_hint": "specific failure"}, {
+        "device_serial": "OTHER", "analysis_hint": "global default",
+    }),
+    ({"device_serial": "", "analysis_hint": ""}, {
+        "device_serial": "OTHER", "analysis_hint": "global default",
+    }),
+    ({}, {"device_serial": "DUT-2", "analysis_hint": "from config"}),
+])
+def test_receipt_digest_matches_effective_issue_analysis_inputs(
+    tmp_path, specified, configured,
+):
+    async def scenario():
+        service = DailyBriefService.__new__(DailyBriefService)
+        service.owner_id = "a"
+        record = DailyBriefIssue(
+            run_id="run", issue_id=1, buckets=[], subject="Device failure",
+        )
+        repository = Mock(db_path=tmp_path / "ledger.sqlite3")
+        repository.get_issue.return_value = record
+        repository.is_cancel_requested.return_value = False
+        repository.running_lease_for_issue.return_value = None
+        service.repository = repository
+        receipt_ledger = Mock()
+        receipt_ledger.begin.return_value = {
+            "duplicate": True, "receipt_id": "already-running",
+        }
+        service._ai_ledger = receipt_ledger
+        run = DailyBriefRun(
+            owner_id="a", brief_date="2026-11-20", mode="issue:1",
+            run_id="run",
+        )
+        with patch(
+            "features.redmine.daily_brief_service.event_store_for_repository"
+        ) as event_store, patch(
+            "features.redmine.daily_brief_service.start_analysis_progress",
+            return_value=None,
+        ):
+            event_store.return_value.load_checkpoint.return_value = None
+            await service._analyze_one(run, 1, specified, Mock(), configured)
+        material = receipt_ledger.begin.call_args.kwargs["input_hash"]
+        assert material["device_serial"] == specified.get(
+            "device_serial", configured.get("device_serial", ""),
+        )
+        assert material["analysis_hint"] == specified.get(
+            "analysis_hint", configured.get("analysis_hint", ""),
+        )
+        assert record.error_type == "ai_call_in_flight"
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize("cancelled", [False, True])
 def test_service_owns_heartbeat_and_uses_stored_issue_facts(tmp_path, cancelled):
     async def run():
