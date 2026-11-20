@@ -332,6 +332,14 @@ class SSHGitMultiRepoTests(unittest.TestCase):
             + _grep_record(self.COMMIT_KERN, "drivers/gpio.c", 3, "gpio_set()")
         )
 
+    def _scoped_grep_stdout(self) -> str:
+        # repo_scope 检索只 grep 目标子仓：远端不会出现其他仓的记录，
+        # 混入即触发实现的防御性 limited（覆盖不完整）。
+        return (
+            f"{_REPO_SEP}frameworks/base\t{self.COMMIT_FB}\n"
+            + _grep_record(self.COMMIT_FB, "core/java/A.java", 7, "void run()")
+        )
+
     # ---- tests -------------------------------------------------------
 
     def test_metadata_lists_per_repo_heads(self):
@@ -430,7 +438,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
     def test_explicit_repo_scope_searches_only_selected_repo(self):
         """Scope is exact; legacy path_filter remains only a match filter."""
         self.provider = self._provider(self._handler(
-            grep_stdout=self._grep_stdout(),
+            grep_stdout=self._scoped_grep_stdout(),
         ))
         result = self.provider.search("", "run", repo_scope="frameworks/base")
         grep = [command for command in self.executed if " grep " in command]
@@ -459,7 +467,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertNotIn("'HEAD^{commit}'", grep)
 
     def test_reused_pinned_query_skips_duplicate_ssh(self):
-        self.provider = self._provider(self._handler(grep_stdout=self._grep_stdout()))
+        self.provider = self._provider(self._handler(grep_stdout=self._scoped_grep_stdout()))
         first = self.provider.search(
             self.COMMIT_FB, "run", repo_scope="frameworks/base", permission_scope="user1"
         )

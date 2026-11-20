@@ -637,6 +637,9 @@ class DailyBriefService:
                 run.error = mask_secrets(auth_reason, 1000)
                 run.finished_at = _now()
                 self.repository.update_run(run)
+                # 预检失败不重试：issue 必须跟着收敛，否则前端读到
+                # 「run 失败 + issue 进行中」的矛盾状态。
+                self.repository.settle_pending_issues(run_id, "failed", run.error)
                 return self.repository.get_run(run_id)
             run = await self._snapshot_phase(run, config)
             await self._analyze_phase(run, config)
@@ -672,6 +675,8 @@ class DailyBriefService:
             run.error = mask_secrets(str(exc), 1000)
             run.finished_at = _now()
             self.repository.update_run(run)
+            # 未捕获异常即终态失败：同步收敛残留的进行中 issue 行。
+            self.repository.settle_pending_issues(run_id, "failed", run.error)
         finally:
             if task is not None and self._RUN_EXECUTIONS.get(run_id) is task:
                 self._RUN_EXECUTIONS.pop(run_id, None)
