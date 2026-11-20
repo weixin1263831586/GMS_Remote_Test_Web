@@ -7,7 +7,7 @@ class _Reporter(ReportingAnalysisMixin):
     def _detect_version_type(self, version):
         return ""
 
-    def _ensure_code_block(self, text, language):
+    def _ensure_code_block(self, text, _language):
         return str(text)
 
 
