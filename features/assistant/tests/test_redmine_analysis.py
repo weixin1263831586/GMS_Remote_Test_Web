@@ -67,6 +67,34 @@ async def environment(monkeypatch, tmp_path):
     session_registry._agent_monitor_tasks.update(saved_tasks)
 
 
+def test_monitor_tracks_real_activity_and_preserves_attempt_phase():
+    """Polling alone must not advance the last real analysis activity."""
+    from datetime import datetime
+
+    stamp = datetime.now().isoformat(timespec="seconds")
+    active = {}
+    events = [
+        {"event_type": "analysis_started", "attempt_no": 3, "created_at": stamp},
+        {"event_type": "stage_changed", "summary": "结论复核", "created_at": stamp},
+        {
+            "event_type": "tool_started", "tool_name": "SDK 搜索",
+            "created_at": stamp, "attempt_no": 3,
+        },
+    ]
+    rendered = analysis._activity_summary(active, events)
+    assert "第 3 次尝试 · 结论复核" in rendered
+    assert "当前工具：SDK 搜索 · 已等待" in rendered
+    assert "最近活动：" in rendered
+    saved = active["last_analysis_activity"]
+    another_poll = analysis._activity_summary(active, [])
+    assert active["last_analysis_activity"] == saved
+    assert "第 3 次尝试" in another_poll
+    analysis._activity_summary(active, [
+        {"event_type": "tool_completed", "created_at": stamp},
+    ])
+    assert not active["current_tool"]
+
+
 def test_tools_describe_single_issue_analysis_and_required_attachment_url():
     tool = registry.get(analysis.START_TOOL)
     assert tool and not tool.is_readonly and not tool.requires_confirm
