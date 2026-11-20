@@ -129,10 +129,12 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                                 labelWidth: node.querySelector('.summary-label').getBoundingClientRect().width,
                                 valueWidth: node.querySelector('.summary-value').getBoundingClientRect().width
                             })),
-                            reportValueFits: (() => {
-                                const value = document.querySelector('.report-summary-report .summary-value');
-                                return value.scrollWidth <= value.clientWidth + 2;
-                            })(),
+                            reportNoWrap: getComputedStyle(
+                                document.querySelector('#report-summary .report-summary-report')
+                            ).whiteSpace,
+                            reportTitle: document.querySelector(
+                                '#report-summary .report-summary-report'
+                            ).title,
                             actionTop: rect('.report-overview-actions').top,
                             summaryWidth: rect('#report-summary').width,
                             summaryContentRight: rect('#report-summary .report-summary-report').right,
@@ -154,13 +156,20 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     self.assertEqual(metrics["control"], "32px", metrics)
                     self.assertLessEqual(metrics["summaryHeight"], 46, metrics)
                     self.assertLessEqual(metrics["overviewHeight"], 50, metrics)
-                    self.assertGreaterEqual(len(metrics["summaryItems"]), 8, metrics)
+                    self.assertEqual(len(metrics["summaryItems"]), 9, metrics)
                     for item in metrics["summaryItems"][:-1]:
-                        self.assertGreaterEqual(item["width"], item["labelWidth"] + item["valueWidth"])
-                    if width == 1792:
-                        self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 440, metrics)
-                        self.assertTrue(metrics["reportValueFits"], metrics)
-                        self.assertFalse(metrics["summaryOverflow"], metrics)
+                        self.assertAlmostEqual(item["width"], 150, delta=1, msg=metrics)
+                        self.assertGreaterEqual(
+                            item["width"], item["labelWidth"] + item["valueWidth"], metrics
+                        )
+                    self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 300, metrics)
+                    self.assertEqual(metrics["reportNoWrap"], "nowrap", metrics)
+                    self.assertEqual(
+                        metrics["reportTitle"],
+                        "Redmine-48231-2026.11.16_17.04.22.327_8108_CtsWindowManagerDeviceActivity.zip",
+                    )
+                    if width == 1280:
+                        self.assertTrue(metrics["summaryOverflow"], metrics)
                     self.assertLessEqual(
                         max(item["top"] for item in metrics["summaryItems"])
                         - min(item["top"] for item in metrics["summaryItems"]), 1, metrics
@@ -204,7 +213,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_large_cts_counts_fit_compact_single_row_summary_chips(self):
+    def test_large_cts_counts_fit_fixed_single_row_summary_chips(self):
         page = self.new_page()
         try:
             self.goto_shell(page)
@@ -212,7 +221,10 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
             page.evaluate("""() => displayReportAnalysis({
                 report_name: '2026.10.14_15.28.47.806_5426',
                 summary: {total: 3038784, pass: 3036568, fail: 2216, pass_rate: '99.93%'},
-                details: {test_type: 'CTS', suite_version: '17_r2', android_version: '17'},
+                details: {
+                    test_type: 'CTS', suite_version: '17_r2',
+                    android_version: '17', soc_platform: 'RK3572S'
+                },
                 failures: [{module: 'CtsAppOps2TestCases',
                             name: 'android.app.appops2.cts.AppOpsLoggingTest#requestInstall',
                             reason: 'java.lang.IndexOutOfBoundsException'}]
@@ -225,6 +237,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                 (".report-summary-test-type", "CTS"),
                 (".report-summary-suite-version", "17_r2"),
                 (".report-summary-android-version", "17"),
+                (".report-summary-soc-platform", "RK3572S"),
             )
             for selector, value in expected:
                 cell = page.locator("#report-summary " + selector)
@@ -235,7 +248,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     valueFits: el.querySelector('.summary-value').scrollWidth
                         <= el.querySelector('.summary-value').clientWidth + 1
                 })""")
-                self.assertLessEqual(geom["width"], 150, msg=geom)
+                self.assertAlmostEqual(geom["width"], 150, delta=1, msg=geom)
                 self.assertTrue(geom["valueFits"], (selector, geom))
             self.assertEqual(page.locator("#report-summary").evaluate(
                 "el => getComputedStyle(el).flexWrap"

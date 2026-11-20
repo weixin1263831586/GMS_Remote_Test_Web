@@ -336,6 +336,11 @@
 #page-report-analysis #report-summary .report-summary-stats > div {
     min-height: 26px;
 }
+/* Keep each semantic field exactly 150px; only the report filename can flex. */
+#page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div:not(.report-summary-report) {
+    flex: 0 0 150px;
+    width: 150px;
+}
 /* Report filename remains the flexible last chip and never wraps. */
 #page-report-analysis #report-summary .report-summary-context > .report-summary-report {
     flex: 1 1 360px;
