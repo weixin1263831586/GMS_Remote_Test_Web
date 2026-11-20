@@ -76,7 +76,7 @@ def _production_modules() -> list[str]:
     for top in ("bootstrap", "foundation", "features", "worker_agent", "workflows", "scripts"):
         for source in (ROOT / top).rglob("*.py"):
             relative = source.relative_to(ROOT)
-            if "tests" in relative.parts or "test" in relative.parts:
+            if "tests" in relative.parts or "test" in relative.parts or "release" in relative.parts:
                 continue
             if source.name.startswith("test_") or source.name in {"conftest.py", "__init__.py"}:
                 continue
