@@ -450,6 +450,43 @@ def issue_payload(
 
     tools = execution.get("tools") or []
     gate = (issue.result or {}).get("evidence_gate") or {}
+    # Failed attempts have no accepted report/result, but their real tool trace
+    # still proves which evidence was fetched and where the gap occurred.
+    # Reconstruct a *diagnostic* observation from the stored, already bounded
+    # metadata. Do not promote this observation to an accepted evidence gate.
+    attempted_gate: dict[str, Any] = {}
+    observed_source_count = 0
+    observed_reproducible_count = 0
+    if isinstance(execution.get("tools"), list):
+        try:
+            from .kkagent.evidence_gate import evaluate_evidence_gate
+            from .kkagent.trace import trace_from_summary
+
+            observed = trace_from_summary(execution)
+            observed_source_count = observed.source_evidence_tool_count
+            observed_reproducible_count = observed.reproducible_source_evidence_count
+            if not execution.get("final_ok"):
+                raw_gate = evaluate_evidence_gate(
+                    observed, {"issue_id": issue.issue_id, "subject": issue.subject,
+                               "analysis_mode": "diagnostic"},
+                )
+                attempted_gate = {
+                    key: raw_gate.get(key)
+                    for key in (
+                        "issue_fetched", "journals_checked", "attachments_checked",
+                        "history_checked", "distinct_history_search_count",
+                        "source_evidence_tool_count", "relevant_source_evidence_count",
+                        "reproducible_source_evidence_count", "listed_attachment_count",
+                        "unread_text_artifact_ids", "window_read_only_artifact_ids",
+                    )
+                }
+                # Never leak file names/artifact IDs through this compact view.
+                for key in ("unread_text_artifact_ids", "window_read_only_artifact_ids"):
+                    attempted_gate[key + "_count"] = len(attempted_gate.pop(key) or [])
+        except (ValueError, TypeError, AttributeError, KeyError):
+            # Legacy traces can be sparse. Keep the failure stage and tool
+            # counters visible rather than failing the entire UI response.
+            pass
     failure_stage = str(
         execution.get("failure_stage") or execution.get("error_type") or ""
     )
@@ -477,15 +514,16 @@ def issue_payload(
             else _tool_status(tools, "gms_rt_devices_snapshot")
         ),
         "journals_checked": _tool_succeeded(tools, "redmine_journals"),
-        "attachments_checked": gate.get("attachments_checked") is True,
+        "attachments_checked": (gate or attempted_gate).get("attachments_checked") is True,
+        # A successful sdk_search with zero hits or apk_resolve/analyze is NOT
+        # source-level evidence. Use evidence-bearing calls, not tool names.
         "source_evidence_checked": bool(
-            execution.get("source_evidence_checked")
-        ) or _tool_succeeded(tools, "gms_rt_sdk_") or _tool_succeeded(
-            tools, "gms_rt_apk_"
+            gate.get("source_evidence_checked") if gate else observed_source_count > 0
         ),
-        "source_evidence_tool_count": int(
+        "source_evidence_tool_count": observed_source_count or int(
             execution.get("source_evidence_tool_count") or 0
         ),
+        "reproducible_source_evidence_count": observed_reproducible_count,
         "history_search_count": int(execution.get("history_search_count") or 0),
         "distinct_history_search_count": int(
             execution.get("distinct_history_search_count") or 0
@@ -500,6 +538,8 @@ def issue_payload(
         "input_tokens": int(execution.get("input_tokens") or 0),
         "output_tokens": int(execution.get("output_tokens") or 0),
         "recorded_at": execution.get("recorded_at") or "",
+        "failed_attempt_evidence": attempted_gate,
+        "review_findings_count": len(execution.get("analysis_review_findings") or []),
     }
     return payload
 
