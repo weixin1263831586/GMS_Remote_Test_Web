@@ -28,7 +28,7 @@
 | AOA 命令行按钮/编辑框（720p 特例） | `--ui-aoa-command-button-height` / `--ui-aoa-command-editor-height` | 20 / 22px |
 | AOA 配置列（正常/低视口） | `--ui-aoa-config-control-height` / `--ui-aoa-config-control-height-short` | 27 / 30px |
 
-Shell 页面的标题内边距、内容区域外框四周留白统一使用 `--ui-page-edge: 8px`。只调整页面外围间距，卡片、表格、终端、弹框等内部组件保留各自的间距规范。独立 iframe 的内部工具栏与工作区不额外叠加同一层页面边距。
+页面外围唯一尺寸定义为 `ui-sizing.css` 中的 `--ui-page-edge: 8px`。该文件只实现全局通用模板：Shell 页面以公共 `.page-content.container` 选择器生效；独立工作区使用 `.ui-page-edge` 标记内容区域。**不允许在统一尺寸文件列出业务页面 ID、模块名称或各页独立覆写。** 各业务样式必须删除原有外围 padding/margin 的数字声明，四边统一 8px；卡片、表格、弹框、终端内部内容间距不是页面外围间距，继续由组件自身管理。具有固定顶部页签栏的独立页面仅对内容区域应用这一模板，避免外框与内部页签栏重复叠加留白。
 
 ## 设计边界
 
