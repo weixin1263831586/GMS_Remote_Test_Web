@@ -133,7 +133,8 @@ async def test_repeated_factual_revision_is_bounded_and_never_published(monkeypa
     stream = mock_stream(monkeypatch, analyzer, responses)
     outcome = await analyzer.analyze({**ENTRY, "output_style": "summary"})
     assert not outcome.ok and "实际 SPL 未核实" in outcome.error
-    assert stream.await_count == 6
+    # Repeated factual review gaps stop without a second redundant repair/review.
+    assert stream.await_count == 4
 
 
 @pytest.mark.asyncio
