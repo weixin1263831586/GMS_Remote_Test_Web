@@ -58,6 +58,7 @@ REQUIRED_UI_PAGES = (
     "features/system/update_monitor/ui/page.html",
     "features/system/update_radar/ui/page.html",
 )
+REQUIRED_UI_SCRIPTS = tuple(str(Path(page).with_name("page.js")) for page in REQUIRED_UI_PAGES)
 FORBIDDEN_SOURCE_ENDINGS = (".py", ".pyc", ".pyo", ".pyi", ".map")
 
 
@@ -125,7 +126,7 @@ def _stage_assets(runtime: Path) -> None:
         "web/static", "web/shell/shell.html", "configs/examples/config.example.json",
         "web/templates/architecture.html",
         *(f"docs/architecture/{name}" for name in ARCHITECTURE_SOURCES),
-        *REQUIRED_UI_PAGES,
+        *REQUIRED_UI_PAGES, *REQUIRED_UI_SCRIPTS,
     )
     missing = [name for name in required if not (runtime / name).is_file()
                and not (runtime / name).is_dir()]
