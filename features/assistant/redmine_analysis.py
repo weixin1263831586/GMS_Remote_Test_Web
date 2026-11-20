@@ -242,11 +242,12 @@ def _activity_summary(active: dict, events: list[dict]) -> str:
         started = active.get("tool_started_at")
         seconds = 0
         try:
-            seconds = max(0, int((datetime.now(timezone.utc) -
-                                  datetime.fromisoformat(started)).total_seconds()))
+            moment = datetime.fromisoformat(started)
+            now = datetime.now(moment.tzinfo) if moment.tzinfo else datetime.now()
+            seconds = max(0, int((now - moment).total_seconds()))
         except (TypeError, ValueError):
             pass
-        lines.append(f"当前工具：{tool} · 已等待 {seconds // 5 * 5} 秒")
+        lines.append(f"当前工具：{tool} · 已等待 {seconds} 秒")
     last = str(active.get("last_analysis_activity") or "")
     if last:
         try:
