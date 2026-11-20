@@ -841,6 +841,13 @@ class DailyBriefService:
         if progress is not None:
             progress.snapshot_hash = run.snapshot_hash
             progress.lease_token = str((job_lease or {}).get("lease_token") or "")
+        # The previous lease is evidence only. This Worker must own a fresh
+        # running lease and the immutable snapshot before it can resume.
+        from .daily_brief_resume import valid_resume_trace
+        resumed = valid_resume_trace(
+            checkpoint, job_lease, previous_status=previous_status,
+            attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
+        )
 
         # AI 逻辑调用账本（receipt）：同一逻辑键（owner+purpose+provider+
         # issue+证据快照+设备/hint+prompt+analyzer+model）存在活跃 receipt
@@ -850,7 +857,7 @@ class DailyBriefService:
         # sha256——字段名叫 hash，存储也必须是 hash（敏感 hint 不落明文）。
         # analyzer_version 取 agent 包版本：analyzer 实现升级而 prompt/model
         # 不变时逻辑键也必须变化，否则错误 dedupe。
-        receipt = self.ai_ledger.begin(
+        receipt_args = dict(
             owner_id=self.owner_id,
             purpose="daily_brief_issue",
             issue_id=issue_id,
@@ -865,6 +872,27 @@ class DailyBriefService:
                 **({"output_style": "summary"} if run.output_style == "summary" else {}),
             },
         )
+        if resumed is not None:
+            from .ai_execution_ledger import RECEIPT_RESUME_STALE_SECONDS
+            receipt_args.update(
+                resume_session_id=resumed.session_id,
+                resume_stale_seconds=RECEIPT_RESUME_STALE_SECONDS,
+            )
+        receipt = self.ai_ledger.begin(**receipt_args)
+        if receipt.get("duplicate") and resumed is not None:
+            # A reclaimed Worker lease can precede the last old receipt
+            # heartbeat. Wait for multiple missed heartbeats, never stealing
+            # a still-running provider or repeatedly failing a resumable job.
+            deadline = time.monotonic() + RECEIPT_RESUME_STALE_SECONDS + 15
+            current_token = str((job_lease or {}).get("lease_token") or "")
+            while receipt.get("duplicate") and time.monotonic() < deadline:
+                if self.repository.is_cancel_requested(run.run_id):
+                    raise cancellation.RunCancelledError()
+                await asyncio.sleep(3)
+                lease = self.repository.running_lease_for_issue(run.run_id, issue_id)
+                if not lease or lease.get("lease_token") != current_token:
+                    raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
+                receipt = self.ai_ledger.begin(**receipt_args)
         if receipt.get("duplicate"):
             record.status = "failed"
             record.error_type = "ai_call_in_flight"
@@ -887,6 +915,10 @@ class DailyBriefService:
         receipt_heartbeat = asyncio.create_task(
             self.ai_ledger.keep_alive(receipt["receipt_id"])
         )
+        if progress is not None:
+            progress.on_session_id = lambda sid: self.ai_ledger.mark_received(
+                receipt["receipt_id"], session_id=sid,
+            )
 
         def mark_provider_started() -> None:
             nonlocal provider_submitted
@@ -907,12 +939,6 @@ class DailyBriefService:
             # 轮询与 profile 判定；原独立模块，已并回服务层编排）。
             analyze_entry["_progress_recorder"] = progress
             analyze_entry["_provider_started"] = mark_provider_started
-            from .daily_brief_resume import valid_resume_trace
-
-            resumed = valid_resume_trace(
-                checkpoint, job_lease, previous_status=previous_status,
-                attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
-            )
             if resumed is not None:
                 analyze_entry["_resume_trace"] = resumed
                 if progress is not None:

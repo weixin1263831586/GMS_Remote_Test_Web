@@ -24,6 +24,8 @@ def valid_resume_trace(
         or checkpoint.get("snapshot_hash") != snapshot_hash
         or lease.get("status") != "running"
         or not lease.get("lease_token")
+        or not checkpoint.get("lease_token")
+        or checkpoint.get("lease_token") == lease.get("lease_token")
         or not checkpoint.get("session_id")
     ):
         return None

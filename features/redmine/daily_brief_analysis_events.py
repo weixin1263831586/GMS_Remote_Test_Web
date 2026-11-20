@@ -431,6 +431,7 @@ class AnalysisProgressRecorder:
         self.attempt_no = max(1, int(attempt_no))
         self.snapshot_hash = ""
         self.lease_token = ""
+        self.on_session_id = None
         self.tool_started_count = 0
         self.tool_completed_count = 0
         self.tool_failed_count = 0
@@ -472,6 +473,11 @@ class AnalysisProgressRecorder:
         十六进制，不含凭据）。
         """
         self._emit("session_started", summary=f"{SESSION_ID_PREFIX}{session_id}")
+        if callable(self.on_session_id):
+            try:
+                self.on_session_id(session_id)
+            except Exception:
+                logger.exception("analysis receipt session binding failed")
 
     def tool_started(self, tool_name: str, tool_input: Any = None, *, stage: str = "kkagent") -> None:
         self.tool_started_count += 1

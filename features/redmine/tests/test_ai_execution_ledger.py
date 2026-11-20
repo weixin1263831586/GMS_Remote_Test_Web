@@ -116,6 +116,27 @@ class ReceiptLifecycleTests(unittest.TestCase):
         self.assertTrue(second["duplicate"])
         self.assertEqual(second["receipt_id"], first["receipt_id"])
 
+    def test_recovered_worker_waits_for_prior_provider_to_stop_heartbeating(self):
+        import datetime
+        import sqlite3
+
+        first = self.ledger.begin(**_begin_kwargs())
+        self.ledger.mark_received(first["receipt_id"], session_id="session-1")
+        options = dict(_begin_kwargs(), resume_session_id="session-1",
+                       resume_stale_seconds=135)
+        self.assertTrue(self.ledger.begin(**options)["duplicate"])
+        stale = (datetime.datetime.now(datetime.timezone.utc)
+                 - datetime.timedelta(seconds=160)).isoformat()
+        with sqlite3.connect(self.ledger.db_path) as conn:
+            conn.execute("UPDATE redmine_ai_execution_receipts SET updated_at=? WHERE receipt_id=?",
+                         (stale, first["receipt_id"]))
+        self.assertTrue(self.ledger.begin(**{**options, "resume_session_id": "wrong"})["duplicate"])
+        second = self.ledger.begin(**options)
+        self.assertFalse(second["duplicate"])
+        self.assertEqual(second["attempt"], 2)
+        self.assertEqual(self.ledger.get(first["receipt_id"])["status"], "unknown")
+        self.assertIn("recovered Worker", self.ledger.get(first["receipt_id"])["error"])
+
     def test_main_flow_pending_received_completed(self):
         receipt = self.ledger.begin(**_begin_kwargs())
         self.ledger.mark_received(receipt["receipt_id"], session_id="sess-1")

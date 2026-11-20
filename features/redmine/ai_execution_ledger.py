@@ -63,6 +63,8 @@ logger = logging.getLogger(__name__)
 #: receipt 活跃租约：连续超过该时长无续租的 pending/received 视为失活。
 RECEIPT_LEASE_SECONDS = 4 * 3600
 RECEIPT_HEARTBEAT_SECONDS = 60
+# Never steal an actively heartbeating receipt merely because its Worker lease expired.
+RECEIPT_RESUME_STALE_SECONDS = 2 * RECEIPT_HEARTBEAT_SECONDS + 15
 
 STATUS_PENDING = "pending"
 STATUS_RECEIVED = "received"
@@ -160,6 +162,19 @@ def _lease_cutoff(now: str) -> str:
     return cutoff.isoformat()
 
 
+def _resume_receipt_is_stale(row: dict[str, Any], now: str, seconds: int) -> bool:
+    updated = str(row.get("updated_at") or row.get("created_at") or "")
+    if not updated:
+        return False
+    try:
+        cutoff = datetime.datetime.fromisoformat(now) - datetime.timedelta(
+            seconds=max(RECEIPT_RESUME_STALE_SECONDS, int(seconds))
+        )
+        return datetime.datetime.fromisoformat(updated) < cutoff
+    except (TypeError, ValueError, OverflowError):
+        return False
+
+
 class AIExecutionLedger:
     """per-owner SQLite 账本。线程安全；所有写入走 BEGIN IMMEDIATE。"""
 
@@ -182,6 +197,8 @@ class AIExecutionLedger:
         prompt_version: str = "",
         analyzer_version: str = "",
         input_hash: str = "",
+        resume_session_id: str = "",
+        resume_stale_seconds: int = 0,
     ) -> dict[str, Any]:
         """登记一次逻辑 AI 调用；活跃 receipt 已存在时返回 duplicate。
 
@@ -212,12 +229,20 @@ class AIExecutionLedger:
             ).fetchone()
             if active is not None:
                 row = dict(active)
-                if _lease_expired(row, now):
-                    # 租约过期：持有进程已死。置 unknown（不确定态）并
-                    # 继续新建，绝不复用僵尸 receipt。
+                expired = _lease_expired(row, now)
+                resumable = (
+                    bool(resume_session_id) and resume_stale_seconds > 0
+                    and row["status"] == STATUS_RECEIVED
+                    and (not row.get("session_id") or row["session_id"] == resume_session_id)
+                    and _resume_receipt_is_stale(row, now, resume_stale_seconds)
+                )
+                if expired or resumable:
+                    # BEGIN IMMEDIATE fences another claimant/late heartbeat.
                     self._transition(
                         conn, str(row["receipt_id"]), STATUS_UNKNOWN,
-                        error=f"lease expired after {RECEIPT_LEASE_SECONDS}s",
+                        error=(f"lease expired after {RECEIPT_LEASE_SECONDS}s"
+                               if expired else "stale receipt fenced by recovered Worker"),
+                        finished_at=now,
                     )
                 else:
                     row["duplicate"] = True
