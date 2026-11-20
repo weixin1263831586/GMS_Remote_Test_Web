@@ -60,6 +60,7 @@ def mark_deferred_issue(repository: Any, record: Any, progress: Any) -> None:
 async def admit_resume_receipt(
     ledger: Any, repository: Any, receipt_args: dict[str, Any], resumed: Any,
     run_id: str, issue_id: int, lease_token: str,
+    record: Any = None, progress: Any = None,
 ) -> dict[str, Any]:
     """Do not emit a second AI request while the previous provider is alive.
 
@@ -79,19 +80,29 @@ async def admit_resume_receipt(
             "resume_session_id": resumed.session_id,
             "resume_stale_seconds": RECEIPT_RESUME_STALE_SECONDS,
         }
-    receipt = ledger.begin(**receipt_args)
-    if receipt.get("duplicate") and resumed is not None:
-        deadline = time.monotonic() + RECEIPT_RESUME_STALE_SECONDS + 15
-        while receipt.get("duplicate") and time.monotonic() < deadline:
-            if repository.is_cancel_requested(run_id):
-                raise RunCancelledError()
-            await asyncio.sleep(3)
-            lease = repository.running_lease_for_issue(run_id, issue_id)
-            if not lease or lease.get("lease_token") != lease_token:
-                raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
-            receipt = ledger.begin(**receipt_args)
-        if receipt.get("duplicate"):
-            raise ResumeReceiptBusyError(
-                "previous AI receipt is still active; analysis queued for retry"
-            )
-    return receipt
+    try:
+        receipt = ledger.begin(**receipt_args)
+        if receipt.get("duplicate") and resumed is not None:
+            deadline = time.monotonic() + RECEIPT_RESUME_STALE_SECONDS + 15
+            while receipt.get("duplicate") and time.monotonic() < deadline:
+                if repository.is_cancel_requested(run_id):
+                    raise RunCancelledError()
+                await asyncio.sleep(3)
+                lease = repository.running_lease_for_issue(run_id, issue_id)
+                if not lease or lease.get("lease_token") != lease_token:
+                    raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
+                receipt = ledger.begin(**receipt_args)
+            if receipt.get("duplicate"):
+                raise ResumeReceiptBusyError(
+                    "previous AI receipt is still active; analysis queued for retry"
+                )
+        return receipt
+    except (asyncio.CancelledError, RunCancelledError):
+        # Admission precedes the analysis body's cancellation handler.
+        from .daily_brief_cancellation import reset_cancelled_issue
+
+        if record is not None:
+            reset_cancelled_issue(repository, record)
+        if progress is not None:
+            progress.analysis_finished(ok=False, cancelled=True)
+        raise

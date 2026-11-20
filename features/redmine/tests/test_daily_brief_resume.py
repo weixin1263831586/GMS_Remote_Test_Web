@@ -87,6 +87,33 @@ def test_active_provider_deferred_instead_of_marked_failed():
     asyncio.run(scenario())
 
 
+def test_cancel_in_admission_resets_issue_and_closes_progress_attempt():
+    from features.redmine.daily_brief_cancellation import RunCancelledError
+
+    async def scenario():
+        ledger = Mock()
+        ledger.begin.return_value = {"duplicate": True, "receipt_id": "active"}
+        repository = Mock()
+        repository.is_cancel_requested.return_value = True
+        record, progress = Mock(), Mock()
+        with patch("asyncio.sleep", new_callable=AsyncMock) as sleep:
+            try:
+                await admit_resume_receipt(
+                    ledger, repository, {"owner_id": "owner"},
+                    SimpleNamespace(session_id="sess-1"), "run-id", 123, "new",
+                    record, progress,
+                )
+            except RunCancelledError:
+                pass
+            else:
+                raise AssertionError("cancellation must interrupt receipt wait")
+            sleep.assert_not_awaited()
+        repository.upsert_issue.assert_called_once_with(record)
+        assert record.status == "pending" and record.duration_ms == 0
+        progress.analysis_finished.assert_called_once_with(ok=False, cancelled=True)
+    asyncio.run(scenario())
+
+
 def test_unverified_resume_never_retries_an_active_receipt():
     async def scenario():
         ledger = Mock()

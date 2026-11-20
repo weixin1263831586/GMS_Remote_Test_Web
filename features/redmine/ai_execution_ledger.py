@@ -327,10 +327,10 @@ class AIExecutionLedger:
                     "provider_request_id=CASE WHEN provider_request_id='' THEN ? "
                     "ELSE provider_request_id END, updated_at=? "
                     "WHERE receipt_id=? AND status=? "
-                    "AND (session_id='' OR session_id=?) "
-                    "AND (provider_request_id='' OR provider_request_id=?)",
+                    "AND (?='' OR session_id='' OR session_id=?) "
+                    "AND (?='' OR provider_request_id='' OR provider_request_id=?)",
                     (session_id, provider_request_id, now, receipt_id, STATUS_RECEIVED,
-                     session_id, provider_request_id),
+                     session_id, session_id, provider_request_id, provider_request_id),
                 ).rowcount == 1
             if not changed:
                 logger.info("receipt %s cannot move to received (terminal or missing)", receipt_id)

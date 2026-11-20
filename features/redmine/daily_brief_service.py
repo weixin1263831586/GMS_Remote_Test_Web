@@ -866,7 +866,7 @@ class DailyBriefService:
         try:
             receipt = await admit_resume_receipt(
                 self.ai_ledger, self.repository, receipt_args, resumed,
-                run.run_id, issue_id, str((job_lease or {}).get("lease_token") or ""),
+                run.run_id, issue_id, str((job_lease or {}).get("lease_token") or ""), record, progress,
             )
         except ResumeReceiptBusyError:
             mark_deferred_issue(self.repository, record, progress)

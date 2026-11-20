@@ -150,6 +150,19 @@ class ReceiptLifecycleTests(unittest.TestCase):
         self.ledger.mark_received(receipt_id, session_id="late-session")
         self.assertEqual(self.ledger.get(receipt_id)["session_id"], "expected-session")
 
+    def test_provider_request_id_and_session_bind_in_either_order(self):
+        receipt_id = self.ledger.begin(**_begin_kwargs())["receipt_id"]
+        self.ledger.mark_received(receipt_id, provider_request_id="req-1")
+        self.ledger.mark_received(receipt_id, session_id="session-1")
+        row = self.ledger.get(receipt_id)
+        self.assertEqual(row["provider_request_id"], "req-1")
+        self.assertEqual(row["session_id"], "session-1")
+        self.ledger.mark_received(receipt_id, session_id="wrong")
+        self.ledger.mark_received(receipt_id, provider_request_id="wrong")
+        row = self.ledger.get(receipt_id)
+        self.assertEqual(row["provider_request_id"], "req-1")
+        self.assertEqual(row["session_id"], "session-1")
+
     def test_main_flow_pending_received_completed(self):
         receipt = self.ledger.begin(**_begin_kwargs())
         self.ledger.mark_received(receipt["receipt_id"], session_id="sess-1")
