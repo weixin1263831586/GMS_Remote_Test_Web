@@ -6,7 +6,7 @@ umask 077
 
 REPO="weixin1263831586/GMS_Remote_Test_Web"
 DIST="${GMS_DIST_DIR:-dist}"
-REF="${GMS_RELEASE_TARGET_REF:-ui/unify-page-edge-8px-20261120}"
+REF="${GMS_RELEASE_TARGET_REF:-main}"
 PRERELEASE=false
 fail() { printf 'GitHub Release publish refused: %s\n' "$*" >&2; exit 1; }
 usage() {
