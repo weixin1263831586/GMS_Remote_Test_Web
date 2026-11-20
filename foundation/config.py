@@ -91,7 +91,13 @@ class ConfigManager(ConfigPersistenceMixin):
             root = Path(project_root).resolve()
             base_dir = str(root / 'foundation')
         if base_dir is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
+            # Runtime resources live next to the Nuitka executable in the
+            # source-free distribution. Keep source-checkout behavior intact.
+            compiled_root = os.environ.get("GMS_PROJECT_ROOT", "").strip()
+            base_dir = (
+                str(Path(compiled_root).resolve() / "foundation")
+                if compiled_root else os.path.dirname(os.path.abspath(__file__))
+            )
 
         self.base_dir = base_dir
         self.project_root = Path(base_dir).resolve().parent
