@@ -3,7 +3,6 @@
 :root {
     --workspace-tab-height: var(--ui-tab-height);
     --workspace-tab-width: 112px;
-    --workspace-header-inset: 16px;
 }
 .workspace-header {
     box-sizing: border-box;
@@ -20,7 +19,7 @@
     min-width: 0;
     min-height: var(--workspace-tab-height);
     margin: 0;
-    padding: 0 var(--workspace-header-inset);
+    padding: 0 var(--ui-page-edge);
     border: 0;
     border-radius: 0;
     background: var(--card-bg);

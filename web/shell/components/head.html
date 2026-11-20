@@ -4,7 +4,7 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-        <link rel="stylesheet" href="/static/css/common.css?v=20261120-gerrit-single-frame-top" data-shell-styles>
+        <link rel="stylesheet" href="/static/css/common.css?v=20261120-single-edge-template" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-components.css?v=20261118-notice-focus" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
@@ -15,8 +15,8 @@
     <link rel="stylesheet" href="/static/css/device-inventory.css?v=20261112-inventory-v2" data-shell-styles>
     <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261114-agent-chat-align" data-shell-styles>
     <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261119-solid-analysis-frame" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/host-desktop-workspace.css?v=20261119-balanced-frame" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/host-terminal-workspace.css?v=20261119-terminal-console" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/host-desktop-workspace.css?v=20261120-single-edge-template" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/host-terminal-workspace.css?v=20261120-single-edge-template" data-shell-styles>
     <link rel="stylesheet" href="/static/css/audit-disk.css?v=20261119-disk-interactions" data-shell-styles>
     <link rel="stylesheet" href="/static/css/api-docs-workbench.css?v=20261119-api-audit-layout" data-shell-styles>
     <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261119-solid-analysis-frame" data-shell-styles>
@@ -194,12 +194,6 @@
            几何单点在 common.css：标题盒高 19.2px、行高 17.2px、内容顶
            40.19 ≈ 默认 frame-top 40，页级覆盖已不需要）。行内特有子元素
            （拉伸状态条、布局按钮组）的样式保留在此。 */
-        .main-container > #page-desktop.page-content,
-        .main-container > #page-terminal.page-content,
-        .main-container > #page-devices.page-content {
-            /* 组件化后内容顶与默认 frame-top 对齐（原 45/49px 覆盖对应
-               旧的内联行高，已由组件统一）。占位保留页级锚点便于调整。 */
-        }
         .host-workspace-title-state { height: 24px; align-items: center; }
         .host-workspace-title-state > .host-workspace-pane-status {
             flex: 0 0 150px;
@@ -246,10 +240,6 @@
         body.workspace-scope-single #page-desktop .host-workspace-pane,
         body.workspace-scope-single #page-terminal .host-workspace-pane {
             border: 0;
-        }
-        body.workspace-scope-cluster #page-desktop .host-workspace-grid,
-        body.workspace-scope-cluster #page-terminal .host-workspace-grid {
-            padding: 8px;
         }
         body.workspace-scope-cluster #page-desktop .host-workspace-pane-header,
         body.workspace-scope-cluster #page-terminal .host-workspace-pane-header {

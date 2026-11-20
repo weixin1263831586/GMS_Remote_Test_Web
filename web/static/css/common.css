@@ -489,7 +489,6 @@ body {
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: var(--ui-page-edge);
     overflow: hidden;
     flex: 1;
     min-width: 0;

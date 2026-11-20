@@ -10,10 +10,6 @@
 #page-terminal.page-ui-rework .host-workspace-pane:focus-within {
     border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
 }
-/* Compensate for the shell frame's visually heavier top edge, as on Desktop. */
-body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-grid {
-    padding: 5px 8px 8px;
-}
 body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-pane {
     border: 0;
     border-radius: 0;

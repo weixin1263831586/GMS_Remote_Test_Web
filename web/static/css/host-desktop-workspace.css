@@ -11,11 +11,6 @@
 #page-desktop.page-ui-rework .host-workspace-pane:focus-within {
     border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
 }
-/* The outer frame top edge adds visible separation. Reduce top inset only
-   so its perceived gap matches the unchanged 8px left/right spacing. */
-body.workspace-scope-cluster #page-desktop.page-ui-rework .host-workspace-grid {
-    padding: 5px 8px 8px;
-}
 body.workspace-scope-single #page-desktop.page-ui-rework .host-workspace-pane {
     border: 0;
     border-radius: 0;
