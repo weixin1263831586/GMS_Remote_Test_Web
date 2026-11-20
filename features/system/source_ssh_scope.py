@@ -9,7 +9,60 @@ import time
 from typing import Any
 
 from . import source_ssh_git as src
-from .source_provider_contract import _COMMIT_RE, SourceProviderError
+from .source_local_git import LocalGitProvider
+from .source_provider_contract import (
+    _COMMIT_RE, SourceProviderError, _make_signed_id, _safe_repo_path,
+    decode_signed_id,
+)
+
+
+def sign_result_with_repo(provider, path: str, commit: str) -> str:
+    """Store authenticated repo provenance with a pinned source result."""
+    if not provider._multi:
+        return LocalGitProvider._make_result_id(provider, path, commit)
+    owner = provider._owning_repo_rel(path)
+    if not owner:
+        return LocalGitProvider._make_result_id(provider, path, commit)
+    return _make_signed_id({
+        "source_id": provider.config.source_id, "commit": commit,
+        "path": path, "repo_scope": owner,
+    }, provider._secret)
+
+
+def read_signed_with_repo(
+    provider, result_id: str, *, offset: int = 0, limit: int = 400,
+) -> dict[str, Any]:
+    """Skip cold full-tree discovery when signed result contains its repo.
+
+    The repo hint is authenticated by the result HMAC, checked against the
+    file path and current registered repo list, never supplied as free input.
+    Legacy tokens remain readable via the original discovery path.
+    """
+    if provider._multi:
+        decoded = provider.decode_result_id(result_id)
+        signed = decode_signed_id(result_id, provider._secret)
+        claimed = signed.get("repo_scope")
+        if claimed is not None:
+            scope = _safe_repo_path(str(claimed))
+            path = _safe_repo_path(decoded["path"])
+            if not path.startswith(scope + "/"):
+                raise SourceProviderError(
+                    "result_id 子仓与文件路径不匹配", status_code=422
+                )
+            if provider.config.discover_repos:
+                absolute = provider.config.repo_root.rstrip("/") + "/" + scope
+            else:
+                allowed = {provider._repo_rel(repo): repo for repo in provider._repos}
+                if scope not in allowed:
+                    raise SourceProviderError(
+                        "result_id 子仓未在当前 SDK 源中配置", status_code=422
+                    )
+                absolute = allowed[scope]
+            with provider._search_lock:
+                provider._scoped_repos[scope] = absolute
+    return LocalGitProvider.read_signed(
+        provider, result_id, offset=offset, limit=limit
+    )
 
 
 def search_scoped(
