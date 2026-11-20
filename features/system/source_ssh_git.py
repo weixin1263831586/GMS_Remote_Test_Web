@@ -28,12 +28,13 @@ SDK 仓库位于远端编译服务器时的只读检索 provider：经 ADR 0004 
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import json
 import shlex
 import threading
 import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from typing import Any
 
 from foundation.command_result import CommandResult
@@ -82,6 +83,9 @@ SSH_GIT_HEADS_MAX_REPOS = 64
 SSH_GIT_SERVER_CONCURRENCY = 4
 _SERVER_LIMIT_LOCK = threading.Lock()
 _SERVER_LIMITERS: dict[tuple[str, int, str], threading.BoundedSemaphore] = {}
+_SEARCH_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "sdk_source_search_deadline", default=None
+)
 
 # 唯一放行的远端 git 子命令（只读）；其他子命令一律编程错误。
 _READONLY_GIT_SUBCOMMANDS = frozenset({"rev-parse", "log", "grep", "show"})
@@ -384,9 +388,13 @@ class SSHGitProvider(LocalGitProvider):
             return repos
 
     def _discover_repos_remote(self) -> tuple[str, ...]:
+        deadline = _SEARCH_DEADLINE.get()
+        remaining = deadline - time.monotonic() if deadline is not None else SSH_GIT_DISCOVER_TIMEOUT_SECONDS
+        if remaining <= 0:
+            raise SourceProviderError("SDK 仓库发现预算已耗尽", status_code=504)
         stdout = self._run_command_checked(
             self._discover_command(), "git 仓库发现",
-            SSH_GIT_DISCOVER_TIMEOUT_SECONDS,
+            max(1, int(min(SSH_GIT_DISCOVER_TIMEOUT_SECONDS, remaining))),
         )
         repos = tuple(
             line.strip() for line in stdout.splitlines() if line.strip()
@@ -430,10 +438,19 @@ class SSHGitProvider(LocalGitProvider):
 
     def _run_remote(self, command: str, timeout: int) -> CommandResult:
         """Execute via the shared host limiter, including SSH connection setup."""
+        deadline = _SEARCH_DEADLINE.get()
+        if deadline is not None:
+            timeout = max(0, min(timeout, int(deadline - time.monotonic())))
+        if timeout <= 0:
+            return CommandResult(code=-1, timed_out=True)
         permit = self._server_limit()
         if not permit.acquire(timeout=max(0.0, float(timeout))):
             return CommandResult(code=-1, timed_out=True)
         try:
+            if deadline is not None:
+                timeout = max(0, min(timeout, int(deadline - time.monotonic())))
+            if timeout <= 0:
+                return CommandResult(code=-1, timed_out=True)
             with self._ssh.connection(self._connection_config()) as ssh:
                 return self._ssh.execute_command(ssh, command, timeout=timeout)
         except RuntimeError as exc:
@@ -706,6 +723,22 @@ class SSHGitProvider(LocalGitProvider):
     # -------------------------------------------------------------- search
 
     def search(
+        self, revision: str, query: str, *, path_filter: str = "",
+        limit: int = SEARCH_DEFAULT_LIMIT, repo_scope: str = "",
+        permission_scope: str = "", budget_seconds: int = SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS,
+    ) -> dict[str, Any]:
+        """Budget includes waiting, cold discovery and SSH execution."""
+        seconds = max(1, min(int(budget_seconds), 600))
+        token = _SEARCH_DEADLINE.set(time.monotonic() + seconds)
+        try:
+            return self._search_impl(
+                revision, query, path_filter=path_filter, limit=limit,
+                repo_scope=repo_scope, permission_scope=permission_scope,
+            )
+        finally:
+            _SEARCH_DEADLINE.reset(token)
+
+    def _search_impl(
         self,
         revision: str,
         query: str,
@@ -746,8 +779,13 @@ class SSHGitProvider(LocalGitProvider):
                 future = Future()
                 self._inflight_searches[key] = future
         if not owner:
-            # A follower also has a bound wait; no indefinite queue on a stuck query.
-            return copy.deepcopy(future.result(timeout=SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS + 2))
+            # A follower has no fresh budget; it waits only for this request's remainder.
+            deadline = _SEARCH_DEADLINE.get()
+            remaining = max(0, deadline - time.monotonic()) if deadline is not None else 0
+            try:
+                return copy.deepcopy(future.result(timeout=remaining))
+            except FutureTimeoutError as exc:
+                raise SourceProviderError("相同源码查询仍在执行，等待预算已耗尽", status_code=504) from exc
         try:
             if scope:
                 payload = self._search_scoped(revision, str(query), filter_value, limit, scope)
@@ -827,7 +865,9 @@ class SSHGitProvider(LocalGitProvider):
             raise SourceProviderError(
                 "多仓子仓范围仅支持 HEAD 或固定 40 位 commit", status_code=422
             )
-        deadline = time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        deadline = _SEARCH_DEADLINE.get() or (
+            time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        )
         result = self._run_shard(
             (candidate,), query, "", deadline=deadline,
             revision=revision if pinned else "HEAD",
@@ -1009,7 +1049,9 @@ class SSHGitProvider(LocalGitProvider):
         results: list[CommandResult] = []
         repos_pending = repos_total  # 尚未消费结果的仓库数，包含未发起的波。
         executor = ThreadPoolExecutor(max_workers=SSH_GIT_SHARD_WAVE_SIZE)
-        deadline = time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        deadline = _SEARCH_DEADLINE.get() or (
+            time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        )
         try:
             from concurrent.futures import FIRST_COMPLETED, wait
 
