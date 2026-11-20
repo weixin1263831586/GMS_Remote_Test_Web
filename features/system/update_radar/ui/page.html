@@ -6,11 +6,11 @@
   <title>GMS更新雷达</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
-  <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261114-unified-tabs">
+  <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-single-edge-template">
   <style>
     *{box-sizing:border-box}body{margin:0;background:var(--page-background);color:var(--text-primary);}
     button,input,select,textarea{}button{min-height:var(--ui-control-height);white-space:nowrap;cursor:pointer;border:1px solid var(--border-color);border-radius:6px;background:var(--lighter-bg);color:var(--text-primary);padding:5px 12px}button:disabled{opacity:.45;cursor:default}button.primary{background:var(--primary-gradient)}
-    main{max-width:1500px;margin:auto;padding:18px 16px}h1{margin:0 0 6px}h2{margin:0 0 12px}p{margin:6px 0}.muted{color:var(--text-secondary)}
+    main{min-width:0}h1{margin:0 0 6px}h2{margin:0 0 12px}p{margin:6px 0}.muted{color:var(--text-secondary)}
     .panel{background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:16px;margin-top:16px;min-width:0}.scope,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.scope span{border:1px solid var(--border-color);background:var(--light-bg);border-radius:6px;padding:4px 10px}
     .status{white-space:pre-wrap;color:var(--primary-light)}#message{min-height:24px;white-space:pre-wrap}#message[data-error=true],.error{color:var(--danger-color)}
     .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border-color)}th{color:var(--text-secondary)}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px}
@@ -45,7 +45,7 @@
     <button id="scan" class="primary" type="button" title="全量扫描当前选择的监听任务" disabled>立即全量扫描</button>
   </div>
 </header>
-<main>
+<main class="ui-page-edge">
   <h1>📡 GMS更新雷达</h1>
   <p class="muted">按所选任务扫描GMS更新，保留每次扫描前后的差异，并通过邮件发送汇总。</p>
   <p id="schedule-status" class="status" aria-live="polite">正在读取扫描计划…</p>

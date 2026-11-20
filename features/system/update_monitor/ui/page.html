@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GMS Update Monitor</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261116-head32">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261120-single-edge-template">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --card:var(--card-bg); --head:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); }
     /* 多列定制只在桌宽生效（>600px）：手机宽度让位公共单列布局，
@@ -22,7 +22,7 @@
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 </head>
 <body>
-  <header>
+  <header class="ui-page-edge">
     <h1>GMS Update Monitor</h1>
     <div id="summary" class="summary">加载中…</div>
     <div class="actions">
@@ -31,7 +31,7 @@
       <button data-click="loadAll" class="secondary">刷新</button>
     </div>
   </header>
-  <main>
+  <main class="ui-page-edge">
     <div class="filters">
       <input id="q" placeholder="全局搜索：变更/测试套件/GMS包/Mainline/认证要求">
       <select id="source_key">
