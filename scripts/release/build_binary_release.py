@@ -20,9 +20,14 @@ import tarfile
 import tempfile
 from pathlib import Path
 
-from scripts.release.verify_binary_tree import inspect
-
+# Direct execution (python scripts/release/build_binary_release.py) puts only
+# scripts/release on sys.path. Add the checkout root before importing the
+# release verifier; CI and the documented publishing command both use this mode.
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.release.verify_binary_tree import inspect
 RESOURCE_FILES = (
     "scripts/run_GMS_Test_Auto.sh",
     "scripts/run_GSI_Burn.sh",
