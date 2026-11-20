@@ -76,12 +76,13 @@ class AnalysisEventStoreTests(unittest.TestCase):
         rows = self.store.list_after("run-1", 100)
         self.assertEqual(
             [event["event_type"] for event in rows],
-            ["analysis_started", "progress", "analysis_started"],
+            ["analysis_started", "progress", "analysis_failed", "analysis_started"],
         )
-        self.assertEqual([row["attempt_no"] for row in rows], [1, 1, 2])
+        self.assertEqual([row["attempt_no"] for row in rows], [1, 1, 1, 2])
+        self.assertEqual(rows[2]["status"], "interrupted")
         self.assertIn("第 2 次尝试", rows[-1]["summary"])
         self.store.append("run-1", 101, {"event_type": "analysis_started"})
-        self.assertEqual(len(self.store.list_after("run-1", 100)), 3)
+        self.assertEqual(len(self.store.list_after("run-1", 100)), 4)
         self.assertEqual(len(self.store.list_after("run-1", 101)), 1)
         self.assertEqual(self.store.list_after("run-1", 102), [])
 
