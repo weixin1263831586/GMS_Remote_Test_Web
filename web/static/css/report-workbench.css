@@ -116,8 +116,8 @@
     flex: 0 0 auto;
     min-width: 0;
     width: auto;
-    height: var(--analysis-control-height);
-    min-height: var(--analysis-control-height);
+    height: var(--ui-control-height);
+    min-height: var(--ui-control-height);
     padding: 5px 11px;
     margin: 0;
     border: 1px solid var(--border-light);
@@ -191,8 +191,8 @@
 }
 #page-report-analysis .report-analysis-cancel {
     flex: 0 0 auto;
-    height: var(--analysis-control-height);
-    min-height: var(--analysis-control-height);
+    height: var(--ui-control-height);
+    min-height: var(--ui-control-height);
     padding: 0 10px;
     margin: 0 0 0 8px;
     color: var(--text-primary);
@@ -290,7 +290,7 @@
     gap: 6px;
     width: 100%;
     min-width: 0;
-    height: var(--analysis-summary-row-height);
+    height: var(--ui-table-row-height);
     padding: 0 8px;
 }
 /* Keep metadata in the SAME row as the four metrics.  Narrow layouts
@@ -379,11 +379,11 @@
 #page-report-analysis #report-analysis-result .report-overview-actions > button {
     display: inline-grid;
     place-items: center;
-    flex: 0 0 var(--analysis-control-height);
-    width: var(--analysis-control-height);
-    min-width: var(--analysis-control-height);
-    height: var(--analysis-control-height);
-    min-height: var(--analysis-control-height);
+    flex: 0 0 var(--ui-control-height);
+    width: var(--ui-control-height);
+    min-width: var(--ui-control-height);
+    height: var(--ui-control-height);
+    min-height: var(--ui-control-height);
     margin: 0;
     padding: 0;
 }
@@ -440,8 +440,8 @@
 }
 #page-report-analysis #report-details .report-provenance-link {
     box-sizing: border-box;
-    min-height: var(--analysis-control-height);
-    height: var(--analysis-control-height);
+    min-height: var(--ui-control-height);
+    height: var(--ui-control-height);
     padding: 4px 8px;
     background: var(--lighter-bg);
     border: 1px solid var(--border-light);
@@ -616,8 +616,8 @@
     justify-content: center;
     width: auto;
     min-width: 68px;
-    height: var(--analysis-control-height);
-    min-height: var(--analysis-control-height);
+    height: var(--ui-control-height);
+    min-height: var(--ui-control-height);
     padding: 0 10px;
     margin: 0;
     line-height: 1;
