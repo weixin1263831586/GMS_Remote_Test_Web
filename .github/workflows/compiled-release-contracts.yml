@@ -6,6 +6,8 @@ on:
     paths:
       - 'scripts/release/**'
       - 'tests/test_compiled_release.py'
+      - 'tests/test_github_release_install.py'
+      - 'README.md'
       - 'foundation/runtime_settings.py'
       - 'foundation/config.py'
       - 'bootstrap/env_loader.py'
@@ -24,9 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Shell syntax
-        run: bash -n install.sh scripts/release/install_compiled.sh
+        run: bash -n install.sh scripts/release/install_compiled.sh scripts/release/install_from_github.sh scripts/release/publish_github_release.sh
       - name: Python release contract tests (stdlib only)
-        run: python3 -m unittest -v tests.test_compiled_release
+        run: python3 -m unittest -v tests.test_compiled_release tests.test_github_release_install
       - name: Python syntax for compiled entrypoints
         run: |
           python3 -m py_compile \
