@@ -46,6 +46,7 @@ class CompiledReleaseContracts(unittest.TestCase):
                 "configs/examples/config.example.json",
                 *(f"docs/architecture/{name}" for name in release_builder.ARCHITECTURE_SOURCES),
                 *release_builder.REQUIRED_UI_PAGES,
+                *release_builder.REQUIRED_UI_SCRIPTS,
                 "features/redmine/ui/page.css",
                 "features/automation/ui/page.js",
             )
@@ -65,9 +66,17 @@ class CompiledReleaseContracts(unittest.TestCase):
             self.assertEqual(inspect(staged), [])
             self.assertTrue(all(compiled_entry._runtime_asset_checks(staged).values()))
 
+    def test_actual_repository_embedded_assets_stage_without_source_leaks(self):
+        """Exercise the actual feature UI inventory, not only synthetic fixtures."""
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(release_builder, "RUNTIME_ASSETS", ()):
+                release_builder._stage_assets(Path(directory))
+            self.assertTrue(all(compiled_entry._runtime_asset_checks(Path(directory)).values()))
+            self.assertEqual(inspect(Path(directory)), [])
+
     def test_runtime_smoke_and_builder_agree_on_required_pages(self):
         self.assertTrue(
-            set(release_builder.REQUIRED_UI_PAGES).issubset(
+            set((*release_builder.REQUIRED_UI_PAGES, *release_builder.REQUIRED_UI_SCRIPTS)).issubset(
                 set(compiled_entry.REQUIRED_PAGE_ASSETS)
             )
         )
