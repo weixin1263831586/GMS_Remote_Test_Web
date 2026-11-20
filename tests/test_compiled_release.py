@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import ast
 import io
-import os
 import subprocess
 import tarfile
 import tempfile
@@ -11,8 +10,9 @@ import unittest
 import zipfile
 from pathlib import Path
 
-from scripts.release.verify_binary_tree import inspect
 from foundation.runtime_settings import RuntimeSettings
+from scripts.release.verify_binary_tree import inspect
+
 
 ROOT = Path(__file__).resolve().parents[1]
 

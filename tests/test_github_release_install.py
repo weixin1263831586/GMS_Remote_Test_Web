@@ -121,7 +121,7 @@ class GitHubReleaseInstallContracts(unittest.TestCase):
             self.assertEqual(signature.returncode, 0, signature.stderr)
             public = subprocess.run(
                 ["gpg", "--batch", "--armor", "--export", key_id],
-                env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                env=env, capture_output=True, check=True,
             )
             (release_files / "publisher.asc").write_bytes(public.stdout)
             names = (ARCHIVE, ARCHIVE + ".sha256", ARCHIVE + ".sig", "publisher.asc")

@@ -93,7 +93,7 @@ def _certificates(root: Path, host: str) -> None:
         names.append(x509.IPAddress(ipaddress.ip_address(host)))
     except ValueError:
         if not host or any(ch in host for ch in "/\\@:"):
-            raise RuntimeError("host must be an IP address or DNS hostname")
+            raise RuntimeError("host must be an IP address or DNS hostname") from None
         names.append(x509.DNSName(host))
     names.append(x509.IPAddress(ipaddress.ip_address("127.0.0.1")))
     now = datetime.now(timezone.utc)
@@ -286,9 +286,10 @@ def controller() -> int:
     _set_env(root)
     from bootstrap.env_loader import load_runtime_env
     load_runtime_env()
+    import uvicorn
+
     from bootstrap.application import create_app
     from bootstrap.http_protocol import ShutdownHttpProtocol
-    import uvicorn
     app = create_app()
     port = int(os.environ.get("GMS_PORT", "5001"))
     tls = root / "configs/secrets/certs"
@@ -322,8 +323,8 @@ def smoke() -> int:
     from bootstrap.env_loader import load_runtime_env
     load_runtime_env()
     from bootstrap.application import create_app
-    from worker_agent.entrypoint import main as worker_entrypoint
     from bootstrap.production_security import validate_production_security_configuration
+    from worker_agent.entrypoint import main as worker_entrypoint
     validate_production_security_configuration()
     app = create_app()
     routes = {getattr(route, "path", "") for route in app.routes}

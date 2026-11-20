@@ -7,12 +7,11 @@ development secrets, repository metadata, or nested archives containing them.
 from __future__ import annotations
 
 import argparse
-import io
 import json
-import re
 import tarfile
 import zipfile
 from pathlib import Path, PurePosixPath
+
 
 FORBIDDEN_SUFFIXES = {".py", ".pyc", ".pyo", ".pyi", ".pyx", ".pyd.map", ".map", ".c", ".cpp"}
 FORBIDDEN_PARTS = {".git", ".github", ".venv", "__pycache__", ".pytest_cache", "tests", "test"}

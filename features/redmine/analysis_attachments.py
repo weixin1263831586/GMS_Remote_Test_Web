@@ -9,7 +9,6 @@ import re
 import shutil
 import tempfile
 import zipfile
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from features.redmine.analysis_common import MAX_FAILURE_LINES, _truncate
