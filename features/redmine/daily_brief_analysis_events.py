@@ -259,6 +259,29 @@ class DailyBriefAnalysisEventStore:
             ).fetchall()
             return [dict(row) for row in rows]
 
+    def mark_interrupted_previous_attempt(
+        self, run_id: str, issue_id: int, new_attempt_no: int,
+    ) -> bool:
+        """Close unfinished previous attempt before appending the next attempt."""
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            last = conn.execute(
+                "SELECT attempt_no, event_type FROM redmine_daily_brief_analysis_events "
+                "WHERE run_id=? AND issue_id=? ORDER BY sequence DESC LIMIT 1",
+                (run_id, int(issue_id)),
+            ).fetchone()
+        if (
+            last is None or int(last["attempt_no"]) >= int(new_attempt_no)
+            or last["event_type"] in {"analysis_completed", "analysis_failed"}
+        ):
+            return False
+        self.append(run_id, issue_id, {
+            "event_type": "analysis_failed", "attempt_no": int(last["attempt_no"]),
+            "stage": "worker_recovery", "status": "interrupted",
+            "summary": "上次尝试因 Worker 中断或租约丢失，已重新进入队列",
+        })
+        return True
+
     def save_checkpoint(
         self, run_id: str, issue_id: int, *, attempt_no: int, session_id: str,
         snapshot_hash: str, lease_token: str = "", trace: dict[str, Any] | None = None,
@@ -412,7 +435,11 @@ class AnalysisProgressRecorder:
         self.tool_completed_count = 0
         self.tool_failed_count = 0
         try:
-            # Append-only: attempts must remain visible after requeue/worker restart.
+            # Keep prior attempts, but close abandoned ones before a new attempt.
+            if self.attempt_no > 1:
+                self.store.mark_interrupted_previous_attempt(
+                    self.run_id, self.issue_id, self.attempt_no
+                )
             reason = scrub_secrets(retry_reason or "") if self.attempt_no > 1 else ""
             self._emit(
                 "analysis_started", stage="attempt_start",
