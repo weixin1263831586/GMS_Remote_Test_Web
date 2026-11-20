@@ -31,7 +31,10 @@ from features.kkagent import (
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
 from .claim_review import (
-    apply_review, review_prompt, structured_review_actions, validate_review,
+    apply_review,
+    review_prompt,
+    structured_review_actions,
+    validate_review,
 )
 from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
