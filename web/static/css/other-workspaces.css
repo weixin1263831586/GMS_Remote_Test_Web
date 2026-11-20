@@ -318,8 +318,6 @@
         transition-duration: .01ms !important;
     }
 }
-:is(#page-tools,#page-websites).page-ui-rework .tools-container { padding:7px 8px 8px; }
-:is(#page-tools,#page-websites).page-ui-rework .tools-grid-frame { padding:2px 5px 5px; }
 :is(#page-tools,#page-websites).page-ui-rework .category-section { margin-bottom:7px; padding:7px 9px; }
 :is(#page-tools,#page-websites).page-ui-rework .tools-grid { gap:8px; }
 :is(#page-tools,#page-websites).page-ui-rework .category-header {
