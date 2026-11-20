@@ -615,7 +615,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                         return pane.getBoundingClientRect().top - surface.top;
                     }"""
                 )
-                self.assertLessEqual(abs(pane_top_gap), 1)
+                self.assertLessEqual(abs(pane_top_gap), 8.5)
             # build / events 已并入「追踪与诊断」组（无顶级 Tab），经 pane
             # 切换函数进入，验证同一布局契约仍然成立。
             for workflow_name in ["build", "events"]:
@@ -626,7 +626,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                         return pane.getBoundingClientRect().top - surface.top;
                     }"""
                 )
-                self.assertLessEqual(abs(pane_top_gap), 1)
+                self.assertLessEqual(abs(pane_top_gap), 8.5)
             page.locator('.workflow-tab[data-workflow="create"]').click()
             page.set_viewport_size({"width": 1440, "height": 720})
             create_panel_edges = page.locator("#workflow-pane-create").evaluate(

@@ -276,15 +276,23 @@ class ModalGlobalConsistencyTests(RuntimeUiHarness):
             route.fulfill(json={"success": True})
 
         try:
+            page.route("**/api/devices/management*", lambda route: route.fulfill(json={
+                "success": True, "devices": [{
+                    "serial_no": "fixture-device", "device_id": "fixture-device",
+                    "status": "online", "state": "available",
+                }],
+            }))
             self.goto_shell(page)
             page.route("**/api/devices/wifi", connect)
             page.evaluate("""() => {
                 state.devices = [{device_id:'fixture-device', status:'online'}];
                 state.selectedDevices = new Set(['fixture-device']);
+                window.workspaceWorkerId = () => '';
                 ModalManager.open('wifi-modal');
             }""")
             page.locator('#wifi-ssid').fill('FixtureWifi')
             page.locator('#wifi-password').fill('fixture-password')
+            self.assertEqual(page.evaluate('selectedTestDeviceIds()'), ['fixture-device'])
             with page.expect_response("**/api/devices/wifi"):
                 page.locator('#wifi-modal button[type="submit"]').click()
             expect(page.locator('#wifi-modal')).to_be_hidden()

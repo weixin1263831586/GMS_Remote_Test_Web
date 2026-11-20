@@ -110,7 +110,9 @@ class RuntimeAoaInputCoordinatesTests(RuntimeUiHarness):
             # Force object-fit bars *inside* the canvas element's bounding box.
             point = page.evaluate("""() => {
                 const canvas = aoaEl('aoa-screen-canvas');
-                canvas.style.width = '100%'; canvas.style.height = '100%';
+                canvas.style.width = '500px'; canvas.style.height = '200px';
+                canvas.style.aspectRatio = 'auto'; canvas.style.maxWidth = 'none';
+                canvas.style.maxHeight = 'none'; canvas.style.objectFit = 'contain';
                 const box = canvas.getBoundingClientRect();
                 return {bar:{x:box.left+1,y:box.top+box.height/2},
                     center:{x:box.left+box.width/2,y:box.top+box.height/2}};

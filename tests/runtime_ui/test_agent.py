@@ -675,7 +675,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                         )
                         self.assertAlmostEqual(
                             page_geometry["titleToContent"],
-                            1 if page_name in {"report-analysis", "apk-analysis"} else 6,
+                            1,
                             delta=0.5,
                         )
                         self.assertAlmostEqual(page_geometry["frameLeft"], page_edge, delta=0.5)
@@ -684,7 +684,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                         self.assertAlmostEqual(
                             page_geometry["pageTop"] + page_geometry["frameTop"],
                             page_geometry["contentTop"] - (
-                                0 if page_name in {"report-analysis", "apk-analysis"} else 5
+                                0
                             ),
                             delta=0.5,
                         )

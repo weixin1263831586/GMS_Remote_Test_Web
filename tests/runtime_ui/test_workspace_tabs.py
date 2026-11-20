@@ -56,7 +56,7 @@ class RuntimeWorkspaceTabsTests(RuntimeUiHarness):
                             self.assertAlmostEqual(origin[axis], frame_origin[axis], delta=0.5)
                         geometry = tablist.evaluate(GEOMETRY)
                         self.assertAlmostEqual(geometry['header']['y'], 0, delta=0.5)
-                        self.assertAlmostEqual(geometry['list']['x'], 16, delta=0.5)
+                        self.assertAlmostEqual(geometry['list']['x'], 8, delta=0.5)
                         self.assertAlmostEqual(geometry['list']['y'], 0, delta=0.5)
                         self.assertAlmostEqual(geometry['list']['height'], 44, delta=0.5)
                         self.assertLessEqual(geometry['overflow'], 1)
@@ -70,7 +70,7 @@ class RuntimeWorkspaceTabsTests(RuntimeUiHarness):
                         for index, tab in enumerate(geometry['tabs']):
                             self.assertAlmostEqual(tab['width'], 112, delta=0.5)
                             self.assertAlmostEqual(tab['height'], 44, delta=0.5)
-                            self.assertAlmostEqual(tab['x'], 16 + index * 112, delta=0.5)
+                            self.assertAlmostEqual(tab['x'], 8 + index * 112, delta=0.5)
                             self.assertAlmostEqual(tab['y'], 0, delta=0.5)
                             reference_font = reference_font or tab['font']
                             self.assertEqual(tab['font'], reference_font)

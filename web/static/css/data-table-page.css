@@ -49,6 +49,7 @@ a:hover { text-decoration:underline; }
   }
 
   .filters > * {
+    box-sizing: border-box;
     min-width: 0;
     width: 100%;
   }

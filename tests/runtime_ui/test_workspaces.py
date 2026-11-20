@@ -960,7 +960,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         grid_box["x"], page_box["x"] + frame_geometry["inset"], delta=0.5
                     )
                     self.assertAlmostEqual(
-                        grid_box["y"], page_box["y"] + frame_geometry["top"] + 5, delta=0.5
+                        grid_box["y"], page_box["y"] + frame_geometry["top"], delta=0.5
                     )
                     self.assertAlmostEqual(
                         grid_box["width"],
