@@ -65,20 +65,35 @@ def _run(args: list[str], **kwargs) -> None:
     subprocess.run(args, check=True, **kwargs)
 
 
-def _copy_allowed(source: Path, target: Path) -> None:
-    if not source.exists():
-        return
+def _copy_allowed(
+    source: Path, target: Path, *, allowed_root: Path | None = None,
+) -> None:
+    # Tool bundles (e.g. Tesseract) contain SONAME symlinks to files in the
+    # same directory. Preserve usability without ever packaging a link that
+    # escapes the explicitly selected source tree.
+    if allowed_root is None:
+        allowed_root = (source if source.is_dir() and not source.is_symlink()
+                        else source.parent).resolve(strict=True)
     if source.is_symlink():
-        raise RuntimeError(f"symlinked asset rejected: {source}")
+        try:
+            resolved = source.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise RuntimeError(f"broken or cyclic release asset symlink: {source}") from exc
+        if not resolved.is_file() or not resolved.is_relative_to(allowed_root):
+            raise RuntimeError(f"release asset symlink escapes allowed tree: {source}")
+    elif not source.exists():
+        return
     if source.is_dir():
-        for child in source.iterdir():
-            _copy_allowed(child, target / child.name)
+        for child in sorted(source.iterdir()):
+            _copy_allowed(child, target / child.name, allowed_root=allowed_root)
         return
     if source.suffix.lower() in FORBIDDEN_SOURCE_ENDINGS or source.name.startswith(".env"):
         # Never copy executable Python sources or debug maps to the recipient.
         return
     target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
+    # Dereference accepted in-tree aliases into ordinary files; manifest
+    # verification and tar extraction must never encounter unsafe symlinks.
+    shutil.copy2(source, target, follow_symlinks=True)
 
 
 def _stage_assets(runtime: Path) -> None:
