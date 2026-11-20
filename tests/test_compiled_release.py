@@ -9,9 +9,11 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from foundation.runtime_settings import RuntimeSettings
 from scripts.release.verify_binary_tree import inspect
+from scripts.release import build_binary_release as release_builder
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -30,6 +32,42 @@ class CompiledReleaseContracts(unittest.TestCase):
     def test_installer_shell_syntax(self):
         subprocess.run(["bash", "-n", str(ROOT / "scripts/release/install_compiled.sh")],
                        check=True, capture_output=True)
+
+    def test_staged_release_contains_every_embedded_page_without_sources(self):
+        """Compiled routes must find their own HTML/CSS/JS and Mermaid sources."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            staged = Path(directory) / "staged"
+            required = (
+                "web/shell/shell.html",
+                "web/static/css/common.css",
+                "web/templates/architecture.html",
+                "configs/examples/config.example.json",
+                *(f"docs/architecture/{name}" for name in release_builder.ARCHITECTURE_SOURCES),
+                *release_builder.REQUIRED_UI_PAGES,
+                "features/redmine/ui/page.css",
+                "features/automation/ui/page.js",
+            )
+            for name in required:
+                file = checkout / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text("safe compiled resource", encoding="utf-8")
+            # Python source accidentally stored beside a page must not leak.
+            private = checkout / "features/redmine/ui/internal.py"
+            private.write_text("private = True", encoding="utf-8")
+            with patch.object(release_builder, "ROOT", checkout):
+                release_builder._stage_assets(staged)
+            for name in required:
+                with self.subTest(resource=name):
+                    self.assertTrue((staged / name).is_file(), name)
+            self.assertFalse((staged / "features/redmine/ui/internal.py").exists())
+            self.assertEqual(inspect(staged), [])
+
+    def test_staging_rejects_missing_embedded_page(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(release_builder, "ROOT", Path(directory)):
+                with self.assertRaisesRegex(RuntimeError, "missing required runtime assets"):
+                    release_builder._stage_assets(Path(directory) / "stage")
 
     def test_release_rejects_python_and_key_files(self):
         with tempfile.TemporaryDirectory() as tmp:
