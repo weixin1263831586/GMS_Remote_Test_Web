@@ -108,11 +108,12 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                               const root = document.getElementById('page-' + name);
                               const header = root.querySelector('.page-header-row');
                               const host = root.querySelector('.tools-container');
-                              const grid = root.querySelector('[data-tools-grid]');
-                              const footerButton = root.querySelector('[data-tools-add]');
+                              const grid = root.querySelector('.tools-grid-frame');
+                              const footerButton = root.querySelector('.tools-add-category');
                               if (!header || !host || !grid || !footerButton) {
                                 throw Error('Missing shared utilities page structure');
                               }
+                              // Selectors survive initToolsPageBody(), which deletes data-* attrs.
                               // Stable fixture: isolate frame geometry from data and scrollbars.
                               const category = document.createElement('section');
                               category.className = 'category-section';
