@@ -1,7 +1,7 @@
 name: Native GMS compiled release smoke
 on:
   push:
-    branches: [ui/unify-page-edge-8px-20261120]
+    branches: [main, 'ui/**']
     paths:
       - '.github/workflows/compiled-release-native-smoke.yml'
       - 'scripts/release/build_binary_release.py'
@@ -9,6 +9,10 @@ on:
       - 'scripts/release/verify_binary_tree.py'
       - 'scripts/release/install_compiled.sh'
       - 'requirements.txt'
+      - 'features/**/ui/**'
+      - 'web/templates/architecture.html'
+      - 'docs/architecture/*.mmd'
+      - 'tests/test_compiled_release.py'
   workflow_dispatch:
 
 permissions:
