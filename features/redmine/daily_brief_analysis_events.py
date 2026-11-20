@@ -76,6 +76,7 @@ _SCHEMA_DDL = (
         status TEXT NOT NULL DEFAULT '',
         summary TEXT NOT NULL DEFAULT '',
         duration_ms INTEGER NOT NULL DEFAULT 0,
+        attempt_no INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT ''
     )
     """,
@@ -87,7 +88,7 @@ _SCHEMA_DDL = (
 
 _EVENT_COLUMNS = (
     "sequence", "event_type", "stage", "tool_name", "status",
-    "summary", "duration_ms", "created_at",
+    "summary", "duration_ms", "attempt_no", "created_at",
 )
 
 # summary 清洗：任何疑似凭据赋值片段（token=... / password: ...）整体
@@ -168,6 +169,16 @@ class DailyBriefAnalysisEventStore:
         conn.execute("BEGIN IMMEDIATE")
         for statement in _SCHEMA_DDL:
             conn.execute(statement)
+        columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(redmine_daily_brief_analysis_events)"
+            ).fetchall()
+        }
+        if "attempt_no" not in columns:
+            conn.execute(
+                "ALTER TABLE redmine_daily_brief_analysis_events "
+                "ADD COLUMN attempt_no INTEGER NOT NULL DEFAULT 1"
+            )
         conn.commit()
         self._ready = True
 
@@ -199,8 +210,8 @@ class DailyBriefAnalysisEventStore:
             conn.execute(
                 "INSERT INTO redmine_daily_brief_analysis_events "
                 "(run_id, issue_id, sequence, event_type, stage, tool_name, "
-                " status, summary, duration_ms, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " status, summary, duration_ms, attempt_no, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     int(issue_id),
@@ -211,6 +222,7 @@ class DailyBriefAnalysisEventStore:
                     scrub_secrets(event.get("status", ""))[:32],
                     scrub_secrets(event.get("summary", "")),
                     max(0, int(event.get("duration_ms") or 0)),
+                    max(1, int(event.get("attempt_no") or 1)),
                     str(event.get("created_at") or _now()),
                 ),
             )
@@ -314,19 +326,25 @@ class AnalysisProgressRecorder:
 
     def __init__(
         self, store: DailyBriefAnalysisEventStore, run_id: str, issue_id: int,
-        subject: str = "", model_name: str = "",
+        subject: str = "", model_name: str = "", attempt_no: int = 1,
+        retry_reason: str = "",
     ):
         self.store = store
         self.run_id = str(run_id)
         self.issue_id = int(issue_id)
         self.subject = scrub_secrets(subject)[:120]
         self.model_name = str(model_name or "").strip()
+        self.attempt_no = max(1, int(attempt_no))
         self.tool_started_count = 0
         self.tool_completed_count = 0
         self.tool_failed_count = 0
         try:
-            self.store.reset(self.run_id, self.issue_id)
-            self._emit("analysis_started", summary=f"开始分析 #{self.issue_id}".strip())
+            # Append-only: attempts must remain visible after requeue/worker restart.
+            reason = scrub_secrets(retry_reason or "") if self.attempt_no > 1 else ""
+            self._emit(
+                "analysis_started", stage="attempt_start",
+                summary=f"第 {self.attempt_no} 次尝试 · " + (reason or "开始分析"),
+            )
         except Exception:
             logger.debug("analysis progress start failed", exc_info=True)
 
@@ -396,6 +414,7 @@ class AnalysisProgressRecorder:
                 "status": status,
                 "summary": scrub_secrets(summary),
                 "duration_ms": max(0, int(duration_ms or 0)),
+                "attempt_no": self.attempt_no,
                 "created_at": _now(),
             })
         except Exception:
@@ -412,6 +431,8 @@ def start_analysis_progress(
             store, str(getattr(run, "run_id", "") or ""), int(issue_id),
             subject=str(getattr(record, "subject", "") or ""),
             model_name=str(getattr(run, "model_name", "") or ""),
+            attempt_no=max(1, int(getattr(record, "attempt_count", 1) or 1)),
+            retry_reason=str(getattr(record, "error_type", "") or "Worker 恢复/重试"),
         )
     except Exception:
         logger.debug("analysis progress recorder unavailable", exc_info=True)
