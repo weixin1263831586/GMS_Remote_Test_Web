@@ -10,7 +10,11 @@ from unittest.mock import patch
 
 
 def _module():
-    path = Path(__file__).resolve().parents[1] / "scripts" / "mcp_repair_policy.py"
+    package_root = Path(__file__).resolve().parents[1]
+    runtime = package_root / "runtime"
+    if not runtime.is_dir():
+        runtime = package_root / "scripts"
+    path = runtime / "mcp_repair_policy.py"
     spec = importlib.util.spec_from_file_location("mcp_repair_policy_test", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

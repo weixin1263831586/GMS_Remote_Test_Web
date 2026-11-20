@@ -30,7 +30,6 @@ from features.kkagent import (
 )
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .repair_policy import native_policy_kwargs, approved_repair_call
 from .claim_review import (
     apply_review,
     review_prompt,
@@ -41,6 +40,7 @@ from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import parse_issue_result
+from .repair_policy import approved_repair_call, native_policy_kwargs
 from .trace import KkAgentTrace, ToolTrace, consume_line, trace_from_summary
 
 

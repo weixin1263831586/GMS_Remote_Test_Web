@@ -555,7 +555,7 @@ class RepairSecondRoundContractTests(unittest.TestCase):
             ]
         calls = []
 
-        async def fake_stream(command, progress=None, on_started=None):
+        async def fake_stream(command, progress=None, on_started=None, **kwargs):
             calls.append(command)
             if command[-1].startswith("Review the preceding analysis"):
                 return review_trace(ok_round.final_event["message"], session="s", refs=["EV-001"]), _StreamFallback(), False
