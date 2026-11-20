@@ -63,6 +63,22 @@ PY
 command -v systemctl >/dev/null || fail "systemd missing"
 command -v runuser >/dev/null || fail "runuser missing"
 command -v flock >/dev/null || fail "flock missing"
+[[ -n "$HOST" ]] || HOST="$(hostname -I | awk '{print $1}')"
+if ! $YES; then
+ read -r -p "HTTPS host [$HOST]: " v; HOST="${v:-$HOST}"
+ read -r -p "HTTPS port [$PORT]: " v; PORT="${v:-$PORT}"
+ read -r -p "Service user [$RUN_USER]: " v; RUN_USER="${v:-$RUN_USER}"
+fi
+[[ "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "invalid hostname"
+[[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT > 0 && 10#$PORT <= 65535)) || fail "invalid port"
+[[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "invalid user"
+exec 8>/tmp/gms-compiled-installer.lock
+flock -n 8 || fail "installer already running"
+if ! $YES; then
+ read -r -p "Install compiled GMS $VERSION? [y/N] " v
+ [[ "$v" =~ ^[Yy]$ ]] || fail "cancelled"
+fi
+
 # Offline installations require preinstalled packages; otherwise apt gets
 # explicit control of operating-system dependencies (never curl | bash).
 packages=(ca-certificates curl openssl rsync openssh-client openssh-server iproute2
@@ -76,15 +92,7 @@ else
       || fail "offline prerequisite missing: $p"
   done
 fi
-[[ -n "$HOST" ]] || HOST="$(hostname -I | awk '{print $1}')"
-if ! $YES; then
- read -r -p "HTTPS host [$HOST]: " v; HOST="${v:-$HOST}"
- read -r -p "HTTPS port [$PORT]: " v; PORT="${v:-$PORT}"
- read -r -p "Service user [$RUN_USER]: " v; RUN_USER="${v:-$RUN_USER}"
-fi
-[[ "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "invalid hostname"
-[[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT > 0 && 10#$PORT <= 65535)) || fail "invalid port"
-[[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "invalid user"
+
 if ! id "$RUN_USER" >/dev/null 2>&1; then
  [[ "$RUN_USER" == gms-web ]] || fail "user $RUN_USER does not exist"
  useradd --system --create-home --home-dir /var/lib/gms-web --shell /usr/sbin/nologin gms-web
@@ -92,13 +100,6 @@ fi
 RUN_GROUP="$(id -gn "$RUN_USER")"
 RUN_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
 [[ -d "$RUN_HOME" ]] || fail "service home missing"
-exec 8>/tmp/gms-compiled-installer.lock
-flock -n 8 || fail "installer already running"
-if ! $YES; then
- read -r -p "Install compiled GMS $VERSION? [y/N] " v
- [[ "$v" =~ ^[Yy]$ ]] || fail "cancelled"
-fi
-
 install -d -m 0755 "$PREFIX" "$PREFIX/releases"
 install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0700 "$STATE" "$ETC" "$ETC/configs" "$ETC/configs/local" "$ETC/configs/secrets" "$STATE/local-worker"
 install -d -m 0755 "$ETC/configs/examples"

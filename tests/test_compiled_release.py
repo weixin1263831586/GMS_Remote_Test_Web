@@ -83,6 +83,12 @@ class CompiledReleaseContracts(unittest.TestCase):
         self.assertNotIn("git clone", source)
         self.assertIn("--no-admin-prompt", source)
 
+    def test_installer_obtains_consent_before_os_changes(self):
+        source = (ROOT / "scripts/release/install_compiled.sh").read_text(encoding="utf-8")
+        consent = source.index('read -r -p "Install compiled GMS')
+        self.assertLess(consent, source.index("apt-get update"))
+        self.assertLess(consent, source.index("useradd --system"))
+
     def test_builder_has_real_nuitka_requirement_and_source_gate(self):
         source = (ROOT / "scripts/release/build_binary_release.py").read_text(encoding="utf-8")
         self.assertIn('"-m", "nuitka"', source)
