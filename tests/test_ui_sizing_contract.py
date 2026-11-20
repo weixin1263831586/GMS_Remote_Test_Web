@@ -98,6 +98,9 @@ class UiSizingContractTests(unittest.TestCase):
             "features/system/mainline_issues/ui/page.html": 2,
             "features/system/update_monitor/ui/page.html": 2,
             "features/system/update_radar/ui/page.html": 1,
+            "features/devices/deployment_api.py": 1,
+            "features/devices/debug_api.py": 1,
+            "features/system/gms_assistant_proxy.py": 1,
         }
         for path, expected in roots.items():
             with self.subTest(path=path):
