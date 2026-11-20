@@ -317,6 +317,21 @@ class AIExecutionLedger:
                 received_at=now,
                 allowed_from=(STATUS_PENDING,),
             )
+            if not changed and (session_id or provider_request_id):
+                # process launch transitions pending→received before the first
+                # stream session event. Bind its identity later without ever
+                # overwriting another session or reviving a terminal receipt.
+                changed = conn.execute(
+                    "UPDATE redmine_ai_execution_receipts SET "
+                    "session_id=CASE WHEN session_id='' THEN ? ELSE session_id END, "
+                    "provider_request_id=CASE WHEN provider_request_id='' THEN ? "
+                    "ELSE provider_request_id END, updated_at=? "
+                    "WHERE receipt_id=? AND status=? "
+                    "AND (session_id='' OR session_id=?) "
+                    "AND (provider_request_id='' OR provider_request_id=?)",
+                    (session_id, provider_request_id, now, receipt_id, STATUS_RECEIVED,
+                     session_id, provider_request_id),
+                ).rowcount == 1
             if not changed:
                 logger.info("receipt %s cannot move to received (terminal or missing)", receipt_id)
 

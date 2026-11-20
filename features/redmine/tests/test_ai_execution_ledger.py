@@ -137,6 +137,19 @@ class ReceiptLifecycleTests(unittest.TestCase):
         self.assertEqual(self.ledger.get(first["receipt_id"])["status"], "unknown")
         self.assertIn("recovered Worker", self.ledger.get(first["receipt_id"])["error"])
 
+    def test_session_id_binds_after_provider_has_started_without_overwriting(self):
+        receipt = self.ledger.begin(**_begin_kwargs())
+        receipt_id = receipt["receipt_id"]
+        self.ledger.mark_received(receipt_id)
+        self.assertEqual(self.ledger.get(receipt_id)["session_id"], "")
+        self.ledger.mark_received(receipt_id, session_id="expected-session")
+        self.assertEqual(self.ledger.get(receipt_id)["session_id"], "expected-session")
+        self.ledger.mark_received(receipt_id, session_id="foreign-session")
+        self.assertEqual(self.ledger.get(receipt_id)["session_id"], "expected-session")
+        self.ledger.finish(receipt_id, ok=True, session_id="expected-session")
+        self.ledger.mark_received(receipt_id, session_id="late-session")
+        self.assertEqual(self.ledger.get(receipt_id)["session_id"], "expected-session")
+
     def test_main_flow_pending_received_completed(self):
         receipt = self.ledger.begin(**_begin_kwargs())
         self.ledger.mark_received(receipt["receipt_id"], session_id="sess-1")
