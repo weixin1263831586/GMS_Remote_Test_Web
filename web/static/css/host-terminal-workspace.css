@@ -67,7 +67,7 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     flex: 0 1 210px;
     min-width: 105px;
     max-width: 210px;
-    height: 28px;
+    height: var(--ui-control-height-dense);
     padding: 2px 8px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -80,7 +80,7 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     flex: 0 1 auto;
     box-sizing: border-box;
     min-width: 0;
-    height: 26px;
+    height: var(--ui-control-height-small);
     margin-left: 0;
     max-width: 180px;
     padding: 2px 8px;
@@ -132,8 +132,8 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     box-sizing: border-box;
     width: 28px;
     min-width: 28px;
-    height: 28px;
-    min-height: 28px;
+    height: var(--ui-control-height-dense);
+    min-height: var(--ui-control-height-dense);
     padding: 0;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -156,8 +156,8 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     align-items: center;
     gap: 5px;
     box-sizing: border-box;
-    min-height: 28px;
-    height: 28px;
+    min-height: var(--ui-control-height-dense);
+    height: var(--ui-control-height-dense);
     padding: 2px 9px;
     border: 1px solid var(--border-color);
     border-radius: 6px;
