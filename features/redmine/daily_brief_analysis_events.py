@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -83,6 +84,20 @@ _SCHEMA_DDL = (
     """
     CREATE UNIQUE INDEX IF NOT EXISTS idx_brief_analysis_events_seq
     ON redmine_daily_brief_analysis_events(run_id, issue_id, sequence)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS redmine_daily_brief_analysis_checkpoints (
+        run_id TEXT NOT NULL,
+        issue_id INTEGER NOT NULL,
+        attempt_no INTEGER NOT NULL,
+        session_id TEXT NOT NULL DEFAULT '',
+        snapshot_hash TEXT NOT NULL DEFAULT '',
+        lease_token TEXT NOT NULL DEFAULT '',
+        trace_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'running',
+        updated_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(run_id, issue_id)
+    )
     """,
 )
 
@@ -243,6 +258,62 @@ class DailyBriefAnalysisEventStore:
                 (run_id, int(issue_id), max(0, int(after_sequence)), max(1, min(int(limit), 200))),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def save_checkpoint(
+        self, run_id: str, issue_id: int, *, attempt_no: int, session_id: str,
+        snapshot_hash: str, lease_token: str = "", trace: dict[str, Any] | None = None,
+        status: str = "running",
+    ) -> None:
+        """Save resumable evidence metadata; never persist raw MCP/model output."""
+        safe = dict(trace or {})
+        calls = []
+        for item in (safe.get("tools") or [])[:300]:
+            if not isinstance(item, dict):
+                continue
+            call = dict(item)
+            inputs = item.get("tool_input") or {}
+            call["tool_input"] = {
+                key: scrub_secrets(str(value))
+                for key, value in inputs.items()
+                if key in _IDENTITY_INPUT_KEYS and isinstance(value, (str, int, float))
+            } if isinstance(inputs, dict) else {}
+            # Full output and untrusted previews remain in kkagent's session store.
+            call["output_preview"] = ""
+            calls.append(call)
+        safe["tools"] = calls
+        safe.pop("final_event", None)
+        safe["error"] = scrub_secrets(str(safe.get("error") or ""))
+        body = json.dumps(safe, ensure_ascii=False, default=str)
+        if len(body.encode("utf-8")) > 180000:
+            raise ValueError("analysis checkpoint exceeds bounded metadata limit")
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "INSERT INTO redmine_daily_brief_analysis_checkpoints "
+                "(run_id,issue_id,attempt_no,session_id,snapshot_hash,lease_token,trace_json,status,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,issue_id) DO UPDATE SET "
+                "attempt_no=excluded.attempt_no,session_id=excluded.session_id,"
+                "snapshot_hash=excluded.snapshot_hash,lease_token=excluded.lease_token,"
+                "trace_json=excluded.trace_json,status=excluded.status,updated_at=excluded.updated_at",
+                (run_id, int(issue_id), int(attempt_no), session_id,
+                 snapshot_hash, lease_token, body, status, _now()),
+            )
+
+    def load_checkpoint(self, run_id: str, issue_id: int) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_analysis_checkpoints "
+                "WHERE run_id=? AND issue_id=?", (run_id, int(issue_id)),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = dict(row)
+        try:
+            payload["trace"] = json.loads(payload.pop("trace_json", "{}"))
+        except (TypeError, ValueError):
+            return None
+        return payload
 
     def latest_session_id(self, run_id: str, issue_id: int) -> str:
         """读取该 (run, issue) 最新已知的 kkagent session_id。
