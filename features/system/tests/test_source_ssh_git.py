@@ -427,6 +427,53 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertIn("-C /remote/sdk/kernel-6.1", show_cmd)
         self.assertIn(f"{self.COMMIT_KERN}:drivers/gpio.c", show_cmd)
 
+    def test_explicit_repo_scope_searches_only_selected_repo(self):
+        """Scope is exact; legacy path_filter remains only a match filter."""
+        self.provider = self._provider(self._handler(
+            grep_stdout=self._grep_stdout(),
+        ))
+        result = self.provider.search("", "run", repo_scope="frameworks/base")
+        grep = [command for command in self.executed if " grep " in command]
+        self.assertEqual(len(grep), 1)
+        self.assertIn(self.REPO_FB, grep[0])
+        self.assertNotIn(self.REPO_KERN, grep[0])
+        self.assertEqual([m["repo"] for m in result["matches"]], ["frameworks/base"])
+        self.assertEqual(result["scope"], "repository")
+        self.assertEqual(result["repos_total"], 1)
+        self.assertFalse(result["global_coverage_complete"])
+        self.assertTrue(result["coverage_complete"])
+
+    def test_explicit_repo_scope_rejects_unknown_or_unsafe_repo(self):
+        for scope in ("../../etc", "frameworks/unknown"):
+            with self.subTest(scope=scope), self.assertRaises(SourceProviderError) as caught:
+                self.provider.search("", "needle", repo_scope=scope)
+            self.assertEqual(caught.exception.status_code, 422)
+
+    def test_scoped_commit_is_pinned_in_grep_command(self):
+        self.provider = self._provider(self._handler(
+            grep_stdout=self._grep_stdout(),
+        ))
+        self.provider.search(self.COMMIT_FB, "run", repo_scope="frameworks/base")
+        grep = [command for command in self.executed if " grep " in command][0]
+        self.assertIn(self.COMMIT_FB + "^{commit}", grep)
+        self.assertNotIn("'HEAD^{commit}'", grep)
+
+    def test_reused_pinned_query_skips_duplicate_ssh(self):
+        self.provider = self._provider(self._handler(grep_stdout=self._grep_stdout()))
+        first = self.provider.search(
+            self.COMMIT_FB, "run", repo_scope="frameworks/base", permission_scope="user1"
+        )
+        initial = len(self.executed)
+        second = self.provider.search(
+            self.COMMIT_FB, "run", repo_scope="frameworks/base", permission_scope="user1"
+        )
+        self.assertEqual(second, first)
+        self.assertEqual(len(self.executed), initial)
+        self.provider.search(
+            self.COMMIT_FB, "run", repo_scope="frameworks/base", permission_scope="user2"
+        )
+        self.assertGreater(len(self.executed), initial)
+
     def test_filename_path_filter_searches_all_repos_not_empty(self):
         """文件名 path_filter 不命中子仓名：全量搜索 + 完整路径过滤。
 
@@ -533,7 +580,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
 
         first_finished = threading.Event()
 
-        def run_shard(shard, _query, _path):
+        def run_shard(shard, _query, _path, **_kwargs):
             if shard[0] == self.REPO_FB:
                 first_finished.set()
             else:
@@ -712,7 +759,7 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         grep_count = sum(1 for c in executed if " grep " in c)
         self.assertLess(grep_count, 3, "deadline 过期后不应发起全部波")
         self.assertTrue(result["limited"])
-        self.assertEqual(result["total"], 1)
+        self.assertEqual(result["total"], 0)
 
     def test_first_wave_completes_even_after_deadline(self):
         """首个波总是执行完（deadline 只阻止后续波），结果完整覆盖。"""
@@ -751,9 +798,10 @@ class SSHGitMultiRepoTests(unittest.TestCase):
             result = provider.search("", "x")
         grep_count = sum(1 for c in executed if " grep " in c)
         self.assertEqual(grep_count, 2, "两个分片同一波：超预算仍等完整波")
-        self.assertEqual(result["total"], 2)
-        # 波内等完不算截断（没有丢任何仓的覆盖）。
-        self.assertFalse(result["limited"])
+        # The search budget is a hard cap, even while a wave is in flight.
+        self.assertEqual(result["total"], 0)
+        self.assertTrue(result["limited"])
+        self.assertFalse(result["coverage_complete"])
 
 
 class SSHGitConfigTests(unittest.TestCase):
