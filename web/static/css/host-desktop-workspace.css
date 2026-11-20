@@ -74,7 +74,7 @@ body.workspace-scope-cluster #page-desktop.page-ui-rework .host-workspace-pane-h
     flex: 0 1 210px;
     min-width: 105px;
     max-width: 210px;
-    height: 28px;
+    height: var(--ui-control-height-dense);
     padding: 2px 8px;
     border-radius: 6px;
     border: 1px solid var(--border-color);
@@ -87,7 +87,7 @@ body.workspace-scope-cluster #page-desktop.page-ui-rework .host-workspace-pane-h
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
-    height: 26px;
+    height: var(--ui-control-height-small);
     max-width: 138px;
     padding: 2px 8px;
     border-radius: 6px;
@@ -137,8 +137,8 @@ body.workspace-scope-cluster #page-desktop.page-ui-rework .host-workspace-pane-h
     box-sizing: border-box;
     width: 28px;
     min-width: 28px;
-    height: 28px;
-    min-height: 28px;
+    height: var(--ui-control-height-dense);
+    min-height: var(--ui-control-height-dense);
     padding: 0;
     border: 1px solid var(--border-color);
     border-radius: 6px;
