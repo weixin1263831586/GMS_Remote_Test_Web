@@ -42,6 +42,22 @@ RUNTIME_ASSETS = (
     "tools/adbproxy-rs/dist",
     "tools/gms-worker-native/dist",
 )
+# Resource paths are loaded from disk by page routers after Nuitka compilation.
+# Keep the list explicit and verified: compiling Python alone cannot include them.
+ARCHITECTURE_SOURCES = (
+    "platform-topology.mmd", "usbip-topology.mmd", "aoa-topology.mmd",
+    "firmware-topology.mmd", "test-flow-topology.mmd", "agent-analysis-topology.mmd",
+)
+REQUIRED_UI_PAGES = (
+    "features/automation/ui/page.html",
+    "features/cluster/ui/page.html",
+    "features/devices/ui/page.html",
+    "features/gerrit/ui/page.html",
+    "features/redmine/ui/page.html",
+    "features/system/mainline_issues/ui/page.html",
+    "features/system/update_monitor/ui/page.html",
+    "features/system/update_radar/ui/page.html",
+)
 FORBIDDEN_SOURCE_ENDINGS = (".py", ".pyc", ".pyo", ".pyi", ".map")
 
 
@@ -66,11 +82,32 @@ def _copy_allowed(source: Path, target: Path) -> None:
 
 
 def _stage_assets(runtime: Path) -> None:
-    for rel in ("web/static", "web/shell", "configs/examples", *RESOURCE_FILES, *RUNTIME_ASSETS):
+    for rel in (
+        "web/static", "web/shell", "web/templates/architecture.html",
+        "configs/examples", *RESOURCE_FILES, *RUNTIME_ASSETS,
+    ):
         _copy_allowed(ROOT / rel, runtime / rel)
+    # These six exact source files are read by /templates/architecture.html.
+    for name in ARCHITECTURE_SOURCES:
+        rel = Path("docs/architecture") / name
+        _copy_allowed(ROOT / rel, runtime / rel)
+    # Embedded feature pages (and their CSS/JS chunks) are read from
+    # Path(__file__).with_name("ui") after a compiled Router receives a request.
+    # Only UI assets are copied, never the surrounding Python implementation.
+    features = ROOT / "features"
+    for ui in sorted(features.rglob("ui")):
+        if ui.is_dir() and not ui.is_symlink() and "tests" not in ui.relative_to(features).parts:
+            rel = ui.relative_to(ROOT)
+            _copy_allowed(ui, runtime / rel)
     # No developer configs/local/, configs/secrets/, data/ or personal tokens.
-    required = ("web/static", "web/shell/shell.html", "configs/examples/config.example.json")
-    missing = [name for name in required if not (runtime / name).exists()]
+    required = (
+        "web/static", "web/shell/shell.html", "configs/examples/config.example.json",
+        "web/templates/architecture.html",
+        *(f"docs/architecture/{name}" for name in ARCHITECTURE_SOURCES),
+        *REQUIRED_UI_PAGES,
+    )
+    missing = [name for name in required if not (runtime / name).is_file()
+               and not (runtime / name).is_dir()]
     if missing:
         raise RuntimeError(f"missing required runtime assets: {missing}")
 
