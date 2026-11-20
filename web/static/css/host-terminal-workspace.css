@@ -28,7 +28,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     flex: 0 0 34px;
     box-sizing: border-box;
     align-items: center;
-    min-height: 34px;
     height: 34px;
     padding: 2px 8px;
     gap: 7px;
@@ -133,7 +132,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     width: 28px;
     min-width: 28px;
     height: var(--ui-control-height-dense);
-    min-height: var(--ui-control-height-dense);
     padding: 0;
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -156,7 +154,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     align-items: center;
     gap: 5px;
     box-sizing: border-box;
-    min-height: var(--ui-control-height-dense);
     height: var(--ui-control-height-dense);
     padding: 2px 9px;
     border: 1px solid var(--border-color);
