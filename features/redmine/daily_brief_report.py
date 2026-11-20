@@ -522,9 +522,10 @@ def issue_payload(
         "attachments_checked": (gate or attempted_gate).get("attachments_checked") is True,
         # A successful sdk_search with zero hits or apk_resolve/analyze is NOT
         # source-level evidence. Use evidence-bearing calls, not tool names.
-        "source_evidence_checked": (observed_source_count or int(
-            execution.get("source_evidence_tool_count") or 0
-        )) > 0,
+        "source_evidence_checked": (
+            int((gate or attempted_gate).get("relevant_source_evidence_count") or 0) > 0
+            if (gate or attempted_gate) else observed_source_count > 0
+        ),
         "source_evidence_tool_count": observed_source_count or int(
             execution.get("source_evidence_tool_count") or 0
         ),
