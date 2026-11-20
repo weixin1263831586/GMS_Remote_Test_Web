@@ -68,9 +68,8 @@ class CompiledReleaseContracts(unittest.TestCase):
 
     def test_actual_repository_embedded_assets_stage_without_source_leaks(self):
         """Exercise the actual feature UI inventory, not only synthetic fixtures."""
-        with tempfile.TemporaryDirectory() as directory:
-            with patch.object(release_builder, "RUNTIME_ASSETS", ()):
-                release_builder._stage_assets(Path(directory))
+        with tempfile.TemporaryDirectory() as directory, patch.object(release_builder, "RUNTIME_ASSETS", ()):
+            release_builder._stage_assets(Path(directory))
             self.assertTrue(all(compiled_entry._runtime_asset_checks(Path(directory)).values()))
             self.assertEqual(inspect(Path(directory)), [])
 
