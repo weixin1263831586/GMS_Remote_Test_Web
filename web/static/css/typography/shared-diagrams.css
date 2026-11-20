@@ -47,19 +47,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); }
 #tailscale-info-modal .tech-tailscale-help { font-size: var(--ui-type-size-small) !important; }
 #tailscale-info-modal .tech-dialog-footer > button { font-size: var(--ui-type-size-small); }
-@media(max-width: 800px) { :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; } }
-@media(max-width: 800px) { #tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); } }
-@media(max-width: 800px) { #tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); } }
-@media(max-width: 800px) { #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); } }
-@media(max-width: 480px), (max-height:560px) { .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); } }
-:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
-.tech-dialog .tech-intro { font-size: var(--ui-type-size-body); }
-.tech-dialog .tech-section-title { font-size: var(--ui-type-size-body); }
-.tech-dialog .tech-field-card > label:not(:has(input)) { font-size: var(--ui-type-size-body); }
-.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) { font-size: var(--ui-type-size-body); }
-.tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); }
-@media (max-width: 800px) { :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; } }
-@media (max-width: 480px) { .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) { font-size: var(--ui-type-size-small); } }
 .tech-dialog .modal-title { font-size: var(--ui-type-size-dialog) !important; }
 .tech-dialog :is(label,input,select,textarea) { font-size: var(--ui-type-size-body) !important; }
 .tech-dialog button:not(.modal-close) { font-size: var(--ui-type-size-small) !important; }
@@ -83,7 +70,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #route-check-dialog .route-check-form input[type=text] { font-size: var(--ui-type-size-body); }
 #route-check-dialog .route-check-form small { font-size: var(--ui-type-size-small); }
 #route-check-dialog .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small); }
-@media(max-width: 700px) { #route-check-dialog .modal-title { font-size: var(--ui-type-size-dialog); } }
 #username-detect-modal .modal-ssh-info { font-size: var(--ui-type-size-body); }
 .dx-summary-card > span { font-size: var(--ui-type-size-small); }
 .dx-summary-card > strong { font-size: var(--ui-type-size-dialog); }
@@ -94,9 +80,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #firmware-share-modal .firmware-share-path { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
 .tech-dialog--tool #emoji-picker-row > label { font-size: var(--ui-type-size-body); }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > label { font-size: var(--ui-type-size-body); }
-#username-detect-modal .modal-ssh-info { font-size: var(--ui-type-size-body); }
-#tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); }
-#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); }
 #report-diagnosis-modal .tech-diagnosis-panel-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 #firmware-modal .firmware-target-list { font-size: var(--ui-type-size-body); }
 #firmware-modal .firmware-file-meta { font-size: var(--ui-type-size-small); }
@@ -214,7 +197,7 @@ html[data-ui-type-root="architecture"] .architecture-v2 .arch-details>summary { 
 
 /* web/static/css/architecture-scenes.css */
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title strong { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title strong { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title small { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-node--control[data-scene-node="controller"] .arch-scene-title strong,
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-node--control[data-scene-node="control"] .arch-scene-title strong { font-size: var(--ui-type-size-page); }
@@ -226,16 +209,12 @@ html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-boundaries {
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-panel .arch-v2-intro { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card h2 { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card table { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card td,
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card th { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card th { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel h2,
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card h2 { font-size: var(--ui-type-size-card); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-bottom-card :is(th,td) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td) { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title strong { font-size: var(--ui-type-size-section); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-title small { font-size: var(--ui-type-size-compact); }
 
 /* web/static/css/data-table-page.css */
 html[data-ui-type-root="data-table"] body { font-family: var(--ui-type-font-sans); }
