@@ -1,9 +1,7 @@
 /* Shared embedded workspace header: header > tablist + optional actions.
    Keep domain classes as behavior hooks; tab geometry belongs here. */
 :root {
-    --workspace-tab-height: var(--ui-tab-height);
     --workspace-tab-width: 112px;
-    --workspace-header-inset: 16px;
 }
 .workspace-header {
     box-sizing: border-box;
@@ -18,9 +16,9 @@
     column-gap: 16px;
     row-gap: 0;
     min-width: 0;
-    min-height: var(--workspace-tab-height);
+    min-height: var(--ui-tab-height);
     margin: 0;
-    padding: 0 var(--workspace-header-inset);
+    padding: 0 var(--ui-page-edge);
     border: 0;
     border-radius: 0;
     background: var(--card-bg);
@@ -37,7 +35,7 @@
     width: auto;
     min-width: 0;
     max-width: 100%;
-    height: var(--workspace-tab-height);
+    height: var(--ui-tab-height);
     margin: 0;
     padding: 0;
     border: 0;
@@ -62,8 +60,8 @@
     width: var(--workspace-tab-width);
     min-width: var(--workspace-tab-width);
     max-width: var(--workspace-tab-width);
-    height: var(--workspace-tab-height);
-    min-height: var(--workspace-tab-height);
+    height: var(--ui-tab-height);
+    min-height: var(--ui-tab-height);
     margin: 0;
     padding: 0 8px;
     border: 0;
@@ -103,7 +101,7 @@
     flex-wrap: nowrap;
     gap: 8px;
     min-width: 0;
-    min-height: var(--workspace-tab-height);
+    min-height: var(--ui-tab-height);
     margin: 0;
     padding: 0;
 }

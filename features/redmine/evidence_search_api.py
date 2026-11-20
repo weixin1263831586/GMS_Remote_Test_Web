@@ -200,7 +200,7 @@ def _scan_file_multi(path, needles: list[str], *, stop_after: int,
 
 
 class _ZipStreamState:
-    """v2 成员流解析的完整性状态（coverage 上报用）。"""
+    """ZIP 成员流解析的完整性状态，用于 coverage 上报。"""
 
     __slots__ = ("chars_scanned", "complete", "saw_frame", "truncated_frame")
 

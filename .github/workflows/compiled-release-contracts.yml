@@ -1,0 +1,48 @@
+name: Compiled independent release contracts
+on:
+  push:
+    branches:
+      - main
+      - 'ui/**'
+    paths:
+      - 'scripts/release/**'
+      - 'scripts/gms_backup.py'
+      - 'scripts/*.sh'
+      - 'features/**/ui/**'
+      - 'web/static/**'
+      - 'web/shell/**'
+      - 'web/templates/architecture.html'
+      - 'docs/architecture/*.mmd'
+      - 'tests/test_compiled_release.py'
+      - 'tests/test_github_release_install.py'
+      - 'tests/reliability/test_compiled_runtime.py'
+      - 'tests/reliability/test_backup_tool.py'
+      - 'features/system/agent_package_registry.py'
+      - 'README.md'
+      - 'foundation/runtime_settings.py'
+      - 'foundation/config.py'
+      - 'bootstrap/env_loader.py'
+      - 'install.sh'
+      - '.github/workflows/compiled-release-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-free-contracts:
+    name: Installer syntax and source-free release contract
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Shell syntax
+        run: bash -n install.sh scripts/release/install_compiled.sh scripts/release/install_from_github.sh scripts/release/publish_github_release.sh
+      - name: Python release contract tests (stdlib only)
+        run: python3 -m unittest -v tests.test_compiled_release tests.test_github_release_install
+      - name: Python syntax for compiled entrypoints
+        run: |
+          python3 -m py_compile \
+            scripts/release/compiled_entry.py \
+            scripts/release/build_binary_release.py \
+            scripts/release/verify_binary_tree.py

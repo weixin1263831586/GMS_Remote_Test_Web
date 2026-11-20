@@ -2,7 +2,7 @@ name: Current repository integrity audit
 
 on:
   push:
-    branches: ['audit/**']
+    branches: ['audit/**', 'ui/**']
 
 permissions:
   contents: read

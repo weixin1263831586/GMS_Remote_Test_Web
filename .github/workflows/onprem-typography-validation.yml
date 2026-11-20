@@ -2,7 +2,7 @@ name: On-prem Chromium typography verification
 
 on:
   push:
-    branches: ['audit/**']
+    branches: ['audit/**', 'ui/**']
     paths:
       - 'web/static/css/typography.css'
       - 'web/static/css/typography/**'

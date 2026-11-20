@@ -16,7 +16,9 @@ and later, from the installed runtime:
 
 Serving model: the registry reads the repository's agent package declaration
 (agent/gms-remote-test/package.yaml) and the generated plugin payload
-(plugins/gms-remote-test/). Archive construction goes through the ONE
+(plugins/gms-remote-test/); native distributions carry those same public
+package bytes and bootstrap in a compiled build module (ADR 0039).
+Archive construction goes through the ONE
 canonical builder (features/system/agent_package_builder.py — the same
 module tools/scripts/agent/build_package.py uses), so the served zip and the
 released artifact share a single layout contract: a single
@@ -40,6 +42,13 @@ from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
 
+try:
+    # Generated only on the trusted native build host, compiled into the binary.
+    import _gms_bundled_agent as _bundled_agent
+except ImportError:
+    _bundled_agent = None
+
+
 logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +57,8 @@ PACKAGE_YAML = PROJECT_ROOT / "agent" / "gms-remote-test" / "package.yaml"
 
 
 def _package_version() -> str:
+    if _bundled_agent is not None:
+        return _bundled_agent.VERSION
     try:
         for line in PACKAGE_YAML.read_text(encoding="utf-8").splitlines():
             if line.startswith("version: "):
@@ -80,6 +91,10 @@ def _immutable_archive(version: str) -> bytes:
 
 
 def _archive_for_source(version: str) -> bytes:
+    if _bundled_agent is not None:
+        if version != _bundled_agent.VERSION:
+            raise FileNotFoundError("bundled Agent package version unavailable")
+        return _bundled_agent.ARCHIVE
     # Metadata changes trigger a full rebuild/hash; unchanged files reuse bytes.
     stamp = tuple((str(path), st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_mode)
                   for path, _ in payload_files(AGENT_PACKAGE_DIR)
@@ -153,7 +168,7 @@ def _unsigned_in_production() -> bool:
 async def agent_package_manifest(request: Request):
     """GET /api/agent/packages/gms-remote-test/manifest"""
     version = _package_version()
-    if not version or not AGENT_PACKAGE_DIR.is_dir():
+    if not version or (_bundled_agent is None and not AGENT_PACKAGE_DIR.is_dir()):
         return error_response("agent package payload 未生成", status_code=404)
     try:
         archive = await asyncio.to_thread(_immutable_archive, version)
@@ -229,7 +244,7 @@ async def agent_bootstrap_installer(request: Request):
     installer_path = (
         PROJECT_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
     )
-    if not installer_path.is_file():
+    if _bundled_agent is None and not installer_path.is_file():
         return error_response(
             "agent installer 不可用",
             status_code=503,
@@ -249,7 +264,9 @@ async def agent_bootstrap_installer(request: Request):
         or not (parsed.port is None or 0 < parsed.port < 65536)
     ):
         return error_response("无法从当前请求确定有效的服务地址", status_code=400)
-    content = installer_path.read_text(encoding="utf-8").replace(
+    template = (_bundled_agent.BOOTSTRAP if _bundled_agent is not None
+                else installer_path.read_text(encoding="utf-8"))
+    content = template.replace(
         "__GMS_AGENT_DEFAULT_SERVER__", server_url
     )
     # Pin the release Ed25519 public key into the downloaded bootstrap so

@@ -126,9 +126,9 @@ class TerminalWorkspaceVisualTests(RuntimeUiHarness):
             self.assertEqual(result["quad"]["selectors"], 4)
             self.assertEqual(result["quad"]["refreshButtons"], 4)
             self.assertEqual(result["quad"]["focusButtons"], 4)
-            self.assertEqual(result["quad"]["topPadding"], "5px")
-            self.assertEqual(result["quad"]["leftPadding"], "8px")
-            self.assertEqual(result["quad"]["rightPadding"], "8px")
+            self.assertEqual(result["quad"]["topPadding"], "0px")
+            self.assertEqual(result["quad"]["leftPadding"], "0px")
+            self.assertEqual(result["quad"]["rightPadding"], "0px")
             self.assertEqual(result["quad"]["headerHeight"], "34px")
             self.assertEqual(result["quad"]["helpRows"], 0)
             self.assertEqual(result["quad"]["lazyButtons"], 2)
@@ -136,7 +136,7 @@ class TerminalWorkspaceVisualTests(RuntimeUiHarness):
                 result["status"], {"label": "hcq@ats-041055-64g",
                                    "connected": True, "tooltip": "hcq@ats-041055-64g"}
             )
-            self.assertEqual(result["horizontal"], {"count": 2, "top": "5px", "left": "8px"})
+            self.assertEqual(result["horizontal"], {"count": 2, "top": "0px", "left": "0px"})
             self.assertEqual(result["vertical"], 2)
             self.assertEqual(result["single"]["count"], 1)
             self.assertEqual(result["single"]["headerDisplay"], "flex")

@@ -1069,8 +1069,9 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
         actions.append("install/activate one complete package version")
     processes = running_runtimes(VERSIONS_DIR)
     warnings = [
-        f"MCP PID {item['pid']} still runs {item['version']}; reconnect the client's GMS MCP "
-        f"or restart/resume that client to load {installed}"
+        f"MCP PID {item['pid']} still runs {item['version']}; the resident server follows "
+        f"`current` on its next idle request (version_guard), or restart the client to "
+        f"load {installed} right now"
         for item in processes if item["version"] != installed
     ]
     unique_actions = list(dict.fromkeys(actions))

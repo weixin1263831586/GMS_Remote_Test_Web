@@ -36,9 +36,18 @@ if [[ "${controller_was_active}" == "true" ]]; then
     systemctl stop "${GMS_CONTROLLER_SERVICE}"
 fi
 
-"${GMS_PROJECT_ROOT}/.venv/bin/python" \
-    "${GMS_PROJECT_ROOT}/scripts/gms_backup.py" create \
+backup_command=("${GMS_PROJECT_ROOT}/.venv/bin/python" "${GMS_PROJECT_ROOT}/scripts/gms_backup.py")
+backup_roots=()
+if [[ -n "${GMS_BACKUP_RUNTIME:-}" ]]; then
+    backup_command=("${GMS_BACKUP_RUNTIME}" backup)
+    : "${GMS_BACKUP_DATA_ROOT:?GMS_BACKUP_DATA_ROOT is required for compiled releases}"
+    : "${GMS_BACKUP_CONFIG_ROOT:?GMS_BACKUP_CONFIG_ROOT is required for compiled releases}"
+    backup_roots=(--data-root "${GMS_BACKUP_DATA_ROOT}" --config-root "${GMS_BACKUP_CONFIG_ROOT}")
+fi
+
+"${backup_command[@]}" create \
     --project-root "${GMS_PROJECT_ROOT}" \
+    "${backup_roots[@]}" \
     --run-home "${GMS_RUN_HOME}" \
     --output-dir "${GMS_BACKUP_DIR}" \
     --key-file "${GMS_BACKUP_KEY_FILE}" \

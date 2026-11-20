@@ -21,6 +21,7 @@ from .session_log import (
     _persist_transcript,
     _settle_step,
     complete_recovery_step,
+    confirm_recovery_step,
 )
 from .session_registry import (
     AgentRequestShim,
@@ -233,9 +234,8 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
                     return
             else:
                 errors = 0
-                # 首次成功轮询：后台任务真实状态已确认，收敛重启恢复步骤
-                # （done=仍在跟踪中，后续终态由分析步骤自身呈现）。
-                complete_recovery_step(session, active)
+                # A successful status poll is NOT a completed Redmine analysis.
+                confirm_recovery_step(session, active)
                 payload = outcome.data
                 status = payload["run"].get("status")
                 if status in TERMINAL:
@@ -244,7 +244,8 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
                     finish_run_state(session, "idle")
                     _append_message(session, "assistant", _summary(payload, issue_id), data={
                         "redmine_run_id": run_id, "redmine_issue_id": issue_id,
-                        "quick_actions": [{"label": "打开 Redmine 看板", "page": "redmine-agent"}],
+                        "quick_actions": [{"label": "查看 Redmine 每日晨报", "page": "redmine-agent",
+                                       "params": {"tab": "daily-brief"}}],
                     })
                     return
                 _update_step(session, active, "running", "排队中" if status == "pending" else "正在取证和分析")

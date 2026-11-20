@@ -97,10 +97,10 @@ def review_session(request: Request, session_id: str):
     return HTMLResponse('''<!doctype html><html lang="zh-CN" data-ui-type-root="review"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>调试会话授权</title><link rel="stylesheet" href="/static/css/device-deployment-review.css"><link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
-<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-unified-page-edge-12"><link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
+<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8"><link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-debug-review.js" defer></script></head>
-<body><main><h1>调试会话授权</h1><p>请登录发起申请的 Agent 所属平台账号。批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
+<body class="ui-page-edge"><main><h1>调试会话授权</h1><p>请登录发起申请的 Agent 所属平台账号。批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
 <button id="review-login-open" type="button">登录 / 切换审批账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取调试请求…</p>
 <button id="approve" disabled>批准调试会话</button><button id="revoke" disabled>撤销授权</button>

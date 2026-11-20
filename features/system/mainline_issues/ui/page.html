@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mainline Known Issues</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261116-head32">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261120-single-edge-template">
   <style>
     :root { color-scheme: dark; --border:var(--border-color); --muted:var(--text-secondary); --bg:var(--dark-bg); --text:var(--text-primary); --head:var(--light-bg); --card:var(--card-bg); --primary:var(--primary-color); }
     /* 多列定制只在桌宽生效（>600px）：手机宽度让位公共单列布局，
@@ -16,15 +16,15 @@
     }
     select { appearance:auto; }
   </style>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261119-unified-page-edge-12">
-                        <link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 </head>
 <body>
-  <header>
+  <header class="ui-page-edge">
     <h1>Mainline Known Issues</h1>
     <div id="summary" class="summary">加载中…</div>
   </header>
-  <main>
+  <main class="ui-page-edge">
     <div class="filters">
       <input id="q" placeholder="全局搜索：豁免条目 / 安全补丁(CVE) / Critical_Patch">
       <select id="issue_type"><option value="">全部类型</option><option>CTS</option><option>MTS</option><option>GTS</option></select>

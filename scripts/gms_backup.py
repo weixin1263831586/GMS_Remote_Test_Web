@@ -203,9 +203,15 @@ def _copy_tree(source: Path, target: Path) -> None:
             raise BackupError(f'unsupported backup source entry: {child}')
 
 
-def _stage_sources(project_root: Path, run_home: Path | None, stage: Path) -> None:
+def _stage_sources(
+    project_root: Path, run_home: Path | None, stage: Path, *,
+    data_root: Path | None = None, config_root: Path | None = None,
+) -> None:
     payload = stage / 'payload'
-    data_root = project_root / 'data'
+    # Only explicitly selected deployment roots may cross a release symlink.
+    # _copy_tree still rejects every symlink inside those roots.
+    data_root = data_root.resolve() if data_root is not None else project_root / 'data'
+    config_root = config_root.resolve() if config_root is not None else project_root / 'configs'
     if not data_root.is_dir():
         raise BackupError(f'runtime data directory does not exist: {data_root}')
     _copy_tree(data_root, payload / 'project' / 'data')
@@ -227,21 +233,21 @@ def _stage_sources(project_root: Path, run_home: Path | None, stage: Path) -> No
         Path('configs/redmine_user_map.json'),
     )
     for relative in legacy_config_paths:
-        source = project_root / relative
+        source = config_root / relative.relative_to('configs')
         if relative == Path('configs/config.json') and source.is_symlink():
-            if source.resolve() != (project_root / 'configs/local/deployment.json').resolve():
+            if source.resolve() != (config_root / 'local/deployment.json').resolve():
                 raise BackupError('unexpected configuration compatibility link')
             continue
         if source.is_file():
             _copy_file(source, payload / 'project' / relative)
-    certificate_dir = project_root / 'configs/certs'
+    certificate_dir = config_root / 'certs'
     if certificate_dir.is_symlink():
-        if certificate_dir.resolve() != (project_root / 'configs/secrets/certs').resolve():
+        if certificate_dir.resolve() != (config_root / 'secrets/certs').resolve():
             raise BackupError('unexpected certificate compatibility link')
     elif certificate_dir.is_dir():
         _copy_tree(certificate_dir, payload / 'project' / 'configs/certs')
     for relative in (Path('configs/local'), Path('configs/secrets')):
-        source = project_root / relative
+        source = config_root / relative.relative_to('configs')
         if source.is_dir():
             _copy_tree(source, payload / 'project' / relative)
 
@@ -393,14 +399,17 @@ def _extract_verified(archive_path: Path, key: bytes, target: Path) -> dict:
 
 def create_backup(args: argparse.Namespace) -> Path:
     project_root = args.project_root.resolve()
+    data_root, config_root = _source_roots(args)
     output_dir = args.output_dir.resolve()
+    if any(output_dir.is_relative_to(source.resolve()) for source in (data_root, config_root)):
+        raise BackupError('backup output must be outside runtime data and configuration roots')
     output_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(output_dir, 0o700)
     key = _load_key(args.key_file.resolve())
     timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     output = output_dir / f'gms-backup-{timestamp}-{uuid.uuid4().hex[:8]}{ARCHIVE_SUFFIX}'
     with (
-        _offline_controller_lock(project_root / 'data'),
+        _offline_controller_lock(data_root),
         tempfile.TemporaryDirectory(prefix='gms-backup-stage-') as temp,
     ):
         stage = Path(temp)
@@ -409,6 +418,8 @@ def create_backup(args: argparse.Namespace) -> Path:
             project_root,
             args.run_home.resolve() if args.run_home else None,
             stage,
+            data_root=getattr(args, 'data_root', None),
+            config_root=getattr(args, 'config_root', None),
         )
         manifest = _manifest(stage)
         manifest_path = stage / 'manifest.json'
@@ -477,10 +488,19 @@ def _restore_file(source: Path, destination: Path, entry: dict) -> None:
 def restore_backup(args: argparse.Namespace) -> Path:
     if args.confirm != 'RESTORE':
         raise BackupError('restore requires --confirm RESTORE')
-    project_root = args.project_root.resolve()
+    data_root, config_root = _source_roots(args)
+
+    def destination(relative: str) -> Path:
+        path = PurePosixPath(relative).relative_to('payload/project')
+        if path.parts[0] == 'data':
+            return data_root.joinpath(*path.parts[1:])
+        if path.parts[0] == 'configs':
+            return config_root.joinpath(*path.parts[1:])
+        raise BackupError(f'unsupported restore destination: {relative}')
+
     key = _load_key(args.key_file.resolve())
     with (
-        _offline_controller_lock(project_root / 'data'),
+        _offline_controller_lock(data_root),
         tempfile.TemporaryDirectory(prefix='gms-backup-restore-') as temp,
     ):
         target = Path(temp)
@@ -491,8 +511,8 @@ def restore_backup(args: argparse.Namespace) -> Path:
         if not restored_data.is_dir():
             raise BackupError('backup does not contain project runtime data')
         timestamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
-        previous_data = project_root / f'data.pre-restore-{timestamp}'
-        current_data = project_root / 'data'
+        previous_data = data_root.with_name(f'{data_root.name}.pre-restore-{timestamp}')
+        current_data = data_root
         if previous_data.exists():
             raise BackupError(f'restore safety directory already exists: {previous_data}')
         current_data.rename(previous_data)
@@ -502,36 +522,35 @@ def restore_backup(args: argparse.Namespace) -> Path:
                 source = target.joinpath(*PurePosixPath(relative).parts)
                 if entry.get('type') == 'directory':
                     if relative.startswith(('payload/project/data', 'payload/project/')):
-                        destination = project_root / PurePosixPath(relative).relative_to('payload/project')
+                        restored_path = destination(relative)
                     elif relative.startswith('payload/run_home/') and args.run_home:
-                        destination = args.run_home.resolve() / PurePosixPath(relative).relative_to('payload/run_home')
+                        restored_path = args.run_home.resolve() / PurePosixPath(relative).relative_to('payload/run_home')
                     else:
                         continue
-                    destination.mkdir(parents=True, exist_ok=True)
-                    os.chmod(destination, int(entry.get('mode', 0o700)) & 0o777)
+                    restored_path.mkdir(parents=True, exist_ok=True)
+                    os.chmod(restored_path, int(entry.get('mode', 0o700)) & 0o777)
                     if os.geteuid() == 0:
                         os.chown(
-                            destination,
+                            restored_path,
                             int(entry.get('uid', 0)),
                             int(entry.get('gid', 0)),
                         )
                     continue
                 if relative.startswith('payload/project/') and not relative.startswith('payload/project/data/'):
-                    destination = project_root / PurePosixPath(relative).relative_to('payload/project')
-                    _restore_file(source, destination, entry)
+                    _restore_file(source, destination(relative), entry)
                 elif relative.startswith('payload/run_home/'):
                     if not args.run_home:
                         continue
-                    destination = args.run_home.resolve() / PurePosixPath(relative).relative_to('payload/run_home')
-                    _restore_file(source, destination, entry)
+                    restored_path = args.run_home.resolve() / PurePosixPath(relative).relative_to('payload/run_home')
+                    _restore_file(source, restored_path, entry)
             for relative, entry in entries.items():
                 if entry.get('type') != 'file' or not relative.startswith('payload/project/data/'):
                     continue
-                destination = project_root / PurePosixPath(relative).relative_to('payload/project')
-                os.chmod(destination, int(entry.get('mode', 0o600)) & 0o777)
+                restored_path = destination(relative)
+                os.chmod(restored_path, int(entry.get('mode', 0o600)) & 0o777)
                 if os.geteuid() == 0:
                     os.chown(
-                        destination,
+                        restored_path,
                         int(entry.get('uid', 0)),
                         int(entry.get('gid', 0)),
                     )
@@ -541,6 +560,16 @@ def restore_backup(args: argparse.Namespace) -> Path:
             previous_data.rename(current_data)
             raise
     return previous_data
+
+
+def _source_roots(args: argparse.Namespace) -> tuple[Path, Path]:
+    root = args.project_root.resolve()
+    data = getattr(args, 'data_root', None)
+    config = getattr(args, 'config_root', None)
+    return (
+        data.resolve() if data is not None else root / 'data',
+        config.resolve() if config is not None else root / 'configs',
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -553,6 +582,8 @@ def build_parser() -> argparse.ArgumentParser:
     create = subparsers.add_parser('create', help='create and verify an encrypted backup')
     common(create)
     create.add_argument('--project-root', required=True, type=Path)
+    create.add_argument('--data-root', type=Path, help='explicit persistent data root for split deployments')
+    create.add_argument('--config-root', type=Path, help='explicit persistent configs root for split deployments')
     create.add_argument('--run-home', type=Path)
     create.add_argument('--output-dir', required=True, type=Path)
     create.add_argument('--keep', type=int, default=14)
@@ -565,6 +596,8 @@ def build_parser() -> argparse.ArgumentParser:
     common(restore)
     restore.add_argument('--archive', required=True, type=Path)
     restore.add_argument('--project-root', required=True, type=Path)
+    restore.add_argument('--data-root', type=Path, help='explicit persistent data root for split deployments')
+    restore.add_argument('--config-root', type=Path, help='explicit persistent configs root for split deployments')
     restore.add_argument('--run-home', type=Path)
     restore.add_argument('--confirm', required=True)
     return parser

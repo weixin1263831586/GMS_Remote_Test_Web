@@ -114,10 +114,27 @@ def _load_typed_tools(name):
 
 mcp_deployment_tools = _load_typed_tools("mcp_deployment_tools")
 mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
+version_guard = _load_typed_tools("version_guard")
+
+
+def _follow_current_version() -> None:
+    """Re-exec into the version ``current`` points at, in an idle gap.
+
+    Daemon-held resident servers (singleton spawned once, pipes kept
+    open across client sessions) outlive package upgrades and would
+    serve stale code forever. Checking before each ``readline`` means
+    no request payload is ever consumed across the exec boundary; the
+    daemon's pipes and the PID are preserved, so the very next request
+    runs the freshly-followed image. Repo checkouts without a
+    versions/ + current layout are never touched.
+    """
+    info = version_guard.staleness(__file__)
+    if info:
+        version_guard.follow(info, argv=sys.argv)
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.87"
+SERVER_VERSION = "0.22.88"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -3092,7 +3109,13 @@ def handle(message: dict[str, Any]) -> None:
 
 
 def main() -> None:
-    for line in sys.stdin:
+    while True:
+        # Follow an upgraded install BEFORE reading a line: exec in the
+        # idle gap so no buffered request is lost across the exec.
+        _follow_current_version()
+        line = sys.stdin.readline()
+        if not line:
+            break
         message = None
         try:
             message = json.loads(line)

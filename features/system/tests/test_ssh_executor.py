@@ -187,8 +187,7 @@ def test_run_closes_channel_on_timeout_and_enforces_deadline_during_drain():
     assert "timed out" in result.stderr
     assert result.timed_out
     assert channel.close_calls == 1
-    # 持续高输出下 recv 分支不休眠；修复前 deadline 只在外层检查，
-    # 理论上可以无限运行。这里给它 5 秒上限作为回归约束。
+    # 持续输出期间也必须检查超时，5 秒内完成退出。
     assert elapsed < 5, f"drain loop ignored the deadline for {elapsed:.1f}s"
 
 

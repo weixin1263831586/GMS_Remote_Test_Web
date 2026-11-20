@@ -17,7 +17,7 @@
   --arch-node:#141525;
   background:#15151e;
 }
-.architecture-v2 main{padding:12px 14px 24px;max-width:none}
+.architecture-v2 main{max-width:none}
 .architecture-v2 .lead{line-height:1.45;padding:0 2px;margin:0 0 11px;color:var(--arch-v2-muted)}
 .architecture-v2 .arch-pane{min-width:0}
 .architecture-v2 .arch-v2-panel,
@@ -200,7 +200,6 @@
   .architecture-v2 .arch-v2-bottom--platform{grid-template-columns:1fr}
 }
 @media(max-width:680px){
-  .architecture-v2 main{padding:9px}
   .architecture-v2 .arch-v2-heading{flex-wrap:wrap;padding:10px}
   .architecture-v2 .arch-v2-hint{white-space:normal}
   .architecture-v2 .arch-v2-platform-layout{padding:8px}

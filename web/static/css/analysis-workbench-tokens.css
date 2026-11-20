@@ -3,10 +3,7 @@
 :is(#page-apk-analysis, #page-report-analysis) {
     --analysis-workbench-stage: #17171d;
     --analysis-workbench-surface: var(--card-bg);
-    --analysis-summary-row-height: var(--ui-table-row-height);
-    --analysis-control-height: var(--ui-control-height);
     --analysis-compact-upload-height: 84px;
-    --analysis-tab-height: var(--ui-tab-height);
     --analysis-pane-heading-height: 39px;
     --analysis-pane-radius: var(--ui-radius-card);
     --analysis-pane-gap: 9px;

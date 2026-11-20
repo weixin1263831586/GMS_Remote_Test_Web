@@ -66,10 +66,8 @@
 .agent-run-progress { margin-top: 10px; }
 
 /* Three work areas keep their own scroll surfaces and existing control IDs. */
-#aoa-panel .aoa-workbench-header { min-height: 36px; height: auto; padding: 4px 0; margin-bottom: 10px; align-items: center; }
 #aoa-panel .aoa-workbench-header > div:first-child { flex: 1; min-width: 0; }
 #aoa-panel .aoa-header-status { flex: 1; align-self: center; max-width: 45%; }
-#aoa-panel .aoa-status-pill { min-height: 28px; max-height: 30px; max-width: 100%; padding: 4px 10px; line-height: 18px; }
 #aoa-panel .aoa-column { border-radius: 8px; padding: 12px; gap: 10px; background: var(--card-bg); }
 #aoa-panel .aoa-column-heading { min-height: 38px; padding: 0 0 10px; }
 #aoa-panel .aoa-screen-column .aoa-column-heading,

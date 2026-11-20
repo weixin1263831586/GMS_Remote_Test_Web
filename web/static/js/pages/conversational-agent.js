@@ -417,11 +417,15 @@ function renderAgentSteps(session) {
         // 耗时：终态用后端落盘的 duration_seconds；运行中从 started_at
         // 实时累计（轮询刷新时自动更新）。取不到起点则不显示。
         let durationText = '';
-        const startMs = Date.parse(step.started_at || step.created_at || '');
-        if (step.status === 'running' && Number.isFinite(startMs)) {
-            durationText = `已进行 ${formatAgentDuration((Date.now() - startMs) / 1000)}`;
-        } else if (step.duration_seconds !== undefined && step.duration_seconds !== null) {
-            durationText = `耗时 ${formatAgentDuration(step.duration_seconds)}`;
+        // Recovery is a transient connectivity indicator, not a timed job.
+        // Only the actual Redmine/ATS/test step owns elapsed execution time.
+        if (step.data?.kind !== 'agent_recovery_monitor') {
+            const startMs = Date.parse(step.started_at || step.created_at || '');
+            if (step.status === 'running' && Number.isFinite(startMs)) {
+                durationText = `已进行 ${formatAgentDuration((Date.now() - startMs) / 1000)}`;
+            } else if (step.duration_seconds !== undefined && step.duration_seconds !== null) {
+                durationText = `耗时 ${formatAgentDuration(step.duration_seconds)}`;
+            }
         }
         // Run 卡片：内嵌实时阶段条（后端监控循环回写 data.progress），
         // 不再只是一个跳转按钮；跳转保留为次级操作。

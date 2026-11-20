@@ -93,6 +93,55 @@ class RunPayloadExecutionViewTests(unittest.TestCase):
         self.assertEqual(statistics["models"][0]["model_name"], DEFAULT_MODEL_LABEL)
         self.assertNotIn("PRIVATE", str(statistics))
 
+    def test_failed_attempt_exposes_observed_gate_without_publishing_a_report(self):
+        from features.redmine.daily_brief_models import DailyBriefIssue
+        from features.redmine.daily_brief_report import issue_payload
+        from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace
+
+        trace = KkAgentTrace()
+        trace.tool_calls = [
+            ToolTrace(tool_call_id="a", tool_name="gms_rt_redmine_issue_fetch",
+                      tool_input={"issue_id": 123}, status="succeeded",
+                      evidence_issue_ids=[123], snapshot_ids=["snapshot"]),
+            ToolTrace(tool_call_id="b", tool_name="gms_rt_redmine_journals",
+                      tool_input={"snapshot_id": "snapshot"}, status="succeeded"),
+            ToolTrace(tool_call_id="c", tool_name="gms_rt_redmine_attachments",
+                      tool_input={"snapshot_id": "snapshot"}, status="succeeded",
+                      attachment_manifest_parsed=True, attachment_count=0),
+            ToolTrace(tool_call_id="d", tool_name="gms_rt_sdk_search",
+                      status="succeeded", source_evidence_valid=False,
+                      source_result_count=0),
+        ]
+        record = DailyBriefIssue(run_id="db", issue_id=123, subject="CTS failure", buckets=[])
+        attempt = {
+            **trace.to_summary(), "final_ok": False,
+            "failure_stage": "evidence_gate_failed",
+            "analysis_review_findings": ["source version mismatch"],
+        }
+        payload = issue_payload(record, attempt)
+        observed = payload["ai_execution"]["failed_attempt_evidence"]
+        self.assertTrue(observed["issue_fetched"])
+        self.assertTrue(observed["journals_checked"])
+        self.assertTrue(observed["attachments_checked"])
+        self.assertFalse(payload["ai_execution"]["source_evidence_checked"])
+        self.assertEqual(payload["ai_execution"]["source_evidence_tool_count"], 0)
+        self.assertEqual(payload["ai_execution"]["review_findings_count"], 1)
+        self.assertNotIn("source version mismatch", str(observed))
+        self.assertEqual(record.result, {})
+
+    def test_successful_source_search_with_zero_hits_is_not_evidence(self):
+        from features.redmine.daily_brief_models import DailyBriefIssue
+        from features.redmine.daily_brief_report import issue_payload
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "final_ok": False,
+            "tools": [{"tool_name": "gms_rt_sdk_search", "status": "succeeded",
+                       "source_evidence_valid": False, "source_result_count": 0}],
+        })
+        self.assertFalse(payload["ai_execution"]["source_evidence_checked"])
+        self.assertEqual(payload["ai_execution"]["source_evidence_tool_count"], 0)
+
     def test_device_service_outage_is_not_presented_as_a_device_failure(self):
         from features.redmine.daily_brief_models import DailyBriefIssue
         from features.redmine.daily_brief_report import issue_payload

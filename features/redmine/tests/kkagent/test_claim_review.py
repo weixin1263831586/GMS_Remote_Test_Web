@@ -160,6 +160,20 @@ async def test_failed_or_foreign_review_never_publishes_a_report(monkeypatch):
     assert outcome.error_type == "claim_review_failed"
 
 
+def test_moving_revision_labels_never_confirm_source_version():
+    from features.redmine.kkagent.claim_review import source_version_matches
+
+    commit = "a" * 40
+    entry = {"source_revision": "HEAD"}
+    self_reported = {"revision": "HEAD", "commit": commit}
+    assert not source_version_matches(self_reported, "", entry)
+    assert not source_version_matches({"revision": "main"}, "", {"source_revision": "main"})
+    assert source_version_matches({"commit": commit, "revision": "HEAD"}, "",
+                                  {"source_revision": commit.upper()})
+    assert not source_version_matches({"commit": "b" * 40}, "",
+                                      {"source_revision": commit})
+
+
 def test_comparison_suite_version_cannot_confirm_the_reported_root_cause():
     trace, result = candidate()
     trace.tool_calls[-1].source_context = {"suite_version": "android-cts-17_r2"}

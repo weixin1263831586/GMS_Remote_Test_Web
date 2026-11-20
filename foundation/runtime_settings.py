@@ -67,9 +67,14 @@ class RuntimeSettings:
         environ: dict[str, str] | None = None,
     ) -> RuntimeSettings:
         env = os.environ if environ is None else environ
+        # Compiled releases ship resources beside the executable rather than
+        # beside the synthetic Nuitka __file__. Explicit callers still win.
+        configured_root = env.get("GMS_PROJECT_ROOT", "").strip()
         root = (
             Path(project_root).resolve()
             if project_root
+            else Path(configured_root).resolve()
+            if configured_root
             else Path(__file__).resolve().parents[1]
         )
         environment = runtime_environment(environ)

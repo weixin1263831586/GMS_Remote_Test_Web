@@ -76,7 +76,7 @@ def test_doctor_warns_about_stale_mcp_without_failing_installation(monkeypatch):
     assert report["reconnect_required"] is True
     assert report["mcp_processes"] == processes
     assert len(report["warnings"]) == 1
-    assert "101" in report["warnings"][0] and "reconnect" in report["warnings"][0]
+    assert "101" in report["warnings"][0] and "version_guard" in report["warnings"][0]
 
 
 @pytest.mark.parametrize("method", ["tools/list", "tools/call"])

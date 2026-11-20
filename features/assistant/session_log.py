@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from features.assistant import session_store
@@ -92,7 +92,11 @@ def _append_step(session: dict[str, Any], title: str, status: str = "done", deta
     _persist_transcript(session)
 
 
-RECOVERY_STEP_TITLE = "会话已恢复"
+# This step is a transient monitor indicator, not the Redmine/ATS/test result.
+# Earlier versions accumulated "会话已恢复"/done on each Controller restart.
+RECOVERY_STEP_TITLE = "任务监控恢复"
+_RECOVERY_TITLES = frozenset((RECOVERY_STEP_TITLE, "会话已恢复"))
+_RUN_ID_KEYS = ("redmine_run_id", "automation_run_id", "cluster_job_id")
 
 
 def _find_step(session: dict[str, Any], step_id: Any) -> dict[str, Any] | None:
@@ -104,34 +108,121 @@ def _find_step(session: dict[str, Any], step_id: Any) -> dict[str, Any] | None:
     )
 
 
+def _step_timestamp(value: Any) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _recovery_steps(session: dict[str, Any], active: dict[str, Any]) -> list[dict[str, Any]]:
+    """Identify the current run's markers, including old untagged transcripts."""
+    steps = session.get("steps") or []
+    run_key = next((key for key in _RUN_ID_KEYS if active.get(key)), None)
+    run_id = str(active.get(run_key)) if run_key else ""
+    anchor_id = active.get("recovery_step_id")
+    analysis_id = active.get("redmine_step_id")
+    analysis_index = next(
+        (index for index, item in enumerate(steps) if item.get("id") == analysis_id),
+        None,
+    ) if analysis_id else None
+    started = _step_timestamp(active.get("started_at")) if analysis_index is None else None
+    matching = []
+    for index, step in enumerate(steps):
+        if step.get("title") not in _RECOVERY_TITLES:
+            continue
+        if anchor_id and step.get("id") == anchor_id:
+            matching.append(step)
+            continue
+        data = step.get("data") or {}
+        # Explicit IDs take priority over timestamps; never touch another run.
+        if any(data.get(key) for key in _RUN_ID_KEYS):
+            if run_key and str(data.get(run_key) or "") == run_id:
+                matching.append(step)
+            continue
+        if analysis_index is not None:
+            if index > analysis_index:
+                matching.append(step)
+        elif started:
+            created = _step_timestamp(step.get("created_at"))
+            if created and created >= started:
+                matching.append(step)
+    return matching
+
+
 def append_recovery_step(
     session: dict[str, Any], active: dict[str, Any],
-    detail: str = "正在重新关联后台任务…",
+    detail: str = "正在重新关联后台任务监控…",
 ) -> None:
-    """登记 Controller 重启恢复步骤，状态保持 running。
-
-    恢复步骤不能立刻标 done：此时监控协程尚未向后台确认任务的真实
-    状态，绿勾会看起来像"分析完成"（假完成）。由接手的监控器在首次
-    成功轮询后调用 complete_recovery_step 收敛。
-    幂等：active_run.recovery_step_id 指向的步骤仍在 running 时不重复
-    追加（监控任务退出后再次恢复会重入这里，避免出现重复恢复步骤）。
-    """
-    existing = _find_step(session, active.get("recovery_step_id"))
-    if existing is not None and existing.get("status") == "running":
+    """One running recovery indicator per active run, including across restarts."""
+    if not any(active.get(key) for key in _RUN_ID_KEYS):
         return
-    _append_step(session, RECOVERY_STEP_TITLE, "running", detail)
-    active["recovery_step_id"] = session["steps"][-1]["id"]
+    matches = _recovery_steps(session, active)
+    if matches:
+        step = matches[0]
+        duplicate_ids = {item.get("id") for item in matches[1:]}
+        changed = bool(duplicate_ids)
+        if duplicate_ids:
+            session["steps"] = [
+                item for item in session["steps"]
+                if item.get("id") not in duplicate_ids
+            ]
+        if step.get("title") != RECOVERY_STEP_TITLE or step.get("status") != "running":
+            step["title"] = RECOVERY_STEP_TITLE
+            step["status"] = "running"
+            step["detail"] = redact_sensitive_data(detail)
+            step.pop("finished_at", None)
+            step.pop("duration_seconds", None)
+            changed = True
+        payload = step.setdefault("data", {})
+        if payload.get("kind") != "agent_recovery_monitor":
+            payload["kind"] = "agent_recovery_monitor"
+            changed = True
+        if changed:
+            session["updated_at"] = _now_iso()
+            _persist_transcript(session)
+    else:
+        ids = {key: active[key] for key in _RUN_ID_KEYS if active.get(key)}
+        ids["kind"] = "agent_recovery_monitor"
+        _append_step(session, RECOVERY_STEP_TITLE, "running", detail, ids)
+        step = session["steps"][-1]
+    if active.get("recovery_step_id") != step["id"]:
+        active["recovery_step_id"] = step["id"]
+        # Persist the reference: old code only changed the in-memory dict.
+        from .session_registry import save_session_anchor
+
+        save_session_anchor(session)
+
+
+def confirm_recovery_step(
+    session: dict[str, Any], active: dict[str, Any],
+    detail: str = "后台任务仍在执行，监控已恢复。",
+) -> None:
+    """First successful poll confirms connectivity, NOT task completion."""
+    step = _find_step(session, active.get("recovery_step_id"))
+    if step and step.get("status") == "running" and step.get("detail") != detail:
+        step["detail"] = redact_sensitive_data(detail)
+        session["updated_at"] = _now_iso()
+        _persist_transcript(session)
 
 
 def complete_recovery_step(
     session: dict[str, Any], active: dict[str, Any], *,
     status: str = "done", detail: str = "已重新关联后台任务监控。",
 ) -> None:
-    """监控器确认后台任务状态后收敛恢复步骤；无待收敛步骤时是 no-op。"""
-    step = _find_step(session, active.get("recovery_step_id"))
-    if step is not None and step.get("status") == "running":
-        step.update(status=status, detail=redact_sensitive_data(detail))
-        _settle_step(step)
+    """Drop transient recovery markers when the actual run leaves monitoring.
+
+    The real analysis/test/ATS step owns final status and duration. A second
+    green 'recovery completed' step is redundant and misleading.
+    """
+    _ = (status, detail)
+    matches = _recovery_steps(session, active)
+    if matches:
+        ids = {step.get("id") for step in matches}
+        session["steps"] = [
+            step for step in session.get("steps", []) if step.get("id") not in ids
+        ]
         session["updated_at"] = _now_iso()
         _persist_transcript(session)
     active.pop("recovery_step_id", None)

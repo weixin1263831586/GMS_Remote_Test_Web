@@ -119,7 +119,7 @@ class LocalGitProviderTests(unittest.TestCase):
         self.assertTrue(read_v1["blob_sha256"])
         self.assertEqual(read_v1["total_lines"], 3)
 
-        # v1 的 result_id 不能读 v2 的 commit（载荷内 commit 已固定）
+        # result_id 绑定对应 commit，篡改签名载荷必须被拒绝。
         with self.assertRaises(SourceProviderError):
             self.provider.read_signed(
                 match["result_id"].replace(match["result_id"][-4:], "0000"),

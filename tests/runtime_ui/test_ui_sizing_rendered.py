@@ -72,7 +72,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                             delta=1,
                             msg=str(geometry),
                         )
-                        expected_gap = 6 if name == "test-suites" else 1
+                        expected_gap = 1
                         self.assertAlmostEqual(
                             geometry["contentGap"], expected_gap,
                             delta=1, msg=str(geometry),
@@ -86,6 +86,162 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     json.dumps(evidence, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+        finally:
+            page.close()
+
+    def test_utility_cards_and_footer_match_8px_outer_frame_inset(self):
+        """Tools and Websites: first category card and footer stay 8px inside the frame."""
+        page = self.new_page()
+        evidence = {}
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                for name in ("tools", "websites"):
+                    with self.subTest(width=width, page=name):
+                        page.evaluate("(name) => switchPage(name, null)", name)
+                        page.wait_for_function(
+                            f"document.getElementById('page-{name}').classList.contains('active')"
+                        )
+                        geometry = page.evaluate(
+                            """(name) => {
+                              const root = document.getElementById('page-' + name);
+                              const header = root.querySelector('.page-header-row');
+                              const host = root.querySelector('.tools-container');
+                              const grid = root.querySelector('.tools-grid-frame');
+                              const footerButton = root.querySelector('.tools-add-category');
+                              if (!header || !host || !grid || !footerButton) {
+                                throw Error('Missing shared utilities page structure');
+                              }
+                              // Selectors survive initToolsPageBody(), which deletes data-* attrs.
+                              // Render many real category-section elements to exercise the
+                              // same overflow and scrollbar geometry as populated pages.
+                              const category = document.createElement('section');
+                              category.className = 'category-section';
+                              category.textContent = 'geometry fixture';
+                              grid.replaceChildren(category,
+                                ...Array.from({length: 36}, () => category.cloneNode(true)));
+                              const scroll = root.querySelector('.tools-scroll');
+                              scroll.scrollTop = 0;
+                              const scrollbarWidth = scroll.offsetWidth - scroll.clientWidth;
+                              const frame = getComputedStyle(root, '::after');
+                              const rootRect = root.getBoundingClientRect();
+                              const cardRect = category.getBoundingClientRect();
+                              const footerRect = footerButton.getBoundingClientRect();
+                              const outer = {
+                                top: rootRect.top + parseFloat(frame.top),
+                                left: rootRect.left + parseFloat(frame.left),
+                                right: rootRect.right - parseFloat(frame.right),
+                                bottom: rootRect.bottom - parseFloat(frame.bottom),
+                              };
+                              return {
+                                top: cardRect.top - outer.top,
+                                left: cardRect.left - outer.left,
+                                right: outer.right - cardRect.right - scrollbarWidth,
+                                renderedRight: outer.right - cardRect.right,
+                                scrollbarWidth,
+                                scrollable: scroll.scrollHeight > scroll.clientHeight,
+                                footerBottom: outer.bottom - footerRect.bottom,
+                                headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
+                                hostPadding: getComputedStyle(host).padding,
+                                gridPadding: getComputedStyle(grid).padding,
+                                frameBorderWidth: parseFloat(frame.borderTopWidth),
+                                overflowX: root.scrollWidth - root.clientWidth,
+                              };
+                            }""",
+                            name,
+                        )
+                        evidence[f"{name}-{width}"] = geometry
+                        for side in ("top", "left", "right", "footerBottom"):
+                            self.assertAlmostEqual(geometry[side], 8, delta=0.6, msg=str(geometry))
+                        self.assertTrue(geometry["scrollable"], msg=str(geometry))
+                        self.assertAlmostEqual(
+                            geometry["renderedRight"] - geometry["scrollbarWidth"],
+                            8, delta=0.6, msg=str(geometry),
+                        )
+                        self.assertAlmostEqual(geometry["headerMarginBottom"], 1, delta=0.1)
+                        self.assertEqual(geometry["hostPadding"], "8px")
+                        self.assertEqual(geometry["gridPadding"], "0px")
+                        self.assertAlmostEqual(geometry["frameBorderWidth"], 1, delta=0.1)
+                        self.assertLessEqual(geometry["overflowX"], 1)
+                target = os.getenv("GMS_UI_PREVIEW_DIR")
+                if target:
+                    output = Path(target)
+                    output.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(output / f"utility-insets-{width}.png"))
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                (Path(target) / "computed-utility-insets.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+        finally:
+            page.close()
+
+    def test_full_height_workspaces_have_one_top_boundary(self):
+        """Full-height workspaces and their first panes meet the shell frame without a second seam."""
+        page = self.new_page()
+        names = (
+            "devices-console", "reports", "architecture", "automation",
+            "cluster", "redmine-agent", "gerrit-dashboard",
+            "desktop", "terminal",
+        )
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                for name in names:
+                    with self.subTest(width=width, page=name):
+                        page.evaluate("(name) => switchPage(name, null)", name)
+                        page.wait_for_function(
+                            f"document.querySelector('#page-{name}').classList.contains('active')"
+                        )
+                        geometry = page.evaluate(
+                            """(name) => {
+                              const root = document.getElementById('page-' + name);
+                              const header = root.querySelector('.page-header-row');
+                              const inner = root.querySelector(
+                                '.embedded-frame-shell, .list-table-wrap, .host-workspace-grid');
+                              if (!header || !inner) throw Error('Missing shared page surface');
+                              const frame = getComputedStyle(root, '::after');
+                              const pane = inner.matches('.host-workspace-grid')
+                                ? inner.querySelector('.host-workspace-pane') : null;
+                              return {
+                                outerTop: root.getBoundingClientRect().top + parseFloat(frame.top),
+                                contentTop: inner.getBoundingClientRect().top,
+                                paneTop: pane ? pane.getBoundingClientRect().top : null,
+                                gridPaddingTop: inner.matches('.host-workspace-grid')
+                                  ? parseFloat(getComputedStyle(inner).paddingTop) : null,
+                                headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
+                                outerBorderStyle: frame.borderTopStyle,
+                                outerBorderWidth: parseFloat(frame.borderTopWidth),
+                                innerBorderWidth: parseFloat(getComputedStyle(inner).borderTopWidth),
+                                pageEdge: parseFloat(getComputedStyle(root).paddingTop),
+                              };
+                            }""",
+                            name,
+                        )
+                        self.assertAlmostEqual(
+                            geometry["outerTop"], geometry["contentTop"],
+                            delta=0.6, msg=str(geometry),
+                        )
+                        self.assertAlmostEqual(
+                            geometry["headerMarginBottom"], 1,
+                            delta=0.1, msg=str(geometry),
+                        )
+                        self.assertEqual(geometry["outerBorderStyle"], "solid")
+                        self.assertAlmostEqual(geometry["outerBorderWidth"], 1, delta=0.1)
+                        self.assertAlmostEqual(geometry["innerBorderWidth"], 0, delta=0.1)
+                        self.assertAlmostEqual(geometry["pageEdge"], 8, delta=0.1)
+                        if name in ("desktop", "terminal"):
+                            self.assertAlmostEqual(
+                                geometry["gridPaddingTop"], 0, delta=0.1,
+                                msg=str(geometry),
+                            )
+                            if geometry["paneTop"] is not None:
+                                self.assertAlmostEqual(
+                                    geometry["outerTop"], geometry["paneTop"],
+                                    delta=0.6, msg=str(geometry),
+                                )
         finally:
             page.close()
 
@@ -153,7 +309,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     )
                     measured[module] = geometry
                     with self.subTest(viewport=width, module=module):
-                        for name, expected in (("inset", 16), ("chartGap", 16), ("cardGap", 12)):
+                        for name, expected in (("inset", 8), ("chartGap", 16), ("cardGap", 12)):
                             self.assertAlmostEqual(
                                 geometry[name], expected, delta=1, msg=str(geometry),
                             )

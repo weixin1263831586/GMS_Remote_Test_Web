@@ -164,6 +164,18 @@ ensure_sudo() {
 }
 
 package_web_app() {
+    # Customer deliveries default to the compiled, source-free release path.
+    # The legacy source tarball is explicitly opt-in for internal development.
+    if [[ "${GMS_ALLOW_SOURCE_PACKAGE:-false}" != "true" ]]; then
+        [[ "${PACKAGE_NAME}" == "gms-web-app" ]] \
+            || fail "compiled release has fixed package name gms-web-app"
+        python3 "${PROJECT_DIR}/scripts/release/build_binary_release.py" \
+            --dist-dir "${DIST_DIR}" \
+            --version "${PACKAGE_VERSION}" \
+            --signing-key "${PACKAGE_SIGNING_KEY}"
+        return
+    fi
+    warn "GMS_ALLOW_SOURCE_PACKAGE=true: legacy tarball WILL expose Python source"
     local archive archive_name root_name
     root_name="${PACKAGE_NAME}"
     [[ "${root_name}" =~ ^[A-Za-z0-9._-]+$ ]] || fail "安装包名称只能包含字母、数字、点、下划线和连字符"

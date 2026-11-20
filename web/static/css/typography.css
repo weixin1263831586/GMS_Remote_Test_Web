@@ -1,11 +1,11 @@
 /* Canonical typography tokens: ONLY defined here; text-role rules are imported from typography/.
    All UI roots load this entrypoint; terminal character grids and SVG icons remain exempt. */
 
-@import url("/static/css/typography/roles-and-pages.css?v=20261119-page-heading-14");
-@import url("/static/css/typography/shell-layout.css?v=20261119-type-audit-v5");
+@import url("/static/css/typography/roles-and-pages.css?v=20261120-type-dedup-v1");
+@import url("/static/css/typography/shell-layout.css?v=20261120-type-dedup-v2");
 @import url("/static/css/typography/shell-workspaces.css?v=20261119-page-heading-16");
-@import url("/static/css/typography/shared-diagrams.css?v=20261119-page-heading-16");
-@import url("/static/css/typography/inline-and-exceptions.css?v=20261119-type-audit-v5");
+@import url("/static/css/typography/shared-diagrams.css?v=20261120-type-dedup-v2");
+@import url("/static/css/typography/inline-and-exceptions.css?v=20261120-type-dedup-v1");
 /* Normal UI: buttons/tables 12px, body/forms/descriptions 13px. Only compact
    status/diagram glyphs, serial/xterm grids, code and icons are approved exceptions.
    Role selectors belong exclusively to the five imported rule files. */

@@ -1,0 +1,226 @@
+"""Compiled release hardening: never regress back to shipping Python sources."""
+from __future__ import annotations
+
+import ast
+import base64
+import io
+import subprocess
+import tarfile
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest.mock import patch
+
+from foundation.runtime_settings import RuntimeSettings
+from scripts.release import build_binary_release as release_builder
+from scripts.release import compiled_entry
+from scripts.release.verify_binary_tree import inspect
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class CompiledReleaseContracts(unittest.TestCase):
+    def test_backup_key_is_compatible_and_existing_material_is_preserved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            key = Path(directory) / "backup.key"
+            compiled_entry._backup_key(key)
+            original = key.read_bytes()
+            self.assertEqual(len(base64.urlsafe_b64decode(original)), 32)
+            compiled_entry._backup_key(key)
+            self.assertEqual(key.read_bytes(), original)
+            raw = bytes(range(32))
+            key.write_bytes(raw)
+            compiled_entry._backup_key(key)
+            self.assertEqual(base64.urlsafe_b64decode(key.read_bytes()), raw)
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+            key.write_bytes(b"invalid-key")
+            with self.assertRaisesRegex(RuntimeError, "refusing to replace"):
+                compiled_entry._backup_key(key)
+
+    def test_compiled_sources_are_syntactically_valid(self):
+        for name in (
+            "scripts/release/compiled_entry.py",
+            "scripts/release/build_binary_release.py",
+            "scripts/release/verify_binary_tree.py",
+        ):
+            with self.subTest(source=name):
+                ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
+
+    def test_installer_shell_syntax(self):
+        subprocess.run(["bash", "-n", str(ROOT / "scripts/release/install_compiled.sh")],
+                       check=True, capture_output=True)
+
+    def test_staged_release_contains_every_embedded_page_without_sources(self):
+        """Compiled routes must find their own HTML/CSS/JS and Mermaid sources."""
+        with tempfile.TemporaryDirectory() as directory:
+            checkout = Path(directory) / "checkout"
+            staged = Path(directory) / "staged"
+            required = (
+                "web/shell/shell.html",
+                "web/static/css/common.css",
+                "web/templates/architecture.html",
+                "configs/examples/config.example.json",
+                *(f"docs/architecture/{name}" for name in release_builder.ARCHITECTURE_SOURCES),
+                *release_builder.REQUIRED_UI_PAGES,
+                *release_builder.REQUIRED_UI_SCRIPTS,
+                "features/redmine/ui/page.css",
+                "features/automation/ui/page.js",
+                *release_builder.RESOURCE_FILES,
+            )
+            for name in required:
+                file = checkout / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_text("safe compiled resource", encoding="utf-8")
+            # Python source accidentally stored beside a page must not leak.
+            private = checkout / "features/redmine/ui/internal.py"
+            private.write_text("private = True", encoding="utf-8")
+            with patch.object(release_builder, "ROOT", checkout):
+                release_builder._stage_assets(staged)
+            for name in required:
+                with self.subTest(resource=name):
+                    self.assertTrue((staged / name).is_file(), name)
+            self.assertFalse((staged / "features/redmine/ui/internal.py").exists())
+            self.assertEqual((staged / "scripts/run_production_backup.sh").stat().st_mode & 0o777, 0o755)
+            self.assertEqual(inspect(staged), [])
+            self.assertTrue(all(compiled_entry._runtime_asset_checks(staged).values()))
+
+    def test_actual_repository_embedded_assets_stage_without_source_leaks(self):
+        """Exercise the actual feature UI inventory, not only synthetic fixtures."""
+        with tempfile.TemporaryDirectory() as directory, patch.object(release_builder, "RUNTIME_ASSETS", ()):
+            release_builder._stage_assets(Path(directory))
+            self.assertTrue(all(compiled_entry._runtime_asset_checks(Path(directory)).values()))
+            self.assertEqual(inspect(Path(directory)), [])
+
+    def test_runtime_smoke_and_builder_agree_on_required_pages(self):
+        self.assertTrue(
+            set((*release_builder.REQUIRED_UI_PAGES, *release_builder.REQUIRED_UI_SCRIPTS)).issubset(
+                set(compiled_entry.REQUIRED_PAGE_ASSETS)
+            )
+        )
+        self.assertTrue(all(
+            f"docs/architecture/{name}" in compiled_entry.REQUIRED_PAGE_ASSETS
+            for name in release_builder.ARCHITECTURE_SOURCES
+        ))
+        for route in ("/automation", "/cluster", "/redmine-agent", "/gerrit-dashboard"):
+            self.assertIn(route, compiled_entry.REQUIRED_PAGE_ROUTES)
+
+    def test_staging_rejects_missing_embedded_page(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(release_builder, "ROOT", Path(directory)),
+            self.assertRaisesRegex(RuntimeError, "missing required runtime assets"),
+        ):
+            release_builder._stage_assets(Path(directory) / "stage")
+
+    def test_release_materializes_only_in_tree_library_aliases(self):
+        """Nuitka Tesseract SONAME symlinks are safe only within their asset tree."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tools/tesseract"
+            source.mkdir(parents=True)
+            library = source / "libtesseract.so.4.0.0"
+            library.write_bytes(b"safe native library")
+            (source / "libtesseract.so.4").symlink_to(library.name)
+            target = root / "release/tools/tesseract"
+            release_builder._copy_allowed(source, target)
+            alias = target / "libtesseract.so.4"
+            self.assertTrue(alias.is_file())
+            self.assertFalse(alias.is_symlink())
+            self.assertEqual(alias.read_bytes(), library.read_bytes())
+
+            escaped = root / "outside-library.so"
+            escaped.write_bytes(b"outside")
+            (source / "unsafe.so").symlink_to(escaped)
+            with self.assertRaisesRegex(RuntimeError, "escapes allowed tree"):
+                release_builder._copy_allowed(source, root / "unsafe-release")
+
+            leaked = source / "sensitive.py"
+            leaked.write_text("secret = 'nope'", encoding="utf-8")
+            (source / "source-alias.so").symlink_to(leaked.name)
+            with self.assertRaisesRegex(RuntimeError, "source or secret"):
+                release_builder._copy_allowed(source, root / "source-leak-release")
+
+    def test_missing_optional_release_tool_is_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release_builder._copy_allowed(root / "missing-optional-tool", root / "out")
+            self.assertFalse((root / "out").exists())
+
+    def test_release_rejects_broken_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "asset"
+            source.mkdir()
+            (source / "missing.so").symlink_to("absent.so")
+            with self.assertRaisesRegex(RuntimeError, "broken or cyclic"):
+                release_builder._copy_allowed(source, Path(directory) / "release")
+
+    def test_release_rejects_python_and_key_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            (root / "runtime/app.py").write_text("secret = True\n")
+            (root / "runtime/secret.pem").write_text(
+                "-----BEGIN PRIVATE KEY-----\nexample\n-----END PRIVATE KEY-----\n")
+            problems = inspect(root)
+            self.assertTrue(any("app.py" in issue for issue in problems))
+            self.assertTrue(any("secret.pem" in issue for issue in problems))
+
+    def test_release_rejects_python_inside_archives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with zipfile.ZipFile(root / "tools.zip", "w") as archive:
+                archive.writestr("private/core.py", "implementation")
+            with tarfile.open(root / "native.tar.gz", "w:gz") as archive:
+                payload = b"implementation"
+                info = tarfile.TarInfo("src/config.pyc")
+                info.size = len(payload)
+                archive.addfile(info, io.BytesIO(payload))
+            problems = inspect(root)
+            self.assertTrue(any("tools.zip" in item for item in problems))
+            self.assertTrue(any("native.tar.gz" in item for item in problems))
+
+    def test_empty_compiled_tree_is_allowed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "runtime").mkdir()
+            (root / "runtime/gms-runtime").write_bytes(b"ELF stub")
+            (root / "runtime/index.html").write_text("<p>Web</p>")
+            self.assertEqual(inspect(root), [])
+
+    def test_explicit_binary_resource_root_does_not_change_source_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = RuntimeSettings.from_environment(
+                environ={"GMS_PROJECT_ROOT": str(root), "GMS_ENV": "production"})
+            self.assertEqual(runtime.project_root, root.resolve())
+            self.assertEqual(runtime.data_root, (root / "data").resolve())
+            source = RuntimeSettings.from_environment(environ={"GMS_ENV": "production"})
+            self.assertNotEqual(source.project_root, root.resolve())
+
+    def test_installer_fails_closed_and_never_installs_python_venv(self):
+        source = (ROOT / "scripts/release/install_compiled.sh").read_text(encoding="utf-8")
+        self.assertIn("sha256sum --quiet -c manifest.sha256", source)
+        self.assertIn("systemctl", source)
+        self.assertIn("read -r -p", source)
+        self.assertNotIn("pip install", source)
+        self.assertNotIn("git clone", source)
+        self.assertIn("--no-admin-prompt", source)
+
+    def test_installer_obtains_consent_before_os_changes(self):
+        source = (ROOT / "scripts/release/install_compiled.sh").read_text(encoding="utf-8")
+        consent = source.index('read -r -p "Install compiled GMS')
+        self.assertLess(consent, source.index("apt-get update"))
+        self.assertLess(consent, source.index("useradd --system"))
+
+    def test_builder_has_real_nuitka_requirement_and_source_gate(self):
+        source = (ROOT / "scripts/release/build_binary_release.py").read_text(encoding="utf-8")
+        self.assertIn('"-m", "nuitka"', source)
+        self.assertIn("findings = inspect(stage)", source)
+        self.assertIn("GMS_RELEASE_SIGNING_KEY", source)
+        self.assertNotIn("--include-package=features", source)
+
+
+if __name__ == "__main__":
+    unittest.main()

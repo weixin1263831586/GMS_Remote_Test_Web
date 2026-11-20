@@ -2,7 +2,6 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page-background); color: var(--text);  }
 
-main { margin: 0 auto; padding: 16px; }
 .lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px;  }
 
 .arch-pane { min-width: 0; }
@@ -36,7 +35,6 @@ code { color: var(--green); }
   .roles, .workers, .sources { grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 620px) {
-  main { padding: 12px; }
   .roles, .workers, .sources { grid-template-columns: 1fr; }
 }
 

@@ -44,9 +44,38 @@ class UiSizingContractTests(unittest.TestCase):
             versions[path] = matches[0]
         self.assertEqual(len(set(versions.values())), 1, versions)
 
+    def test_redundant_module_height_aliases_are_not_reintroduced(self):
+        """Directly consume shared height roles instead of aliasing identical values."""
+        legacy = (
+            "--analysis-control-height",
+            "--analysis-summary-row-height",
+            "--analysis-tab-height",
+            "--tech-control-height",
+            "--workspace-tab-height",
+        )
+        styles = (
+            "analysis-workbench-tokens.css",
+            "apk-workbench.css",
+            "report-workbench.css",
+            "modal-tech-dialogs.css",
+            "modal-tech-cases.css",
+            "workspace-tabs.css",
+        )
+        for name in styles:
+            with self.subTest(name=name):
+                source = (CSS / name).read_text(encoding="utf-8")
+                for alias in legacy:
+                    self.assertNotIn(alias, source)
+        page = (CSS / "common-page.css").read_text(encoding="utf-8")
+        self.assertNotIn("#kb-doc-tags { height: 26px; }", page)
+        self.assertIn("#suite-download-url { width: 100%; height: var(--ui-control-height); }", page)
+        layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
+        self.assertIn(".btn-act { min-height: var(--ui-control-height-dense);", layout)
+
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {
+            "page-edge": 8,
             "control-height": 32,
             "control-height-dense": 28,
             "control-height-small": 26,
@@ -62,6 +91,55 @@ class UiSizingContractTests(unittest.TestCase):
                 self.assertRegex(data, rf"--ui-{key}:\s*{px}px\s*;")
         self.assertNotRegex(data, r"(?<![\w-])font(?:-size|-family|-weight)?\s*:")
 
+    def test_perimeter_has_one_shared_template_and_no_business_selectors(self):
+        source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        self.assertEqual(source.count("--ui-page-edge: 8px;"), 1)
+        self.assertRegex(
+            source,
+            r"\.ui-page-edge,\s*\.page-content\.container\s*\{[^}]*"
+            r"padding:\s*var\(--ui-page-edge\);",
+        )
+        self.assertNotRegex(
+            source, r"#page-|workspace-scope-|data-ui-type-root|\[data-page=",
+        )
+        shell = (CSS / "common.css").read_text(encoding="utf-8")
+        container = shell.split(".container {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("padding:", container)
+        for name in ("host-desktop-workspace.css", "host-terminal-workspace.css"):
+            self.assertNotIn(
+                "padding: 5px 8px 8px",
+                (CSS / name).read_text(encoding="utf-8"),
+            )
+
+    def test_page_roots_opt_in_to_same_shared_perimeter(self):
+        roots = {
+            "web/shell/pages/desktop.html": 0,
+            "web/shell/pages/terminal.html": 0,
+            "web/templates/architecture.html": 1,
+            "features/automation/ui/page.html": 1,
+            "features/cluster/ui/page.html": 2,
+            "features/devices/ui/page.html": 2,
+            "features/gerrit/ui/page.html": 3,
+            "features/redmine/ui/page.html": 7,
+            "features/system/mainline_issues/ui/page.html": 2,
+            "features/system/update_monitor/ui/page.html": 2,
+            "features/system/update_radar/ui/page.html": 1,
+            "features/devices/deployment_api.py": 1,
+            "features/devices/debug_api.py": 1,
+            "features/system/gms_assistant_proxy.py": 1,
+        }
+        # Desktop and terminal are Shell page-content.container roots, so
+        # their shared padding comes from the template, not ui-page-edge
+        # applied again (which would double the outer inset).
+        for path, expected in roots.items():
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                self.assertEqual(source.count("ui-page-edge"), expected)
+        # Standalone page headers use the same horizontal perimeter token.
+        tabs = (CSS / "workspace-tabs.css").read_text(encoding="utf-8")
+        self.assertIn("padding: 0 var(--ui-page-edge);", tabs)
+        self.assertNotIn("--workspace-header-inset:", tabs)
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
@@ -69,7 +147,7 @@ class UiSizingContractTests(unittest.TestCase):
             "other-workspaces.css": ("--ui-table-row-height", "--ui-stat-height"),
             "device-inventory.css": ("--ui-table-header-height", "--ui-control-height"),
             "api-docs-workbench.css": ("--ui-table-row-height", "--ui-stat-height"),
-            "analysis-workbench-tokens.css": ("--ui-control-height",),
+            "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
             "data-table-page.css": ("--ui-table-header-height", "--ui-control-height"),
         }
@@ -84,7 +162,7 @@ class UiSizingContractTests(unittest.TestCase):
         role_map = {
             "web/static/css/workspace-tabs.css": ("--ui-tab-height",),
             "web/static/css/analysis-workbench-tokens.css": (
-                "--ui-tab-height", "--ui-table-row-height",
+                "--ui-radius-card",
             ),
             "web/static/css/apk-workbench.css": (
                 "--ui-tab-height", "--ui-tab-height-narrow", "--ui-control-height-dense",

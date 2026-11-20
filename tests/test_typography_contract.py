@@ -45,6 +45,37 @@ class TypographyContractTests(unittest.TestCase):
         self.assertIn("--ui-type-line-page: 24px", css)
         self.assertIn("button:not(.modal-close)", (STYLE.parent / "typography/roles-and-pages.css").read_text(encoding="utf-8"))
 
+    def test_canonical_typography_has_no_shadowed_duplicates(self):
+        """Former per-module copies must not survive after shared roles own them."""
+        folder = STYLE.parent / "typography"
+        shared = (folder / "shared-diagrams.css").read_text(encoding="utf-8")
+        shell = (folder / "shell-layout.css").read_text(encoding="utf-8")
+        roles = (folder / "roles-and-pages.css").read_text(encoding="utf-8")
+        self.assertIn(
+            ".tech-dialog .tech-title-group",
+            roles,
+        )
+        self.assertNotIn(
+            ".tech-dialog .tech-title-group :is(.modal-title,h2,h3)",
+            shared,
+        )
+        self.assertEqual(
+            shared.count(
+                'html[data-ui-type-root="architecture"] '
+                ".architecture-v2 .arch-v2-timeline li { font-size:"
+            ),
+            1,
+        )
+        self.assertNotIn(
+            "@media(max-width: 800px) { :is(.modal,.modal-backdrop,.auth-gate)",
+            shared,
+        )
+        self.assertNotIn(
+            '@media (max-width: 768px) { html[data-ui-type-root="shell"] '
+            ".tool-title { font-size:",
+            shell,
+        )
+
     def test_canonical_rule_chunks_are_reviewable(self):
         css = STYLE.read_text(encoding="utf-8")
         parts = (

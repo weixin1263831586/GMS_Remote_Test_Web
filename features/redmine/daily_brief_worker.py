@@ -51,14 +51,9 @@ def discover_repositories(data_root: Path | None = None) -> list[DailyBriefRepos
 
 
 class OwnerFairnessCursor:
-    """跨 owner 的 round-robin 游标(P2 fairness)。
+    """按 owner 轮转扫描起点，避免字母排序导致某个 owner 长期饥饿。
 
-    旧模型每轮都从字母序第一个 owner 目录开始 claim:owner A 长期有
-    大量耗时 AI 任务时,owner B/C 会被明显饿死。游标记住上一轮服务的
-    owner 起始偏移,让每个 owner 轮流成为扫描起点。
-
-    单 Worker 进程内有效;多 Worker 部署下各自独立轮转(仍然公平:
-    任意 Worker 都不再固定偏向字母序靠前的 owner)。
+    游标在单 Worker 进程内生效；多 Worker 各自独立轮转。
     """
 
     def __init__(self) -> None:

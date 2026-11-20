@@ -9,7 +9,6 @@ import re
 import shutil
 import tempfile
 import zipfile
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from features.redmine.analysis_common import MAX_FAILURE_LINES, _truncate
@@ -138,12 +137,55 @@ class AttachmentAnalysisMixin:
         }
 
     def _analyze_text_attachment(self, path: str) -> dict[str, Any]:
+        """Stream complete logs so late failures survive without loading GBs into RAM."""
+        replacement_count = 0
+        interesting_count = 0
+        excerpt_parts: list[str] = []
+        excerpt_size = 0
+        error_blocks: list[str] = []
+        current_block: list[str] = []
+        current_size = 0
+        # Only the first 1200 characters of combined failures reach the report;
+        # bound each retained block while still scanning every input line.
+        block_char_limit = 1201
+
         try:
-            content = Path(path).read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            content = ""
-        error_blocks = self._extract_error_blocks(content)
-        interesting_count = len(self._extract_failure_like_lines(content))
+            with open(path, encoding="utf-8", errors="replace") as stream:
+                for line in stream:
+                    replacement_count += line.count("\ufffd")
+                    if excerpt_size < 3001:
+                        prefix = line[:3001 - excerpt_size]
+                        excerpt_parts.append(prefix)
+                        excerpt_size += len(prefix)
+
+                    stripped = line.strip()
+                    if _ERROR_LINE_RE.search(stripped):
+                        interesting_count = min(MAX_FAILURE_LINES, interesting_count + 1)
+                        if len(error_blocks) < MAX_ERROR_BLOCKS and current_size < block_char_limit:
+                            # Preserve consecutive-line blocks without retaining
+                            # an unlimited stack trace in memory.
+                            separator = "\n" if current_block else ""
+                            remaining = block_char_limit - current_size
+                            part = (separator + stripped)[:remaining]
+                            if part:
+                                current_block.append(part)
+                                current_size += len(part)
+                    elif current_block:
+                        error_blocks.append("".join(current_block))
+                        current_block = []
+                        current_size = 0
+        except OSError as exc:
+            return {
+                "filename": os.path.basename(path),
+                "parsed": False,
+                "summary": {"interesting_lines": 0, "error_blocks": 0},
+                "details": {"type": "text", "read_error_kind": type(exc).__name__},
+                "text_excerpt": "",
+                "failures": [],
+            }
+
+        if current_block and len(error_blocks) < MAX_ERROR_BLOCKS:
+            error_blocks.append("".join(current_block))
         failures = []
         if error_blocks:
             failures.append({
@@ -156,8 +198,12 @@ class AttachmentAnalysisMixin:
             "filename": os.path.basename(path),
             "parsed": True,
             "summary": {"interesting_lines": interesting_count, "error_blocks": len(error_blocks)},
-            "details": {"type": "text"},
-            "text_excerpt": _truncate(content, 3000),
+            "details": {
+                "type": "text",
+                "encoding_warning": bool(replacement_count),
+                "utf8_replacement_count": replacement_count,
+            },
+            "text_excerpt": _truncate("".join(excerpt_parts), 3000),
             "failures": failures,
         }
 

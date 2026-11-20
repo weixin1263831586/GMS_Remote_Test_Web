@@ -3,7 +3,7 @@
 :root {
     /* One shell-page edge: title, content frame and viewport perimeter.
        Internal cards/columns keep their own separate spacing tokens. */
-    --ui-page-edge: 12px;
+    --ui-page-edge: 8px;
     --ui-control-height: 32px;
     --ui-control-height-dense: 28px;
     --ui-control-height-small: 26px;
@@ -57,3 +57,11 @@
 .ui-nowrap { white-space: nowrap; min-width: 0; }
 .ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
 .ui-control:is(button,select) { white-space: nowrap; }
+
+/* Shared page perimeter for the Shell template and independent workspaces.
+   Page CSS defines internal component spacing, never perimeter overrides. */
+.ui-page-edge,
+.page-content.container {
+    box-sizing: border-box;
+    padding: var(--ui-page-edge);
+}

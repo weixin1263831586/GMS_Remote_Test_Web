@@ -32,11 +32,9 @@ html[data-ui-type-root="cluster"] #tab-management .cluster-pnl > .table-wrap th 
 html[data-ui-type-root="cluster"] #tab-management .section-head-copy p { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] #tab-management .worker-host-line .worker-main-name { font-size: var(--ui-type-size-card); }
 html[data-ui-type-root="cluster"] #tab-management .worker-host-line .worker-subline { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="cluster"] #tab-management .worker-meta-details { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-summary-state .assessment { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="cluster"] #tab-management .worker-usage { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-counts { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="cluster"] #tab-management .worker-actions button { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management #close-job-detail { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-meta-details summary { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-memory-percent { font-size: var(--ui-type-size-small); }
@@ -78,10 +76,6 @@ html[data-ui-type-root="architecture"] .arch-system-modules th { font-weight: va
 html[data-ui-type-root="architecture"] .arch-system-events li::before { font-weight: var(--ui-type-weight-bold); }
 
 /* web/static/css/architecture-scenes.css */
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-legend li { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-boundaries { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-key { font-size: var(--ui-type-size-compact); }
-@media(max-width:760px) { html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-legend li { font-size: var(--ui-type-size-compact); } }
 
 /* web/static/css/architecture-v2.css */
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-node header small { font-weight: var(--ui-type-weight-medium); }

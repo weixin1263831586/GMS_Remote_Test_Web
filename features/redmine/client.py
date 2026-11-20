@@ -683,7 +683,7 @@ class RedmineClient(RedmineAttachmentMixin):
     async def search_issues_by_subject(
         self,
         term: str,
-        project_id: str = "fae",
+        project_id: str | None = None,
         limit: int = 10,
         status_id: str = "*",
     ) -> list[dict[str, Any]]:
@@ -697,13 +697,18 @@ class RedmineClient(RedmineAttachmentMixin):
             def _name(obj: Any) -> str:
                 return str(getattr(obj, "name", "") or obj or "")
 
-            issues = self._redmine.issue.filter(
-                project_id=project_id,
-                status_id=status_id,
-                subject=f"~{term}",
-                sort="updated_on:desc",
-                limit=limit,
-            )
+            # Omit project_id to search every project visible to the authenticated
+            # Redmine account. A hard-coded "fae" silently excluded other SDK/GMS
+            # projects and made cross-project similarity searches incomplete.
+            params = {
+                "status_id": status_id,
+                "subject": f"~{term}",
+                "sort": "updated_on:desc",
+                "limit": limit,
+            }
+            if project_id and str(project_id).strip():
+                params["project_id"] = str(project_id).strip()
+            issues = self._redmine.issue.filter(**params)
             return [
                 {
                     "issue_id": int(issue.id),

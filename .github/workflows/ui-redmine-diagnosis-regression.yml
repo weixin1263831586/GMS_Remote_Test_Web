@@ -1,0 +1,68 @@
+name: Redmine diagnosis correctness regressions
+on:
+  push:
+    branches: [main, 'ui/**']
+    paths:
+      - 'features/redmine/**'
+      - 'features/kkagent/**'
+      - '.github/workflows/ui-redmine-diagnosis-regression.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: redmine-diagnosis-regression-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  diagnostic-tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: "3.10"
+      - name: Install OCR runtime used by evidence extraction tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+          tesseract --list-langs | tee "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx eng "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx chi_sim "$RUNNER_TEMP/tesseract-languages.txt"
+      - name: Install pinned test requirements
+        run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
+      - name: Compile changed Python modules
+        run: |
+          python -m py_compile features/redmine/history_search.py features/redmine/client.py \
+            features/redmine/analysis_similarity.py features/redmine/analysis_attachments.py \
+            features/redmine/analysis_reporting.py features/redmine/daily_brief_report.py \
+            features/redmine/kkagent/claim_review.py
+      - name: Redmine history, evidence and native review regressions
+        env:
+          GMS_SKIP_RUNTIME_ENV: "1"
+        run: |
+          python -m pytest -q \
+            features/redmine/tests/test_history_remote_contract.py \
+            features/redmine/tests/test_client_search_hardening.py \
+            features/redmine/tests/test_analysis_similarity_ranking.py \
+            features/redmine/tests/test_issue_journal_export.py \
+            features/redmine/tests/test_attachment_text_integrity.py \
+            features/redmine/tests/test_repository_search.py \
+            features/redmine/tests/test_daily_brief_execution_view.py \
+            features/redmine/tests/test_daily_brief_review_regressions.py \
+            features/redmine/tests/kkagent/test_claim_review.py \
+            features/redmine/tests/kkagent/test_evidence_gate.py
+
+      - name: Full Redmine and SDK source-provider regression
+        env:
+          GMS_SKIP_RUNTIME_ENV: "1"
+        run: |
+          python -m pytest -q features/redmine/tests \
+            features/system/tests/test_source_provider.py \
+            features/system/tests/test_source_provider_boundaries.py \
+            features/system/tests/test_source_repo_rank.py \
+            features/system/tests/test_source_ssh_git.py \
+            features/system/tests/test_source_git_search.py

@@ -172,6 +172,43 @@ class BackupToolTests(unittest.TestCase):
         latest = self.create(keep=1)
         self.assertEqual(list(self.output.glob("*.gmsbak")), [latest])
 
+    def test_split_deployment_backup_and_restore_preserve_release_links(self) -> None:
+        state, config = self.root / "persistent-state", self.root / "persistent-configs"
+        (self.project / "data").rename(state)
+        (self.project / "configs").rename(config)
+        (self.project / "data").symlink_to(state, target_is_directory=True)
+        (self.project / "configs").symlink_to(config, target_is_directory=True)
+        (config / "local").mkdir()
+        (config / "local/environment.json").write_text('{"GMS_PORT":"5001"}')
+        roots = ["--project-root", str(self.project), "--data-root", str(state),
+                 "--config-root", str(config), "--run-home", str(self.home),
+                 "--key-file", str(self.key)]
+        result = self.run_tool("create", *roots, "--output-dir", str(self.output))
+        archive = json.loads(result.stdout)["archive"]
+        self.run_tool("verify", "--archive", archive, "--key-file", str(self.key))
+        (state / "nested/value.txt").write_text("changed")
+        (config / "local/environment.json").write_text("{}")
+        self.run_tool("restore", *roots, "--archive", archive, "--confirm", "RESTORE")
+        self.assertEqual((state / "nested/value.txt").read_text(), "original")
+        self.assertEqual(json.loads((config / "local/environment.json").read_text()), {"GMS_PORT": "5001"})
+        self.assertTrue((self.project / "data").is_symlink())
+        self.assertTrue((self.project / "configs").is_symlink())
+
+    def test_backup_rejects_nested_output_and_untrusted_child_links(self) -> None:
+        for directory in (self.project / "data/backups", self.project / "configs/backups"):
+            result = self.run_tool(
+                "create", "--project-root", str(self.project), "--output-dir", str(directory),
+                "--key-file", str(self.key), expected=1,
+            )
+            self.assertIn("outside runtime data", result.stderr)
+            self.assertFalse(directory.exists())
+        (self.project / "data/unsafe").symlink_to(self.key)
+        result = self.run_tool(
+            "create", "--project-root", str(self.project), "--data-root", str(self.project / "data"),
+            "--output-dir", str(self.output), "--key-file", str(self.key), expected=1,
+        )
+        self.assertIn("must not contain symlinks", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

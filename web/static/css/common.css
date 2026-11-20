@@ -489,7 +489,6 @@ body {
     display: flex;
     flex-direction: column;
     height: 100%;
-    padding: var(--ui-page-edge);
     overflow: hidden;
     flex: 1;
     min-width: 0;
@@ -663,7 +662,7 @@ body {
     position: relative;
 }
 
-/* All breakpoints retain the same 12px page inset.
+/* All breakpoints retain the same 8px page inset.
    Only internal responsive layouts change; page edges never shrink. */
 
 .main-container > .page-content:not(#page-test)::after {
@@ -692,7 +691,8 @@ body {
 .tools-container {
     background: var(--card-bg);
     border-radius: 6px;
-    padding: 12px;
+    /* The public frame is the sole outer border; all cards inset by one edge token. */
+    padding: var(--ui-page-edge);
     display: flex;
     flex: 1;
     min-height: 0;
@@ -707,7 +707,8 @@ body {
 }
 
 .tools-grid-frame {
-    padding: 4px 8px 8px;
+    /* The parent .tools-container owns the 8px inset; no nested padding. */
+    padding: 0;
 }
 
 .tools-footer {
@@ -996,7 +997,9 @@ body {
     display: flex;
     gap: 10px;
     justify-content: space-between;
-    margin-bottom: 6px;
+    /* Match the top of the single public body border on every Shell page.
+       A 6px default added a 5px offset to ordinary pages. */
+    margin-bottom: 1px;
     min-height: var(--ui-type-line-page);
     position: relative;
 }

@@ -1191,10 +1191,9 @@ body.apk-resizing {
     flex-direction: column;
     min-height: 0;
 }
-#kb-doc-tags { height: 26px; }
-#kb-doc-title { height: 30px;   }
+#kb-doc-title { height: var(--ui-control-height);   }
 #kb-doc-tags,
-#kb-search-input { height: 28px;  }
+#kb-search-input { height: var(--ui-control-height-dense);  }
 #kb-doc-content {
     flex: 1;
     min-height: 0;
@@ -1250,9 +1249,9 @@ body.apk-resizing {
     margin-bottom: 8px;
 }
 .suite-download-row > div:first-child { flex: 1; min-width: 200px; }
-#suite-download-url { width: 100%; height: 36px; }
+#suite-download-url { width: 100%; height: var(--ui-control-height); }
 #btn-download-suite,
-#btn-extract-suite { height: 32px; min-width: 100px; white-space: nowrap; }
+#btn-extract-suite { height: var(--ui-control-height); min-width: 100px; white-space: nowrap; }
 .suite-progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .suite-progress-status { min-width: 80px; color: var(--text-muted);  }
 .suite-progress-track { flex: 1; height: 6px; overflow: hidden; border-radius: 4px; background: var(--border-color); }

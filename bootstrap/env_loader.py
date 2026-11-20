@@ -11,7 +11,8 @@ from foundation.private_config import read_json_object
 
 
 def _project_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    compiled_root = os.environ.get("GMS_PROJECT_ROOT", "").strip()
+    return Path(compiled_root).resolve() if compiled_root else Path(__file__).resolve().parents[1]
 
 
 def _expand_project_root(value: str, base_root: Path) -> str:
