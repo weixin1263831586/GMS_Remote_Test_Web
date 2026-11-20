@@ -23,6 +23,7 @@ from features.assistant.session_log import (
     _append_message,
     _append_step,
     complete_recovery_step,
+    confirm_recovery_step,
 )
 from features.assistant.session_registry import (
     AgentRequestShim,
@@ -626,8 +627,8 @@ async def monitor_workflow_run(
                 _save_session_anchor(session)
             if status in AUTOMATION_TERMINAL_STATUSES:
                 break
-            # 非终态：后台任务真实状态已确认，收敛重启恢复步骤。
-            complete_recovery_step(session, active)
+            # Non-terminal status: monitoring is back, the ATS run is not done.
+            confirm_recovery_step(session, active)
             await asyncio.sleep(5)
         if not _monitor_run_is_current(session, monitor_token):
             return

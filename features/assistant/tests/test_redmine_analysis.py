@@ -12,7 +12,7 @@ import pytest_asyncio
 from features.assistant import project_agent, session_registry, session_store
 from features.assistant import redmine_analysis as analysis
 from features.assistant.kkagent_bridge import BridgeTurnResult
-from features.assistant.session_log import _append_message
+from features.assistant.session_log import _append_message, _append_step
 from features.assistant.tools import registry
 from features.auth import CurrentUser
 from foundation.error_model import ApiError
@@ -427,22 +427,90 @@ async def test_model_corrects_extra_redmine_parameters_before_dispatch(environme
 
 
 @pytest.mark.asyncio
-async def test_recovery_step_stays_running_until_first_successful_poll(environment):
-    """恢复步骤在首次成功轮询前保持 running，后续重复恢复不追加步骤。"""
-    from features.assistant.session_log import append_recovery_step
+async def test_recovery_remains_running_until_backend_run_really_finishes(environment, monkeypatch):
+    from features.assistant.session_log import RECOVERY_STEP_TITLE, append_recovery_step
 
-    _submit, _read = environment
+    _submit, read = environment
+    monkeypatch.setattr(analysis, "POLL_SECONDS", 0.01)
+    first_poll = asyncio.Event()
+    finish_backend = asyncio.Event()
+
+    async def poll(*_args):
+        first_poll.set()
+        return (status("completed", report="本次工单分析证据")
+                if finish_backend.is_set() else status("running"))
+
+    read.side_effect = poll
     current, req = session(), request()
-    outcome = await analysis.start_analysis(current, req, {"issue_ref": "661332"})
-    assert outcome.success
+    await analysis.start_analysis(current, req, {"issue_ref": "661332"})
     active = current["active_run"]
-    # 模拟 api.get_agent_session 恢复路径：running 状态 + 幂等。
     append_recovery_step(current, active)
-    recovery = [s for s in current["steps"] if s["title"] == "会话已恢复"]
-    assert len(recovery) == 1 and recovery[0]["status"] == "running"
     append_recovery_step(current, active)
-    assert len([s for s in current["steps"] if s["title"] == "会话已恢复"]) == 1
-    # 监控器首次成功轮询后收敛恢复步骤。
+    await asyncio.wait_for(first_poll.wait(), 2)
+    await asyncio.sleep(0.03)
+    recovered = [s for s in current["steps"] if s["title"] == RECOVERY_STEP_TITLE]
+    assert len(recovered) == 1 and recovered[0]["status"] == "running"
+    assert "duration_seconds" not in recovered[0]
+    assert any(s["title"] == "Redmine #661332 分析" and s["status"] == "running"
+               for s in current["steps"])
+    finish_backend.set()
     await asyncio.wait_for(session_registry._agent_monitor_tasks[current["session_id"]], 2)
-    recovery = [s for s in current["steps"] if s["title"] == "会话已恢复"]
-    assert len(recovery) == 1 and recovery[0]["status"] == "done"
+    assert not any(s["title"] in {RECOVERY_STEP_TITLE, "会话已恢复"}
+                   for s in current["steps"])
+    assert any(s["title"] == "Redmine #661332 分析" and s["status"] == "done"
+               for s in current["steps"])
+
+
+@pytest.mark.asyncio
+async def test_repeated_restarts_deduplicate_old_recovery_steps(environment, monkeypatch):
+    from features.assistant import api
+    from features.assistant.session_log import RECOVERY_STEP_TITLE, append_recovery_step
+
+    _submit, read = environment
+    monkeypatch.setattr(analysis, "POLL_SECONDS", 0.01)
+    monkeypatch.setattr(api, "get_client_id_from_request", lambda _req: "browser")
+    finish_backend = asyncio.Event()
+
+    async def poll(*_args):
+        return (status("completed", report="恢复后的结论")
+                if finish_backend.is_set() else status("running"))
+
+    read.side_effect = poll
+    current, req = session(), request()
+    await analysis.start_analysis(current, req, {"issue_ref": "661332"})
+    sid = current["session_id"]
+    active = current["active_run"]
+    for _ in range(4):
+        _append_step(current, "会话已恢复", "done", "已重新关联后台任务监控。")
+    active.pop("recovery_step_id", None)  # Legacy code did not retain it.
+    append_recovery_step(current, active)
+    recovery = [s for s in current["steps"] if s["title"] in
+                {RECOVERY_STEP_TITLE, "会话已恢复"}]
+    assert len(recovery) == 1 and recovery[0]["status"] == "running"
+    assert "duration_seconds" not in recovery[0]
+    recovery_id = recovery[0]["id"]
+    assert session_store.load_anchors()[sid]["active_run"]["recovery_step_id"] == recovery_id
+
+    for _ in range(2):
+        task = session_registry._agent_monitor_tasks[sid]
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        session_registry._agent_monitor_tasks.pop(sid, None)
+        session_registry._agent_sessions.pop(sid, None)
+        await api.get_agent_session(sid, req)
+        restored = session_registry._agent_sessions[sid]
+        recovery = [s for s in restored["steps"] if s["title"] in
+                    {RECOVERY_STEP_TITLE, "会话已恢复"}]
+        assert len(recovery) == 1
+        assert recovery[0]["id"] == recovery_id
+        assert recovery[0]["status"] == "running"
+
+    finish_backend.set()
+    await asyncio.wait_for(session_registry._agent_monitor_tasks[sid], 2)
+    restored = session_registry._agent_sessions[sid]
+    assert restored["active_run"] is None
+    assert not any(s["title"] in {RECOVERY_STEP_TITLE, "会话已恢复"}
+                   for s in restored["steps"])
+    disk = session_store.load_transcript(sid)
+    assert disk and not any(s["title"] in {RECOVERY_STEP_TITLE, "会话已恢复"}
+                            for s in disk["steps"])

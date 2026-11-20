@@ -208,6 +208,11 @@ def finish_run_state(session: dict[str, Any], status: str) -> None:
     Monitors must first check monitor_run_is_current() so an old run cannot
     clear the state or anchor belonging to its replacement.
     """
+    # A recovered monitor is transient. Final status belongs to the real task.
+    if session.get("active_run"):
+        from .session_log import complete_recovery_step
+
+        complete_recovery_step(session, session["active_run"])
     session["status"] = status
     session["active_run"] = None
     clear_session_anchor(session)

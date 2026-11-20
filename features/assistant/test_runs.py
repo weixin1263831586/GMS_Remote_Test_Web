@@ -22,6 +22,7 @@ from features.assistant.session_log import (
     _append_message,
     _append_step,
     complete_recovery_step,
+    confirm_recovery_step,
 )
 from features.assistant.session_registry import (
     AgentRequestShim,
@@ -197,8 +198,8 @@ async def _monitor_agent_run(
                 repository = get_cluster_service().repository
                 job = repository.get_job(cluster_job_id)
                 if job:
-                    # 后台任务真实存在：收敛重启恢复步骤（幂等）。
-                    complete_recovery_step(session, session.get("active_run") or {})
+                    # Presence of the background job proves tracking, not completion.
+                    confirm_recovery_step(session, session.get("active_run") or {})
                 while job and job.get("status") in _ACTIVE_CLUSTER_JOB_STATUSES:
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
