@@ -64,8 +64,6 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertNotRegex(data, r"(?<![\w-])font(?:-size|-family|-weight)?\s*:")
 
     def test_perimeter_has_one_shared_template_and_no_business_selectors(self):
-        import re
-
         source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         self.assertEqual(source.count("--ui-page-edge: 8px;"), 1)
         self.assertRegex(
