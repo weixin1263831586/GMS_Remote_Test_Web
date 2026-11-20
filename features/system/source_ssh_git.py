@@ -53,6 +53,8 @@ from .source_provider_contract import (
     ProviderConfig,
     SourceProviderError,
     _safe_repo_path,
+    _make_signed_id,
+    decode_signed_id,
 )
 
 
@@ -290,6 +292,50 @@ class SSHGitProvider(LocalGitProvider):
                 if best is None or len(rel) > len(best):
                     best = rel
         return best
+
+    def _make_result_id(self, path: str, commit: str) -> str:
+        """Sign the owning repo as well as the commit for cold-process reads."""
+        if not self._multi:
+            return super()._make_result_id(path, commit)
+        owner = self._owning_repo_rel(path)
+        if not owner:
+            return super()._make_result_id(path, commit)
+        return _make_signed_id({
+            "source_id": self.config.source_id, "commit": commit,
+            "path": path, "repo_scope": owner,
+        }, self._secret)
+
+    def read_signed(
+        self, result_id: str, *, offset: int = 0, limit: int = 400,
+    ) -> dict[str, Any]:
+        """Read an immutable result without rediscovering thousands of repos.
+
+        The optional repo_scope comes from the signed payload, not a caller
+        parameter. Older signatures still take the normal discovery path.
+        """
+        if self._multi:
+            decoded = self.decode_result_id(result_id)
+            signed = decode_signed_id(result_id, self._secret)
+            claimed = signed.get("repo_scope")
+            if claimed is not None:
+                scope = _safe_repo_path(str(claimed))
+                path = _safe_repo_path(decoded["path"])
+                if not path.startswith(scope + "/"):
+                    raise SourceProviderError(
+                        "result_id 子仓与文件路径不匹配", status_code=422
+                    )
+                if self.config.discover_repos:
+                    absolute = self.config.repo_root.rstrip("/") + "/" + scope
+                else:
+                    allowed = {self._repo_rel(repo): repo for repo in self._repos}
+                    if scope not in allowed:
+                        raise SourceProviderError(
+                            "result_id 子仓未在当前 SDK 源中配置", status_code=422
+                        )
+                    absolute = allowed[scope]
+                with self._search_lock:
+                    self._scoped_repos[scope] = absolute
+        return super().read_signed(result_id, offset=offset, limit=limit)
 
     # ---------------------------------------------------- repo discovery
 
