@@ -76,7 +76,7 @@ GMS_ENV=development python app.py
 发布经过签名的编译版安装包后，在另一台服务器打开终端，**点击下面代码块的复制按钮**：
 
 ```bash
-curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/ui/unify-page-edge-8px-20261120/scripts/release/install_from_github.sh && bash gms-install.sh
+curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/main/scripts/release/install_from_github.sh && bash gms-install.sh
 ```
 
 首次安装需核对并输入可信渠道提供的 **40 位 GPG 发布者指纹**。
