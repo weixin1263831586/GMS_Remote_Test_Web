@@ -69,6 +69,32 @@ GMS_ENV=development python app.py
 重新克隆不会恢复本机配置。示例值可使应用启动，但不能证明 SSH、套件或 Worker 已配置。
 必要配置、密钥和状态的恢复范围见[配置与迁移](docs/deployment/configuration.md)。
 
+## GitHub Release：复制命令，一键部署独立服务器
+
+目标服务器支持 Ubuntu 22.04 x86_64。无需克隆 Git 仓库，也不需要获取后端 Python 源码。
+在 [GitHub Releases](https://github.com/weixin1263831586/GMS_Remote_Test_Web/releases)
+发布经过签名的编译版安装包后，在另一台服务器打开终端，**点击下面代码块的复制按钮**：
+
+```bash
+curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/ui/unify-page-edge-8px-20261120/scripts/release/install_from_github.sh && bash gms-install.sh
+```
+
+首次安装需核对并输入可信渠道提供的 **40 位 GPG 发布者指纹**。
+脚本会自动获取 GitHub 最新正式 Release（或通过 `--tag` 指定测试版本），
+验证 SHA-256、发布者签名、压缩包路径以及内层文件清单，
+验证通过后才调用 `sudo` 安装。安装过程中可配置服务器地址/端口、
+管理员账号/密码及 Redmine。**不会执行 `git clone`，也不会交付明文后端 Python 源码。**
+
+如果需要验证某个预发布版本，可在以上命令末尾加 `--tag gms-v1.0.0`。
+只验证下载包、不写入服务器服务配置时加 `--download-only`。
+发布者签名指纹不能仅凭下载包里的 `publisher.asc` 自证可信，必须先通过可靠渠道核对。
+
+> 当前实验分支已添加一键下载和发布脚本，但 GitHub Releases 尚无正式安装包。
+> 首次发布前需完成 Nuitka 原生编译、生产初始化 Smoke 和验收；不应把
+> GitHub Actions 临时测试密钥签出的包当作生产交付包。
+
+详情：[编译版独立部署](docs/deployment/compiled-independent-install.md)。
+
 ## Agent 安装
 
 先由平台管理员生成一次性配对码，并通过可信渠道取得 Controller CA：
