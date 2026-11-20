@@ -1,6 +1,6 @@
 # 独立 GMS 平台：编译发布与首次部署
 
-适用实验分支：ui/unify-page-edge-8px-20261120。
+适用发布主线：main。
 首版目标：Ubuntu 22.04 x86_64。此文档描述编译版独立部署链路，
 不是已经完成全功能实机验证的生产发布证明。
 
@@ -54,8 +54,8 @@ GMS_RELEASE_SIGNING_KEY="<实际长期发布密钥ID>" \
 
 测试版发布可以加 `--prerelease`，安装脚本须加 `--tag gms-v1.0.0`；
 GitHub `/releases/latest` 仅返回最新正式发布（不含预发布）。
-默认发布目标分支暂为 `ui/unify-page-edge-8px-20261120`，
-合并主线后应将 `GMS_RELEASE_TARGET_REF` 设置为经审核的主线提交。
+默认发布目标为 `main`，正式发布时可通过 `GMS_RELEASE_TARGET_REF` 指定
+经审核的主线提交 SHA，确保发布内容可追溯且不依赖临时分支。
 **发布脚本不会自动创建一个签名可信的构建包；必须先完成构建及验证。**
 
 ## 二-B、在目标主机复制一行命令安装
@@ -64,7 +64,7 @@ GitHub 仓库 [README](../../README.md) 的 Bash 代码块自带复制按钮。
 复制以下整行到**另一台 Ubuntu 22.04 x86_64 服务器**执行：
 
 ```bash
-curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/ui/unify-page-edge-8px-20261120/scripts/release/install_from_github.sh && bash gms-install.sh
+curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/main/scripts/release/install_from_github.sh && bash gms-install.sh
 ```
 
 - 自动从 GitHub 最新正式 Release 获取四个文件，不运行 `git clone`。
