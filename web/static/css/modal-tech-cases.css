@@ -49,7 +49,7 @@
 .tech-dialog--firmware .firmware-target-card .modal-form-row > label,
 .tech-dialog--firmware .firmware-artifact-card .tech-field-glyph,
 .tech-dialog--firmware .firmware-artifact-card .modal-form-row > label { display: none; }
-.tech-dialog--firmware .firmware-target-list { padding: 6px 9px; border: 1px solid var(--tech-edge-soft); background: var(--tech-control); border-radius: 7px; color: var(--primary-light); min-height: var(--tech-control-height); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
+.tech-dialog--firmware .firmware-target-list { padding: 6px 9px; border: 1px solid var(--tech-edge-soft); background: var(--tech-control); border-radius: 7px; color: var(--primary-light); min-height: var(--ui-control-height); max-height: 90px; overflow: auto; overflow-wrap: anywhere; }
 .tech-dialog--firmware .firmware-artifact-card .tech-field-card { display: block; padding: 0; border: 0; background: transparent; }
 .tech-dialog--firmware .input-with-btn { display: flex; flex-wrap: nowrap; gap: 6px; }
 .tech-dialog--firmware #firmware-path { flex: 1 1 0; width: 0; }
@@ -518,7 +518,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   border: 1px solid #61487e; border-radius: 10px; background: #252032; padding: 10px;
 }
 #firmware-modal .tech-dialog--firmware .firmware-target-list {
-  min-height: var(--tech-control-height); background: #181522; border-color: #775899;
+  min-height: var(--ui-control-height); background: #181522; border-color: #775899;
 }
 #firmware-modal .tech-dialog--firmware .firmware-artifact-card .tech-field-card {
   display: flex; flex-wrap: wrap; gap: 8px; border: none; padding: 0; background: transparent;
@@ -598,7 +598,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 /* Compact preflight cards follow the input height; empty metadata owns no row. */
 #firmware-modal .firmware-preflight-grid .modal-form-row { margin-bottom: 0; }
 #firmware-modal .firmware-artifact-card .tech-field-card { min-height: 0; }
-#firmware-modal .input-with-btn > button { height: var(--tech-control-height); padding: 4px 8px; flex: none; line-height: 1.4; }
+#firmware-modal .input-with-btn > button { height: var(--ui-control-height); padding: 4px 8px; flex: none; line-height: 1.4; }
 #firmware-modal .firmware-target-list {  line-height: 1.4; }
 #firmware-modal .tech-section-title { margin-bottom: 7px; padding-bottom: 6px; }
 #firmware-modal .firmware-file-meta { min-height: 0; margin-top: 6px;  }
@@ -613,10 +613,10 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #route-check-dialog .modal-content.tech-dialog--route-check .modal-body { padding: 12px 16px; }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form .form-group { margin-bottom: 10px; }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { gap: 6px; margin-bottom: 4px;  }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-field { min-height: var(--tech-control-height); padding: 0 8px; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-field { min-height: var(--ui-control-height); padding: 0 8px; }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { padding: 5px 0;  }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions { min-height: 58px; padding: 8px 16px 18px; margin: 0; gap: 9px; }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { min-width: 68px; min-height: var(--tech-control-height); padding: 5px 12px;  letter-spacing: 0; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { min-width: 68px; min-height: var(--ui-control-height); padding: 5px 12px;  letter-spacing: 0; }
 /* UI inspection: remove blank fixed-height workspace, scroll the long list inside. */
 .tech-dialog--ui-control .ui-control-body { display: flex; flex-direction: column; gap: 8px; }
 .tech-dialog--ui-control .ui-control-body > * { flex: none; }
