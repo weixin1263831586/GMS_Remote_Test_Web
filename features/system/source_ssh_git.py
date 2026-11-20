@@ -779,14 +779,12 @@ class SSHGitProvider(LocalGitProvider):
         revision = str(revision or "").strip() or self.config.default_revision
         if scope and not self._multi:
             raise SourceProviderError("单仓源无需 repo_scope", status_code=422)
-        if not self._multi and not scope:
-            return self._search_single(revision, str(query), filter_value, limit)
         key = (
             permission_scope, self.config.source_id, self.config.ssh_host,
             self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
             revision, str(query), filter_value, scope, limit,
         )
-        pinned = bool(scope and _COMMIT_RE.fullmatch(revision))
+        pinned = bool(_COMMIT_RE.fullmatch(revision) and (scope or not self._multi))
         with self._search_lock:
             if pinned and key in self._pinned_search_cache:
                 return copy.deepcopy(self._pinned_search_cache[key])
@@ -804,7 +802,9 @@ class SSHGitProvider(LocalGitProvider):
             except FutureTimeoutError as exc:
                 raise SourceProviderError("相同源码查询仍在执行，等待预算已耗尽", status_code=504) from exc
         try:
-            if scope:
+            if not self._multi:
+                payload = self._search_single(revision, str(query), filter_value, limit)
+            elif scope:
                 payload = self._search_scoped(revision, str(query), filter_value, limit, scope)
             else:
                 payload = self._search_multi(revision, str(query), filter_value, limit)
@@ -812,7 +812,7 @@ class SSHGitProvider(LocalGitProvider):
                 payload["searched_scope"] = "all_repositories"
                 payload["global_coverage_complete"] = payload["coverage_complete"]
             with self._search_lock:
-                if pinned and payload.get("coverage_complete"):
+                if pinned and not payload.get("limited") and (not self._multi or payload.get("coverage_complete")):
                     if len(self._pinned_search_cache) >= 128:
                         self._pinned_search_cache.pop(next(iter(self._pinned_search_cache)))
                     self._pinned_search_cache[key] = copy.deepcopy(payload)
