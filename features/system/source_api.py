@@ -73,6 +73,7 @@ def sdk_search(
     query: str = Query(..., min_length=1, max_length=256),
     path_filter: str = Query("", max_length=256),
     repo_scope: str = Query("", max_length=256),
+    budget_seconds: int = Query(100, ge=1, le=600),
     limit: int = Query(50, ge=1, le=200),
 ):
     require_agent_scope("sdk.read")(request)
@@ -87,6 +88,7 @@ def sdk_search(
             kwargs["repo_scope"] = repo_scope
         if provider.kind == "ssh_git":
             kwargs["permission_scope"] = principal_actor_id(request)
+            kwargs["budget_seconds"] = budget_seconds
         result = provider.search(revision, query, **kwargs)
     except SourceProviderError as exc:
         return _error(exc)
