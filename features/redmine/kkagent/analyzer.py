@@ -855,11 +855,11 @@ class KkAgentRedmineAnalyzer:
                 call for call in repair_trace.tool_calls
                 if call.tool_call_id and call.tool_call_id not in earlier_ids
             ]
-            if not allow_new_tools and new_calls:
+            if native_summary and not allow_new_tools and new_calls:
                 merged = _merge_traces(merged, repair_trace)
                 merged.errors.append("report-only correction called an unapproved tool")
                 return None, merged
-            if allow_new_tools and any(
+            if native_summary and allow_new_tools and any(
                 not any(target in json.dumps(call.tool_input, ensure_ascii=False)
                         for target in targets)
                 for call in new_calls
