@@ -44,6 +44,34 @@ class UiSizingContractTests(unittest.TestCase):
             versions[path] = matches[0]
         self.assertEqual(len(set(versions.values())), 1, versions)
 
+    def test_redundant_module_height_aliases_are_not_reintroduced(self):
+        """Directly consume shared height roles instead of aliasing identical values."""
+        legacy = (
+            "--analysis-control-height",
+            "--analysis-summary-row-height",
+            "--analysis-tab-height",
+            "--tech-control-height",
+            "--workspace-tab-height",
+        )
+        styles = (
+            "analysis-workbench-tokens.css",
+            "apk-workbench.css",
+            "report-workbench.css",
+            "modal-tech-dialogs.css",
+            "modal-tech-cases.css",
+            "workspace-tabs.css",
+        )
+        for name in styles:
+            with self.subTest(name=name):
+                source = (CSS / name).read_text(encoding="utf-8")
+                for alias in legacy:
+                    self.assertNotIn(alias, source)
+        page = (CSS / "common-page.css").read_text(encoding="utf-8")
+        self.assertNotIn("#kb-doc-tags { height: 26px; }", page)
+        self.assertIn("#suite-download-url { width: 100%; height: var(--ui-control-height); }", page)
+        layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
+        self.assertIn(".btn-act { min-height: var(--ui-control-height-dense);", layout)
+
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {
