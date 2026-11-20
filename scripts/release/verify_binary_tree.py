@@ -64,14 +64,15 @@ def inspect(root: Path) -> list[str]:
             if any(marker in blob for marker in FORBIDDEN_MARKERS):
                 issues.append(f"private-key material: {rel}")
         try:
-            if zipfile.is_zipfile(path):
+            lower_name = path.name.lower()
+            if lower_name.endswith((".zip", ".whl", ".egg", ".jar")) and zipfile.is_zipfile(path):
                 with zipfile.ZipFile(path) as zf:
                     if len(zf.infolist()) > MAX_ARCHIVE_MEMBERS:
                         issues.append(f"archive too many entries: {rel}")
                     for member in zf.infolist()[:MAX_ARCHIVE_MEMBERS]:
                         if _forbidden(member.filename):
                             issues.append(f"nested source: {rel}!{member.filename}")
-            elif tarfile.is_tarfile(path) and path.suffix.lower() in {".gz", ".tar", ".xz", ".bz2"}:
+            elif lower_name.endswith((".tar", ".tar.gz", ".tgz", ".tar.xz", ".tar.bz2")) and tarfile.is_tarfile(path):
                 with tarfile.open(path, "r:*") as archive:
                     for idx, member in enumerate(archive):
                         if idx > MAX_ARCHIVE_MEMBERS:
