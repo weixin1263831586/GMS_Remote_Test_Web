@@ -872,27 +872,11 @@ class DailyBriefService:
                 **({"output_style": "summary"} if run.output_style == "summary" else {}),
             },
         )
-        if resumed is not None:
-            from .ai_execution_ledger import RECEIPT_RESUME_STALE_SECONDS
-            receipt_args.update(
-                resume_session_id=resumed.session_id,
-                resume_stale_seconds=RECEIPT_RESUME_STALE_SECONDS,
-            )
-        receipt = self.ai_ledger.begin(**receipt_args)
-        if receipt.get("duplicate") and resumed is not None:
-            # A reclaimed Worker lease can precede the last old receipt
-            # heartbeat. Wait for multiple missed heartbeats, never stealing
-            # a still-running provider or repeatedly failing a resumable job.
-            deadline = time.monotonic() + RECEIPT_RESUME_STALE_SECONDS + 15
-            current_token = str((job_lease or {}).get("lease_token") or "")
-            while receipt.get("duplicate") and time.monotonic() < deadline:
-                if self.repository.is_cancel_requested(run.run_id):
-                    raise cancellation.RunCancelledError()
-                await asyncio.sleep(3)
-                lease = self.repository.running_lease_for_issue(run.run_id, issue_id)
-                if not lease or lease.get("lease_token") != current_token:
-                    raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
-                receipt = self.ai_ledger.begin(**receipt_args)
+        from .daily_brief_resume import admit_resume_receipt
+        receipt = await admit_resume_receipt(
+            self.ai_ledger, self.repository, receipt_args, resumed,
+            run.run_id, issue_id, str((job_lease or {}).get("lease_token") or ""),
+        )
         if receipt.get("duplicate"):
             record.status = "failed"
             record.error_type = "ai_call_in_flight"

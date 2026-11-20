@@ -41,3 +41,38 @@ def valid_resume_trace(
         return trace_from_summary(summary)
     except (TypeError, ValueError, KeyError):
         return None
+
+async def admit_resume_receipt(
+    ledger: Any, repository: Any, receipt_args: dict[str, Any], resumed: Any,
+    run_id: str, issue_id: int, lease_token: str,
+) -> dict[str, Any]:
+    """Do not emit a second AI request while the previous provider is alive.
+
+    The execution ledger remains the single transaction owner. A new Worker
+    lease only authorizes waiting; taking over the receipt requires multiple
+    missed heartbeats and the exact prior session.
+    """
+    import asyncio
+    import time
+
+    from .ai_execution_ledger import RECEIPT_RESUME_STALE_SECONDS
+    from .daily_brief_cancellation import RunCancelledError
+
+    if resumed is not None:
+        receipt_args = {
+            **receipt_args,
+            "resume_session_id": resumed.session_id,
+            "resume_stale_seconds": RECEIPT_RESUME_STALE_SECONDS,
+        }
+    receipt = ledger.begin(**receipt_args)
+    if receipt.get("duplicate") and resumed is not None:
+        deadline = time.monotonic() + RECEIPT_RESUME_STALE_SECONDS + 15
+        while receipt.get("duplicate") and time.monotonic() < deadline:
+            if repository.is_cancel_requested(run_id):
+                raise RunCancelledError()
+            await asyncio.sleep(3)
+            lease = repository.running_lease_for_issue(run_id, issue_id)
+            if not lease or lease.get("lease_token") != lease_token:
+                raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
+            receipt = ledger.begin(**receipt_args)
+    return receipt
