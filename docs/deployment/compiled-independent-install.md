@@ -36,6 +36,55 @@ native doctor -> 临时隔离环境 init 和 production smoke ->
 内部开发如需旧源码发布包，只允许显式 GMS_ALLOW_SOURCE_PACKAGE=true。
 这种源码包不能交付给不可信主机。
 
+## 二-A、将编译安装包发布到 GitHub Releases
+
+`./install.sh package` 完成 Nuitka 原生构建、隔离初始化/生产 Smoke、
+无源码及敏感文件检查并生成 GPG 签名后，在**可信构建主机**执行：
+
+```bash
+GMS_RELEASE_SIGNING_KEY="<实际长期发布密钥ID>" \
+  ./scripts/release/publish_github_release.sh 1.0.0 --dist-dir dist
+```
+
+发布脚本要求安装并登录 `gh`（GitHub CLI），再次验证安装包 SHA-256
+与签名是否属于指定发布者，才创建 GitHub Release。
+它会上传 4 个文件：编译包 `.tar.gz`、`.sha256`、`.sig` 以及发布者
+**公钥** `publisher.asc`，并在 Release 说明中生成一条可复制的部署命令。
+不会上传 GPG 私钥、源码或 CI 测试密钥。
+
+测试版发布可以加 `--prerelease`，安装脚本须加 `--tag gms-v1.0.0`；
+GitHub `/releases/latest` 仅返回最新正式发布（不含预发布）。
+默认发布目标分支暂为 `ui/unify-page-edge-8px-20261120`，
+合并主线后应将 `GMS_RELEASE_TARGET_REF` 设置为经审核的主线提交。
+**发布脚本不会自动创建一个签名可信的构建包；必须先完成构建及验证。**
+
+## 二-B、在目标主机复制一行命令安装
+
+GitHub 仓库 [README](../../README.md) 的 Bash 代码块自带复制按钮。
+复制以下整行到**另一台 Ubuntu 22.04 x86_64 服务器**执行：
+
+```bash
+curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/ui/unify-page-edge-8px-20261120/scripts/release/install_from_github.sh && bash gms-install.sh
+```
+
+- 自动从 GitHub 最新正式 Release 获取四个文件，不运行 `git clone`。
+- 必须录入可信渠道获得的完整 **40 位 GPG 发布者指纹**（或
+  `--fingerprint FINGERPRINT`）。仅信任同一个 Release 附带的公钥不构成
+  独立的发布者身份认证；引导脚本会在校验失败时拒绝继续。
+- 验证顺序：GitHub Release URL 和文件名 → SHA-256 → GPG 签名及签署者 →
+  tar 成员路径与类型 → 内层 manifest → 执行 `sudo ./install.sh`。
+- 安装程序继续交互输入服务账号、IP/域名、端口、管理员密码和 Redmine；
+  仍支持 `--no-admin-prompt` 延后管理员设置。
+- 只验证、不安装可用 `bash gms-install.sh --download-only`；
+  指定测试版本可用 `bash gms-install.sh --tag gms-v1.0.0`。
+- 此命令依赖公开的 GitHub Release 和互联网下载能力。**仓库目前尚未发布
+  Release 安装包，第一次实际安装前必须先执行发布步骤。**
+  如果未来转为私有仓库，需要另行通过 GitHub 身份验证才能下载私有资产。
+
+命令中的引导脚本是可审核的公开 Shell，不是后端 Python 源码；
+对已认证发布包的下载和签名验证在本地完成，不建议无校验地
+`curl | bash` 执行不受信任来源的安装包。
+
 ## 三、目标主机签名验证与安装
 
 先通过可信渠道获取发布者 GPG 公钥并核对指纹。三件套：
