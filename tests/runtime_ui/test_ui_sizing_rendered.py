@@ -89,6 +89,80 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_utility_cards_and_footer_match_8px_outer_frame_inset(self):
+        """Tools and Websites: first category card and footer stay 8px inside the frame."""
+        page = self.new_page()
+        evidence = {}
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                for name in ("tools", "websites"):
+                    with self.subTest(width=width, page=name):
+                        page.evaluate("(name) => switchPage(name, null)", name)
+                        page.wait_for_function(
+                            f"document.getElementById('page-{name}').classList.contains('active')"
+                        )
+                        geometry = page.evaluate(
+                            """(name) => {
+                              const root = document.getElementById('page-' + name);
+                              const header = root.querySelector('.page-header-row');
+                              const host = root.querySelector('.tools-container');
+                              const grid = root.querySelector('[data-tools-grid]');
+                              const footerButton = root.querySelector('[data-tools-add]');
+                              if (!header || !host || !grid || !footerButton) {
+                                throw Error('Missing shared utilities page structure');
+                              }
+                              // Stable fixture: isolate frame geometry from data and scrollbars.
+                              const category = document.createElement('section');
+                              category.className = 'category-section';
+                              category.textContent = 'geometry fixture';
+                              grid.replaceChildren(category);
+                              const frame = getComputedStyle(root, '::after');
+                              const rootRect = root.getBoundingClientRect();
+                              const cardRect = category.getBoundingClientRect();
+                              const footerRect = footerButton.getBoundingClientRect();
+                              const outer = {
+                                top: rootRect.top + parseFloat(frame.top),
+                                left: rootRect.left + parseFloat(frame.left),
+                                right: rootRect.right - parseFloat(frame.right),
+                                bottom: rootRect.bottom - parseFloat(frame.bottom),
+                              };
+                              return {
+                                top: cardRect.top - outer.top,
+                                left: cardRect.left - outer.left,
+                                right: outer.right - cardRect.right,
+                                footerBottom: outer.bottom - footerRect.bottom,
+                                headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
+                                hostPadding: getComputedStyle(host).padding,
+                                gridPadding: getComputedStyle(grid).padding,
+                                frameBorderWidth: parseFloat(frame.borderTopWidth),
+                                overflowX: root.scrollWidth - root.clientWidth,
+                              };
+                            }""",
+                            name,
+                        )
+                        evidence[f"{name}-{width}"] = geometry
+                        for side in ("top", "left", "right", "footerBottom"):
+                            self.assertAlmostEqual(geometry[side], 8, delta=0.6, msg=str(geometry))
+                        self.assertAlmostEqual(geometry["headerMarginBottom"], 1, delta=0.1)
+                        self.assertEqual(geometry["hostPadding"], "8px")
+                        self.assertEqual(geometry["gridPadding"], "0px")
+                        self.assertAlmostEqual(geometry["frameBorderWidth"], 1, delta=0.1)
+                        self.assertLessEqual(geometry["overflowX"], 1)
+                target = os.getenv("GMS_UI_PREVIEW_DIR")
+                if target:
+                    output = Path(target)
+                    output.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(output / f"utility-insets-{width}.png"))
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                (Path(target) / "computed-utility-insets.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+        finally:
+            page.close()
+
     def test_full_height_workspaces_have_one_top_boundary(self):
         """Full-height workspaces and their first panes meet the shell frame without a second seam."""
         page = self.new_page()
