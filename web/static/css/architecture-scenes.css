@@ -373,10 +373,6 @@
   background:linear-gradient(180deg,rgba(71,72,129,.23),rgba(24,26,47,.93));
 }
 .architecture-v2 .arch-scene-chip .arch-scene-icon{width:13px;height:13px}
-.architecture-v2 .arch-scene-sidecard h3{}
-.architecture-v2 .arch-scene-legend li{}
-.architecture-v2 .arch-scene-boundaries{}
-.architecture-v2 .arch-scene-edge-key{}
 /* Worker boxes are blue in these three scenes: their legend must be blue too. */
 .architecture-v2 .arch-scene-layout:is(
  [data-scene-view="platform"],[data-scene-view="firmware"],
@@ -385,7 +381,6 @@
 /* Do not let a gold execution legend identify a blue device-worker node. */
 .architecture-v2 .arch-scene-layout[data-scene-view="agent-analysis"] .arch-scene-swatch--resource{--swatch:#3cddaf}
 @media(max-width:760px){
-  .architecture-v2 .arch-scene-legend li{}
 }
 
 
@@ -422,7 +417,7 @@
   white-space:nowrap;
   overflow:hidden;
   padding-inline:3px;
-  
+
 }
 .architecture-v2 .arch-scene-chip > span{
   min-width:0;

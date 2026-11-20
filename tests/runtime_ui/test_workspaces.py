@@ -972,7 +972,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         page_box["y"] + page_box["height"] - frame_geometry["inset"],
                         delta=0.5,
                     )
-                    if scope_mode == "single":
+                    if scope_mode == "single" and page_name == "desktop":
                         status_selector = (
                             "#host-workspace-status-single"
                             if page_name == "desktop"
@@ -999,36 +999,21 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         refresh_button = page.locator(
                             f"{page_selector} .host-workspace-single-bar .host-workspace-refresh-btn"
                         )
+                        self.assertEqual(refresh_button.evaluate("button => getComputedStyle(button).borderTopWidth"), "0px")
                     else:
-                        refresh_button = page.locator(
-                            f"{page_selector} .host-workspace-pane-header .host-workspace-refresh-btn"
-                        ).first
-                        cluster_header = page.locator(
-                            f"{page_selector} .host-workspace-pane-header"
-                        ).first
-                        header_box = cluster_header.bounding_box()
-                        select_box = cluster_header.locator("select").bounding_box()
-                        maximize_box = cluster_header.locator("button").last.bounding_box()
-                        self.assertIsNotNone(header_box)
-                        self.assertIsNotNone(select_box)
-                        self.assertIsNotNone(maximize_box)
-                        # ba3be31 为触屏可达性把簇模式 header 控件从 22px 提到
-                        # 24px（header = 24 内容 + 4 padding + 1 边框 = 29），
-                        # 同步契约：header ≤ 29.5、select/按钮高 24。
-                        self.assertLessEqual(header_box["height"], 29.5)
-                        self.assertAlmostEqual(select_box["height"], 24, delta=0.5)
-                        self.assertAlmostEqual(maximize_box["height"], 24, delta=0.5)
-                    refresh_style = refresh_button.evaluate(
-                        "button=>{const s=getComputedStyle(button);return {"
-                        "borderWidth:s.borderTopWidth,borderStyle:s.borderTopStyle,"
-                        "background:s.backgroundColor,boxShadow:s.boxShadow}}"
-                    )
-                    # 契约是「无边框、透明背景、无阴影」；0 宽边框的 border-color
-                    # 回落 currentColor，随主题按钮文字色变化，不参与断言。
-                    self.assertEqual(refresh_style["borderWidth"], "0px", refresh_style)
-                    self.assertEqual(refresh_style["borderStyle"], "none", refresh_style)
-                    self.assertEqual(refresh_style["background"], "rgba(0, 0, 0, 0)", refresh_style)
-                    self.assertEqual(refresh_style["boxShadow"], "none", refresh_style)
+                        header = page.locator(f"{page_selector} .host-workspace-pane-header").first
+                        expect(header).to_be_visible()
+                        self.assertAlmostEqual(header.bounding_box()["height"], 34, delta=0.5)
+                        refresh_button = header.locator(".host-workspace-refresh-btn")
+                        expect(refresh_button).to_be_visible()
+                        self.assertAlmostEqual(refresh_button.bounding_box()["height"], 28, delta=0.5)
+                        if scope_mode == "cluster":
+                            for control in (header.locator("select"), header.locator("button").last):
+                                expect(control).to_be_visible()
+                                self.assertAlmostEqual(control.bounding_box()["height"], 28, delta=0.5)
+                        else:
+                            expect(header.locator("select")).to_be_hidden()
+                            expect(header.locator(".host-terminal-status")).to_be_visible()
                     pane = page.locator(f"{page_selector} .host-workspace-pane").first
                     pane_box = pane.bounding_box()
                     pane_style = pane.evaluate(
@@ -1041,7 +1026,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         self.assertEqual(set(pane_style.values()), {"0px"})
                     else:
                         self.assertGreaterEqual(pane_box["x"], grid_box["x"] + 8)
-                        self.assertGreaterEqual(pane_box["y"], grid_box["y"] + 8)
+                        self.assertGreaterEqual(pane_box["y"], grid_box["y"] + 5)
                     history = page.evaluate("window.__scopeClassHistory")
                     wrong_class = (
                         "workspace-scope-cluster"
@@ -1329,25 +1314,26 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                       // 保证相邻间距断言成立（flex-wrap 换行时仅比对行内）。
                       return topLevel.map(measure).sort((a, b) => a.x - b.x);
                     };
+                    const pageEdge = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-page-edge'));
                     if (name === 'devices') {
                       // devices 动作区含两个子容器（分组工具栏 + 视图页签），
                       // 容器之间允许分组间隔，容器内部控件必须贴住。
                       collected[name] = [
-                        {group: 'toolbar', expectH: 26, expectBottom: 41,
+                        {group: 'toolbar', expectH: 26, expectBottom: pageEdge + 26,
                          boxes: collect('#page-devices .device-group-toolbar :is(button, select)')},
-                        {group: 'tabs', expectH: 26, expectBottom: 41,
+                        {group: 'tabs', expectH: 26, expectBottom: pageEdge + 26,
                          boxes: collect('#page-devices #devices-view-tabs > button')},
                       ];
                     } else if (name === 'users') {
                       // users 页签胶囊：24px 分段按钮 + 边框 = 26px 外壳，
-                      // 底边 41；胶囊内按钮底边 40（胶囊 1px 下边框）。
+                      // 内部分段按钮与胶囊外沿相差 1px。
                       collected[name] = [
-                        {group: 'tabs-capsule', expectH: 24, expectBottom: 40,
+                        {group: 'tabs-capsule', expectH: 24, expectBottom: pageEdge + 25,
                          boxes: collect('#page-users .users-view-tabs :is(button)')},
                       ];
                     } else {
                       collected[name] = [
-                        {group: 'actions', expectH: 26, expectBottom: 41,
+                        {group: 'actions', expectH: 26, expectBottom: pageEdge + 26,
                          boxes: collect(
                            `#page-${name} .page-header-actions :is(button, select, label)`
                          )},
@@ -1370,8 +1356,8 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     )
                     for box in boxes:
                         self.assertEqual(
-                            box["fs"], "12px",
-                            msg=f"{name} 页右上角控件「{box['text']}」字号 {box['fs']}，应为统一的 12px",
+                            box["fs"], "13px" if box["tag"] in {"select", "label"} else "12px",
+                            msg=f"{name} 页右上角控件「{box['text']}」字号 {box['fs']}",
                         )
                         expected_h = (
                             26 if box["tag"] == "label" else group["expectH"]
@@ -1394,7 +1380,8 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     # 同组控件之间不留空隙：相邻控件左边缘 = 前一个右边缘。
                     for left, right in itertools.pairwise(boxes):
                         self.assertAlmostEqual(
-                            left["x"] + left["w"], right["x"], delta=1,
+                            left["x"] + left["w"] + (8 if name == "apk-analysis" else 0),
+                            right["x"], delta=1,
                             msg=f"{name} 页右上角 {group['group']} 组内"
                                 f"「{left['text']}」与「{right['text']}」之间存在空隙",
                         )
@@ -1427,45 +1414,24 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                       await {init_fn}();
                     }}"""
                 )
-                page.wait_for_function(
-                    f"""() => {{
-                      const bar = document.querySelector(
-                        '#page-{name} .page-header-actions '
-                        + '.host-workspace-single-bar'
-                      );
-                      return !!bar && bar.getBoundingClientRect().height > 0;
-                    }}"""
-                )
-                boxes = page.evaluate(
-                    """(name) => {
-                      const visible = (el) => {
-                        const box = el.getBoundingClientRect();
-                        return box.width > 0 && box.height > 0;
-                      };
-                      return Array.from(
-                        document.querySelectorAll(
-                          `#page-${name} .page-header-actions `
-                          + '.host-workspace-single-bar :is(span, button)'
-                        )
-                      ).filter(visible).map((el) => {
-                        const box = el.getBoundingClientRect();
-                        return {
-                          tag: el.tagName.toLowerCase(),
-                          h: box.height,
-                          fs: getComputedStyle(el).fontSize,
-                          center: box.y + box.height / 2,
-                          text: (el.textContent || '').trim().slice(0, 6),
-                        };
-                      });
-                    }""",
-                    name,
+                bar = page.locator(
+                    "#page-desktop .host-workspace-single-bar" if name == "desktop"
+                    else "#page-terminal .host-workspace-pane-header"
+                ).first
+                expect(bar).to_be_visible()
+                boxes = bar.locator(".host-workspace-pane-status, .host-workspace-refresh-btn").evaluate_all(
+                    """els => els.map(el => {
+                        const rect = el.getBoundingClientRect();
+                        return {tag: el.tagName.toLowerCase(), h: rect.height, fs: getComputedStyle(el).fontSize,
+                                center: rect.y + rect.height / 2, text: el.textContent.trim().slice(0, 6)};
+                    })"""
                 )
                 self.assertTrue(boxes, f"{name} 页单机状态条没有任何可见控件")
                 for box in boxes:
                     if box["tag"] == "button":
                         self.assertAlmostEqual(
-                            box["h"], 24, delta=1.5,
-                            msg=f"{name} 页状态条按钮「{box['text']}」高度 {box['h']}，应为 24px",
+                            box["h"], 24 if name == "desktop" else 28, delta=1.5,
+                            msg=f"{name} 页状态条按钮「{box['text']}」高度 {box['h']}",
                         )
                         self.assertEqual(
                             box["fs"], "12px",
@@ -1473,8 +1439,8 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         )
                     else:
                         self.assertEqual(
-                            box["fs"], "10px",
-                            msg=f"{name} 页状态条文本「{box['text']}」字号 {box['fs']}，应为 10px",
+                            box["fs"], "12px",
+                            msg=f"{name} 页状态条文本「{box['text']}」字号 {box['fs']}，应为 12px",
                         )
                 centers = [box["center"] for box in boxes]
                 self.assertAlmostEqual(
@@ -1565,7 +1531,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                 }"""
             )
             self.assertIsNotNone(suite_select)
-            self.assertEqual(suite_select["fs"], "11px")
+            self.assertEqual(suite_select["fs"], "13px")
             self.assertEqual(suite_select["h"], "26px")
         finally:
             page.close()

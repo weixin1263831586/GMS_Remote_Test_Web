@@ -48,7 +48,7 @@
 }
 
 body {
-    
+
     background: var(--page-background);
     color: var(--text-primary);
     line-height: 1.6;
@@ -81,7 +81,7 @@ body {
     position: absolute;
     top: 8px;
     right: 12px;
-    
+
     line-height: 1;
     color: var(--text-secondary);
     cursor: pointer;
@@ -94,8 +94,8 @@ body {
 
 .auth-title {
     margin-bottom: 16px;
-    
-    
+
+
 }
 
 .auth-row {
@@ -107,8 +107,8 @@ body {
 
 .auth-row label {
     color: var(--text-secondary);
-    
-    
+
+
 }
 
 .auth-row input {
@@ -122,7 +122,7 @@ body {
 
 .auth-help {
     color: var(--text-muted);
-    
+
     line-height: 1.45;
 }
 
@@ -130,7 +130,7 @@ body {
     min-height: 18px;
     margin-bottom: 12px;
     color: var(--danger-color);
-    
+
 }
 
 /* 登录层内“本机未开启 SSH 服务”的提前提示。 */
@@ -142,7 +142,7 @@ body {
     border-radius: 4px;
     background: rgba(229, 185, 79, 0.08);
     color: var(--text-primary);
-    
+
     line-height: 1.5;
 }
 
@@ -183,8 +183,8 @@ body {
 }
 
 .sidebar-brand {
-    
-    
+
+
     color: var(--text-on-accent);
     letter-spacing: 0.2px;
     position: relative;
@@ -204,7 +204,7 @@ body {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    
+
 }
 
 .notification-toggle:hover {
@@ -222,9 +222,9 @@ body {
     border-radius: 999px;
     background: var(--danger-color);
     color: #fff;
-    
+
     line-height: 16px;
-    
+
 }
 
 .client-info-panel {
@@ -242,8 +242,8 @@ body {
     gap: 4px;
     margin-bottom: 4px;
     color: var(--text-secondary);
-    
-    
+
+
 }
 
 .client-account-switch-trigger {
@@ -252,8 +252,8 @@ body {
     border: 0;
     background: transparent;
     color: inherit;
-    
-    
+
+
     cursor: pointer;
 }
 
@@ -305,8 +305,8 @@ body {
     border-radius: 999px;
     background: var(--success-color);
     color: #062b1b;
-    
-    
+
+
 }
 
 .client-account-switch-option small {
@@ -315,7 +315,7 @@ body {
 
 .client-identity-line {
     color: var(--text-primary);
-    
+
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -360,7 +360,7 @@ body {
 .drag-handle {
     cursor: grab;
     padding: 2px 4px;
-    
+
     line-height: 1;
     color: var(--text-muted);
     opacity: 0;
@@ -403,7 +403,7 @@ body {
     padding: 5px 6px;
     color: var(--text-secondary);
     text-decoration: none;
-    
+
     transition: var(--transition-normal);
     border-radius: 7px;
     margin-bottom: 1px;
@@ -435,7 +435,7 @@ body {
 .sidebar-item.active {
     background: color-mix(in srgb, var(--primary-color) 16%, transparent);
     color: var(--primary-light);
-    
+
 }
 
 .sidebar-item.active::before {
@@ -443,7 +443,7 @@ body {
 }
 
 .sidebar-icon {
-    
+
     width: 22px;
     height: 22px;
     display: inline-flex;
@@ -476,8 +476,8 @@ body {
 }
 
 .sidebar-text {
-    
-    
+
+
     line-height: 24px;
     vertical-align: middle;
     display: inline-flex;
@@ -550,7 +550,7 @@ body {
     padding: 20px;
     color: var(--text-secondary);
     background: var(--card-bg);
-    
+
     text-align: center;
     pointer-events: none;
 }
@@ -727,8 +727,8 @@ body {
     border-radius: 5px;
     background: var(--success-color);
     color: #fff;
-    
-    
+
+
     cursor: pointer;
 }
 
@@ -825,14 +825,14 @@ body {
 .control-row label {
     min-width: 80px;
     color: var(--text-secondary);
-    
+
 }
 
 .status-label {
     padding: 4px 10px;
     border-radius: 4px;
-    
-    
+
+
     background: var(--darker-bg);
     color: var(--text-muted);
 }
@@ -887,17 +887,17 @@ body {
 }
 
 .placeholder-icon {
-    
+
     opacity: 0.3;
 }
 
 .placeholder-text {
-    
+
     color: var(--text-secondary);
 }
 
 .placeholder-hint {
-    
+
     color: var(--text-muted);
 }
 
@@ -918,11 +918,11 @@ body {
 .vnc-display-info {
     padding: 4px 10px;
     border-radius: 4px;
-    
-    
+
+
     background: var(--darker-bg);
     color: var(--info-color);
-    
+
 }
 
 .placeholder-instructions {
@@ -930,7 +930,7 @@ body {
     padding: 15px;
     background: var(--darker-bg);
     border-radius: 4px;
-    
+
     color: var(--text-secondary);
     line-height: 1.8;
 }
@@ -946,8 +946,8 @@ body {
     background: var(--primary-gradient);
     color: var(--text-primary);
     border-radius: 3px;
-    
-    
+
+
     cursor: pointer;
 }
 
@@ -967,8 +967,8 @@ body {
 
 /* ==================== Section Title ==================== */
 .section-title {
-    
-    
+
+
     color: var(--text-secondary);
     margin-bottom: 6px;
     text-transform: uppercase;
@@ -1077,7 +1077,7 @@ body {
 .page-header-actions :is(button, select),
 #page-devices #devices-view-tabs :is(button, select) {
     box-sizing: border-box;
-    
+
     min-height: var(--ui-control-height-small);
     max-height: var(--ui-control-height-small);
     white-space: nowrap;
@@ -1091,7 +1091,7 @@ body {
     align-items: center;
     gap: 6px;
     height: var(--ui-control-height-small);
-    
+
     white-space: nowrap;
     cursor: pointer;
 }
@@ -1141,7 +1141,7 @@ body {
     border-bottom: 1px solid var(--border-color);
     background: var(--darker-bg);
     color: var(--text-secondary);
-    
+
     text-align: center;
 }
 .list-table th[data-click] { cursor: pointer; }
@@ -1174,13 +1174,13 @@ td.table-placeholder {
     grid-template-columns: 130px 120px minmax(180px, 1fr) auto auto;
 }
 #email-outbox-all-users-label {
-    
+
     white-space: nowrap;
 }
 #email-outbox-all-users { vertical-align: middle; }
 #devices-scope-hint {
     color: var(--text-secondary);
-    
+
 }
 #device-group-filter {
     width: 150px;
@@ -1198,7 +1198,7 @@ td.table-placeholder {
     border-radius: 4px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    
+
 }
 .page-header-actions label input[type="checkbox"] { cursor: pointer; }
 
@@ -1233,8 +1233,8 @@ td.table-placeholder {
     padding: 8px 10px;
     border-top: 1px solid var(--border-color);
     color: var(--text-secondary);
-    
-    
+
+
 }
 .pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .pane-foot {
@@ -1413,7 +1413,7 @@ td.table-placeholder {
     min-height: 26px;
     height: 26px;
     padding: 0 6px;
-    
+
 }
 
 /* 分组开关按钮激活态 */
@@ -1454,7 +1454,7 @@ td.table-placeholder {
     width: 14px;
     text-align: center;
     color: var(--text-secondary);
-    
+
 }
 
 .device-group-color {
@@ -1466,8 +1466,8 @@ td.table-placeholder {
 }
 
 .device-group-name {
-    
-    
+
+
     color: var(--text-primary);
     flex: 1;
     min-width: 0;
@@ -1477,8 +1477,8 @@ td.table-placeholder {
 }
 
 .device-group-count {
-    
-    
+
+
     color: var(--text-on-accent);
     background: var(--primary-gradient);
     border-radius: 10px;
@@ -1494,7 +1494,7 @@ td.table-placeholder {
 
 .device-group-header .btn-xxs {
     padding: 2px 5px;
-    
+
     line-height: 1;
 }
 
@@ -1523,7 +1523,7 @@ td.table-placeholder {
     gap: 6px;
     padding: 3px 4px;
     cursor: pointer;
-    
+
     border-radius: 3px;
 }
 
@@ -1538,7 +1538,7 @@ td.table-placeholder {
 
 .group-pick-off {
     color: var(--text-muted);
-    
+
 }
 
 .device-scrollable-frame {
@@ -1588,9 +1588,9 @@ td.table-placeholder {
 }
 
 .device-id {
-    
+
     color: var(--text-primary);
-    
+
     line-height: 1.4;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1599,12 +1599,12 @@ td.table-placeholder {
 
 .device-model {
     color: var(--text-secondary);
-    
+
 }
 
 .device-source {
     color: var(--text-secondary);
-    
+
     line-height: 1.4;
     max-width: 150px;
     overflow: hidden;
@@ -1615,8 +1615,8 @@ td.table-placeholder {
 .device-status {
     padding: 3px 8px;
     border-radius: 10px;
-    
-    
+
+
     background: color-mix(in srgb, var(--success-color) 20%, transparent);
     color: var(--success-color);
     display: inline-flex;
@@ -1642,7 +1642,7 @@ td.table-placeholder {
 }
 
 .lock-status {
-    
+
     color: var(--danger-color);
     margin-top: 2px;
     display: flex;
@@ -1652,7 +1652,7 @@ td.table-placeholder {
 
 .empty-message {
     color: var(--text-muted);
-    
+
     text-align: center;
     padding: 20px;
 }
@@ -1672,7 +1672,7 @@ td.table-placeholder {
     width: 75px;
     min-width: 75px;
     box-sizing: border-box;
-    
+
     box-shadow: var(--shadow-sm);
 }
 
@@ -1710,8 +1710,8 @@ td.table-placeholder {
 .vpn-status-label {
     padding: 2px 6px;
     border-radius: 4px;
-    
-    
+
+
     background: var(--darker-bg);
     color: var(--text-secondary);
     margin-left: 6px;
@@ -1777,8 +1777,8 @@ td.table-placeholder {
     padding: 12px;
     overflow-y: scroll;
     overflow-x: auto;
-    
-    
+
+
     line-height: 1.7;
     color: #e8e8f0;
     word-wrap: break-word;
@@ -1813,7 +1813,7 @@ td.table-placeholder {
     border: 1px solid var(--border-color);
     border-radius: 4px;
     color: var(--text-secondary);
-    
+
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }

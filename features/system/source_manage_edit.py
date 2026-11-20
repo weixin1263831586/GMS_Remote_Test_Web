@@ -138,7 +138,7 @@ def update_source_config(
         ))
     try:
         store = services.store_factory()
-        current = store.get(source_id)
+        current = store.get(source_id, expected_fingerprint=fingerprint)
         provider = current.get("provider")
         fields: dict[str, Any] = {
             key: req[key] for key in (
@@ -173,14 +173,14 @@ def update_source_config(
             # 切换连接目标不可把旧服务器的口令带到新服务器。
             if target_changed:
                 password = services.password_resolver(
-                    new_target[1], new_target[0], supplied_password,
+                    new_target[1], new_target[0], new_target[2], supplied_password,
                 )
                 fields["ssh_password"] = password  # 无凭据则使用 SSH key
             elif supplied_password:
                 password = supplied_password
                 fields["ssh_password"] = password
             else:
-                password = store.get_password(source_id)
+                password = store.password_from_record(current)
             if target_changed or root != current["repo_root"] or supplied_password:
                 target = f"{new_target[0]}@{new_target[1]}:{new_target[2]}"
                 probe = services.remote_probe(target, root, password)
@@ -235,5 +235,3 @@ def update_source_config(
     if not reload_ok:
         response["warning"] = source_runtime_reload_warning()
     return response
-
-

@@ -51,7 +51,16 @@ class ClusterJobLifecycleTests(unittest.TestCase):
         command = self.repo.ack_command("worker-246", command["id"], {
             "status": "completed", "result": {"worker_job_id": "wj-1"}, "error": "",
         })
+        # The job commit and the shared claim release use separate databases.
+        with (
+            patch.object(self.repo.claims, "release", side_effect=RuntimeError("interrupted")),
+            self.assertRaisesRegex(RuntimeError, "interrupted"),
+        ):
+            self.repo.sync_job_from_command(command)
+        self.assertEqual(self.repo.get_job(job["id"])["status"], "completed")
+        self.assertIsNotNone(self.repo.claims.active_claim("worker-246:ABC"))
         self.repo.sync_job_from_command(command)
+        self.assertIsNone(self.repo.claims.active_claim("worker-246:ABC"))
         finished = self.repo.get_job(job["id"])
         self.assertEqual(finished["status"], "completed")
         self.assertEqual(finished["leases"][0]["status"], "released")

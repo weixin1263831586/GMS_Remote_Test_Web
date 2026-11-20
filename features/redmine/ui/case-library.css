@@ -8,12 +8,10 @@
     .case-sig {  padding:2px 6px; border-radius:4px; background:var(--lighter-bg); color:var(--primary-light); }
     .case-title {   color:var(--text-primary); }
     .case-scope {  margin-top:2px; }
-    .case-sources {  }
     .case-actions { display:flex; gap:8px; margin-top:10px; }
     .redmine-issue-link { color:var(--primary-light);  text-decoration:none; }
     .redmine-issue-link:hover { color:var(--primary-light); text-decoration:underline; }
     #knowledgeBody .field { margin-bottom:8px; }
-    #knowledgeBody textarea {  }
     .case-view-toggle { display:inline-flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; }
     .case-view-toggle button {  padding:4px 10px; border:0; background:var(--lighter-bg); color:var(--text-secondary); cursor:pointer; border-radius:0; }
     .case-view-toggle button.active { background:var(--primary-color); color:#fff; }
@@ -31,5 +29,4 @@
     .evidence-line span { color:var(--text-secondary); }
     .detected-errors { display:inline-block; margin-top:4px; padding:2px 6px; border-radius:4px; background:#3b1f1f; color:#fecaca;  }
     .workbench-actions { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border); padding-top:10px; }
-    .workbench-actions button {  }
     @media (max-width:900px) { .workbench-grid { grid-template-columns:1fr; } .kv-line { grid-template-columns:1fr; } }

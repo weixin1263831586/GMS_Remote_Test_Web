@@ -1,8 +1,8 @@
 /* Reference dialog geometry. Controllers retain focus, stacking and visibility. */
 :root {
-  
-  
-  
+
+
+
   --tech-control-height: var(--ui-control-height);
   --tech-field-glyph-size: 28px;
   --tech-deep: var(--light-bg, #202027);
@@ -22,7 +22,7 @@
   border-radius: 16px 16px 16px 16px !important;
   overflow: hidden;
   box-shadow: 0 20px 60px rgb(0 0 0 / 42%);
-  
+
   line-height: 1.5;
   max-height: calc(100dvh - 32px);
   min-height: 0;
@@ -69,11 +69,11 @@
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close {
   flex: none; width: var(--ui-modal-close-size); min-width: var(--ui-modal-close-size); height: var(--ui-modal-close-size); min-height: var(--ui-modal-close-size);
   border: 1px solid transparent; border-radius: 6px; padding: 0;
-  background: transparent; color: var(--text-primary);  
+  background: transparent; color: var(--text-primary);
 }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close:hover { background: var(--tech-accent-soft); border-color: var(--tech-edge); }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-body {
-  min-width: 0; min-height: 0; padding: 12px 16px; background: transparent; 
+  min-width: 0; min-height: 0; padding: 12px 16px; background: transparent;
 }
 .tech-dialog .tech-intro { margin: 0 0 14px; color: var(--text-secondary);  line-height: 1.65; }
 .tech-dialog .tech-section {
@@ -93,7 +93,7 @@
 }
 .tech-dialog .tech-field-card > label:not(:has(input)) {
   margin: 0; padding: 0 0 0 10px; min-width: 90px; width: auto;
-  border-left: 1px solid var(--tech-edge); color: var(--text-primary);  
+  border-left: 1px solid var(--tech-edge); color: var(--text-primary);
 }
 .tech-dialog .tech-field-card > label::before { content: none !important; }
 .tech-dialog .tech-field-glyph {
@@ -174,7 +174,6 @@
 #tailscale-info-modal :is(.tech-footer-ticks,.tech-footer-trace) { display: none; }
 @media(max-width: 800px) {
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: var(--ui-modal-header-height); padding: 10px 14px 14px; }
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {  }
   .tech-dialog .tech-title-group { gap: 10px; }
   .tech-dialog .tech-title-glyph { width: 30px; height: 30px; }
   .tech-dialog .tech-title-glyph :is(.ui-icon,.tech-brand-icon) { width: 26px; height: 26px; }
@@ -280,13 +279,11 @@
   .tech-dialog .tech-title-glyph { width: 28px; height: 28px; }
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: var(--ui-modal-header-height-dense); padding: 8px 14px 13px; }
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head)::after { left: 16px; width: 68px; }
-  :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) {  }
   .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer,.agent-access-form-actions) { padding: 8px 14px 18px; }
 }
 @media (max-width: 480px) {
   .tech-dialog .tech-title-group { gap: 8px; }
   .tech-dialog .tech-title-divider { height: 20px; }
-  .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) {  }
 }
 @media (prefers-reduced-motion: reduce) {
   .tech-dialog .tech-frame-accent { filter: none; }
@@ -357,10 +354,6 @@
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.tech-dialog-footer) > button { position: relative; z-index: 1; }
 
 /* Text-bearing controls share one scale even when a feature uses inline sizing. */
-.tech-dialog .modal-title {  }
-.tech-dialog :is(label,input,select,textarea,button:not(.modal-close)) {
-  
-}
 
 /* Bottom modal actions always align right, regardless of feature defaults.
    The scrolling body remains a separate flex child; do not use sticky footers. */

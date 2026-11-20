@@ -8,7 +8,6 @@ import hashlib
 import re
 import sys
 from dataclasses import dataclass
-from pathlib import Path
 from urllib.parse import urldefrag, urljoin
 
 import requests
@@ -18,7 +17,6 @@ from foundation import partner_android as fetch_partner_android
 
 
 DEFAULT_INDEX_URL = 'https://docs.partner.android.com/mainline/release/release-notes?authuser=2'
-DEFAULT_DB_PATH = Path('data/mainline_known_issues.sqlite3')
 KNOWN_ISSUE_HEADING_RE = re.compile(r'^(MTS|CTS|GTS)\s+known issues\b.*:$', flags=re.IGNORECASE)
 PRODUCT_SECTIONS = ('Android', 'Android Go')
 

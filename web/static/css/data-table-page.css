@@ -37,7 +37,6 @@ a:hover { text-decoration:underline; }
 .pager { position:fixed; bottom:8px; right:12px; display:flex; align-items:center; gap:4px; background:var(--card); border:1px solid var(--border); border-radius:5px; padding:3px 6px; box-shadow:0 2px 8px rgba(0,0,0,.4); z-index:100;  }
 .pager button { width:auto; height:22px;  padding:0 8px;  border-radius:4px; }
 .pager .muted { color:var(--muted);  }
-code {   }
 @media (max-width: 900px) { .filters { grid-template-columns: 1fr 1fr; } }
 /* 手机宽度（CI E2E 390px 实测 mainline-known-issues / gms-update-monitor
    筛选控件溢出）：公共两列降为单列，控件不再撑破视口。min-width:0

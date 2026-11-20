@@ -332,9 +332,8 @@ class WorkerAgent:
                 str(attempt_id),
                 "Controller revoked the expired or superseded device claim",
             )
-        self.runtime.mark_commands_synced(
-            [str(item) for item in response.get("reconciled_command_ids", [])]
-        )
+        reconciled = set(response.get("reconciled_command_ids", []))
+        self.runtime.mark_commands_synced([state for state in command_states if state["id"] in reconciled])
 
     def _ack_command(
         self, command_id: str, status: str, result: dict | None = None, error: str = ""
@@ -355,7 +354,7 @@ class WorkerAgent:
                 if result is None
                 else self.client.ack(command_id, status, result, error)
             )
-            self.runtime.mark_command_synced(command_id)
+            self.runtime.mark_commands_synced([{"id": command_id, "status": status, "result": result, "error": error}])
             return True
         except Exception:
             logger.warning("command %s ACK delivery failed; will retry", command_id, exc_info=True)

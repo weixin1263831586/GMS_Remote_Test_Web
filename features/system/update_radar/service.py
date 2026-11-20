@@ -3,11 +3,13 @@
 import asyncio
 import logging
 import threading
+from contextlib import ExitStack
 from functools import lru_cache
 
 from features.email import send_email
 from foundation.config import settings
 from foundation.error_model import ApiError
+from foundation.process_sync import hold_sync_lock, release_sync_lock, try_acquire_sync_lock
 from foundation.redaction import redact_sensitive_text
 
 from . import scanning
@@ -26,24 +28,37 @@ class RadarService:
         self.reserve, self.release = reserve, release
         self.closing = threading.Event()
         self.worker = None
-        self._mail_lock = threading.Lock()
 
     def start_scan(self, trigger='manual', *, owner_id='', username='', now=None):
         # 停机次序第一步：禁止领取新任务（manual 返回 409，schedule 由 watch 静默跳过）。
         if self.closing.is_set():
             raise ApiError.conflict('服务正在停止，本次扫描未启动')
-        self.reserve()
-        try:
+        descriptor = try_acquire_sync_lock(self.store.scan_lock)
+        if descriptor is None:
+            raise ApiError.conflict('雷达扫描正在进行中')
+        with ExitStack() as rollback:
+            rollback.callback(release_sync_lock, descriptor)
+            self.reserve()
+            rollback.callback(self.release)
             run_id = self.store.claim(trigger, owner_id=owner_id, username=username, now=now)
             if run_id is None:
-                self.release()
                 return None
-        except Exception:
-            self.release()
-            raise
-        self.worker = threading.Thread(target=self.execute, args=(run_id,), name='gms-update-radar', daemon=True)
-        self.worker.start()
+            try:
+                self.worker = threading.Thread(target=self._run_reserved, args=(run_id, descriptor),
+                                               name='gms-update-radar', daemon=True)
+                self.worker.start()
+            except Exception:
+                self.store.finish(run_id, 'failed', {'errors': {'radar': '无法启动扫描线程'}}, [])
+                self.store.mark_email(run_id, 'failed', '扫描未启动')
+                raise
+            rollback.pop_all()  # The worker owns both reservations after start().
         return run_id
+
+    def _run_reserved(self, run_id, descriptor):
+        try:
+            self.execute(run_id)
+        finally:
+            release_sync_lock(descriptor)
 
     def execute(self, run_id):
         error = None
@@ -73,7 +88,7 @@ class RadarService:
         return build_email(run, self.store.changes(run_id, limit=50)['items'])
 
     def notify(self, run_id, *, retry=False):
-        with self._mail_lock:
+        with hold_sync_lock(self.store.mail_lock):
             run = self.store.run(run_id)
             if run['status'] == 'running':
                 raise ApiError.conflict('请等待本次扫描完成后发送汇总')

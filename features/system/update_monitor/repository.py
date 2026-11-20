@@ -3,20 +3,17 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405, E402
 import json
 import sqlite3
 from dataclasses import asdict, replace
-from pathlib import Path
 from typing import Any
 
+from .models import FetchedDocument, ParsedSource
+from .parsers import PARSERS, bulletin_content_hash
+from .parsing import matched_excerpt, reference_term_matches
 
-DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
+
 SCHEMA_VERSION = 2
-
-
-from .models import *
-from .parsers import *
 
 
 def init_db(conn: sqlite3.Connection) -> None:

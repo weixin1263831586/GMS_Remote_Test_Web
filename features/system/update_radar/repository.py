@@ -2,10 +2,12 @@
 
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import ExitStack, closing, contextmanager
 from pathlib import Path
 
 from foundation.error_model import ApiError
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
+from foundation.sqlite_schema import ensure_schema
 
 from .models import RadarConfig, next_scan, utc_now
 
@@ -45,22 +47,14 @@ SCHEMA = '''
 class RadarStore:
     def __init__(self, path: Path):
         self.path = path
-        # Schema 初始化与默认设置写入只在每个实例首次写连接时执行一次
-        # （CREATE IF NOT EXISTS + INSERT OR IGNORE 天然幂等，多进程安全），
-        # 历史查询改走只读连接，避免每次请求都重复建表检查。
-        self._schema_ready = False
+        self.scan_lock = path.with_suffix('.scan.lock')
+        self.mail_lock = path.with_suffix('.mail.lock')
 
     def _initialize(self, conn):
         with conn:
             conn.executescript(SCHEMA)
             conn.execute('INSERT OR IGNORE INTO radar_settings(id,config) VALUES(1,?)',
                          (json.dumps(RadarConfig().model_dump(mode='json')),))
-        self._schema_ready = True
-
-    def _ensure_initialized(self):
-        if not self._schema_ready:
-            with self.connect():
-                pass
 
     @contextmanager
     def connect(self):
@@ -68,21 +62,25 @@ class RadarStore:
         conn = sqlite3.connect(self.path, timeout=30)
         conn.row_factory = sqlite3.Row
         try:
-            if not self._schema_ready:
-                self._initialize(conn)
+            ensure_schema(conn, self.path, self._initialize)
             yield conn
         finally:
             conn.close()
 
+    def _initialize_for_reader(self, _reader):
+        with closing(sqlite3.connect(self.path, timeout=30)) as writer:
+            self._initialize(writer)
+
     @contextmanager
     def connect_readonly(self):
-        self._ensure_initialized()
-        conn = sqlite3.connect(f'file:{self.path}?mode=ro', uri=True, timeout=30)
-        conn.row_factory = sqlite3.Row
-        try:
-            yield conn
-        finally:
-            conn.close()
+        if not self.path.exists():
+            with self.connect():
+                pass
+        uri = self.path.resolve().as_uri() + '?mode=ro'
+        with closing(sqlite3.connect(uri, uri=True, timeout=30)) as reader:
+            reader.row_factory = sqlite3.Row
+            ensure_schema(reader, self.path, self._initialize_for_reader)
+            yield reader
 
     def settings(self):
         with self.connect() as conn:
@@ -191,7 +189,15 @@ class RadarStore:
                                'after_json': json.loads(row['after_json'])} for row in rows], 'total': total}
 
     def recover(self):
-        with self.connect() as conn, conn:
+        # A second Web process can start or stop while another is scanning or sending mail.
+        with ExitStack() as stack:
+            for path in (self.scan_lock, self.mail_lock):
+                descriptor = try_acquire_sync_lock(path)
+                if descriptor is None:
+                    return
+                stack.callback(release_sync_lock, descriptor)
+            conn = stack.enter_context(self.connect())
+            stack.enter_context(conn)
             conn.execute("""UPDATE radar_runs SET status='interrupted',finished_at=?
                 WHERE status='running'""", (utc_now().isoformat(),))
             conn.execute("""UPDATE radar_runs SET

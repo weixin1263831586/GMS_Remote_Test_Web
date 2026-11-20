@@ -48,6 +48,9 @@ class RuntimeAoaHidModesTests(RuntimeUiHarness):
                 {"sequence": 1, "event_type": "progress",
                  "payload": {"debug_sequence": 1, "phase": "completed"}}]}))
             page.route("**/api/cluster/commands/cmd-hid-debug", debug_status)
+            page.route('**/api/devices/management', lambda route: route.fulfill(json={
+                'success': True, 'devices': [{'serial_no': 'TARGET', 'worker_id': 'worker-1', 'state': 'usb_only'}],
+            }))
             self.goto_shell(page)
             page.evaluate("switchPage('devices')")
             page.evaluate("aoaViewToggle(true)")

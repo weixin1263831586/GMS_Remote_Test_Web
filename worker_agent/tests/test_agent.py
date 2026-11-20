@@ -514,8 +514,23 @@ def test_unsynced_command_result_survives_restart_until_controller_accepts_it(tm
     assert restarted.unsynced_commands() == [{
         "id": "cmd-1", "status": "completed", "result": {"count": 1}, "error": "",
     }]
-    restarted.mark_command_synced("cmd-1")
+    restarted.mark_commands_synced(restarted.unsynced_commands())
     assert restarted.unsynced_commands() == []
+
+
+def test_late_ack_preserves_unsent_terminal_result(tmp_path):
+    agent = WorkerAgent(worker_config(tmp_path))
+    agent.runtime.save_command("cmd-delay", "running")
+
+    def finish_before_response(*args):
+        agent.runtime.save_command("cmd-delay", "completed", {"count": 2})
+
+    agent.client = MagicMock()
+    agent.client.ack.side_effect = finish_before_response
+    assert agent._ack_command("cmd-delay", "running", {})
+    assert agent.runtime.unsynced_commands() == [
+        {"id": "cmd-delay", "status": "completed", "result": {"count": 2}, "error": ""},
+    ]
 
 
 def test_worker_rejects_stale_device_fencing_generation(tmp_path):
@@ -620,17 +635,26 @@ def test_completed_device_action_releases_its_fencing_generation(tmp_path):
     })
 
 
-def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path):
+@pytest.mark.parametrize("finishes_in_flight", [False, True])
+def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path, finishes_in_flight):
     agent = WorkerAgent(worker_config(tmp_path))
-    agent.runtime.save_command("cmd-1", "completed", {"worker_job_id": "wj-1"})
+    sent_status = "running" if finishes_in_flight else "completed"
+    agent.runtime.save_command("cmd-1", sent_status, {"worker_job_id": "wj-1"})
     agent.client = MagicMock()
     agent.client.session_id = "session-1"
     agent.client.connection_generation = 3
-    agent.client.heartbeat.return_value = {
+    response = {
         "success": True,
         "reconciled_command_ids": ["cmd-1"],
         "revoked_attempt_ids": ["attempt-old"],
     }
+    def reconcile(payload):
+        assert payload["command_states"][0]["status"] == sent_status
+        if finishes_in_flight:
+            agent.runtime.save_command("cmd-1", "completed", {"worker_job_id": "wj-1"})
+        return response
+
+    agent.client.heartbeat.side_effect = reconcile
     agent.suites = [{"suite_key": "CTS:17"}]
     agent.last_suite_scan = float("inf")
 
@@ -648,7 +672,11 @@ def test_heartbeat_replays_unsynced_command_state_after_reconnect(tmp_path):
     assert payload["session_id"] == "session-1"
     assert payload["connection_generation"] == 3
     assert payload["command_states"][0]["id"] == "cmd-1"
-    assert agent.runtime.unsynced_commands() == []
+    pending = agent.runtime.unsynced_commands()
+    if finishes_in_flight:
+        assert pending == [{"id": "cmd-1", "status": "completed", "result": {"worker_job_id": "wj-1"}, "error": ""}]
+    else:
+        assert pending == []
     revoke.assert_called_once()
 
 

@@ -753,7 +753,8 @@
             }
             if (pageName === 'devices') {
                 await loadDevicesManagement();
-                if (sessionStorage.getItem('gms_devices_view') === 'aoa'
+                if (currentPage === 'devices' && !aoaViewIsOpen()
+                        && sessionStorage.getItem('gms_devices_view') === 'aoa'
                         && typeof aoaViewToggle === 'function') {
                     await aoaViewToggle(true);
                 }

@@ -6,7 +6,6 @@ import re
 import sqlite3
 import subprocess
 import sys
-import threading
 from datetime import datetime
 
 from fastapi import APIRouter
@@ -14,29 +13,20 @@ from fastapi import APIRouter
 from foundation.config import settings
 from foundation.sqlite_schema import ensure_schema
 
+from ..reference_sync import update_scanner
 from .models import SOURCES
 from .repository import init_db, query_bulletin_patches
 
 
 router = APIRouter(prefix='/api/gms-update-monitor')
 page_router = APIRouter()
-DB_PATH = settings.data_root / 'gms_update_monitor.sqlite3'
+DB_PATH = update_scanner.db_path
 
 _DOWNLOAD_API = {'method': 'POST', 'path': '/api/test/suites/download-url', 'body_template': {'url': '<download_url>'}}
 _VERSION_TO_API = {'13': '33', '14': '34', '15': '35', '16': '36', '17': '37'}
 
-_sync_lock = threading.Lock()
-_sync_status = {
-    'running': False,
-    'mode': None,
-    'source': [],
-    'started_at': None,
-    'finished_at': None,
-    'returncode': None,
-    'stdout': '',
-    'stderr': '',
-    'error': None,
-}
+_sync_lock = update_scanner.lock
+_sync_status = update_scanner.status
 
 __all__ = [
     "DB_PATH",
@@ -137,20 +127,23 @@ def _enrich_artifact_item(item: dict) -> dict:
     return item
 
 
-def _run_sync_job(mode: str, source: list[str]):
+def _run_sync_job(mode: str, source: list[str], descriptor: int | None = None):
     command = [
         sys.executable,
         '-m',
         'features.system.update_monitor.cli',
         '--mode',
         mode,
-        '--verbose',
+        '--db', str(DB_PATH), '--verbose',
     ]
+    if descriptor is not None:
+        command.extend(['--sync-lock-fd', str(descriptor)])
     for item in source:
         command.extend(['--source', item])
     try:
         result = subprocess.run(
             command,
+            pass_fds=() if descriptor is None else (descriptor,),
             cwd=str(settings.project_root),
             text=True,
             capture_output=True,

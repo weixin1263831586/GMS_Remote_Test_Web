@@ -28,7 +28,7 @@ h2 { margin: 0 0 12px;  color: var(--blue); }
 .topology svg {
   display: block; width: 100%; min-width: 1040px; max-width: 1240px; height: auto; margin: 0 auto;
   grid-column: 1; grid-row: 1;
-  
+
 }
 .note { margin-top: 12px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: color-mix(in srgb, var(--amber) 6%, var(--panel));  line-height: 1.7; }
 code { color: var(--green); }
@@ -42,7 +42,7 @@ code { color: var(--green); }
 
 /* One font, role palette and line vocabulary for HTML layers and all SVG views. */
 :root {
-  
+
   --arch-access: #a78bfa;
   --arch-control: #38bdf8;
   --arch-worker: #fbbf24;
@@ -52,7 +52,6 @@ code { color: var(--green); }
   --arch-text: var(--text-primary);
   --arch-node: var(--darker-bg);
 }
-.layers-section {  }
 .layers-section .layers-intro { margin: -3px 0 12px; color: var(--muted);  line-height: 1.7; }
 .architecture-layers { margin: 0; }
 .arch-layer {
@@ -78,7 +77,6 @@ code { color: var(--green); }
   background: color-mix(in srgb, var(--layer-color) 12%, var(--panel));
   text-align: center;
 }
-.arch-layer-label strong {  }
 .arch-layer-label span {  letter-spacing: .04em; }
 .arch-layer-label small { color: var(--muted);  }
 .arch-layer-content { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 10px; min-width: 0; }

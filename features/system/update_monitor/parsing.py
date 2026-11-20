@@ -3,24 +3,17 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405, E402
 import hashlib
 import json
 import re
 from dataclasses import asdict
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
 from lxml import html
 
-
-DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 1
-
-
-from .models import *
+from .models import LinkInfo
 
 
 def utc_now() -> str:

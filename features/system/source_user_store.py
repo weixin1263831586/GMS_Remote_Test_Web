@@ -231,18 +231,24 @@ class UserSourceStore:
         with self._thread_lock, self._locked():
             return list(self._load().values())
 
-    def get(self, source_id: str) -> dict[str, Any]:
+    def get(self, source_id: str, *, expected_fingerprint: str = "") -> dict[str, Any]:
         with self._thread_lock, self._locked():
             record = self._load().get(source_id)
-        if record is None:
-            raise UserSourceStoreError(
-                f"SDK 源 '{source_id}' 未在用户注册表中", status_code=404
-            )
+            if record is None:
+                raise UserSourceStoreError(
+                    f"SDK 源 '{source_id}' 未在用户注册表中", status_code=404
+                )
+            if expected_fingerprint and record.get("config_fingerprint") != expected_fingerprint:
+                raise UserSourceStoreError("SDK 源配置已被其他操作更新，请刷新列表后重试", status_code=409)
         return dict(record)
 
     def get_password(self, source_id: str) -> str:
         """解密口令；仅 provider 构建与校验路径使用，绝不进日志/响应。"""
-        record = self.get(source_id)
+        return self.password_from_record(self.get(source_id))
+
+    @staticmethod
+    def password_from_record(record: dict[str, Any]) -> str:
+        """Decrypt the credential from the same snapshot as the SSH endpoint."""
         token = str(record.get("ssh_password_enc") or "")
         if not token:
             return ""

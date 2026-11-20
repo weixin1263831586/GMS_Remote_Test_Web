@@ -17,9 +17,11 @@ import types
 from pathlib import Path
 from types import SimpleNamespace
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _common import find_repo_root  # noqa: E402
-from _live_runtime_roots import active_disk_root_environment  # noqa: E402
+from _common import find_repo_root
+from _live_runtime_roots import active_disk_root_environment
+from scan_live_artifacts import APK_EXTENSIONS
 
 
 def _load_scanner(checkout: Path, host_root: Path, data_root: Path, upload_base: Path):
@@ -69,7 +71,7 @@ def main() -> int:
     scanned_data = physical.get(data_label)
     if not scanned_data or not scanned_data["complete"]:
         raise SystemExit("independent Controller data root scan was not complete")
-    by_category = {row["name"]: row for row in expected["categories"]}
+    category_bytes = {row["name"]: row["bytes"] for row in expected["categories"]}
     scanner = _load_scanner(checkout, home, data_root, upload_base)
     # Match the real page entry point: explicit test-root parameters suppress
     # /tmp report discovery and change how session transcripts are classified.
@@ -89,9 +91,9 @@ def main() -> int:
     # larger, but catch the old defect (1.3 vs 10.2 GiB).
     comparisons = [
         ("Controller data", summary["controller_data_bytes"], scanned_data["bytes"]),
-        ("APK analysis", rows["apk"]["bytes"], by_category["apk_uploads"]["bytes"]),
+        ("APK analysis", rows["apk"]["bytes"], category_bytes.get("apk_uploads", 0)),
         ("Redmine evidence", rows["redmine_evidence"]["bytes"],
-         by_category["redmine/by_user/*/evidence"]["bytes"]),
+         category_bytes.get("redmine/by_user/*/evidence", 0)),
         ("Local Worker jobs", rows["local_worker_jobs"]["bytes"],
          physical.get("worker-jobs", {}).get("bytes", 0)),
     ]
@@ -110,7 +112,10 @@ def main() -> int:
             {"name": label, "page_bytes": actual, "reference_bytes": reference}
             for label, actual, reference in comparisons
         ],
-        "apk_file_types": rows["apk"].get("breakdown", [])[:8],
+        "apk_file_types": [
+            entry for entry in rows["apk"].get("breakdown", [])
+            if entry["type"] in APK_EXTENSIONS or entry["type"] == "(无后缀)"
+        ][:8],
         "category_count": len(audit["items"]),
         "configuration_scope": configuration_scope,
         "custom_data_root": custom_data,

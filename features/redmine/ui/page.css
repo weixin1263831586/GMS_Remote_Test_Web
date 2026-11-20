@@ -388,7 +388,7 @@
     .daily-brief-analysis-overlay .daily-brief-modal .modal-header { padding:8px 14px; }
     .daily-brief-analysis-overlay .daily-brief-modal-body { padding:12px 16px 14px; }
     .daily-brief-analysis-overlay .daily-brief-modal-footer { padding:4px 14px; }
-    .daily-brief-analysis-overlay .daily-brief-modal-footer button { height:var(--ui-control-height-small); min-height:var(--ui-control-height-small); padding:0 8px;  }
+    .daily-brief-analysis-overlay .daily-brief-modal .daily-brief-modal-footer button:not(.modal-close) { height:var(--ui-control-height-small); min-height:var(--ui-control-height-small); padding:0 8px;  }
     .daily-brief-modal.daily-brief-statistics-modal { height:auto; max-height:min(800px,calc(100dvh - 32px)); }
     .daily-brief-modal .modal-header { flex:0 0 auto; padding:14px 20px; }
     .daily-brief-modal-title { display:flex; min-width:0; align-items:center; gap:6px; line-height:1.35; white-space:nowrap; }
@@ -493,7 +493,7 @@
         .daily-brief-analysis-overlay .daily-brief-modal .modal-header { padding:7px 10px; }
         .daily-brief-analysis-overlay .daily-brief-modal-body { padding:10px 10px 12px; }
         .daily-brief-analysis-overlay .daily-brief-modal-footer { padding:3px 10px; }
-        .daily-brief-analysis-overlay .daily-brief-modal-footer button { height:var(--ui-control-height-icon); min-height:var(--ui-control-height-icon); }
+        .daily-brief-analysis-overlay .daily-brief-modal .daily-brief-modal-footer button:not(.modal-close) { height:var(--ui-control-height-icon); min-height:var(--ui-control-height-icon); }
         .daily-brief-analysis-overlay .modal-content.daily-brief-modal { width:100%; max-width:none; height:100%; max-height:none; min-height:0; }
         .daily-brief-modal.daily-brief-statistics-modal { width:calc(100vw - 16px); height:auto; max-height:calc(100dvh - 16px); }
         .daily-brief-modal-body { padding:14px 12px 18px; }

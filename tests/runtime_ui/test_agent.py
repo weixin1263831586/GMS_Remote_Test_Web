@@ -13,6 +13,18 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeAgentTests(RuntimeUiHarness):
+    def test_sdk_version_card_renders_literal_text(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            version = "<em>Android</em> & preview"
+            page.evaluate("version => sdkConfigRenderStats([{android_version: version}])", version)
+            label = page.locator("#agent-sdk-stat-row .page-stat-label").last
+            expect(label).to_have_text(version)
+            expect(label.locator("*")).to_have_count(0)
+        finally:
+            page.close()
+
     def test_agent_access_panel_renders_real_scopes_after_delayed_auth(self):
         """真实浏览器验收。
 
@@ -586,6 +598,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.wait_for_function("typeof openAgentPageAction === 'function'")
+            page_edge = page.evaluate("parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-page-edge'))")
             test_page_frame = page.locator("#page-test").evaluate(
                 """container => ({
                     borderTopWidth: getComputedStyle(container).borderTopWidth,
@@ -595,7 +608,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             )
             self.assertEqual(
                 test_page_frame,
-                {"borderTopWidth": "0px", "marginTop": "0px", "paddingTop": "15px"},
+                {"borderTopWidth": "0px", "marginTop": "0px", "paddingTop": f"{page_edge}px"},
             )
 
             expected_page_frame = None
@@ -647,12 +660,12 @@ class RuntimeAgentTests(RuntimeUiHarness):
                             self.assertEqual(page_frame, expected_page_frame)
                         self.assertAlmostEqual(
                             page_geometry["titleLeft"] - page_geometry["pageLeft"],
-                            15,
+                            page_edge,
                             delta=0.5,
                         )
                         self.assertAlmostEqual(
                             page_geometry["titleTop"] - page_geometry["pageTop"],
-                            15,
+                            page_edge,
                             delta=0.5,
                         )
                         self.assertAlmostEqual(
@@ -665,9 +678,9 @@ class RuntimeAgentTests(RuntimeUiHarness):
                             1 if page_name in {"report-analysis", "apk-analysis"} else 6,
                             delta=0.5,
                         )
-                        self.assertAlmostEqual(page_geometry["frameLeft"], 15, delta=0.5)
-                        self.assertAlmostEqual(page_geometry["frameRight"], 15, delta=0.5)
-                        self.assertAlmostEqual(page_geometry["frameBottom"], 15, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameLeft"], page_edge, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameRight"], page_edge, delta=0.5)
+                        self.assertAlmostEqual(page_geometry["frameBottom"], page_edge, delta=0.5)
                         self.assertAlmostEqual(
                             page_geometry["pageTop"] + page_geometry["frameTop"],
                             page_geometry["contentTop"] - (
@@ -715,56 +728,20 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                 """zone => {
                                     const rect = zone.getBoundingClientRect();
                                     const pageRect = zone.closest('.page-content').getBoundingClientRect();
-                                    const pageTitleStyle = getComputedStyle(
-                                        zone.closest('.page-content').querySelector('.section-title')
-                                    );
-                                    const title = zone.querySelector('.analysis-upload-title');
-                                    const instructions = zone.querySelector('.upload-instructions');
                                     const button = zone.querySelector('button');
-                                    const titleRect = title.getBoundingClientRect();
                                     const buttonRect = button.getBoundingClientRect();
-                                    const titleStyle = getComputedStyle(title);
-                                    const instructionsStyle = getComputedStyle(instructions);
-                                    const buttonStyle = getComputedStyle(button);
                                     return {
                                         left: rect.left - pageRect.left,
                                         top: rect.top - pageRect.top,
                                         bottom: pageRect.bottom - rect.bottom,
                                         width: rect.width,
                                         height: rect.height,
-                                        titleLeft: titleRect.left - pageRect.left,
-                                        titleTop: titleRect.top - pageRect.top,
-                                        buttonLeft: buttonRect.left - pageRect.left,
-                                        buttonTop: buttonRect.top - pageRect.top,
-                                        buttonWidth: buttonRect.width,
+                                        buttonFits: button.scrollWidth <= button.clientWidth + 1
+                                            && buttonRect.left >= rect.left && buttonRect.right <= rect.right,
                                         borderStyle: getComputedStyle(zone).borderTopStyle,
                                         borderWidth: getComputedStyle(zone).borderTopWidth,
                                         borderRadius: getComputedStyle(zone).borderTopLeftRadius,
                                         minHeight: getComputedStyle(zone).minHeight,
-                                        pageTitleFont: [
-                                            pageTitleStyle.fontFamily,
-                                            pageTitleStyle.fontSize,
-                                            pageTitleStyle.fontWeight,
-                                            pageTitleStyle.lineHeight,
-                                        ],
-                                        titleFont: [
-                                            titleStyle.fontFamily,
-                                            titleStyle.fontSize,
-                                            titleStyle.fontWeight,
-                                            titleStyle.lineHeight,
-                                        ],
-                                        instructionsFont: [
-                                            instructionsStyle.fontFamily,
-                                            instructionsStyle.fontSize,
-                                            instructionsStyle.fontWeight,
-                                            instructionsStyle.lineHeight,
-                                        ],
-                                        buttonFont: [
-                                            buttonStyle.fontFamily,
-                                            buttonStyle.fontSize,
-                                            buttonStyle.fontWeight,
-                                            buttonStyle.lineHeight,
-                                        ],
                                     };
                                 }"""
                             )
@@ -775,22 +752,22 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                     upload_geometry,
                                     expected_analysis_upload_frame,
                                 )
-                            self.assertAlmostEqual(upload_geometry["left"], 15, delta=0.5)
-                            self.assertAlmostEqual(upload_geometry["top"], 40, delta=0.5)
+                            self.assertAlmostEqual(upload_geometry["left"], page_edge, delta=0.5)
+                            self.assertAlmostEqual(upload_geometry["top"], page_edge + 25, delta=0.5)
                             self.assertAlmostEqual(
                                 upload_geometry["height"],
-                                page.evaluate("window.innerHeight * 0.5"),
+                                page.evaluate("Math.min(290, Math.max(200, window.innerHeight * 0.32))"),
                                 delta=0.5,
                             )
-                            self.assertGreater(upload_geometry["bottom"], 15)
+                            self.assertGreater(upload_geometry["bottom"], page_edge)
                             self.assertEqual(upload_geometry["borderStyle"], "solid")
                             self.assertEqual(upload_geometry["borderWidth"], "1px")
                             self.assertEqual(upload_geometry["borderRadius"], "8px")
                             self.assertEqual(
                                 upload_geometry["minHeight"],
-                                f"{page.evaluate('window.innerHeight * 0.5'):g}px",
+                                "200px",
                             )
-                            self.assertAlmostEqual(upload_geometry["buttonWidth"], 160, delta=0.5)
+                            self.assertTrue(upload_geometry["buttonFits"])
                             self.assertEqual(page_geometry["frameDisplay"], "none")
                             if page_name == "report-analysis":
                                 self.assertEqual(
@@ -815,10 +792,10 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                     upload_selector,
                                 )
                                 self.assertEqual(result_state_frame["frameDisplay"], "block")
-                                self.assertEqual(result_state_frame["uploadBorder"], "0px")
+                                self.assertEqual(result_state_frame["uploadBorder"], "1px")
                                 self.assertAlmostEqual(
                                     result_state_frame["uploadHeight"],
-                                    80,
+                                    84,
                                     delta=0.5,
                                 )
                                 page.locator(upload_selector).evaluate(

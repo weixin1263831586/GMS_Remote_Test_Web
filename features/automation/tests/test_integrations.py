@@ -480,6 +480,14 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertEqual(session.calls[0][2]["params"]["cluster_job_id"], "job-1")
         self.assertEqual(session.calls[0][2]["params"]["automation_run_id"], "ats-1")
 
+    def test_cancel_without_a_correlated_cluster_job_preserves_other_tests(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        session = FakeSession()
+        executor = HttpAutomationExecutor(base_url="http://controller", session=session)
+        self.assertFalse(executor.cancel({"id": "run", "status": "testing"})["success"])
+        self.assertEqual(session.calls, [])
+
     def test_cluster_test_routes_start_poll_and_cancel_by_cluster_job_id(self):
         from features.automation.executors import HttpAutomationExecutor
 

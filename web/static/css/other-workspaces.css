@@ -103,11 +103,19 @@
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
     gap: 10px; margin-bottom: 6px;
 }
-/* At 1600px+ give the action pane enough width for ten real 12px labels
-   without reducing font size, inserting line breaks or clipping buttons. */
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+    #page-test.page-ui-rework .middle-row { grid-template-columns: minmax(0, .65fr) minmax(0, .35fr); }
+}
+@media (min-width: 1200px) and (max-width: 1299.98px) {
+    #page-test.page-ui-rework .middle-row { grid-template-columns: minmax(0, .72fr) minmax(0, .28fr); }
+}
+/* At 1600px+ the device-action pane (first column) needs ≥52.2% of the row:
+   ten 12px labeled buttons measure ~830px while the old .46fr split left the
+   toolbar at ~729px and forced a horizontal scrollbar. Give the adb frame the
+   wider .54fr share; the control pane keeps its flexible inputs. */
 @media (min-width: 1600px) {
     #page-test.page-ui-rework .middle-row {
-        grid-template-columns: minmax(0, .46fr) minmax(0, .54fr);
+        grid-template-columns: minmax(0, .54fr) minmax(0, .46fr);
     }
 }
 #page-test.page-ui-rework :is(.adb-frame, .control-frame, .log-frame) { padding: 7px 9px; }

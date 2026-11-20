@@ -128,6 +128,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #dashboard .dash-panel .dash-empty{margin:10px 13px;color:var(--muted)}
 #dashboard .dash-panel-sub{margin-left:auto;color:var(--muted)}
 #dashboard .dash-gauges-host-tabs,#dashboard .dash-trend-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:9px 13px 6px;margin:0}
+#dashboard .dash-trend-tabs{box-sizing:border-box;min-height:41px}
 #dashboard .dash-trend-btn{padding:4px 10px;border-radius:5px;min-height:26px;background:#252430;border:1px solid #3a3848;color:#c4c0d0}
 #dashboard .dash-trend-btn.active{background:#795ac6;color:#fff;border-color:#997ee9}
 #dashboard .dash-trend-btn:hover:not(.active){color:#fff;background:#323040}
@@ -261,8 +262,8 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
   display:inline-flex;
   align-items:center;
   gap:8px;
-  
-  
+
+
   color:#aaa5bc;
 }
 #tab-management .cluster-loading-message::before{
@@ -286,7 +287,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 }
 #tab-management .cluster-load-failed{
   color:#edb7a2;
-  
+
   line-height:1.6;
   padding:15px 12px;
 }
@@ -328,7 +329,7 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
   padding:4px 12px;
   white-space:nowrap;
   box-sizing:border-box;
-  
+
 }
 #cluster-toolbar #refresh[aria-busy="true"],
 #tab-management #reload-library[aria-busy="true"]{
@@ -420,3 +421,7 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
 #tab-management .worker-card-loading .cluster-skeleton-line{height:9px;margin:0}
 @media(max-width:560px){#tab-management .worker-card{height:144px}#tab-management .worker-card-grid{grid-auto-columns:max(500px,calc((100% - 16px)/3))}#tab-management .worker-card .worker-actions button{height:30px;min-height:30px}}
 @media(prefers-reduced-motion:reduce){#tab-management .worker-card{transition:none}}
+/* 任务监控表（#jobs）固定布局：七列收进 .table-wrap，长单元格省略，
+   不横向撑宽面板（表格固定布局后不再出现水平滚动条）。 */
+#tab-management .cluster-pnl:has(#jobs) .ui-table{table-layout:fixed;width:100%}
+#tab-management .cluster-pnl:has(#jobs) .ui-table :is(th,td){overflow:hidden;text-overflow:ellipsis}

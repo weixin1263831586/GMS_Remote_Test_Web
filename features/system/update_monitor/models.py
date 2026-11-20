@@ -4,13 +4,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 
 from lxml import html
-
-
-DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)

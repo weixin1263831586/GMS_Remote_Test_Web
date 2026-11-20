@@ -33,27 +33,36 @@ def make_stat() -> dict:
             "older_90d_bytes": 0}
 
 
+# Only fixed labels may reach CI logs and exported JSON.
+APK_EXTENSIONS = frozenset({".apk", ".dex", ".java", ".class", ".xml", ".so", ".jar", ".png", ".json"})
+
+_DATA_GROUPS = {
+    "uploads": {"gms_firmware_uploads", "gms_uploads"},
+    "cluster": {"artifacts", "artifact-uploads", "transfers", "firmware",
+                "jobs", "suites", "workers", "runs"},
+    "automation": {"artifact-stage"},
+    "assistant": {"agent_transcripts"},
+    "redmine": {"attachments", "docs", "evidence"},
+    "apk_uploads": set(), "reports": set(), "devices_console": set(),
+    "config_explorer_cache": set(),
+}
+
+
 def category_for(relative: tuple[str, ...], prefix: str) -> str:
     if prefix not in ("data", "custom-data"):
         return prefix
     if not relative:
         return "data 根目录"
     top = relative[0]
-    if top == "uploads" and len(relative) > 1:
-        if relative[1] in ("gms_firmware_uploads", "gms_uploads"):
-            return "uploads/" + relative[1]
-        return "uploads/其他"
-    if top in ("cluster", "automation", "redmine", "assistant") and len(relative) > 1:
-        if top == "redmine" and relative[1] == "by_user":
-            return ("redmine/by_user/*/" + relative[3]) if len(relative) >= 4 else "redmine/by_user（根）"
-        if top == "automation" and relative[1] == "artifact-stage":
-            return "automation/artifact-stage"
-        if top == "cluster":
-            return "cluster/" + (relative[1] if relative[1] in (
-                "artifacts", "artifact-uploads", "transfers", "firmware",
-                "jobs", "suites", "workers", "runs",
-            ) else "其他")
-        return top + "/" + relative[1]
+    if top not in _DATA_GROUPS:
+        return "其他"
+    if relative[0:2] == ("redmine", "by_user"):
+        if len(relative) < 4:
+            return "redmine/by_user（根）"
+        section = relative[3]
+        return "redmine/by_user/*/" + (section if section in _DATA_GROUPS[top] else "其他")
+    if len(relative) > 1 and _DATA_GROUPS[top]:
+        return top + "/" + (relative[1] if relative[1] in _DATA_GROUPS[top] else "其他")
     return top
 
 
@@ -65,7 +74,7 @@ def scan_root(root: Path, label: str, stats: dict, top_stats: dict,
         report.update(complete=False, reason="根目录是符号链接，未进入")
         return report
     try:
-        info = root.lstat()
+        root.lstat()
     except FileNotFoundError:
         return report
     except OSError:
@@ -92,9 +101,12 @@ def scan_root(root: Path, label: str, stats: dict, top_stats: dict,
             record = stats[category]
             record["files"] += 1
             record["bytes"] += st.st_size
-            root_bucket = top_stats[label + "/" + (rel[0] if label == "data" and rel else "(all)")]
-            if label == "data" and rel and rel[0] == "apk_uploads":
-                suffix = path.suffix.lower()[:20] or "(无后缀)"
+            bucket = category_for(rel[:1], label) if label in ("data", "custom-data") else "(all)"
+            root_bucket = top_stats[label + "/" + bucket]
+            if label in ("data", "custom-data") and rel and rel[0] == "apk_uploads":
+                suffix = path.suffix.lower()
+                if suffix not in APK_EXTENSIONS:
+                    suffix = "其他" if suffix else "(无后缀)"
                 extensions[suffix]["bytes"] += st.st_size
                 extensions[suffix]["files"] += 1
             root_bucket["files"] += 1
@@ -112,7 +124,7 @@ def scan_root(root: Path, label: str, stats: dict, top_stats: dict,
                     for entry in handle:
                         if entry.is_symlink():
                             continue
-                        stack.append((Path(entry.path), rel + (entry.name,)))
+                        stack.append((Path(entry.path), (*rel, entry.name)))
                         if len(stack) > 500_000:
                             report.update(complete=False, reason="遍历队列上限")
                             break
@@ -175,7 +187,7 @@ def main() -> int:
     except OSError:
         matches = []
     # Avoid unbounded roots and filenames in the public log.
-    for index, path in enumerate(matches[:100]):
+    for path in matches[:100]:
         roots.append(("tmp-report-export", path))
     result_roots = []
     unique = set()

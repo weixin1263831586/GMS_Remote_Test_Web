@@ -7,7 +7,7 @@
     justify-content: flex-end;
     gap: 0;
     /* 全站页头动作区统一 11px 字号（tests/runtime_ui/test_workspaces.py 契约）。 */
-    
+
     color: var(--text-secondary);
 }
 
@@ -17,7 +17,7 @@
     min-height: var(--ui-control-height-small);
     height: var(--ui-control-height-small);
     padding: 3px 8px;
-    
+
 }
 
 #apk-task-history-refresh {
@@ -81,21 +81,21 @@
     gap: 8px;
     width: 100%;
     color: var(--text-secondary);
-    
-    
+
+
     line-height: 1.6;
 }
 #page-report-analysis > .section-title {
-    
-    
-    
+
+
+
     line-height: 1.6;
 }
 .report-upload-content > div:first-child,
 .apk-upload-content > div:first-child {
     flex: 0 0 28px;
     width: 28px;
-    
+
     opacity: 0.8;
     text-align: center;
     align-self: center;
@@ -116,18 +116,18 @@
 }
 .analysis-upload-title {
     height: 22px;
-    
-    
-    
+
+
+
     line-height: 22px;
     white-space: nowrap;
 }
 .analysis-upload-copy .upload-instructions {
     margin-top: 4px;
     color: var(--text-secondary);
-    
-    
-    
+
+
+
     line-height: 1.6;
 }
 .report-upload-content button,
@@ -137,8 +137,8 @@
     margin-left: 6px;
     align-self: center;
     padding: 10px 20px;
-    
-    
+
+
     line-height: 1.6;
 }
 /* 收起态：隐藏多行说明。 */
@@ -154,7 +154,7 @@
 .report-upload-zone:not(.upload-empty) button,
 .apk-upload-zone:not(.upload-empty) button {
     padding: 6px 12px;
-    
+
 }
 /* 上传进度条：默认隐藏，上传期间由 JS 拉起。 */
 .report-upload-progress,
@@ -189,8 +189,8 @@
     margin-bottom: 10px;
 }
 #apk-analysis-status .section-title {
-    
-    
+
+
     margin-bottom: 12px;
 }
 
@@ -236,8 +236,8 @@
     border: 1px solid var(--border-color);
     background: var(--light-bg);
     color: var(--text-secondary);
-    
-    
+
+
     cursor: pointer;
     transition: all 0.2s ease;
 }
@@ -287,21 +287,21 @@
     margin-bottom: 0;
 }
 .apk-manifest-label {
-    
+
     color: var(--text-secondary);
     display: flex;
     align-items: center;
     gap: 4px;
-    
+
     justify-content: flex-start;
     white-space: nowrap;
 }
 .apk-manifest-value {
-    
-    
+
+
     color: var(--text-primary);
     word-break: break-all;
-    
+
     text-align: left;
     min-width: 0;
 }
@@ -313,7 +313,7 @@
     align-items: center;
     padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
-    
+
     transition: background 0.15s ease;
 }
 .apk-permission-item:hover {
@@ -327,13 +327,13 @@
     min-width: 30px;
 }
 .apk-perm-name {
-    
-    
+
+
     word-break: break-all;
 }
 .apk-perm-short {
     color: var(--text-secondary);
-    
+
     white-space: nowrap;
     margin-left: 10px;
 }
@@ -352,7 +352,7 @@
     cursor: pointer;
     border-radius: 6px;
     transition: all 0.15s ease;
-    
+
 }
 .apk-tree-item:hover {
     background: var(--lighter-bg);
@@ -360,18 +360,18 @@
 }
 .apk-tree-item.dir {
     color: var(--warning-color);
-    
+
 }
 .apk-tree-item.dir::before {
     content: '📁';
-    
+
 }
 .apk-tree-item.file {
     color: var(--text-secondary);
 }
 .apk-tree-item.file::before {
     content: '📄';
-    
+
 }
 .apk-tree-item.file:hover {
     color: var(--text-primary);
@@ -390,8 +390,8 @@
     animation: fadeIn 0.2s ease;
 }
 .apk-file-path {
-    
-    
+
+
     color: var(--text-secondary);
     padding: 4px 8px;
     background: var(--darker-bg);
@@ -407,8 +407,8 @@
     padding: 15px;
     border-radius: 6px;
     background: var(--darker-bg);
-    
-    
+
+
     line-height: 1.5;
     color: var(--text-secondary);
     white-space: pre;
@@ -491,8 +491,8 @@ body.apk-resizing {
 }
 
 .apk-source-tree {
-    
-    
+
+
     height: 100%;
     min-height: 0;
     overflow-y: auto;
@@ -533,7 +533,7 @@ body.apk-resizing {
     border-radius: 6px 6px 0 0;
     background: var(--darker-bg);
     color: var(--text-secondary);
-    
+
     cursor: pointer;
     white-space: nowrap;
 }
@@ -569,7 +569,7 @@ body.apk-resizing {
     padding: 8px 12px;
     cursor: pointer;
     border-bottom: 1px solid var(--border-color);
-    
+
     transition: background-color 0.15s ease;
 }
 
@@ -585,7 +585,7 @@ body.apk-resizing {
 
 .apk-search-result-path {
     color: var(--text-secondary);
-    
+
     margin-left: 8px;
 }
 
@@ -595,7 +595,7 @@ body.apk-resizing {
     align-items: center;
     gap: 8px;
     padding: 4px 0;
-    
+
     color: var(--text-secondary);
 }
 
@@ -613,7 +613,7 @@ body.apk-resizing {
 .redmine-file-remove {
     cursor: pointer;
     color: var(--danger-color);
-    
+
 }
 
 .redmine-drop-zone.drag-over {
@@ -629,7 +629,7 @@ body.apk-resizing {
     border-radius: 4px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    
+
 }
 
 .apk-search-input:focus {
@@ -689,7 +689,7 @@ body.apk-resizing {
     margin: auto;
     max-width: 560px;
     color: var(--text-secondary);
-    
+
     line-height: 1.7;
     text-align: center;
     padding: 22px;
@@ -752,8 +752,8 @@ body.apk-resizing {
 }
 
 .agent-role {
-    
-    
+
+
     color: var(--text-secondary);
 }
 
@@ -762,16 +762,16 @@ body.apk-resizing {
 }
 
 .agent-time {
-    
+
     color: var(--text-muted);
-    
+
     white-space: nowrap;
 }
 
 .agent-message-body {
     padding: 10px 12px;
     color: var(--text-primary);
-    
+
     line-height: 1.55;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
@@ -794,20 +794,20 @@ body.apk-resizing {
 
 .agent-plan-key {
     color: var(--text-muted);
-    
+
 }
 
 .agent-plan-value {
     color: var(--text-primary);
-    
-    
+
+
     word-break: break-word;
 }
 
 .agent-plan-note {
     margin-top: 10px;
     color: var(--warning-color);
-    
+
 }
 
 .agent-question {
@@ -820,14 +820,14 @@ body.apk-resizing {
 .agent-question-field {
     display: grid;
     gap: 4px;
-    
+
 }
 
 .agent-question-field select,
 .agent-question-field input {
     width: 100%;
     min-width: 0;
-    
+
 }
 
 /* Agent 步骤面板：ATS Run 实时进展条（阶段模型与 ATS 页一致） */
@@ -837,7 +837,7 @@ body.apk-resizing {
 
 .agent-run-progress-empty {
     color: var(--text-secondary);
-    
+
 }
 
 .agent-run-progress-head {
@@ -849,13 +849,13 @@ body.apk-resizing {
 }
 
 .agent-run-stage-label {
-    
-    
+
+
     color: var(--text-primary);
 }
 
 .agent-run-stage-time {
-    
+
     color: var(--text-secondary);
 }
 
@@ -906,7 +906,7 @@ body.apk-resizing {
 .agent-typing {
     align-self: flex-start;
     color: var(--text-secondary);
-    
+
     padding: 7px 12px;
     opacity: 0.82;
     border: 1px solid var(--border-color);
@@ -926,15 +926,15 @@ body.apk-resizing {
 }
 
 .agent-run-title {
-    
-    
+
+
     white-space: nowrap;
 }
 
 #agent-status {
     flex: 0 0 auto;
     color: var(--text-secondary);
-    
+
     white-space: nowrap;
 }
 
@@ -945,7 +945,7 @@ body.apk-resizing {
     text-overflow: ellipsis;
     white-space: nowrap;
     color: var(--text-muted);
-    
+
 }
 
 /* 对话引擎状态着色：与模型状态同一套语义色。 */
@@ -965,7 +965,7 @@ body.apk-resizing {
     align-items: center;
     gap: 6px;
     color: var(--text-muted);
-    
+
 }
 
 #agent-model-status {
@@ -986,7 +986,7 @@ body.apk-resizing {
     min-width: 44px;
     min-height: 24px;
     padding: 2px 7px;
-    
+
 }
 
 /* ==================== 用户与 Agent 接入管理 ==================== */
@@ -1086,7 +1086,7 @@ body.apk-resizing {
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
     background: var(--darker-bg);
-    
+
     text-align: center;
 }
 
@@ -1202,8 +1202,8 @@ body.apk-resizing {
     border: 0;
     background: transparent;
     color: var(--text-primary);
-    
-    
+
+
     line-height: 1.6;
     resize: none;
 }
@@ -1213,7 +1213,7 @@ body.apk-resizing {
     overflow: auto;
     border-top: 1px solid var(--border-color);
     color: var(--text-secondary);
-    
+
 }
 .api-toolbar { margin-bottom: 10px; }
 #api-search-input {
@@ -1224,7 +1224,7 @@ body.apk-resizing {
     border-radius: 6px;
     background: var(--darker-bg);
     color: var(--text-primary);
-    
+
 }
 .api-filter-row {
     display: flex;
@@ -1289,13 +1289,13 @@ body.apk-resizing {
     }
 
     .sidebar-brand {
-        
+
         letter-spacing: 0;
     }
 
     .sidebar-brand::after {
         content: "GMS";
-        
+
         letter-spacing: 0.4px;
     }
 
@@ -1491,7 +1491,7 @@ body.apk-resizing {
 .emoji-opt {
     background: transparent;
     border: none;
-    
+
     cursor: pointer;
     padding: 2px 3px;
     border-radius: 3px;

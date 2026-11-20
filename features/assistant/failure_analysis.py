@@ -78,7 +78,7 @@ async def _analyze_saved_report(
     session: dict[str, Any], report_timestamp: str, request: Any = None
 ) -> dict[str, Any] | None:
     """Analyze a saved report and append an Agent step."""
-    from features.reports import test_report_manager
+    from features.reports import ReportScanIncompleteError, test_report_manager
 
     _append_step(session, "报告分析", "running", f"正在分析报告 {report_timestamp}")
     try:
@@ -113,6 +113,9 @@ async def _analyze_saved_report(
         detail = f"总计 {summary.get('total', 0)}，通过 {summary.get('pass', 0)}，失败 {summary.get('fail', summary.get('failed', 0))}"
         _append_step(session, "报告分析", "done", detail, {"report_analysis": analysis})
         return analysis
+    except ReportScanIncompleteError as exc:
+        _append_step(session, "报告分析", "warning", str(exc))
+        return None
     except Exception:
         message = record_internal_error(logger, "报告分析", "[Agent] report analysis failed")
         _append_step(session, "报告分析失败", "error", message)

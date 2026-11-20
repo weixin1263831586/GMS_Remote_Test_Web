@@ -30,16 +30,11 @@
 #devices-main-view .device-management-table .ui-stack > * { min-width: 0; max-width: 100%; }
 #devices-main-view .device-management-table .ui-status { flex: none; gap: 4px; padding: 3px 6px; }
 #devices-main-view .device-management-table .inventory-host { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#devices-main-view .device-management-table .ui-name {  }
-#devices-main-view .device-management-table .ui-meta {  }
-#devices-main-view .device-management-table [data-device-field="model"] .ui-name {   }
-#devices-main-view .device-management-table [data-device-field="soc"] .ui-name {   }
 .inventory-device { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .inventory-device > .ui-icon { flex: none; width: 16px; height: 18px; color: var(--text-secondary); }
 .inventory-device > .ui-stack { min-width: 0; flex: 1; }
 .inventory-select-cell { text-align: center !important; }
 #devices-main-view input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--primary-color); cursor: pointer; }
-#devices-main-view .device-sort {  }
 #devices-main-view .device-row-actions { gap: 4px; }
 #devices-main-view .device-row-actions .btn-xxs { flex: none; width: auto; min-height: var(--ui-control-height-dense); max-height: none; padding: 3px 5px;  }
 #devices-main-view .device-row-actions .btn-xxs > .ui-icon { margin-right: 3px; }

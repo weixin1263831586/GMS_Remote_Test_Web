@@ -312,7 +312,7 @@ async function performUsbipDisconnect(selections) {
                                 && !device.worker_id
                             )
                         ))
-                        .map(device => String(device.serial || device.device_id || '').split(':').pop())
+                        .map(device => serialForWorker(device.serial || device.device_id, workerId))
                 );
                 workerBaselines.set(workerId, serials);
             }
@@ -414,7 +414,7 @@ async function refreshUsbipDetachedWorkers(
             try {
                 const devices = await fetchDevicesForWorker(workerId, true);
                 const visible = new Set(
-                    (devices || []).map(device => String(device.serial || device.device_id || '').split(':').pop())
+                    (devices || []).map(device => serialForWorker(device.serial || device.device_id, workerId))
                 );
                 const expected = expectedUsbipSerials.get(workerId) || new Set();
                 const usbipVisible = new Set(
@@ -424,7 +424,7 @@ async function refreshUsbipDetachedWorkers(
                             || device.is_usbip === true
                             || device.properties?.is_usbip === true
                         ))
-                        .map(device => String(device.serial || device.device_id || '').split(':').pop())
+                        .map(device => serialForWorker(device.serial || device.device_id, workerId))
                 );
                 if (
                     (expected.size && ![...expected].some(serial => usbipVisible.has(serial)))
@@ -935,7 +935,7 @@ async function refreshUsbipTargetWorker(
             if (operationGeneration !== usbipOperationGeneration) return;
             const visible = new Set(
                 state.devices.map(device => (
-                    String(device.serial || device.device_id || '').split(':').pop()
+                    serialForWorker(device.serial || device.device_id, workerId)
                 ))
             );
             const discoveredSerials = expectedSerials.length

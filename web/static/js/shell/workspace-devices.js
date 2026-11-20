@@ -1,3 +1,9 @@
+function serialForWorker(value, workerId) {
+    const serial = String(value || '');
+    const prefix = `${workerId}:`;
+    return workerId && serial.startsWith(prefix) ? serial.slice(prefix.length) : serial;
+}
+
 // Cluster workspace, device inventory, and suite selection extracted from navigation.js.
 // ==================== Device Management ====================
 let _loadClusterWorkersInFlight = null;

@@ -545,6 +545,7 @@ class ClusterCommandRepositoryMixin:
     ) -> dict[str, Any] | None:
         now = _utc_now()
         with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             current = conn.execute(
                 "SELECT * FROM cluster_commands WHERE id=? AND worker_id=?",
                 (command_id, worker_id),
@@ -668,6 +669,7 @@ class ClusterCommandRepositoryMixin:
         now = _utc_now()
         release_claim = False
         with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
             job = conn.execute(
                 "SELECT current_attempt_id FROM cluster_jobs WHERE id=?", (job_id,)
             ).fetchone()
@@ -689,7 +691,7 @@ class ClusterCommandRepositoryMixin:
                 )
                 return
             try:
-                transitioned = self._transition_job_conn(
+                self._transition_job_conn(
                     conn,
                     job_id,
                     job_status,
@@ -706,16 +708,16 @@ class ClusterCommandRepositoryMixin:
             except InvalidJobTransitionError:
                 return
             worker_job_id = result.get("worker_job_id", "")
-            conn.execute("""UPDATE cluster_job_attempts SET status=?,worker_job_id=?,
+            conn.execute("""UPDATE cluster_job_attempts SET status=?,worker_job_id=COALESCE(NULLIF(?,''),worker_job_id),
                 result_json=?,error=?,
-                started_at=CASE WHEN ?='running' THEN ? ELSE started_at END,
-                finished_at=CASE WHEN ? IN ('completed','failed','cancelled')
+                started_at=CASE WHEN ?='running' AND started_at='' THEN ? ELSE started_at END,
+                finished_at=CASE WHEN ? IN ('completed','failed','cancelled') AND finished_at=''
                     THEN ? ELSE finished_at END WHERE id=?""", (
                 status, worker_job_id, json.dumps(result, separators=(",", ":")),
                 command.get("error", ""), status, now, status, now,
                 job["current_attempt_id"],
             ))
-            if transitioned and status in {"completed", "failed", "cancelled"}:
+            if status in {"completed", "failed", "cancelled"}:
                 release_claim = True
                 leases = conn.execute(
                     """SELECT device_id FROM device_leases

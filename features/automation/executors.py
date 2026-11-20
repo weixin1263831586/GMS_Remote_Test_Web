@@ -583,17 +583,18 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
         from features.cluster import get_cluster_service
 
         repository = get_cluster_service().repository
+        run_id = str(run.get("id") or "")
+        reservation = repository.get_reservation(reservation_id)
+        if not run_id or not reservation or reservation.get("source_id") != run_id:
+            return {"success": False, "error": "无法确认设备预约属于当前 Run，已保留占用"}
         if run.get("status") == "completed":
-            reservation = repository.get_reservation(reservation_id)
-            if not reservation or reservation.get("source_id") != run["id"]:
-                return {"success": False, "error": "无法确认设备预约属于当前 Run，已保留占用"}
             for command_id in {run.get("flash_command_id"), run.get("aoa_command_id")} - {None, ""}:
                 command = repository.get_command(command_id)
                 if not command or command.get("status") not in {"completed", "failed", "cancelled"}:
                     return {"success": False, "error": "关联设备命令尚未确认结束，已保留预约"}
-            released = repository.release_reservation(reservation_id, "released", expected_source_id=run["id"])
+            released = repository.release_reservation(reservation_id, "released", expected_source_id=run_id)
         else:
-            released = repository.release_reservation(reservation_id, "cancelled")
+            released = repository.release_reservation(reservation_id, "cancelled", expected_source_id=run_id)
         return {"success": True, "released": released}
 
     def flash(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -1067,13 +1068,16 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
             cluster_job_id = str(
                 run.get("cluster_job_id") or _run_result(run).get("cluster_job_id") or ""
             )
-            endpoint = f"/api/cluster/jobs/{cluster_job_id}/cancel" if cluster_job_id else "/api/test/stop"
+            if not cluster_job_id:
+                return {"success": False, "error": "Automation run has no correlated Cluster Job to cancel"}
             response = self.session.post(
-                self._url(endpoint), headers=self._auth_headers(run), timeout=30
+                self._url(f"/api/cluster/jobs/{cluster_job_id}/cancel"), headers=self._auth_headers(run), timeout=30
             )
             result = self._json_response(response)
             if result.get("success"):
-                self.release_resources(run)
+                cleanup = self.release_resources(run)
+                if not cleanup["success"]:
+                    return cleanup
             return result
         if status in {"jenkins_queued", "jenkins_building"}:
             try:
@@ -1104,7 +1108,9 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                         return result
             except Exception as exc:
                 return {"success": False, "error": f"failed to cancel build: {exc}"}
-        self.release_resources(run)
+        cleanup = self.release_resources(run)
+        if not cleanup["success"]:
+            return cleanup
         return {"success": True, "cancelled": True}
 
     def collect_report(self, run: dict[str, Any]) -> dict[str, Any]:

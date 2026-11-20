@@ -16,26 +16,15 @@ from foundation.config import settings
 from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
 from foundation.sqlite_schema import ensure_schema
 
+from ..reference_sync import initial_sync_status, mainline_scanner
 from .repository import escape_like, init_db
 
 
 router = APIRouter()
-DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
-_sync_lock = threading.Lock()
+DB_PATH = mainline_scanner.db_path
+_sync_lock = mainline_scanner.lock
+_sync_status = mainline_scanner.status
 _SYNC_FILE_LOCK = DB_PATH.with_suffix('.sync.lock')
-
-
-def _initial_sync_status(**overrides):
-    base = {
-        'running': False, 'mode': None, 'started_at': None,
-        'finished_at': None, 'returncode': None, 'stdout': '',
-        'stderr': '', 'error': None,
-    }
-    base.update(overrides)
-    return base
-
-
-_sync_status = _initial_sync_status()
 
 
 def _connect_db() -> sqlite3.Connection:
@@ -50,31 +39,28 @@ def _connect_db() -> sqlite3.Connection:
     return conn
 
 
-def _db_exists_response():
-    _connect_db().close()
-    return None
-
-
-def _run_sync_job(mode: str):
-    global _sync_status
+def _run_sync_job(mode: str, descriptor: int | None = None):
     command = [
         sys.executable,
         '-m',
         'features.system.mainline_issues.cli',
-        '--verbose',
+        '--db', str(DB_PATH), '--verbose',
     ]
+    if descriptor is not None:
+        command.extend(['--sync-lock-fd', str(descriptor)])
     if mode == 'full':
         command.append('--force')
     elif mode == 'incremental':
         command.append('--new-only')
 
     with _sync_lock:
-        _sync_status.update(_initial_sync_status(
+        _sync_status.update(initial_sync_status(
             running=True, mode=mode, started_at=datetime.now().isoformat(),
         ))
     try:
         result = subprocess.run(
             command,
+            pass_fds=() if descriptor is None else (descriptor,),
             cwd=str(settings.project_root),
             text=True,
             capture_output=True,
@@ -82,7 +68,7 @@ def _run_sync_job(mode: str):
             check=False,
         )
         with _sync_lock:
-            _sync_status.update(_initial_sync_status(
+            _sync_status.update(initial_sync_status(
                 running=False, finished_at=datetime.now().isoformat(),
                 returncode=result.returncode,
                 stdout=result.stdout[-4000:], stderr=result.stderr[-4000:],
@@ -90,7 +76,7 @@ def _run_sync_job(mode: str):
             ))
     except Exception as exc:
         with _sync_lock:
-            _sync_status.update(_initial_sync_status(
+            _sync_status.update(initial_sync_status(
                 running=False, finished_at=datetime.now().isoformat(),
                 returncode=None, error=str(exc),
             ))
@@ -98,7 +84,7 @@ def _run_sync_job(mode: str):
 
 def _run_locked_sync_job(mode: str, descriptor: int) -> None:
     try:
-        _run_sync_job(mode)
+        _run_sync_job(mode, descriptor)
     finally:
         release_sync_lock(descriptor)
 
@@ -120,7 +106,7 @@ async def start_mainline_known_issues_sync(
                 status_code=409,
                 content={'success': False, 'error': 'sync already running'},
             )
-        _sync_status.update(_initial_sync_status(
+        _sync_status.update(initial_sync_status(
             running=True, mode=mode, started_at=datetime.now().isoformat(),
         ))
         thread = threading.Thread(target=_run_locked_sync_job, args=(mode, descriptor), daemon=True)
@@ -159,9 +145,6 @@ async def list_mainline_known_issues(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    missing = _db_exists_response()
-    if missing:
-        return missing
 
     where = []
     params: list[str | int] = []
@@ -228,9 +211,6 @@ async def list_mainline_known_issues(
 
 @router.get('/api/mainline-known-issues/summary')
 async def mainline_known_issues_summary():
-    missing = _db_exists_response()
-    if missing:
-        return missing
     with _connect_db() as conn:
         total = conn.execute('SELECT COUNT(*) FROM mainline_known_issues').fetchone()[0]
         patch_total = conn.execute('SELECT COUNT(*) FROM mainline_security_patches').fetchone()[0]
@@ -273,9 +253,6 @@ async def list_mainline_security_patches(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    missing = _db_exists_response()
-    if missing:
-        return missing
     where = []
     params: list[str | int] = []
     if q:

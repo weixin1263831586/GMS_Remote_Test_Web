@@ -21,8 +21,8 @@ body {
     margin: 0;
     background: var(--page-background);
     color: var(--text);
-    
-    
+
+
     overflow: hidden;
 }
 .ats-shell {
@@ -45,7 +45,7 @@ body {
     border-radius: 4px;
     padding: 6px 10px;
     cursor: pointer;
-    
+
     list-style: none;
 }
 .ats-more-btn::-webkit-details-marker { display: none; }
@@ -74,7 +74,7 @@ body {
     padding: 4px 9px;
     border-radius: 999px;
     border: 1px solid var(--line);
-    
+
     color: var(--muted);
     cursor: help;
 }
@@ -96,7 +96,7 @@ button {
     border-radius: 4px;
     padding: 6px 10px;
     cursor: pointer;
-    
+
 }
 button:hover { border-color: var(--primary); color: #fff; }
 button.primary { background:var(--primary-gradient); border-color: var(--primary); }
@@ -163,7 +163,7 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     padding: 10px 12px;
     border-bottom: 1px solid var(--line);
     background: var(--panel-2);
-    
+
 }
 .guided-header { justify-content: flex-start; }
 .build-panel-header { justify-content: space-between; }
@@ -193,7 +193,7 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     background: color-mix(in srgb, var(--primary-color) 14%, transparent);
     border: 1px solid color-mix(in srgb, var(--primary-color) 42%, transparent);
     color: var(--primary-hover);
-    
+
 }
 .step-index.done {
     background: rgb(72 199 142 / 14%);
@@ -204,8 +204,8 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
 .panel-description {
     margin-top: 2px;
     color: var(--subtle);
-    
-    
+
+
 }
 .panel-body { padding: 12px; flex: 1 1 auto; min-height: 0; overflow: hidden; }
 .compact-stack {
@@ -223,7 +223,7 @@ input, select, textarea {
     color: var(--text);
     border-radius: 5px;
     padding: 7px 9px;
-    
+
 }
 input:disabled, select:disabled, button:disabled {
     cursor: not-allowed;
@@ -232,7 +232,7 @@ input:disabled, select:disabled, button:disabled {
 .field-hint,
 .field-status {
     color: var(--subtle);
-    
+
     line-height: 1.35;
 }
 .field-status.loading { color: var(--primary-hover); }
@@ -247,7 +247,7 @@ input:disabled, select:disabled, button:disabled {
     gap: 10px;
     padding-top: 2px;
     color: var(--text);
-    
+
 }
 .build-config-heading span { color: var(--subtle);  }
 .build-config-fields {
@@ -364,7 +364,7 @@ textarea { min-height: 76px; resize: vertical;  }
 .log-actions { display: flex; align-items: center; gap: 8px; }
 .create-run-button {
     min-height: var(--ui-control-height-large);
-    
+
 }
 .launch-panel-header { justify-content: flex-start; }
 .launch-body {
@@ -419,7 +419,7 @@ textarea { min-height: 76px; resize: vertical;  }
     color: var(--muted);
     text-align: center;
     padding: 48px 12px;
-    
+
 }
 .build-monitor-body {
     display: grid;
@@ -439,8 +439,8 @@ textarea { min-height: 76px; resize: vertical;  }
 .section-label {
     margin-bottom: 8px;
     color: var(--muted);
-    
-    
+
+
 }
 .build-log-pane { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .build-log-toolbar {
@@ -456,7 +456,7 @@ textarea { min-height: 76px; resize: vertical;  }
     width: min(220px, 28vw);
     min-width: 140px;
     padding-block: 5px;
-    
+
 }
 .log-level { width: auto; min-width: 105px; padding-block: 5px; }
 .log-view {
@@ -472,8 +472,8 @@ textarea { min-height: 76px; resize: vertical;  }
     color: var(--text);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    
-    
+
+
     line-height: 1.5;
     overscroll-behavior: contain;
     scrollbar-gutter: stable;
@@ -580,7 +580,7 @@ textarea { min-height: 76px; resize: vertical;  }
 .field-label {
     margin-bottom: 3px;
     color: var(--muted);
-    
+
 }
 .run-value {
     min-width: 0;
@@ -599,7 +599,7 @@ textarea { min-height: 76px; resize: vertical;  }
     border: 1px solid var(--line);
     color: var(--text);
     white-space: nowrap;
-    
+
 }
 .badge.completed { color: var(--ok); border-color: var(--ok); }
 .badge.failed, .badge.jenkins_failed, .badge.flash_failed, .badge.test_failed { color: var(--danger); border-color: var(--danger); }
@@ -610,8 +610,8 @@ textarea { min-height: 76px; resize: vertical;  }
     overflow: auto;
     padding: 10px 12px;
     background: var(--darker-bg);
-    
-    
+
+
     scrollbar-gutter: stable;
 }
 .log-console { color: var(--text); }
@@ -641,7 +641,7 @@ textarea { min-height: 76px; resize: vertical;  }
     border-radius: 4px;
     background: var(--panel-3);
     color: var(--primary-hover);
-    
+
     text-decoration: none;
 }
 #run-log-links button:hover,
@@ -712,8 +712,8 @@ textarea { min-height: 76px; resize: vertical;  }
     gap: 4px;
 }
 .stat-card .stat-value {
-    
-    
+
+
     line-height: 1.1;
 }
 .stat-card .stat-label { color: var(--muted);  }
@@ -820,7 +820,7 @@ textarea { min-height: 76px; resize: vertical;  }
 }
 .trace-section { display: flex; flex-direction: column; gap: 6px; }
 .trace-section-title {
-    
+
     color: var(--subtle);
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -847,7 +847,7 @@ body.overlay-open { overflow: hidden; }
 .profile-dryrun summary {
     cursor: pointer;
     color: var(--muted);
-    
+
 }
 .profile-dryrun .compact-stack { margin-top: 8px; gap: 6px; }
 #dryrun-result {  white-space: pre-wrap; word-break: break-word; }

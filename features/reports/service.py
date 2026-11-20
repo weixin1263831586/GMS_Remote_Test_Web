@@ -11,7 +11,7 @@ import os
 import re
 from typing import Any
 
-from .analysis_agent import ReportAnalysisAgent
+from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 from .analyzer import HostLogParser
 from .display import report_display_name, tradefed_result_folder_name
 from .repository import test_report_db
@@ -243,6 +243,8 @@ class TestReportManager:
                         logger.error(f"Error reading device log: {e}")
 
             return analysis
+        except ReportScanIncompleteError:
+            raise
         except Exception as e:
             logger.error(f"Error analyzing report: {e}")
             return None

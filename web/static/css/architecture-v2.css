@@ -86,7 +86,6 @@
 }
 .architecture-v2 .arch-v2-node--access{--node-edge:#a976f3;--node-bg:#2b2046;left:24px;top:92px;width:216px;min-height:194px}
 .architecture-v2 .arch-v2-node--controller{--node-edge:#568aff;--node-bg:#242c61;left:388px;top:106px;width:347px;min-height:212px}
-.architecture-v2 .arch-v2-node--controller header{}
 .architecture-v2 .arch-v2-node--controller .arch-v2-node-grid span{min-height:33px}
 .architecture-v2 .arch-v2-node--worker{--node-edge:#4fbafa;--node-bg:#173452;left:872px;top:87px;width:220px;min-height:233px}
 .architecture-v2 .arch-v2-node--external{--node-edge:#a183db;--node-bg:#292140;left:24px;top:376px;width:243px;min-height:142px}

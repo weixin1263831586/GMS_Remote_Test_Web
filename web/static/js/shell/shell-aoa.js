@@ -207,7 +207,7 @@ function aoaDeviceWorker(device) {
 }
 
 function aoaDeviceSerial(device) {
-    return String(device?.serial_no || device?.serial || '').split(':').pop();
+    return serialForWorker(device?.serial_no || device?.serial, aoaDeviceWorker(device));
 }
 
 function aoaDeviceLabel(device) {

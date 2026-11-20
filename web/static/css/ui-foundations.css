@@ -42,9 +42,9 @@
   height: 1.25em;
   margin-right: 4px;
   vertical-align: -0.16em;
-  
+
   line-height: 1;
-  
+
 }
 #page-test button:disabled > .test-action-icon { opacity: .55; }
 /* Original text power glyph stays unchanged; only its color is highlighted.
@@ -52,8 +52,8 @@
 #page-test .adb-button-frame .reboot-icon {
   display: inline-block;
   color: var(--danger-color, #f06b78);
-  
-  
+
+
   line-height: 1;
   margin-right: 2px;
 }
@@ -90,14 +90,14 @@
   max-width: none;
   flex: 0 0 auto;
   padding: 4px 6px;
-  
+
   white-space: nowrap;
 }
 #page-test.page-ui-rework .adb-button-frame .test-action-icon {
   width: 1.15em;
   height: 1.15em;
   margin-right: 2px;
-  
+
 }
 #page-test.page-ui-rework .adb-button-frame button > svg.ui-icon {
   width: 1.08em;
@@ -105,6 +105,33 @@
   padding: 1px;
   margin-right: 3px;
 }
+@media (min-width: 1200px) and (max-width: 1599.98px) {
+    #page-test.page-ui-rework .middle-row .adb-button-frame { gap: 2px; }
+    #page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs {
+        padding: 4px 4px;
+    }
+    #page-test.page-ui-rework .middle-row .adb-button-frame .test-action-icon {
+        width: 1.05em;
+        height: 1.05em;
+        margin-right: 1px;
+    }
+    #page-test.page-ui-rework .middle-row .adb-button-frame button > svg.ui-icon {
+        width: 1em;
+        height: 1em;
+        margin-right: 2px;
+    }
+}
+
+@media (min-width: 1200px) and (max-width: 1299.98px) {
+    #page-test.page-ui-rework .middle-row .adb-button-frame { gap: 1px; }
+    #page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs { padding: 4px 2px; }
+    #page-test.page-ui-rework .middle-row .adb-button-frame .test-action-icon {
+        width: 0.9em;
+        height: 0.9em;
+        margin-right: 0;
+    }
+}
+
 /* The shared .page-header-row > .section-title gap (6px) is the only spacing between page icon and label. */
 .page-title-icon { display: inline-flex; align-items: center; justify-content: center; width: 20px; flex: none; margin-right: 0; line-height: 1; }
 /* 图片版标题图标（当前为 APK 分析的 JADX logo）：固定 16 × 14px；
@@ -115,9 +142,6 @@ button > .ui-icon { margin-right: 5px; }
 button > .ui-icon:last-child:first-child { margin-right: 0; }
 .ui-name { color: var(--text-primary, var(--text, #eaf0f9));   line-height: 1.5; }
 .ui-meta { color: var(--text-secondary, var(--muted, #91a1b7));   line-height: 1.5; }
-.ui-mono, pre, code, .xterm, .log-content, .log-output, .file-path,
-.suite-browser-path, .apk-file-path, #client-identity,
-#script-path, #device-host, #local-server, #test-module, #test-case, #retry-result,
 .ui-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
 .ui-stack > :is(.ui-name, .ui-meta) { max-width: 100%; overflow-wrap: anywhere; }
 .ui-status {
@@ -131,8 +155,8 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
     border-radius: 5px;
     background: color-mix(in srgb, var(--status-color) 9%, transparent);
     color: var(--status-color);
-    
-    
+
+
     line-height: 1.4;
     white-space: nowrap;
 }

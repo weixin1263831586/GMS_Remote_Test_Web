@@ -125,8 +125,8 @@
 
 .modal-title {
     min-width: 0;
-    
-    
+
+
     line-height: 1.35;
     color: var(--text-primary);
     overflow-wrap: anywhere;
@@ -144,9 +144,9 @@
     min-width: 32px;
     min-height: 32px;
     border-radius: 6px;
-    
-    
-    
+
+
+
     line-height: 1;
     color: var(--text-secondary);
     cursor: pointer;

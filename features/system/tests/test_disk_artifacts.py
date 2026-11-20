@@ -169,7 +169,9 @@ def test_custom_data_root_counts_actual_agent_transcripts_once(tmp_path, monkeyp
     monkeypatch.setattr(disk_artifacts, "upload_temp_root",
                         lambda namespace="gms_uploads":
                         str(tmp_path / "unused" / namespace))
-    result = disk_artifacts.collect_disk_artifacts(test_log_root=tmp_path / "missing")
+    result = disk_artifacts.collect_disk_artifacts(
+        test_log_root=tmp_path / "missing", worker_root=tmp_path / "worker-jobs",
+    )
     rows = _rows(result)
     assert rows["agent_transcripts"]["bytes"] == 23
     assert rows["runtime_other"]["bytes"] == 47

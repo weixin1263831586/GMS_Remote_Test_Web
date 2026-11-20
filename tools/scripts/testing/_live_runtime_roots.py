@@ -9,6 +9,7 @@ import os
 import subprocess
 from pathlib import Path
 
+
 _ROOT_KEYS = frozenset(("GMS_DATA_ROOT", "GMS_UPLOAD_DIR", "GMS_TEST_LOG_ROOT"))
 
 

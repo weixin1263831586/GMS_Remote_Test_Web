@@ -283,6 +283,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
                 "sessionStorage.getItem('gms_cluster_force_dashboard_once')"
             ), "1")
             page.reload(wait_until="domcontentloaded")
+            self.close_initial_modals(page)
             cluster = self.frame_for(page, "#cluster-frame")
             expect(cluster.locator('[data-dash-tab="dashboard"]')).to_have_attribute(
                 "aria-selected", "true"
@@ -306,6 +307,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
                 })
             )""")
             page.reload(wait_until="domcontentloaded")
+            self.close_initial_modals(page)
             cluster = self.frame_for(page, "#cluster-frame")
             expect(cluster.locator('[data-dash-tab="dashboard"]')).to_have_attribute(
                 "aria-selected", "true"

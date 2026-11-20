@@ -113,4 +113,3 @@ function clearReportAnalysisActivity() {
     const status = $('report-analysis-activity');
     if (status) status.hidden = true;
 }
-

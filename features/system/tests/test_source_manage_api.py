@@ -469,6 +469,49 @@ class ManageApiFlowTests(_ManageApiHarness):
         self.assertEqual(self.store.get_password("a16"), "new-pw")
         self.assertNotIn("last_verified_at", record)
 
+    def test_edit_port_does_not_reuse_other_endpoint_credentials(self):
+        original = self.store.add(source_id="port-edit", repo_root="/sdk", ssh_host="10.10.10.206",
+                                  ssh_username="hcj", ssh_password="fixture-original")
+        with mock.patch.dict("os.environ", TEST_SDK_SSH_PW="fixture-env"), mock.patch.object(
+            self.manage, "_run_remote_probe", return_value=("DIR_OK\nREPO_OK\n", 0)
+        ) as probe, mock.patch.object(self.manage, "reload_source_runtime", return_value="AVAILABLE"):
+            response = self.client.put("/api/sdk/manage/sources/port-edit", json={
+                "target": "hcj@10.10.10.206:2222",
+                "expected_config_fingerprint": original["config_fingerprint"],
+            })
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(probe.call_args.kwargs["port"], 2222)
+            self.assertEqual(probe.call_args.kwargs["password"], "")
+            self.assertEqual(self.store.get_password("port-edit"), "")
+            probe.reset_mock()
+            stale = self.client.put("/api/sdk/manage/sources/port-edit", json={
+                "repo_root": "/sdk/moved", "expected_config_fingerprint": original["config_fingerprint"],
+            })
+            self.assertEqual(stale.status_code, 409)
+            probe.assert_not_called()
+
+    def test_edit_probes_with_credentials_from_the_original_snapshot(self):
+        original = self.store.add(source_id="concurrent", repo_root="/sdk", ssh_host="original",
+                                  ssh_username="user", ssh_password="fixture-first")
+        read = self.store.get
+
+        def migrate_after_read(source_id, **kwargs):
+            snapshot = read(source_id, **kwargs)
+            self.store.update(source_id, fields={"ssh_host": "updated", "ssh_password": "fixture-second"},
+                              expected_fingerprint=snapshot["config_fingerprint"])
+            return snapshot
+
+        with mock.patch.object(self.store, "get", side_effect=migrate_after_read), mock.patch.object(
+            self.manage, "_run_remote_probe", return_value=("DIR_OK\nREPO_OK\n", 0)
+        ) as probe:
+            response = self.client.put("/api/sdk/manage/sources/concurrent", json={
+                "repo_root": "/sdk/moved", "expected_config_fingerprint": original["config_fingerprint"],
+            })
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(probe.call_args.kwargs["host"], "original")
+        self.assertEqual(probe.call_args.kwargs["password"], "fixture-first")
+        self.assertEqual(self.store.get("concurrent")["repo_root"], "/sdk")
+
     def test_update_missing_path_keeps_previous_record(self):
         self.store.add(source_id="local", provider="local_git", repo_root="/sdk/old")
         with mock.patch.object(self.manage, "_probe_local_path", return_value={
@@ -694,7 +737,7 @@ class DiscoverTests(_ManageApiHarness):
         self.assertEqual(response.status_code, 200, response.text)
         probe = response.json()["data"]["probe"]
         self.assertTrue(probe["has_sub_git_repo"])
-        resolve.assert_called_once_with("10.0.0.9", "hcq", "", source_id="")
+        resolve.assert_called_once_with("10.0.0.9", "hcq", 22, "")
 
     def test_register_via_manual_target(self):
         with mock.patch.object(

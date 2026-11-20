@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405
 import json
 import threading
 from datetime import datetime
@@ -18,7 +17,22 @@ from features.auth import (
 )
 from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
 
-from .api_support import *
+from .api_support import (
+    _DOWNLOAD_API,
+    DB_PATH,
+    SOURCES,
+    _connect_db,
+    _enrich_artifact_item,
+    _get_db,
+    _like_param,
+    _rows_to_dicts,
+    _run_sync_job,
+    _sync_lock,
+    _sync_status,
+    page_router,
+    query_bulletin_patches,
+    router,
+)
 
 
 @page_router.get('/gms-update-monitor', response_class=HTMLResponse)
@@ -77,7 +91,7 @@ _SYNC_FILE_LOCK = DB_PATH.with_suffix('.sync.lock')
 
 def _run_locked_sync_job(mode: str, source: list[str], descriptor: int) -> None:
     try:
-        _run_sync_job(mode, source)
+        _run_sync_job(mode, source, descriptor)
     finally:
         release_sync_lock(descriptor)
 

@@ -7,6 +7,9 @@ from tests.runtime_ui.test_aoa_workbench import json_response
 
 class RuntimeAoaDebugSessionTests(RuntimeUiHarness):
     def open_workbench(self, page):
+        page.route('**/api/devices/management', lambda route: route.fulfill(json={
+            'success': True, 'devices': [{'serial_no': 'TARGET', 'worker_id': 'worker-1', 'state': 'usb_only'}],
+        }))
         self.goto_shell(page)
         page.evaluate("switchPage('devices')")
         page.evaluate("aoaViewToggle(true)")
@@ -116,6 +119,21 @@ class RuntimeAoaDebugSessionTests(RuntimeUiHarness):
             expect(page.locator('#aoa-replay-device')).to_have_value('REMOTE')
             page.locator('#aoa-replay-worker').select_option('worker-1')
             expect(page.locator('#aoa-replay-device')).to_have_value('OTHER')
+        finally:
+            page.close()
+
+    def test_network_serials_keep_their_host_for_each_worker(self):
+        page = self.new_page()
+        try:
+            self.open_workbench(page)
+            page.evaluate("""aoaSyncDeviceSources([
+                {worker_id: 'worker-2', serial_no: 'worker-2:192.0.2.11:5555'},
+                {worker_id: 'worker-2', serial_no: '192.0.2.12:5555'}
+            ])""")
+            page.locator('#aoa-replay-worker').select_option('worker-2')
+            self.assertEqual(page.locator('#aoa-replay-device option').evaluate_all(
+                'options => options.map(option => option.value)'
+            ), ['192.0.2.11:5555', '192.0.2.12:5555'])
         finally:
             page.close()
 

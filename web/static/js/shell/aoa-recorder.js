@@ -109,7 +109,8 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
         }
         if (aoaPanelState.recording && result?.command) aoaAppendCommand(result.command, pace);
         if (result?.touch_calibration) {
-            aoaPanelState.calibration = result.touch_calibration;
+            const calibration = result.touch_calibration;
+            aoaPanelState.calibration = calibration;
             const key = `gms-aoa-calibration:${target.workerId}:${target.device}`;
             try { localStorage.setItem(key, JSON.stringify(result.touch_calibration)); } catch (_) { /* storage unavailable */ }
             aoaRenderCalibration();
@@ -122,15 +123,19 @@ async function aoaExecuteRecorderInput(input, {refresh = true, pace = true} = {}
                     body: {mapping: result.touch_calibration.mapping,
                            label: `${target.device} @ ${new Date().toISOString().slice(0, 19)}`},
                     });
-                    aoaPanelState.calibration.record_id = saved.calibration.id;
-                    delete aoaPanelState.calibration.save_error;
-                    try { localStorage.setItem(key, JSON.stringify(aoaPanelState.calibration)); } catch (_) { /* storage unavailable */ }
-                    aoaRenderCalibration();
+                    calibration.record_id = saved.calibration.id;
+                    delete calibration.save_error;
                     showToast(`标定已保存：${saved.calibration.id}`, 'success');
                 } catch (error) {
-                    aoaPanelState.calibration.save_error = error.message;
-                    aoaRenderCalibration();
+                    calibration.save_error = error.message;
                     showToast(`标定已实测，但保存失败：${error.message}。请重新保存标定。`, 'warning');
+                }
+                try { localStorage.setItem(key, JSON.stringify(calibration)); } catch (_) { /* storage unavailable */ }
+                if (target.workerId === aoaEl('aoa-record-worker')?.value
+                        && target.device === aoaEl('aoa-record-device')?.value
+                        && (calibration.context?.hid_touch_mode || 'direct') === aoaHidMetadata().hid_touch_mode) {
+                    aoaPanelState.calibration = calibration;
+                    aoaRenderCalibration();
                 }
             }
         }

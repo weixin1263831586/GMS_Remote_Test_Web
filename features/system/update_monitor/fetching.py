@@ -3,26 +3,19 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405, E402
 import argparse
 import sys
-from pathlib import Path
 
 import requests
 from lxml import html
 
 from foundation import partner_android as fetch_partner_android
 
-
-DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 1
-
-# 单次扫描的 Mainline PRELOAD 月份上限。
-MAINLINE_MONTH_DEPTH = 12
-
-
-from .models import *
+from .models import FetchedDocument, SourceConfig
 from .parsing import clean_title, stable_doc_hash
+
+
+MAINLINE_MONTH_DEPTH = 12
 
 
 def build_session(args: argparse.Namespace) -> requests.Session:

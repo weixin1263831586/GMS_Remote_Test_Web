@@ -188,7 +188,7 @@ def _build_registry_configs(config: dict[str, Any]) -> list[ProviderConfig]:
                 )
             continue
         try:
-            password = user_source_store().get_password(sid)
+            password = UserSourceStore.password_from_record(record)
             item = user_source_to_provider_config(record, password=password)
             provider_config = load_provider_configs(
                 {"sdk_sources": {"providers": [item]}}

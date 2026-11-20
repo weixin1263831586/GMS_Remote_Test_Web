@@ -44,7 +44,7 @@
             to { transform: translateX(100%); opacity: 0; }
         }
         .snackbar-icon {
-            
+
             flex-shrink: 0;
         }
         .snackbar-content {
@@ -52,13 +52,13 @@
             min-width: 0;
         }
         .snackbar-title {
-            
-            
+
+
             color: #fff;
             margin-bottom: 4px;
         }
         .snackbar-message {
-            
+
             color: var(--text-muted);
             line-height: 1.4;
             word-wrap: break-word;
@@ -67,7 +67,7 @@
             background: none;
             border: none;
             color: var(--text-muted);
-            
+
             cursor: pointer;
             padding: 0;
             width: 24px;

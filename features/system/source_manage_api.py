@@ -197,14 +197,9 @@ def _probe_via_target(
     provided_password: str,
     *,
     verify_only: bool = False,
-    source_id: str = "",
 ) -> dict[str, Any]:
     """手动输入 target（user@host[:port]）的探测封装。"""
     connection = _parse_target(target)
-    password = _resolve_password_by_target(
-        connection["host"], connection["username"], provided_password,
-        source_id=source_id,
-    )
     synthetic = {
         "id": "(manual)",
         "host": connection["host"],
@@ -213,8 +208,7 @@ def _probe_via_target(
         "auth_type": "",
     }
     return _probe_via_server(
-        synthetic, repo_root, password,
-        verify_only=verify_only, source_id=source_id,
+        synthetic, repo_root, provided_password, verify_only=verify_only,
     )
 
 
@@ -300,7 +294,7 @@ def _discover_via_target(
     """列出远端 home（≤2 层）下的 SDK 根目录候选（repo 工作区 / git 仓）。"""
     connection = _parse_target(target)
     password = _resolve_password_by_target(
-        connection["host"], connection["username"], provided_password
+        connection["host"], connection["username"], connection["port"], provided_password
     )
     synthetic = {
         "id": "(manual)",
@@ -486,59 +480,31 @@ def _get_server(server_id: str) -> dict[str, Any]:
     )
 
 
-def _resolve_password(
-    server: dict[str, Any], provided: str, *, source_id: str = ""
-) -> str:
-    """口令来源：请求一次性提供 > 编译服务器 env_password > 既有加密记录。"""
-    if provided:
-        return provided
-    if server.get("auth_env"):
-        return os.getenv(server["auth_env"], "")
-    if source_id:
-        try:
-            return user_source_store().get_password(source_id)
-        except UserSourceStoreError:
-            return ""
-    return ""
-
-
 def _resolve_password_by_target(
-    host: str, username: str, provided: str, *, source_id: str = ""
+    host: str, username: str, port: int, provided: str,
 ) -> str:
-    """按 host+username 匹配 build_servers 的 env_password；否则回退既有记录。"""
+    """Use a supplied credential or an environment credential for this exact endpoint."""
     if provided:
         return provided
     for item in _load_build_servers():
-        if item["host"] == host and item["username"] == username:
-            password = _resolve_password(item, "")
-            if password:
-                return password
-            break
-    if source_id:
-        try:
-            return user_source_store().get_password(source_id)
-        except UserSourceStoreError:
-            return ""
+        if (item["host"], item["username"], item["port"]) == (host, username, port):
+            if item.get("auth_env"):
+                return os.getenv(item["auth_env"], "")
     return ""
 
 
 def _probe_via_server(
     server: dict[str, Any], repo_root: str, provided_password: str,
-    *, verify_only: bool = False, source_id: str = "",
+    *, verify_only: bool = False,
 ) -> dict[str, Any]:
-    """连接编译服务器并探测/校验路径；返回探测结果或抛 UserSourceStoreError。
-
-    口令解析：请求一次性提供 > server 自带 auth_env > 按 host+username
-    匹配 build_servers（列表刷新的合成 server 没有 auth_env 字段，必须
-    走这个回退）> 既有加密记录。解析不到才回退密钥认证——本机常备
-    口令短语保护的私钥，空口令强走 key auth 只会稳定失败。
-    """
+    """连接指定 SSH 端点并探测或校验路径。"""
     validate_repo_root(repo_root)
-    password = _resolve_password(server, provided_password, source_id=source_id)
-    if not password and provided_password == "":
+    password = provided_password
+    if not password and server.get("auth_env"):
+        password = os.getenv(server["auth_env"], "")
+    if not password:
         password = _resolve_password_by_target(
-            str(server.get("host") or ""), str(server.get("username") or ""),
-            "", source_id=source_id,
+            server["host"], server["username"], int(server["port"]), "",
         )
     # 无口令时尝试密钥认证（SSHManager 会回退 agent/默认密钥）。
     use_key_auth = not password
@@ -633,7 +599,7 @@ def _batch_probe_via_target(
     """一次 SSH 连接顺序探测全部路径（认证阶段 60s+ 的 206 只付一次）。"""
     connection = _parse_target(target)
     password = _resolve_password_by_target(
-        connection["host"], connection["username"], provided_password
+        connection["host"], connection["username"], connection["port"], provided_password
     )
     synthetic = {
         "id": "(manual)",
@@ -765,10 +731,7 @@ def list_user_sdk_sources(request: Request, verify: str = "auto"):
             )
             probe = _probe_via_server(
                 servers_by_host[key],
-                repo_root,
-                "",
-                verify_only=True,
-                source_id=source_id,
+                repo_root, store.password_from_record(record), verify_only=True,
             )
             live = {"verified": probe["verified"], "reason": probe["reason"]}
         try:
@@ -873,8 +836,7 @@ def _schedule_background_verify(
                 if server is None:
                     return
                 probe = _probe_via_server(
-                    server, repo_root, "",
-                    verify_only=True, source_id=source_id,
+                    server, repo_root, store.password_from_record(record), verify_only=True,
                 )
                 verified = bool(probe["verified"])
             try:
@@ -1025,10 +987,9 @@ def _register_single_source(
                 "username": connection["username"],
             }
             probe = probe_override or _probe_via_target(target, repo_root, password)
-            # env/既有记录解析出的口令也要随记录加密存储，否则下次
-            # 刷新校验时拿不到凭据。
+            # 按完整端点解析的环境口令随记录加密保存，供后续校验使用。
             stored_password = _resolve_password_by_target(
-                connection["host"], connection["username"], password
+                connection["host"], connection["username"], connection["port"], password
             )
         else:
             server = _get_server(str(req.get("server_id") or "").strip())

@@ -219,27 +219,11 @@ def get_page_state(conn: sqlite3.Connection, source_url: str) -> sqlite3.Row | N
     ).fetchone()
 
 
-def replace_page_issues(conn: sqlite3.Connection, source_url: str, issues: list[KnownIssue], timestamp: str) -> None:
-    conn.execute('DELETE FROM mainline_known_issues WHERE source_url = ?', (source_url,))
-    upsert_issues(conn, issues, timestamp)
-
-
-def load_known_issue_keys(
-    conn: sqlite3.Connection,
-    *,
-    exclude_source_url: str | None = None,
-) -> set[tuple[str, str, str, str, str]]:
-    where = 'WHERE source_url != ?' if exclude_source_url else ''
-    params = (exclude_source_url,) if exclude_source_url else ()
+def load_known_issue_keys(conn: sqlite3.Connection) -> set[tuple[str, str, str, str, str]]:
     return {
         (row['product_section'], row['issue_type'], row['test_module'], row['test_case'], row['exemption_id'])
         for row in conn.execute(
-            f"""
-            SELECT product_section, issue_type, test_module, test_case, exemption_id
-            FROM mainline_known_issues
-            {where}
-            """,
-            params,
+            "SELECT product_section,issue_type,test_module,test_case,exemption_id FROM mainline_known_issues"
         )
     }
 
@@ -289,7 +273,8 @@ def upsert_page_state(
     )
 
 
-def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp: str) -> None:    conn.executemany(
+def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp: str) -> None:
+    conn.executemany(
         """
         INSERT INTO mainline_known_issues (
             source_url, source_title, release_year, release_label, product_section, issue_type,

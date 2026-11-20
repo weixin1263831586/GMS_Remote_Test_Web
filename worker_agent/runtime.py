@@ -178,7 +178,7 @@ class WorkerRuntime:
             row = conn.execute("SELECT * FROM commands WHERE id=?", (command_id,)).fetchone()
         if not row:
             return None
-        return {**dict(row), "result": json.loads(row["result_json"] or "{}")}
+        return {**dict(row), "result": self._command_result(row["result_json"])}
 
     def save_command(self, command_id: str, status: str, result=None, error: str = ""):
         with self.connect() as conn:
@@ -188,20 +188,26 @@ class WorkerRuntime:
                 controller_synced=0,updated_at=CURRENT_TIMESTAMP""",
                 (command_id, status, json.dumps(result or {}, separators=(",", ":")), error))
 
-    def mark_command_synced(self, command_id: str) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                "UPDATE commands SET controller_synced=1 WHERE id=?", (command_id,)
-            )
+    @staticmethod
+    def _command_result(serialized):
+        try:
+            return json.loads(serialized or "{}")
+        except json.JSONDecodeError:
+            return {}
 
-    def mark_commands_synced(self, command_ids: list[str]) -> None:
-        if not command_ids:
+    def mark_commands_synced(self, states: list[dict[str, Any]]) -> None:
+        """A delayed response may acknowledge only the snapshot actually sent."""
+        if not states:
             return
         with self.connect() as conn:
-            conn.executemany(
-                "UPDATE commands SET controller_synced=1 WHERE id=?",
-                [(command_id,) for command_id in command_ids],
-            )
+            conn.execute("BEGIN IMMEDIATE")
+            for state in states:
+                row = conn.execute(
+                    "SELECT result_json FROM commands WHERE id=? AND status=? AND error=? AND controller_synced=0",
+                    (state["id"], state["status"], state.get("error", "")),
+                ).fetchone()
+                if row and self._command_result(row["result_json"]) == (state.get("result") or {}):
+                    conn.execute("UPDATE commands SET controller_synced=1 WHERE id=?", (state["id"],))
 
     def unsynced_commands(self, limit: int = 200) -> list[dict[str, Any]]:
         with self.connect() as conn:
@@ -211,21 +217,11 @@ class WorkerRuntime:
                    ORDER BY updated_at,id LIMIT ?""",
                 (max(1, min(int(limit or 200), 200)),),
             ).fetchall()
-        result = []
-        for row in rows:
-            try:
-                payload = json.loads(row["result_json"] or "{}")
-            except json.JSONDecodeError:
-                payload = {}
-            result.append(
-                {
-                    "id": row["id"],
-                    "status": row["status"],
-                    "result": payload,
-                    "error": row["error"],
-                }
-            )
-        return result
+        return [
+            {"id": row["id"], "status": row["status"], "result": self._command_result(row["result_json"]),
+             "error": row["error"]}
+            for row in rows
+        ]
 
     def validate_fencing(self, command: dict[str, Any]) -> None:
         payload = command.get("payload") or {}

@@ -61,11 +61,6 @@ def _clean_str(value: Any, limit: int = _MAX_TEXT) -> str:
     return text.strip()[:limit]
 
 
-def _clean_optional_str(value: Any) -> str:
-    text = _clean_str(value)
-    return text
-
-
 def normalize_recommended_actions(items: Any) -> list[dict[str, Any]]:
     """归一化建议行动：dict 形状取 action/step/reason，字符串视为单步建议。"""
     actions: list[dict[str, Any]] = []

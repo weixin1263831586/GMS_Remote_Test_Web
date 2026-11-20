@@ -25,6 +25,9 @@ class RuntimeAoaMappingSaveTests(RuntimeUiHarness):
             route.fulfill(status=status, content_type='application/json', body=json.dumps(payload))
         try:
             page.route('**/api/devices/aoa/**', reply)
+            page.route('**/api/devices/management', lambda route: route.fulfill(json={
+                'success': True, 'devices': [{'serial_no': 'REC', 'worker_id': 'w', 'state': 'available'}],
+            }))
             self.goto_shell(page)
             page.evaluate("""async () => {
                 switchPage('devices');

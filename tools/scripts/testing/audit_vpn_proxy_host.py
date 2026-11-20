@@ -1,17 +1,18 @@
 """Read-only on-host audit of vpn-proxy installed runtime and GMS integration."""
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import stat
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import requests
+
 
 UNITS = {"proxy": "rk-vpn-proxy.service",
          "firewall": "rk-vpn-proxy-firewall.service",
@@ -43,7 +44,7 @@ def audit(args):
     def add(name, ok, message):
         state = "PASS" if ok is True else ("WARN" if ok is None else "FAIL")
         report["checks"].append({"name": name, "state": state, "note": message})
-        print("[%s] %s: %s" % (state, name, message), flush=True)
+        print(f"[{state}] {name}: {message}", flush=True)
 
     add("runner", os.getenv("RUNNER_NAME") == "ats-041055-64g"
         and cmd("id", "-un")[1] == "hcq", "dedicated on-prem runner identity")
@@ -90,9 +91,9 @@ def audit(args):
         _, response = cmd("systemctl", "is-active", unit)
         if name == "installer" and config.get("installer_enabled") is False:
             add("service_" + name, None,
-                "%s: optional installer explicitly disabled" % unit)
+                f"{unit}: optional installer explicitly disabled")
         else:
-            add("service_" + name, response == "active", "%s: %s" % (unit, response or "unknown"))
+            add("service_" + name, response == "active", f"{unit}: {response or 'unknown'}")
 
     port = config.get("stats_port", 17898)
     if not isinstance(port, int) or not (1 <= port <= 65535):
@@ -100,7 +101,7 @@ def audit(args):
     try:
         with requests.Session() as session:
             session.trust_env = False
-            response = session.get("http://127.0.0.1:%d/api/stats" % port, timeout=4)
+            response = session.get(f"http://127.0.0.1:{port}/api/stats", timeout=4)
             payload = response.json() if response.status_code == 200 else {}
         sources = payload.get("sources", {}) if isinstance(payload, dict) else {}
         fresh = -5 <= time.time() - float(payload.get("time", 0)) <= 45
@@ -151,7 +152,7 @@ def audit(args):
                         raise ValueError("login refused")
             resp = session.get(base + "/api/tools/vpn-proxy/status", timeout=10)
             if resp.status_code != 200:
-                add("gms_status_api", False, "HTTP %d (authenticated)" % resp.status_code)
+                add("gms_status_api", False, f"HTTP {resp.status_code} (authenticated)")
             else:
                 body = resp.json()
                 d = body.get("data") if isinstance(body, dict) else None
@@ -164,8 +165,7 @@ def audit(args):
                     stats_ok = isinstance(d.get("clients"), dict) and not d.get("stats_error")
                     all_ok = present and service and access and stats_ok
                     add("gms_status_api", all_ok,
-                        "installed=%s proxy_active=%s client_control=%s stats=%s" %
-                        (present, service, access, stats_ok))
+                        f"installed={present} proxy_active={service} client_control={access} stats={stats_ok}")
                     report["gms_live"] = {
                         "installed": present, "proxy_active": service,
                         "client_control": access, "stats_healthy": stats_ok

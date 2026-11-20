@@ -3,20 +3,16 @@
 
 from __future__ import annotations
 
-# ruff: noqa: F403, F405, E402
 import argparse
 import sqlite3
 import sys
 from pathlib import Path
 
-
-DEFAULT_DB_PATH = Path('data/gms_update_monitor.sqlite3')
-SCHEMA_VERSION = 1
-
-
-from .fetching import *
-from .models import *
-from .repository import *
+from ..reference_sync import run_reference_sync, update_scanner
+from .fetching import build_session, fetch_source
+from .models import SOURCES, SourceConfig
+from .parsing import utc_now
+from .repository import init_db, sync_source
 
 
 def select_sources(source_keys: list[str] | None) -> list[SourceConfig]:
@@ -173,7 +169,8 @@ def run_sync(args: argparse.Namespace) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description='Scan CTS/GMS update pages and store structured change records.')
-    parser.add_argument('--db', type=Path, default=DEFAULT_DB_PATH, help=f'Default: {DEFAULT_DB_PATH}')
+    parser.add_argument('--sync-lock-fd', type=int, help=argparse.SUPPRESS)
+    parser.add_argument('--db', type=Path, default=update_scanner.db_path, help=f'Default: {update_scanner.db_path}')
     parser.add_argument('--mode', choices=('incremental', 'full'), default='incremental')
     parser.add_argument('--source', action='append', choices=[source.key for source in SOURCES], help='Source key to scan. Repeatable.')
     parser.add_argument('--timeout', type=float, default=30.0)
@@ -185,7 +182,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    return run_sync(build_parser().parse_args())
+    return run_reference_sync(build_parser().parse_args(), run_sync)
 
 
 if __name__ == '__main__':

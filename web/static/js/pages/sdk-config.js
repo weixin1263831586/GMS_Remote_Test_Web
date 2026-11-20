@@ -11,7 +11,7 @@ let agentSdkSourcesLoaded = false;
 let agentSdkSourcesSequence = 0;
 let agentSdkSourcesCache = [];
 let agentSdkUserLiveCache = {};
-let agentSdkEditingSourceId = null;
+let agentSdkEditingRecord = null;
 
 const AGENT_SDK_PROVIDER_LABELS = {
     local_git: '本机 Git 仓库',
@@ -105,7 +105,7 @@ function sdkConfigRenderStats(sources) {
         <div class="page-stat-card workbench-stat">
             <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#${icon}"></use></svg></span><span class="workbench-stat-copy">
             <span class="page-stat-value ${tone}">${value}</span>
-            <span class="page-stat-label">${label}</span>
+            <span class="page-stat-label">${agentAccessEscape(label)}</span>
         </span></div>`;
     row.innerHTML = card('users', 'tone-primary', total, '全部 SDK 源')
         + versions.map(([version, count]) =>
@@ -200,7 +200,7 @@ function sdkConfigOpenEditSource(sourceId) {
         return;
     }
     // 从有权限的 manage 接口取原始配置，不能从隐藏 repo_root 的只读列表猜测。
-    agentSdkEditingSourceId = sourceId;
+    agentSdkEditingRecord = record;
     const set = (id, value) => {
         const el = document.getElementById(id);
         if (el) el.value = String(value ?? '');
@@ -226,16 +226,16 @@ function sdkConfigOpenEditSource(sourceId) {
 
 function sdkConfigCloseEditSource() {
     ModalManager.close('agent-sdk-edit-modal');
-    agentSdkEditingSourceId = null;
+    agentSdkEditingRecord = null;
     const password = document.getElementById('agent-sdk-edit-password');
     if (password) password.value = '';
 }
 
 async function sdkConfigSubmitEdit(event) {
     event?.preventDefault?.();
-    const sourceId = agentSdkEditingSourceId;
+    const record = agentSdkEditingRecord;
+    const sourceId = record?.source_id;
     const submit = document.getElementById('agent-sdk-edit-submit');
-    const record = sourceId ? agentSdkUserLiveCache[sourceId] : null;
     if (!record || submit?.disabled || !ModalManager.isOpen('agent-sdk-edit-modal')) return;
     const get = id => document.getElementById(id)?.value?.trim() || '';
     const repoRoot = get('agent-sdk-edit-path');
@@ -267,10 +267,10 @@ async function sdkConfigSubmitEdit(event) {
         const granted = window.requestElevatedAccess
             ? await window.requestElevatedAccess(`修改 SDK 源配置：${sourceId}`)
             : true;
-        if (!granted || !ModalManager.isOpen('agent-sdk-edit-modal')) return;
+        if (!granted || agentSdkEditingRecord !== record || !ModalManager.isOpen('agent-sdk-edit-modal')) return;
         const saved = await apiCall(`/api/sdk/manage/sources/${encodeURIComponent(sourceId)}`,
             'PUT', payload, {silentToast: true});
-        sdkConfigCloseEditSource();
+        if (agentSdkEditingRecord === record) sdkConfigCloseEditSource();
         if (saved?.data?.runtime_reload_ok === false) {
             showToast(
                 saved.warning || `SDK 源「${sourceId}」已保存，但运行时热重载失败，请检查服务日志`,

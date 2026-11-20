@@ -5,10 +5,8 @@
 .agent-conversation-heading { display: flex; align-items: center; gap: 8px 12px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border-color); }
 /* 固定 48px 单行：不再换行，溢出由各状态 span 自身省略号消化。 */
 .agent-heading-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px 12px; }
-.agent-conversation-heading strong {  }
 .agent-conversation-heading .ui-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
 .agent-sessions-heading { padding: 0 14px; gap: 8px; }
-.agent-sessions-heading strong {  }
 .agent-sessions-heading .ui-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .agent-session-search { padding: 8px 10px; border-bottom: 1px solid var(--border-color); }
 .agent-session-search .entry-field { width: 100%; height: 30px;  }
@@ -80,7 +78,6 @@
 #aoa-panel .aoa-command-column .aoa-column-heading > div:first-child { flex: 1 0 185px; }
 #aoa-panel .aoa-screen-toolbar { flex-wrap: wrap; }
 #aoa-panel .aoa-screen-toolbar .btn-xxs { flex: 1 1 62px; min-width: 62px; }
-#aoa-panel .aoa-column-heading strong {  }
 #aoa-panel .aoa-config-column > .aoa-column-heading > div { width: 100%; justify-content: space-between; }
 #aoa-panel .aoa-screen-stage { background: var(--darker-bg); border-color: var(--border-color); }
 #aoa-panel .aoa-calibration-status { border-radius: 6px; background: var(--light-bg); border: 1px solid var(--border-color); }
@@ -95,7 +92,6 @@
 #aoa-panel .aoa-command-list code { white-space: normal; overflow-wrap: anywhere; }
 .aoa-operation-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
 .aoa-operation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.aoa-operation-heading > strong {  }
 .aoa-operation-block > .aoa-muted { margin-top: 7px; }
 #aoa-panel .aoa-save-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
 #aoa-panel .aoa-target-section { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }

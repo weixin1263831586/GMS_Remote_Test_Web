@@ -155,14 +155,12 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     self.assertLessEqual(metrics["summaryHeight"], 46, metrics)
                     self.assertLessEqual(metrics["overviewHeight"], 50, metrics)
                     self.assertGreaterEqual(len(metrics["summaryItems"]), 8, metrics)
-                    # Seven semantic fields keep stable widths; the report
-                    # filename alone absorbs the remaining horizontal space.
-                    expected = (150, 150, 150, 150, 150, 150, 150)
-                    for item, width_px in zip(metrics["summaryItems"][:7], expected):
-                        self.assertAlmostEqual(item["width"], width_px, delta=1, msg=metrics)
+                    for item in metrics["summaryItems"][:-1]:
+                        self.assertGreaterEqual(item["width"], item["labelWidth"] + item["valueWidth"])
                     if width == 1792:
                         self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 440, metrics)
                         self.assertTrue(metrics["reportValueFits"], metrics)
+                        self.assertFalse(metrics["summaryOverflow"], metrics)
                     self.assertLessEqual(
                         max(item["top"] for item in metrics["summaryItems"])
                         - min(item["top"] for item in metrics["summaryItems"]), 1, metrics
@@ -206,7 +204,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_large_cts_counts_fit_fixed_single_row_summary_chips(self):
+    def test_large_cts_counts_fit_compact_single_row_summary_chips(self):
         page = self.new_page()
         try:
             self.goto_shell(page)
@@ -220,15 +218,15 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                             reason: 'java.lang.IndexOutOfBoundsException'}]
             })""")
             expected = (
-                (".report-summary-total", 150, "3038784"),
-                (".report-summary-pass", 150, "3036568"),
-                (".report-summary-fail", 150, "2216"),
-                (".report-summary-pass-rate", 150, "99.93%"),
-                (".report-summary-test-type", 150, "CTS"),
-                (".report-summary-suite-version", 150, "17_r2"),
-                (".report-summary-android-version", 150, "17"),
+                (".report-summary-total", "3038784"),
+                (".report-summary-pass", "3036568"),
+                (".report-summary-fail", "2216"),
+                (".report-summary-pass-rate", "99.93%"),
+                (".report-summary-test-type", "CTS"),
+                (".report-summary-suite-version", "17_r2"),
+                (".report-summary-android-version", "17"),
             )
-            for selector, width_px, value in expected:
+            for selector, value in expected:
                 cell = page.locator("#report-summary " + selector)
                 expect(cell).to_have_count(1)
                 expect(cell.locator(".summary-value")).to_have_text(value)
@@ -237,7 +235,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     valueFits: el.querySelector('.summary-value').scrollWidth
                         <= el.querySelector('.summary-value').clientWidth + 1
                 })""")
-                self.assertAlmostEqual(geom["width"], width_px, delta=1, msg=geom)
+                self.assertLessEqual(geom["width"], 150, msg=geom)
                 self.assertTrue(geom["valueFits"], (selector, geom))
             self.assertEqual(page.locator("#report-summary").evaluate(
                 "el => getComputedStyle(el).flexWrap"

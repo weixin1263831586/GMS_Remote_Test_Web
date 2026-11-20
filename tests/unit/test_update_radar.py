@@ -37,6 +37,19 @@ def store(tmp_path):
     return RadarStore(tmp_path / 'radar.sqlite3')
 
 
+def test_history_reader_remains_read_only_after_database_replacement(store):
+    with store.connect_readonly() as reader:
+        assert reader.execute('SELECT COUNT(*) FROM radar_runs').fetchone()[0] == 0
+    replacement = store.path.with_name('empty.sqlite3')
+    replacement.touch()
+    replacement.replace(store.path)
+    with store.connect_readonly() as reader:
+        assert reader.execute('SELECT COUNT(*) FROM radar_runs').fetchone()[0] == 0
+        reader.execute('PRAGMA query_only=OFF')
+        with pytest.raises(sqlite3.OperationalError, match='readonly'):
+            reader.execute('DELETE FROM radar_settings')
+
+
 def result(*, changes=0, errors=None):
     counts = {key: {'before': 1, 'after': 1, 'added': 0, 'modified': 0, 'removed': 0} for key in CATEGORIES}
     counts['packages']['modified'] = changes
@@ -176,8 +189,8 @@ def test_incomplete_mainline_scan_keeps_previous_database(tmp_path, monkeypatch)
     updates, exemptions = tmp_path / 'updates.db', tmp_path / 'exemptions.db'
     update_db(updates, [('a', 'old.zip')])
     exemption_db(exemptions, 'original')
-    monkeypatch.setattr(scanning.update_api, 'DB_PATH', updates)
-    monkeypatch.setattr(scanning.mainline_api, 'DB_PATH', exemptions)
+    monkeypatch.setattr(scanning.update_scanner, 'db_path', updates)
+    monkeypatch.setattr(scanning.mainline_scanner, 'db_path', exemptions)
     monkeypatch.setattr(scanning, 'settings', SimpleNamespace(data_root=tmp_path, project_root=tmp_path))
 
     def command(argv, **kwargs):
@@ -206,8 +219,8 @@ def test_scan_timeout_keeps_baseline_and_surfaces_both_failures(tmp_path, monkey
     updates, exemptions = tmp_path / 'updates.db', tmp_path / 'exemptions.db'
     update_db(updates, [('a', 'old.zip')])
     exemption_db(exemptions, 'original')
-    monkeypatch.setattr(scanning.update_api, 'DB_PATH', updates)
-    monkeypatch.setattr(scanning.mainline_api, 'DB_PATH', exemptions)
+    monkeypatch.setattr(scanning.update_scanner, 'db_path', updates)
+    monkeypatch.setattr(scanning.mainline_scanner, 'db_path', exemptions)
     monkeypatch.setattr(scanning, 'settings', SimpleNamespace(data_root=tmp_path, project_root=tmp_path))
     monkeypatch.setattr(scanning, 'run_local_command', lambda *_, **__: CommandResult(code=-1, stderr='Command timed out'))
     summary, changes = scanning.full_scan()
@@ -231,8 +244,8 @@ def test_selected_tasks_filter_notifications_and_deduplicate_shared_sources(tmp_
             conn.execute('INSERT INTO gms_update_packages VALUES(?,?,?)', ('gms_downloads', 'p', name))
 
     package(updates, 'old-package.zip')
-    monkeypatch.setattr(scanning.update_api, 'DB_PATH', updates)
-    monkeypatch.setattr(scanning.mainline_api, 'DB_PATH', tmp_path / 'must-not-scan.db')
+    monkeypatch.setattr(scanning.update_scanner, 'db_path', updates)
+    monkeypatch.setattr(scanning.mainline_scanner, 'db_path', tmp_path / 'must-not-scan.db')
     monkeypatch.setattr(scanning, 'settings', SimpleNamespace(data_root=tmp_path, project_root=tmp_path))
     calls = []
 
@@ -259,8 +272,8 @@ def test_exemptions_only_never_runs_gms_scanner(tmp_path, monkeypatch):
     exemptions = tmp_path / 'exemptions.db'
     exemption_db(exemptions, 'original')
     updates = tmp_path / 'must-not-create.db'
-    monkeypatch.setattr(scanning.update_api, 'DB_PATH', updates)
-    monkeypatch.setattr(scanning.mainline_api, 'DB_PATH', exemptions)
+    monkeypatch.setattr(scanning.update_scanner, 'db_path', updates)
+    monkeypatch.setattr(scanning.mainline_scanner, 'db_path', exemptions)
     monkeypatch.setattr(scanning, 'settings', SimpleNamespace(data_root=tmp_path, project_root=tmp_path))
 
     def command(argv, **kwargs):
@@ -525,3 +538,43 @@ def test_change_truncation_and_run_retention(store, monkeypatch):
         store.run(first)
     with pytest.raises(ApiError):
         store.run(latest[0])
+
+
+def test_radar_reservation_uses_manual_process_locks(tmp_path, monkeypatch):
+    from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
+
+    for scanner in scanning.SCANNERS:
+        monkeypatch.setattr(scanner, "db_path", tmp_path / scanner.db_path.name)
+    paths = [scanner.db_path.with_suffix(".sync.lock") for scanner in scanning.SCANNERS]
+    manual = try_acquire_sync_lock(paths[1])
+    try:
+        with pytest.raises(ApiError):
+            scanning.reserve_scanners()
+        assert not sync_lock_held(paths[0])
+    finally:
+        release_sync_lock(manual)
+    scanning.reserve_scanners()
+    try:
+        assert all(sync_lock_held(path) for path in paths)
+    finally:
+        scanning.release_scanners()
+    assert all(not sync_lock_held(path) for path in paths)
+
+
+def test_recovery_preserves_other_process_scan_and_thread_start_failure_releases_locks(store, monkeypatch):
+    from foundation.process_sync import release_sync_lock, sync_lock_held, try_acquire_sync_lock
+
+    descriptor = try_acquire_sync_lock(store.scan_lock)
+    try:
+        run_id = store.claim("manual")
+        RadarStore(store.path).recover()
+        assert store.run(run_id)["status"] == "running"
+    finally:
+        release_sync_lock(descriptor)
+    store.recover()
+    radar = service(store)
+    monkeypatch.setattr(threading.Thread, "start", Mock(side_effect=RuntimeError("thread limit")))
+    with pytest.raises(RuntimeError, match="thread limit"):
+        radar.start_scan()
+    assert store.history()["items"][0]["status"] == "failed"
+    assert not sync_lock_held(store.scan_lock)

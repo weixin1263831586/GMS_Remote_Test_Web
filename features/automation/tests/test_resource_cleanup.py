@@ -77,9 +77,10 @@ def test_active_device_command_preserves_the_reservation(context, field):
     assert context.repository.claims.active_claim('ats-worker-controller:ABC')
 
 
-def test_mismatched_reservation_source_is_never_released(context):
+@pytest.mark.parametrize('status', ['completed', 'cancelled', 'failed'])
+def test_mismatched_reservation_source_is_never_released(context, status):
     run = context.store.get_run('run')
-    outcome = HttpAutomationExecutor.release_resources({**run, 'id': 'another-run', 'status': 'completed'})
+    outcome = HttpAutomationExecutor.release_resources({**run, 'id': 'another-run', 'status': status})
     assert outcome['success'] is False
     assert context.repository.get_reservation(context.reservation['id'])['status'] == 'active'
 

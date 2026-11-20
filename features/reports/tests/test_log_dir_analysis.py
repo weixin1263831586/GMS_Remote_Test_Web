@@ -238,6 +238,25 @@ class AnalyzeLogDirEndpointTests(unittest.TestCase):
         self.assertIn("不完整", response.text)
         self.assertIn("1 个上限", response.text)
 
+    def test_saved_report_returns_scan_limit_reason(self):
+        from unittest.mock import Mock
+
+        from features.reports import analysis_api
+        from features.reports.analysis_agent import ReportAnalysisAgent
+
+        report = {"report_id": "saved-id", "timestamp": "test-run", "result_dir": str(self.suite_root)}
+        store = Mock()
+        store.get_report.return_value = report
+        with (
+            patch.object(analysis_api, "test_report_db", store),
+            patch.object(analysis_api.test_report_manager, "test_report_db", store),
+            patch("features.reports.service.ReportAnalysisAgent",
+                  side_effect=lambda **kwargs: ReportAnalysisAgent(max_files=0, **kwargs)),
+        ):
+            response = self.client.post("/api/reports/analyze", data={"mode": "saved", "report_id": "saved-id"})
+        self.assertEqual(response.status_code, 413, response.text)
+        self.assertIn("不完整", response.text)
+
     def test_returns_clear_error_when_dir_not_local(self):
         resp = self.client.post(
             "/api/reports/analyze-log-dir",

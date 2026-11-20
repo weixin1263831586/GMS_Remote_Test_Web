@@ -1,5 +1,5 @@
 from .access import can_access_report, filter_accessible_reports
-from .analysis_agent import ReportAnalysisAgent
+from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 from .analyzer import ReportAnalyzer
 from .api import diagnose_report_failure
 from .api_helpers import resolve_redmine_knowledge_service
@@ -20,6 +20,7 @@ __all__ = [
     "ReportAnalysisAgent",
     "ReportAnalyzer",
     "ReportDiagnosisRequest",
+    "ReportScanIncompleteError",
     "TestReportDB",
     "TestReportManager",
     "XMLReportParser",

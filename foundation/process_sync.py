@@ -8,6 +8,7 @@ from __future__ import annotations
 import errno
 import fcntl
 import os
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -40,3 +41,15 @@ def sync_lock_held(path: Path) -> bool:
         return True
     release_sync_lock(descriptor)
     return False
+
+
+@contextmanager
+def hold_sync_lock(path: Path):
+    """Serialize work that must wait for the previous owner to finish."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(descriptor)

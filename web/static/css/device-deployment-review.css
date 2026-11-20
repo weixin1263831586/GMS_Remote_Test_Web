@@ -2,7 +2,7 @@
 body{margin:0;background:var(--page-background);color:var(--text-primary);}
 main{max-width:760px;margin:48px auto;padding:32px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:16px}
 h1{margin-top:0}dl{display:grid;grid-template-columns:90px 1fr;gap:12px}
-dt{}dd{margin:0;overflow-wrap:anywhere}
+dd{margin:0;overflow-wrap:anywhere}
 button{padding:12px 20px;border:0;border-radius:8px;background:var(--primary-gradient);color:white;cursor:pointer}
 button:disabled{opacity:.5;cursor:default}a{margin-left:20px;color:var(--primary-light)}
 @media(max-width:600px){main{margin:16px;padding:20px}dl{grid-template-columns:1fr;gap:4px}dd{margin-bottom:12px}}

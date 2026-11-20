@@ -10,16 +10,16 @@ from tempfile import TemporaryDirectory
 
 from foundation.config import settings
 from foundation.error_model import ApiError
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 from foundation.processes import run_local_command
 from foundation.redaction import redact_sensitive_text
 
-from ..mainline_issues import api as mainline_api
-from ..update_monitor import api_support as update_api
+from ..reference_sync import mainline_scanner, update_scanner
 from .models import utc_now
 from .snapshots import backup, compare, snapshot
 
 
-SCANNERS = (update_api, mainline_api)
+SCANNERS = (update_scanner, mainline_scanner)
 TASK_SOURCES = {
     'requirements': ['gms_requirements'], 'packages': ['gms_downloads'],
     'mainline': ['mainline_preload'], 'artifacts': ['cts_downloads', 'vts_downloads', 'gts_downloads', 'gms_downloads'],
@@ -30,28 +30,41 @@ TASK_SOURCES = {
 def reserve_scanners():
     # Both manual API entrypoints check these flags under the same locks.
     with ExitStack() as stack:
-        for api in SCANNERS:
-            stack.enter_context(api._sync_lock)
-        if any(api._sync_status['running'] for api in SCANNERS):
+        for scanner in SCANNERS:
+            stack.enter_context(scanner.lock)
+        if any(scanner.status['running'] for scanner in SCANNERS):
             raise ApiError.conflict('卡片扫描正在运行，请完成后再启动雷达')
-        for api in SCANNERS:
-            api._sync_status.update(running=True, mode='full', started_at=utc_now().isoformat(),
-                                    finished_at=None, returncode=None, stdout='', stderr='', error=None)
+        descriptors = []
+        with ExitStack() as acquired:
+            for scanner in SCANNERS:
+                descriptor = try_acquire_sync_lock(scanner.db_path.with_suffix('.sync.lock'))
+                if descriptor is None:
+                    raise ApiError.conflict('卡片扫描正在运行，请完成后再启动雷达')
+                acquired.callback(release_sync_lock, descriptor)
+                descriptors.append(descriptor)
+            acquired.pop_all()  # The scan worker releases both descriptors on completion.
+        for scanner, descriptor in zip(SCANNERS, descriptors):
+            scanner.radar_descriptor = descriptor
+            scanner.status.update(running=True, mode='full', started_at=utc_now().isoformat(),
+                               finished_at=None, returncode=None, stdout='', stderr='', error=None)
 
 
 def release_scanners(error=None):
-    for group, api in zip(('updates', 'exemptions'), SCANNERS):
+    for group, scanner in zip(('updates', 'exemptions'), SCANNERS):
         detail = error.get(group) if isinstance(error, dict) else error
-        with api._sync_lock:
-            api._sync_status.update(running=False, finished_at=utc_now().isoformat(),
-                                    returncode=1 if detail else 0, error=detail)
+        with scanner.lock:
+            if scanner.radar_descriptor is not None:
+                release_sync_lock(scanner.radar_descriptor)
+                scanner.radar_descriptor = None
+            scanner.status.update(running=False, finished_at=utc_now().isoformat(),
+                                  returncode=1 if detail else 0, error=detail)
 
 
-def scan_group(directory, group, api, module, flags, cancelled, cancel_event=None):
+def scan_group(directory, group, scanner, module, flags, cancelled, cancel_event=None):
     if cancelled():
         raise InterruptedError('服务停止，本组未完成扫描，保留原数据')
-    staged = Path(directory) / api.DB_PATH.name
-    backup(api.DB_PATH, staged)
+    staged = Path(directory) / scanner.db_path.name
+    backup(scanner.db_path, staged)
     result = run_local_command(
         [sys.executable, '-m', module, '--db', str(staged), *flags], timeout=3600,
         cwd=str(settings.project_root), env={**os.environ, 'GMS_PARTNER_ANDROID_AUTO_LOGIN': '0'},
@@ -79,7 +92,7 @@ def scan_group(directory, group, api, module, flags, cancelled, cancel_event=Non
     current = snapshot(staged)
     if cancelled():
         raise InterruptedError('服务停止，本组未完成扫描，保留原数据')
-    backup(staged, api.DB_PATH)
+    backup(staged, scanner.db_path)
     return current
 
 
@@ -96,9 +109,9 @@ def full_scan(cancelled=lambda: False, tasks=None, cancel_event=None):
     if not tasks or set(tasks) - CATEGORIES.keys():
         raise ValueError('请至少选择一个有效的监听任务')
     errors = {}
-    before = snapshot(update_api.DB_PATH) if any(key != 'exemptions' for key in tasks) else {key: {} for key in CATEGORIES}
+    before = snapshot(update_scanner.db_path) if any(key != 'exemptions' for key in tasks) else {key: {} for key in CATEGORIES}
     if 'exemptions' in tasks:
-        before['exemptions'] = snapshot(mainline_api.DB_PATH)['exemptions']
+        before['exemptions'] = snapshot(mainline_scanner.db_path)['exemptions']
     after = {category: dict(records) for category, records in before.items()}
     sources = sorted({source for task in tasks for source in TASK_SOURCES.get(task, [])})
     groups = []
@@ -106,14 +119,14 @@ def full_scan(cancelled=lambda: False, tasks=None, cancel_event=None):
         flags = ['--mode', 'full']
         for source in sources:
             flags.extend(['--source', source])
-        groups.append(('updates', update_api, 'features.system.update_monitor.cli', flags))
+        groups.append(('updates', update_scanner, 'features.system.update_monitor.cli', flags))
     if 'exemptions' in tasks:
-        groups.append(('exemptions', mainline_api, 'features.system.mainline_issues.cli', ['--force']))
+        groups.append(('exemptions', mainline_scanner, 'features.system.mainline_issues.cli', ['--force']))
     settings.data_root.mkdir(parents=True, exist_ok=True)
     with TemporaryDirectory(prefix='update-radar-', dir=settings.data_root) as directory:
-        for group, api, module, flags in groups:
+        for group, scanner, module, flags in groups:
             try:
-                current = scan_group(directory, group, api, module, flags, cancelled, cancel_event)
+                current = scan_group(directory, group, scanner, module, flags, cancelled, cancel_event)
                 for category in after:
                     if (category == 'exemptions') == (group == 'exemptions'):
                         after[category] = current[category]
