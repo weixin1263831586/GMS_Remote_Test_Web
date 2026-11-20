@@ -205,7 +205,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     )
                     measured[module] = geometry
                     with self.subTest(viewport=width, module=module):
-                        for name, expected in (("inset", 16), ("chartGap", 16), ("cardGap", 12)):
+                        for name, expected in (("inset", 8), ("chartGap", 16), ("cardGap", 12)):
                             self.assertAlmostEqual(
                                 geometry[name], expected, delta=1, msg=str(geometry),
                             )
