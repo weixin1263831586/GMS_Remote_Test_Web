@@ -15,7 +15,10 @@ import sys
 import tokenize
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from _common import find_repo_root
+
+ROOT = find_repo_root()
 CODE_SUFFIXES = {".py", ".js", ".css", ".html", ".sh", ".ts", ".tsx", ".rs"}
 SKIP_DIRS = {".git", ".venv", "node_modules", "__pycache__", "actions-runner", "dist", "target"}
 MARKERS = (
