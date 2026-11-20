@@ -2,9 +2,9 @@ name: Audit on-prem repository and live feature validation
 
 on:
   push:
-    # Audit branch deliberately validates every module change, not only
+    # Audit and UI review branches validate every module change, not only
     # edits to the audit scripts. Runner jobs are independent of CI jobs.
-    branches: ['audit/**']
+    branches: ['audit/**', 'ui/**']
   workflow_dispatch:
 
 permissions:
