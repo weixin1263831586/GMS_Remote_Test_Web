@@ -3,6 +3,16 @@ on:
   push:
     branches: [ui/unify-page-edge-8px-20261120]
     paths:
+      - '**/*.py'
+      - '**/*.js'
+      - '**/*.css'
+      - '**/*.html'
+      - '**/*.sh'
+      - '**/*.ts'
+      - '**/*.tsx'
+      - '**/*.rs'
+      - '*.py'
+      - '*.sh'
       - 'tools/scripts/maintenance/audit_comment_hygiene.py'
       - '.github/workflows/comment-hygiene-audit.yml'
   workflow_dispatch:
@@ -12,7 +22,7 @@ permissions:
 
 jobs:
   audit-comments:
-    name: Audit all tracked comments and docstrings (read-only)
+    name: Check stale comments in all tracked sources (read-only)
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
