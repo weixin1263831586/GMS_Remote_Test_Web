@@ -167,10 +167,18 @@ def _resume_receipt_is_stale(row: dict[str, Any], now: str, seconds: int) -> boo
     if not updated:
         return False
     try:
-        cutoff = datetime.datetime.fromisoformat(now) - datetime.timedelta(
+        # Legacy receipt times are host-local naive ISO; newer snapshots may
+        # include UTC offsets. Normalize both before comparing heartbeat age.
+        now_utc = datetime.datetime.fromisoformat(now.replace("Z", "+00:00")).astimezone(
+            datetime.timezone.utc
+        )
+        updated_utc = datetime.datetime.fromisoformat(
+            updated.replace("Z", "+00:00")
+        ).astimezone(datetime.timezone.utc)
+        cutoff = now_utc - datetime.timedelta(
             seconds=max(RECEIPT_RESUME_STALE_SECONDS, int(seconds))
         )
-        return datetime.datetime.fromisoformat(updated) < cutoff
+        return updated_utc < cutoff
     except (TypeError, ValueError, OverflowError):
         return False
 
