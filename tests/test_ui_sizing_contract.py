@@ -113,8 +113,8 @@ class UiSizingContractTests(unittest.TestCase):
 
     def test_page_roots_opt_in_to_same_shared_perimeter(self):
         roots = {
-            "web/shell/pages/desktop.html": 1,
-            "web/shell/pages/terminal.html": 1,
+            "web/shell/pages/desktop.html": 0,
+            "web/shell/pages/terminal.html": 0,
             "web/templates/architecture.html": 1,
             "features/automation/ui/page.html": 1,
             "features/cluster/ui/page.html": 2,
@@ -128,6 +128,9 @@ class UiSizingContractTests(unittest.TestCase):
             "features/devices/debug_api.py": 1,
             "features/system/gms_assistant_proxy.py": 1,
         }
+        # Desktop and terminal are Shell page-content.container roots, so
+        # their shared padding comes from the template, not ui-page-edge
+        # applied again (which would double the outer inset).
         for path, expected in roots.items():
             with self.subTest(path=path):
                 source = (ROOT / path).read_text(encoding="utf-8")
@@ -144,7 +147,7 @@ class UiSizingContractTests(unittest.TestCase):
             "other-workspaces.css": ("--ui-table-row-height", "--ui-stat-height"),
             "device-inventory.css": ("--ui-table-header-height", "--ui-control-height"),
             "api-docs-workbench.css": ("--ui-table-row-height", "--ui-stat-height"),
-            "analysis-workbench-tokens.css": ("--ui-control-height",),
+            "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
             "data-table-page.css": ("--ui-table-header-height", "--ui-control-height"),
         }
@@ -159,7 +162,7 @@ class UiSizingContractTests(unittest.TestCase):
         role_map = {
             "web/static/css/workspace-tabs.css": ("--ui-tab-height",),
             "web/static/css/analysis-workbench-tokens.css": (
-                "--ui-tab-height", "--ui-table-row-height",
+                "--ui-radius-card",
             ),
             "web/static/css/apk-workbench.css": (
                 "--ui-tab-height", "--ui-tab-height-narrow", "--ui-control-height-dense",

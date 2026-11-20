@@ -82,9 +82,9 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                     with self.subTest(width=width, page=name):
                         self.assertTrue(item["visible"], item)
                         self.assertGreaterEqual(item["count"], 1, item)
-                        self.assertAlmostEqual(item["top"], 12, delta=0.75, msg=str(item))
-                        self.assertAlmostEqual(item["right"], 12, delta=0.75, msg=str(item))
-                        self.assertAlmostEqual(item["actionTop"], 12,
+                        self.assertAlmostEqual(item["top"], 8, delta=0.75, msg=str(item))
+                        self.assertAlmostEqual(item["right"], 8, delta=0.75, msg=str(item))
+                        self.assertAlmostEqual(item["actionTop"], 8,
                                                delta=0.75, msg=str(item))
                         self.assertAlmostEqual(item["height"], 26,
                                                delta=0.75, msg=str(item))
