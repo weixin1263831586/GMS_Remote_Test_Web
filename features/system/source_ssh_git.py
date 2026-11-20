@@ -28,11 +28,12 @@ SDK 仓库位于远端编译服务器时的只读检索 provider：经 ADR 0004 
 
 from __future__ import annotations
 
+import copy
 import json
 import shlex
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 from foundation.command_result import CommandResult
@@ -77,6 +78,10 @@ SSH_GIT_DISCOVER_MAX_REPOS = 8192     # 发现子仓数的防御上限
 # metadata 逐仓收集 HEAD 的仓数上限：超过则只返回 repo_count（上千仓的
 # 逐仓 rev-parse 是分钟级操作，metadata 不承担这个成本）。
 SSH_GIT_HEADS_MAX_REPOS = 64
+# Cross-provider per-server cap; individual searches must not multiply sshd load.
+SSH_GIT_SERVER_CONCURRENCY = 4
+_SERVER_LIMIT_LOCK = threading.Lock()
+_SERVER_LIMITERS: dict[tuple[str, int, str], threading.BoundedSemaphore] = {}
 
 # 唯一放行的远端 git 子命令（只读）；其他子命令一律编程错误。
 _READONLY_GIT_SUBCOMMANDS = frozenset({"rev-parse", "log", "grep", "show"})
@@ -243,6 +248,10 @@ class SSHGitProvider(LocalGitProvider):
         self._discovered_repos: tuple[str, ...] | None = None
         self._discovered_at: float = 0.0
         self._discover_lock = threading.Lock()
+        self._search_lock = threading.Lock()
+        self._inflight_searches: dict[tuple, Future] = {}
+        self._pinned_search_cache: dict[tuple, dict[str, Any]] = {}
+        self._blob_cache: dict[tuple[str, str], bytes] = {}
         # 延迟 import：source.system.ssh 同包模块；连接池容量小、按需复用。
         from .ssh import SSHManager
 
@@ -402,8 +411,18 @@ class SSHGitProvider(LocalGitProvider):
             "password": self.config.ssh_password,
         }
 
+    def _server_limit(self) -> threading.BoundedSemaphore:
+        key = (self.config.ssh_host, self.config.ssh_port, self.config.ssh_username)
+        with _SERVER_LIMIT_LOCK:
+            return _SERVER_LIMITERS.setdefault(
+                key, threading.BoundedSemaphore(SSH_GIT_SERVER_CONCURRENCY)
+            )
+
     def _run_remote(self, command: str, timeout: int) -> CommandResult:
-        """唯一远端执行入口：SSHManager 连接池 + SSHExecutor（ADR 0004）。"""
+        """Execute via the shared host limiter, including SSH connection setup."""
+        permit = self._server_limit()
+        if not permit.acquire(timeout=max(0.0, float(timeout))):
+            return CommandResult(code=-1, timed_out=True)
         try:
             with self._ssh.connection(self._connection_config()) as ssh:
                 return self._ssh.execute_command(ssh, command, timeout=timeout)
@@ -414,6 +433,8 @@ class SSHGitProvider(LocalGitProvider):
                 "请检查 sdk_sources.ssh_git 配置、网络与凭据",
                 status_code=502,
             ) from exc
+        finally:
+            permit.release()
 
     def _git_command(self, *args: str, repo: str = "") -> str:
         """构造远端只读 git 命令行：子命令白名单 + 全参数 shlex.quote。"""
