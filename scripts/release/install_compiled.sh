@@ -12,12 +12,13 @@ PORT="${GMS_PORT:-5001}"
 SERVICE="${GMS_SERVICE_NAME:-gms-web-app}"
 YES=false
 SKIP_ADMIN=false
+OFFLINE=false
 fail(){ echo "ERROR: $*" >&2; exit 1; }
 usage(){ cat <<'EOF'
 sudo ./install.sh [--user USER] [--host IP_OR_DNS] [--port 5001]
   [--prefix /opt/gms-remote-test] [--state-dir /var/lib/gms-remote-test]
   [--config-dir /etc/gms-remote-test] [--service-name gms-web-app]
-  [--yes] [--no-admin-prompt]
+  [--yes] [--no-admin-prompt] [--offline]
 Interactive: create admin account, configure optional per-user Redmine.
 EOF
 }
@@ -33,6 +34,7 @@ while (($#)); do
  --service-name) SERVICE="$2"; shift 2;;
  --yes) YES=true; shift;;
  --no-admin-prompt) SKIP_ADMIN=true; shift;;
+ --offline) OFFLINE=true; shift;;
  *) fail "unknown option: $1";;
  esac
 done
@@ -61,6 +63,19 @@ PY
 command -v systemctl >/dev/null || fail "systemd missing"
 command -v runuser >/dev/null || fail "runuser missing"
 command -v flock >/dev/null || fail "flock missing"
+# Offline installations require preinstalled packages; otherwise apt gets
+# explicit control of operating-system dependencies (never curl | bash).
+packages=(ca-certificates curl openssl rsync openssh-client openssh-server iproute2
+          libudev1 libusb-1.0-0 x11vnc novnc websockify)
+if ! $OFFLINE; then
+  apt-get update
+  DEBIAN_FRONTEND=noninteractive apt-get install -y "${packages[@]}"
+else
+  for p in "${packages[@]}"; do
+    dpkg-query -W --showformat='${Status}' "$p" 2>/dev/null | grep -qx 'install ok installed' \
+      || fail "offline prerequisite missing: $p"
+  done
+fi
 [[ -n "$HOST" ]] || HOST="$(hostname -I | awk '{print $1}')"
 if ! $YES; then
  read -r -p "HTTPS host [$HOST]: " v; HOST="${v:-$HOST}"
@@ -89,11 +104,16 @@ install -d -o "$RUN_USER" -g "$RUN_GROUP" -m 0700 "$STATE" "$ETC" "$ETC/configs"
 install -d -m 0755 "$ETC/configs/examples"
 cp -an "$PKG/runtime/configs/examples/." "$ETC/configs/examples/"
 TARGET="$PREFIX/releases/$VERSION"
-if [[ ! -e "$TARGET" ]]; then
+if [[ -e "$TARGET" ]]; then
+ [[ -f "$TARGET/release-manifest.json" ]] || fail "existing version has no immutable manifest"
+ cmp -s "$PKG/manifest.json" "$TARGET/release-manifest.json" \
+   || fail "version $VERSION already installed with different content"
+else
  STAGE="$PREFIX/releases/.$VERSION.install.$$"
  trap '[[ -z "${STAGE:-}" ]] || rm -rf -- "$STAGE"' EXIT
  install -d -m 0755 "$STAGE"
  cp -a "$PKG/runtime" "$STAGE/runtime"
+ cp "$PKG/manifest.json" "$STAGE/release-manifest.json"
  rm -rf "$STAGE/runtime/configs"
  ln -s "$ETC/configs" "$STAGE/runtime/configs"
  ln -s "$STATE" "$STAGE/runtime/data"
@@ -195,7 +215,9 @@ WantedBy=timers.target
 EOF
 systemctl daemon-reload
 systemctl enable "$SERVICE.service" "$SERVICE-local-worker.service" "$SERVICE-backup.timer" >/dev/null
-if ! systemctl restart "$SERVICE.service" || ! systemctl is-active --quiet "$SERVICE.service"; then
+if ! systemctl restart "$SERVICE.service" || ! systemctl is-active --quiet "$SERVICE.service" ||
+   ! curl --silent --show-error --fail --insecure --retry 8 --retry-delay 1 --retry-connrefused \
+      --connect-timeout 2 --max-time 5 "https://127.0.0.1:$PORT/api/auth/status" >/dev/null; then
  if [[ -n "$OLD" ]]; then
    ln -s "$OLD" "$NEXT"; mv -Tf "$NEXT" "$PREFIX/current"
    systemctl restart "$SERVICE.service" || true
