@@ -61,6 +61,8 @@ gh auth status >/dev/null || fail "GitHub CLI is not authenticated"
 if gh release view "$tag" --repo "$REPO" >/dev/null 2>&1; then
   fail "release already exists: $tag; do not silently overwrite signed artifacts"
 fi
+# Keep variable expansion for release metadata, but escape Markdown
+# backticks so Bash does not treat fenced code blocks as substitutions.
 cat > "$tmp/notes.md" <<EOF
 ## GMS Remote Test Web — compiled independent installation
 
@@ -69,15 +71,15 @@ the project's plain Python backend source. The front-end and public installer
 remain inspectable. Verify publisher fingerprint through a separate trusted channel.
 
 Publisher signing fingerprint:
-```text
+\`\`\`text
 $fingerprint
-```
+\`\`\`
 
 ### Copy into another server
 
-```bash
+\`\`\`bash
 curl -fsSLo gms-install.sh https://raw.githubusercontent.com/weixin1263831586/GMS_Remote_Test_Web/$REF/scripts/release/install_from_github.sh && bash gms-install.sh --fingerprint $fingerprint $(if "$PRERELEASE"; then printf '%s' "--tag $tag"; fi)
-```
+\`\`\`
 
 This command downloads the release archive, SHA-256, detached GPG signature
 and publisher public key from GitHub, then verifies them before invoking sudo.
