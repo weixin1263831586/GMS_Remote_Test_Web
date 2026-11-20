@@ -2938,6 +2938,16 @@ def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     path_filter = str(arguments.get("path") or "").strip()
     if path_filter:
         args.extend(["--path", path_filter])
+    repo_scope = str(arguments.get("repo_scope") or "").strip()
+    if repo_scope:
+        if repo_scope.startswith("/") or ".." in repo_scope.split("/"):
+            return "repo_scope must be an exact child repository path", True
+        args.extend(["--repo-scope", repo_scope])
+    budget = arguments.get("budget_seconds")
+    if budget is not None:
+        if isinstance(budget, bool) or not isinstance(budget, int) or not 1 <= budget <= 600:
+            return "budget_seconds must be an integer in [1, 600]", True
+        args.extend(["--budget-seconds", str(budget)])
     return run_cli("gms-rt-sdk-search", args)
 
 
