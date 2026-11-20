@@ -4,6 +4,77 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class DiskAuditRefreshTests(RuntimeUiHarness):
+    def test_disk_sidebar_cards_scroll_instead_of_clipping_content(self):
+        """Disk details and scan scope retain complete text at constrained heights."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("() => switchPage('security-audit', null)")
+            page.wait_for_function(
+                "() => document.getElementById('page-security-audit').classList.contains('active')"
+            )
+            page.evaluate(
+                """() => {
+                    document.getElementById('audit-main-view').style.display = 'none';
+                    document.getElementById('audit-outbox-panel').style.display = 'none';
+                    document.getElementById('audit-disk-panel').style.display = 'flex';
+                    const detail = document.getElementById('audit-disk-detail');
+                    // Populate long details without making a network or device request.
+                    for (let i = 0; i < 12; i++) {
+                        const row = document.createElement('div');
+                        const label = document.createElement('span');
+                        const value = document.createElement('strong');
+                        label.textContent = '追加分类属性 ' + i;
+                        value.textContent = '较长的只读分类审计说明与完整路径 ' + i;
+                        row.append(label, value);
+                        detail.appendChild(row);
+                    }
+                }"""
+            )
+            for width, height in ((1912, 914), (1440, 720)):
+                with self.subTest(viewport=(width, height)):
+                    page.set_viewport_size({"width": width, "height": height})
+                    geometry = page.evaluate(
+                        """() => {
+                            const root = document.getElementById('audit-disk-panel');
+                            const side = root.querySelector('.audit-side-panels');
+                            const cards = Array.from(side.querySelectorAll(':scope > .audit-side-card'));
+                            const table = root.querySelector('.audit-disk-table-panel .audit-table-wrap');
+                            const scrolled = side.scrollHeight > side.clientHeight + 1;
+                            const styles = cards.map(card => ({
+                                shrink: getComputedStyle(card).flexShrink,
+                                client: card.clientHeight,
+                                scroll: card.scrollHeight,
+                            }));
+                            side.scrollTop = side.scrollHeight;
+                            const sideRect = side.getBoundingClientRect();
+                            const notesRect = cards[cards.length - 1].getBoundingClientRect();
+                            return {
+                                sideOverflow: getComputedStyle(side).overflowY,
+                                tableOverflow: getComputedStyle(table).overflowY,
+                                scrollable: scrolled,
+                                scrollTop: side.scrollTop,
+                                notesBottom: notesRect.bottom,
+                                sideBottom: sideRect.bottom,
+                                cardSizes: styles,
+                                cardCount: cards.length,
+                            };
+                        }"""
+                    )
+                    self.assertEqual(geometry["sideOverflow"], "auto", geometry)
+                    self.assertEqual(geometry["tableOverflow"], "auto", geometry)
+                    self.assertEqual(geometry["cardCount"], 3, geometry)
+                    self.assertTrue(geometry["scrollable"], geometry)
+                    self.assertGreater(geometry["scrollTop"], 0, geometry)
+                    self.assertLessEqual(
+                        geometry["notesBottom"], geometry["sideBottom"] + 2, geometry
+                    )
+                    for card in geometry["cardSizes"]:
+                        self.assertEqual(card["shrink"], "0", geometry)
+                        self.assertLessEqual(card["scroll"] - card["client"], 1, geometry)
+        finally:
+            page.close()
+
     def test_refresh_bypasses_cache_and_has_visible_loading_feedback(self):
         page = self.new_page()
         try:
