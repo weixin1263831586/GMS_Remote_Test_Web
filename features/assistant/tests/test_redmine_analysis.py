@@ -428,9 +428,7 @@ async def test_model_corrects_extra_redmine_parameters_before_dispatch(environme
 
 @pytest.mark.asyncio
 async def test_recovery_step_stays_running_until_first_successful_poll(environment):
-    """Controller 重启恢复（20261113154337 截图）：恢复步骤不能立即显示
-    绿勾假完成——保持 running，监控器首次成功轮询到后台真实状态后才
-    收敛；后续重复恢复（监控退出后再 GET）幂等不追加重复步骤。"""
+    """恢复步骤在首次成功轮询前保持 running，后续重复恢复不追加步骤。"""
     from features.assistant.session_log import append_recovery_step
 
     _submit, _read = environment
