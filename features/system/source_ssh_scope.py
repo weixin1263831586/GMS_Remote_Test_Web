@@ -9,7 +9,7 @@ import time
 from typing import Any
 
 from . import source_ssh_git as src
-from .source_provider_contract import SourceProviderError, _COMMIT_RE
+from .source_provider_contract import _COMMIT_RE, SourceProviderError
 
 
 def search_scoped(
