@@ -732,12 +732,12 @@ gms-rt-sdk-sources() {
 
 gms-rt-sdk-search() {
     local source="" revision="" query=""
-    local limit=50 path_filter=""
+    local limit=50 path_filter="" repo_scope="" budget_seconds=""
     local argument
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--limit N]"
+                echo "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--repo-scope SUBREPO] [--budget-seconds N] [--limit N]"
                 echo "  Omitting --revision resolves the source's default_revision automatically."
                 return 0
                 ;;
@@ -745,6 +745,8 @@ gms-rt-sdk-search() {
             --revision) shift; [ $# -gt 0 ] || { error "--revision requires a value"; return "$GMS_RT_EXIT_USAGE"; }; revision="$1" ;;
             --query) shift; [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }; query="$1" ;;
             --path) shift; [ $# -gt 0 ] || { error "--path requires a value"; return "$GMS_RT_EXIT_USAGE"; }; path_filter="$1" ;;
+            --repo-scope) shift; [ $# -gt 0 ] || { error "--repo-scope requires a value"; return "$GMS_RT_EXIT_USAGE"; }; repo_scope="$1" ;;
+            --budget-seconds) shift; [ $# -gt 0 ] || { error "--budget-seconds requires a value"; return "$GMS_RT_EXIT_USAGE"; }; budget_seconds="$1" ;;
             --limit) shift; [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }; limit="$1" ;;
             *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
         esac
@@ -777,6 +779,14 @@ gms-rt-sdk-search() {
     fi
     local url="/sdk/search?source=$(_urlencode "$source")&revision=$(_urlencode "$revision")&query=$(_urlencode "$query")&limit=$limit"
     [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
+    [ -n "$repo_scope" ] && url="$url&repo_scope=$(_urlencode "$repo_scope")"
+    if [ -n "$budget_seconds" ]; then
+        [[ "$budget_seconds" =~ ^[0-9]+$ ]] && [ "$budget_seconds" -ge 1 ] && [ "$budget_seconds" -le 600 ] || {
+            error "--budget-seconds must be an integer between 1 and 600"
+            return "$GMS_RT_EXIT_USAGE"
+        }
+        url="$url&budget_seconds=$budget_seconds"
+    fi
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
         api_call "$url" "GET" | jq '.'
         return $?
