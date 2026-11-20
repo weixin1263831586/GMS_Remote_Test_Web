@@ -11,8 +11,8 @@ name: CI
 #   browser-e2e ─┘
 on:
   push:
-    # 所有 audit/ 审核分支与 main 使用相同门禁，避免绑定临时分支。
-    branches: [main, 'audit/**']
+    # main、audit/** 与 ui/** 推送共享完整门禁，不依赖临时分支专属工作流。
+    branches: [main, 'audit/**', 'ui/**']
   pull_request:
     branches: [main]
 
