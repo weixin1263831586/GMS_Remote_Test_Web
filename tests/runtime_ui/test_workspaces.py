@@ -1025,8 +1025,10 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     if scope_mode == "single":
                         self.assertEqual(set(pane_style.values()), {"0px"})
                     else:
-                        self.assertGreaterEqual(pane_box["x"], grid_box["x"] + 8)
-                        self.assertGreaterEqual(pane_box["y"], grid_box["y"] + 5)
+                        # The shared outer frame supplies the 8px edge. A
+                        # second pane inset would reintroduce double spacing.
+                        self.assertAlmostEqual(pane_box["x"], grid_box["x"], delta=0.5)
+                        self.assertAlmostEqual(pane_box["y"], grid_box["y"], delta=0.5)
                     history = page.evaluate("window.__scopeClassHistory")
                     wrong_class = (
                         "workspace-scope-cluster"
