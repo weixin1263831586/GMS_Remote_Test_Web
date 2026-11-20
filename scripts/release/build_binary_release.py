@@ -88,6 +88,7 @@ def _compile_native(out: Path) -> Path:
     compiler = [
         sys.executable, "-m", "nuitka",
         "--standalone", "--follow-imports",
+        "--jobs=4",
         "--assume-yes-for-downloads",
         "--python-flag=no_asserts",
         f"--output-dir={out}",
