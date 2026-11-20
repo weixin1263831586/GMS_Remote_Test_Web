@@ -827,6 +827,18 @@ class DailyBriefRepository:
             ).fetchone()
             return dict(row) if row is not None else None
 
+    def running_lease_for_issue(self, run_id: str, issue_id: int) -> dict[str, Any] | None:
+        """Only a currently owned running job may resume a persisted AI session."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? "
+                "AND status='running' AND lease_token<>'' "
+                "AND (kind='run' OR (kind='issue' AND issue_id=?)) "
+                "ORDER BY started_at DESC LIMIT 1",
+                (run_id, int(issue_id)),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
     # ----------------------------------------------------------- ai executions
 
     def record_ai_execution(self, run_id: str, issue_id: int, payload: dict[str, Any]) -> None:
