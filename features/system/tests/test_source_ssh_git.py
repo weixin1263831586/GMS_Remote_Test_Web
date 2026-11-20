@@ -435,6 +435,29 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertIn("-C /remote/sdk/kernel-6.1", show_cmd)
         self.assertIn(f"{self.COMMIT_KERN}:drivers/gpio.c", show_cmd)
 
+    def test_signed_result_reads_pinned_repo_without_cold_discovery(self):
+        """A link opened after a server restart must never scan the whole SDK."""
+        self.provider = self._provider(self._handler(
+            grep_stdout=self._grep_stdout(),
+        ))
+        result = self.provider.search("", "run")
+        signed = result["matches"][1]["result_id"]
+        fresh = self._provider(
+            self._handler(show_stdout="pinned blob\\n"),
+            repos=(), discover=True,
+        )
+        with unittest.mock.patch.object(
+            fresh, "_discover_repos_remote",
+            side_effect=AssertionError("unexpected full SDK discovery"),
+        ):
+            content = fresh.read_signed(signed, offset=0, limit=5)
+        self.assertEqual(content["commit"], self.COMMIT_KERN)
+        self.assertEqual(content["path"], "kernel-6.1/drivers/gpio.c")
+        commands = [command for command in self.executed if " show " in command]
+        self.assertTrue(commands)
+        self.assertIn("-C /remote/sdk/kernel-6.1", commands[-1])
+        self.assertIn(f"{self.COMMIT_KERN}:drivers/gpio.c", commands[-1])
+
     def test_explicit_repo_scope_searches_only_selected_repo(self):
         """Scope is exact; legacy path_filter remains only a match filter."""
         self.provider = self._provider(self._handler(
