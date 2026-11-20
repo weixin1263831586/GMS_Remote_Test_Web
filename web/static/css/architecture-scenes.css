@@ -239,7 +239,7 @@
 }
 
 
-/* v3 polish: dimensional focal nodes and legible non-overlapping flow routes. */
+/* Controller 中心节点与路径线条的层次样式。 */
 .architecture-v2 .arch-scene-controller-emblem{
   position:absolute;top:-40px;left:50%;z-index:4;
   width:67px;height:51px;transform:translateX(-50%);
