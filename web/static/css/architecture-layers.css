@@ -2,7 +2,6 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--page-background); color: var(--text);  }
 
-main { margin: 0 auto; }
 .lead { color: var(--muted); line-height: 1.7; margin: 0 0 14px;  }
 
 .arch-pane { min-width: 0; }
