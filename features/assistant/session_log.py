@@ -175,11 +175,16 @@ def append_recovery_step(
             step.pop("finished_at", None)
             step.pop("duration_seconds", None)
             changed = True
+        payload = step.setdefault("data", {})
+        if payload.get("kind") != "agent_recovery_monitor":
+            payload["kind"] = "agent_recovery_monitor"
+            changed = True
         if changed:
             session["updated_at"] = _now_iso()
             _persist_transcript(session)
     else:
         ids = {key: active[key] for key in _RUN_ID_KEYS if active.get(key)}
+        ids["kind"] = "agent_recovery_monitor"
         _append_step(session, RECOVERY_STEP_TITLE, "running", detail, ids)
         step = session["steps"][-1]
     if active.get("recovery_step_id") != step["id"]:
