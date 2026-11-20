@@ -343,6 +343,11 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                             columns, previous, top: badge.top - header.top, bottom: header.bottom - badge.bottom,
                             overflow: document.documentElement.scrollWidth - innerWidth,
                             headerHeight: header.height,
+                            headerMinHeight: getComputedStyle(panel.querySelector('.aoa-workbench-header')).minHeight,
+                            headerPaddingTop: getComputedStyle(panel.querySelector('.aoa-workbench-header')).paddingTop,
+                            headerPaddingBottom: getComputedStyle(panel.querySelector('.aoa-workbench-header')).paddingBottom,
+                            gridTopGap: grid.getBoundingClientRect().top - header.bottom,
+                            statusHeight: badge.height,
                             headerGap: getComputedStyle(panel.querySelector('.aoa-workbench-header')).gap,
                             headerBottomMargin: getComputedStyle(panel.querySelector('.aoa-workbench-header')).marginBottom,
                             statusTopPadding: getComputedStyle(panel.querySelector('#aoa-run-status')).paddingTop,
@@ -352,11 +357,16 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                     self.assertGreaterEqual(geometry['top'], 0)
                     self.assertGreaterEqual(geometry['bottom'], 0)
                     self.assertLessEqual(geometry['overflow'], 1)
-                    self.assertEqual(geometry['headerBottomMargin'], '6px')
-                    self.assertEqual(geometry['statusTopPadding'], '3px')
-                    self.assertEqual(geometry['statusBottomPadding'], '3px')
+                    self.assertEqual(geometry['headerBottomMargin'], '4px')
+                    self.assertEqual(geometry['headerMinHeight'], '22px')
+                    self.assertEqual(geometry['headerPaddingTop'], '0px')
+                    self.assertEqual(geometry['headerPaddingBottom'], '0px')
+                    self.assertEqual(geometry['statusTopPadding'], '2px')
+                    self.assertEqual(geometry['statusBottomPadding'], '2px')
+                    self.assertAlmostEqual(geometry['statusHeight'], 22, delta=0.5)
+                    self.assertAlmostEqual(geometry['gridTopGap'], 4, delta=0.5)
                     self.assertEqual(geometry['headerGap'], '4px' if width <= 760 else '10px')
-                    self.assertLessEqual(geometry['headerHeight'], 68 if width <= 760 else 36)
+                    self.assertLessEqual(geometry['headerHeight'], 54 if width <= 760 else 26)
                     if width >= 1181:
                         self.assertLess(geometry['columns'][0], geometry['previous'][0])
                         self.assertGreater(geometry['columns'][1], geometry['previous'][1])
