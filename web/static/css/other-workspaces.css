@@ -349,7 +349,7 @@
     flex:0 0 auto;
 }
 #page-security-audit.page-ui-rework .audit-stat-card.workbench-stat {
-    position:relative; overflow:hidden; min-height:95px; height:95px; padding:14px 15px;
+    position:relative; overflow:hidden; min-height:var(--ui-stat-height); height:var(--ui-stat-height); padding:14px 15px;
     border-radius:8px; gap:12px; border-color:var(--audit-edge);
     background: linear-gradient(125deg, color-mix(in srgb, var(--audit-accent) 13%, var(--card-bg)), var(--card-bg) 75%);
 }
@@ -627,7 +627,7 @@
 /* Match the two pane headers to the same fixed row height. */
 #page-test-suites.page-ui-rework :is(.suite-browser-toolbar, .suite-browser-header) {
     box-sizing: border-box;
-    height: 40px; min-height: 40px; padding: 5px 12px;
+    height: var(--ui-control-height-large); min-height: var(--ui-control-height-large); padding: 5px 12px;
 }
 #page-test-suites .suite-sidebar-heading {
     display: inline-flex; align-items: center; gap: 7px;
@@ -735,7 +735,7 @@
 #page-test-suites .suite-browser-breadcrumb {
     grid-column: 1; grid-row: 1;
     display: flex; align-items: center; gap: 3px;
-    min-width: 0; min-height: 28px; margin: 0; padding: 0 9px 0 0;
+    min-width: 0; min-height: var(--ui-control-height-dense); margin: 0; padding: 0 9px 0 0;
     border: 0; border-right: 1px solid var(--border-color);
     background: transparent; white-space: nowrap;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
