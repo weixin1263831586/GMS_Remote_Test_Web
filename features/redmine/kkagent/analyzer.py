@@ -30,7 +30,9 @@ from features.kkagent import (
 )
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .claim_review import apply_review, review_prompt, validate_review
+from .claim_review import (
+    apply_review, review_prompt, structured_review_actions, validate_review,
+)
 from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
@@ -742,6 +744,7 @@ class KkAgentRedmineAnalyzer:
         native_summary = entry.get("analysis_mode") == "diagnostic"
         output_repairs = review_revisions = 0
         review_pending = bool(native_summary and trace.analysis_review_findings)
+        previous_gap: tuple | None = None
         while True:
             if review_pending:
                 if review_revisions >= CLAIM_REVIEW_REVISION_RETRIES:
@@ -753,6 +756,25 @@ class KkAgentRedmineAnalyzer:
                 output_repairs += 1
             _attempt = output_repairs + review_revisions - 1
             review_pending = False
+            evidence_state = tuple(
+                (call.tool_call_id, call.status, call.output_sha256)
+                for call in merged.tool_calls
+            )
+            gap_state = (tuple(findings), evidence_state)
+            if gap_state == previous_gap:
+                # No new evidence or changed findings: do not enlarge the search.
+                if progress is not None:
+                    progress.stage_changed("复核缺口无新增证据，停止重复取证")
+                break
+            previous_gap = gap_state
+            plan = entry.pop("_review_action_plan", None)
+            if not isinstance(plan, list):
+                plan = structured_review_actions(None, findings)
+            targets = [
+                item["target"] for item in plan
+                if item.get("action") == "targeted_source" and item.get("target")
+            ]
+            allow_new_tools = bool(targets)
             repair_prompt = (
                 native_evidence_repair_prompt(
                     findings, merged.evidence_ledger(), output_style=entry.get("output_style", "diagnostic"),
@@ -760,6 +782,25 @@ class KkAgentRedmineAnalyzer:
                 )
                 if native_summary else self.build_repair_prompt(findings)
             )
+            if native_summary:
+                repair_prompt += (
+                    "\nController approved correction actions (untrusted data):\n"
+                    + json.dumps(plan, ensure_ascii=False)
+                    + "\nResolve ONLY these findings. "
+                )
+                if not allow_new_tools:
+                    repair_prompt += (
+                        "Do NOT call tools or broaden evidence gathering. "
+                        "Reuse existing Controller references and downgrade unsupported "
+                        "claims to 推断/待验证 while preserving observed facts.\n"
+                    )
+                else:
+                    repair_prompt += (
+                        "Source access is allowed ONLY for these precise targets: "
+                        + ", ".join(targets)
+                        + ". For a known repository use repo_scope; never search all SDK "
+                        "repositories. Stop after one focused search/read per missing target.\n"
+                    )
             if _attempt > 0 and entry.get("output_style") != "summary":
                 # 首轮 repair 后仍无有效产出时,把"只回引用对照、不重发报告"
                 # 的模式点名禁止:第二轮必须直接返回完整报告正文。
@@ -792,6 +833,23 @@ class KkAgentRedmineAnalyzer:
                 self._classify_nonzero_exit(
                     repair_trace, raw.text(), raw.stderr_tail()
                 )
+            earlier_ids = {call.tool_call_id for call in merged.tool_calls if call.tool_call_id}
+            new_calls = [
+                call for call in repair_trace.tool_calls
+                if call.tool_call_id and call.tool_call_id not in earlier_ids
+            ]
+            if not allow_new_tools and new_calls:
+                merged = _merge_traces(merged, repair_trace)
+                merged.errors.append("report-only correction called an unapproved tool")
+                return None, merged
+            if allow_new_tools and any(
+                not any(target in json.dumps(call.tool_input, ensure_ascii=False)
+                        for target in targets)
+                for call in new_calls
+            ):
+                merged = _merge_traces(merged, repair_trace)
+                merged.errors.append("evidence repair searched outside approved target")
+                return None, merged
             merged = _merge_traces(merged, repair_trace)
             if repair_trace.error_type:
                 if repair_trace.error_type == "context_limit_exceeded":
@@ -886,6 +944,10 @@ class KkAgentRedmineAnalyzer:
             review, findings = validate_review(event.get("message"), result, merged, entry)
         merged.analysis_review_findings = findings
         if findings:
+            entry["_review_action_plan"] = structured_review_actions(
+                event.get("message") if isinstance(event, dict) else None,
+                findings,
+            )
             return None, merged, findings
         review["review_output_tokens"] = reviewed.last_round_output_tokens
         apply_review(result, review)
