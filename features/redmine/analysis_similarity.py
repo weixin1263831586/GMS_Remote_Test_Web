@@ -44,7 +44,7 @@ class SimilarityAnalysisMixin:
 
         for term in self._redmine_search_terms(issue_payload, failures):
             try:
-                rows = await client.search_issues_by_subject(term, project_id="fae", limit=10, status_id="*")
+                rows = await client.search_issues_by_subject(term, limit=10, status_id="*")
             except Exception as exc:
                 logger.warning("[RedmineAgent] Redmine subject search failed for %s: %s", term, exc)
                 continue
