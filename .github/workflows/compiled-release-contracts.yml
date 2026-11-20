@@ -1,0 +1,35 @@
+name: Compiled independent release contracts
+on:
+  push:
+    branches:
+      - ui/unify-page-edge-8px-20261120
+    paths:
+      - 'scripts/release/**'
+      - 'tests/test_compiled_release.py'
+      - 'foundation/runtime_settings.py'
+      - 'foundation/config.py'
+      - 'bootstrap/env_loader.py'
+      - 'install.sh'
+      - '.github/workflows/compiled-release-contracts.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-free-contracts:
+    name: Installer syntax and source-free release contract
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Shell syntax
+        run: bash -n install.sh scripts/release/install_compiled.sh
+      - name: Python release contract tests (stdlib only)
+        run: python3 -m unittest -v tests.test_compiled_release
+      - name: Python syntax for compiled entrypoints
+        run: |
+          python3 -m py_compile \
+            scripts/release/compiled_entry.py \
+            scripts/release/build_binary_release.py \
+            scripts/release/verify_binary_tree.py
