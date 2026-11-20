@@ -18,6 +18,7 @@ from foundation.config import settings
 
 from .daily_brief_analysis_events import event_store_for_repository, mask_secrets
 from .daily_brief_owner_policy import is_daily_brief_owner_eligible
+from .daily_brief_resume import ResumeReceiptBusyError
 from .daily_brief_repository import TERMINAL_RUN_STATUSES, DailyBriefRepository
 from .daily_brief_service import DailyBriefService
 from .users import _now
@@ -208,6 +209,12 @@ async def run_claimed_job(
             await heartbeat
         try:
             await work
+        except ResumeReceiptBusyError as exc:
+            requeued = repository.requeue_job(
+                job_id, worker_id, lease_token, reason=str(exc),
+            )
+            outcome = "requeued" if requeued else "lease-lost"
+            logger.info("daily brief job %s deferred while receipt is active", job_id)
         except Exception as exc:
             logger.exception("daily brief job %s failed", job_id)
             finished = repository.finish_job(

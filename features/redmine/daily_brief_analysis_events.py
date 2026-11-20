@@ -508,6 +508,13 @@ class AnalysisProgressRecorder:
     def progress(self, summary: str) -> None:
         self._emit("progress", summary=summary)
 
+    def analysis_deferred(self) -> None:
+        """Close the interrupted attempt without falsely reporting success."""
+        self._emit(
+            "analysis_failed", stage="receipt_wait", status="interrupted",
+            summary="原 AI 分析仍在执行，本次恢复已重新排队，不重复发送请求",
+        )
+
     def analysis_finished(
         self, *, ok: bool, cancelled: bool = False, error_type: str = "", model_name: str = "",
     ) -> None:

@@ -6,7 +6,9 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 
-from features.redmine.daily_brief_resume import admit_resume_receipt, valid_resume_trace
+from features.redmine.daily_brief_resume import (
+    ResumeReceiptBusyError, admit_resume_receipt, valid_resume_trace,
+)
 
 
 def _checkpoint(**changes):
@@ -59,6 +61,29 @@ def test_resume_receipt_admission_retries_only_under_same_running_lease():
         assert ledger.begin.call_count == 2
         sleep.assert_awaited_once()
         assert ledger.begin.call_args.kwargs["resume_session_id"] == "sess-1"
+    asyncio.run(scenario())
+
+
+def test_active_provider_deferred_instead_of_marked_failed():
+    async def scenario():
+        ledger = Mock()
+        ledger.begin.return_value = {"duplicate": True, "receipt_id": "active"}
+        repository = Mock()
+        repository.is_cancel_requested.return_value = False
+        repository.running_lease_for_issue.return_value = _lease()
+        trace = SimpleNamespace(session_id="sess-1")
+        # Fast-forward the grace period without changing asyncio's clock.
+        with patch("features.redmine.ai_execution_ledger.RECEIPT_RESUME_STALE_SECONDS", -16):
+            try:
+                await admit_resume_receipt(
+                    ledger, repository, {"owner_id": "owner"}, trace,
+                    "run-id", 123, "new",
+                )
+            except ResumeReceiptBusyError:
+                pass
+            else:
+                raise AssertionError("active provider must defer rather than fail")
+        ledger.begin.assert_called_once()
     asyncio.run(scenario())
 
 

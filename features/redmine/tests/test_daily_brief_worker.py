@@ -129,6 +129,30 @@ class DailyBriefWorkerTests(unittest.TestCase):
         self.assertEqual(self.repository.get_job(job["job_id"])["status"], "completed")
         self.assertEqual(self.repository.get_run("db_test").status, "completed")
 
+    def test_active_ai_receipt_is_requeued_not_failed(self):
+        from features.redmine.daily_brief_resume import ResumeReceiptBusyError
+
+        self.repository.create_run(DailyBriefRun(
+            owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_test"
+        ))
+        job = self._claim()
+
+        async def execute_run(_run_id):
+            raise ResumeReceiptBusyError("prior provider still active")
+
+        fake_service = SimpleNamespace(execute_run=execute_run)
+
+        async def scenario():
+            return await run_claimed_job(
+                self.repository, job, self.worker_id, asyncio.Event(),
+                lease_seconds=30, service_factory=lambda _owner: fake_service,
+            )
+
+        self.assertTrue(asyncio.run(scenario()))
+        self.assertEqual(self.repository.get_job(job["job_id"])["status"], "queued")
+        self.assertEqual(self.repository.get_run("db_test").status, "pending")
+        self.assertIsNotNone(self.repository.claim_next_job("other-worker", lease_seconds=30))
+
     def test_worker_shutdown_requeues_active_job(self):
         self.repository.create_run(DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_test"

@@ -42,6 +42,21 @@ def valid_resume_trace(
     except (TypeError, ValueError, KeyError):
         return None
 
+class ResumeReceiptBusyError(RuntimeError):
+    """An old provider still owns this receipt: retry without failing the job."""
+
+
+def mark_deferred_issue(repository: Any, record: Any, progress: Any) -> None:
+    """Leave an interrupted attempt pending and its progress terminal."""
+    record.status = "pending"
+    record.error_type = "receipt_busy"
+    record.error = "previous AI analysis still active; queued for retry"
+    record.started_at = record.finished_at = ""
+    repository.upsert_issue(record)
+    if progress is not None:
+        progress.analysis_deferred()
+
+
 async def admit_resume_receipt(
     ledger: Any, repository: Any, receipt_args: dict[str, Any], resumed: Any,
     run_id: str, issue_id: int, lease_token: str,
@@ -75,4 +90,8 @@ async def admit_resume_receipt(
             if not lease or lease.get("lease_token") != lease_token:
                 raise RuntimeError("lost Worker lease while awaiting AI receipt recovery")
             receipt = ledger.begin(**receipt_args)
+        if receipt.get("duplicate"):
+            raise ResumeReceiptBusyError(
+                "previous AI receipt is still active; analysis queued for retry"
+            )
     return receipt

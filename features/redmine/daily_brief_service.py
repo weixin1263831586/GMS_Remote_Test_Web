@@ -847,7 +847,6 @@ class DailyBriefService:
             attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
         )
 
-        # Receipt admission and checkpoint resumption are a single fenced path.
         receipt_args = dict(
             owner_id=self.owner_id,
             purpose="daily_brief_issue",
@@ -863,11 +862,15 @@ class DailyBriefService:
                 **({"output_style": "summary"} if run.output_style == "summary" else {}),
             },
         )
-        from .daily_brief_resume import admit_resume_receipt
-        receipt = await admit_resume_receipt(
-            self.ai_ledger, self.repository, receipt_args, resumed,
-            run.run_id, issue_id, str((job_lease or {}).get("lease_token") or ""),
-        )
+        from .daily_brief_resume import ResumeReceiptBusyError, admit_resume_receipt, mark_deferred_issue
+        try:
+            receipt = await admit_resume_receipt(
+                self.ai_ledger, self.repository, receipt_args, resumed,
+                run.run_id, issue_id, str((job_lease or {}).get("lease_token") or ""),
+            )
+        except ResumeReceiptBusyError:
+            mark_deferred_issue(self.repository, record, progress)
+            raise
         if receipt.get("duplicate"):
             record.status = "failed"
             record.error_type = "ai_call_in_flight"
