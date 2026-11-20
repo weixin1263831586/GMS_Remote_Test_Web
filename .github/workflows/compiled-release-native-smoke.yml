@@ -20,7 +20,8 @@ permissions:
 
 concurrency:
   group: gms-native-release-smoke-${{ github.ref }}
-  cancel-in-progress: false
+  # Do not spend an hour compiling a commit superseded by a newer review patch.
+  cancel-in-progress: true
 
 jobs:
   native-smoke:
