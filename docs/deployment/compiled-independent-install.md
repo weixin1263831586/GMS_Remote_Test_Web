@@ -16,12 +16,14 @@
 
 ## 二、可信构建机编译
 
-要求：Ubuntu 22.04 x86_64、Python 3.10、编译工具链、Nuitka、
-与仓库匹配的 requirements.txt、受控的 GPG 发布签名私钥。
+要求：Ubuntu 22.04 x86_64、Python 3.10、编译工具链（gcc）、
+Nuitka、patchelf、与仓库匹配的 requirements.txt、受控的 GPG 发布签名私钥。
+patchelf 必须在构建时可执行；自托管 Runner 可安装到临时 venv，
+不必修改宿主系统的包管理状态。
 
 ~~~bash
 python3 -m pip install -r requirements.txt
-python3 -m pip install 'nuitka>=2.7,<3' ordered-set zstandard
+python3 -m pip install 'nuitka>=2.7,<3' ordered-set zstandard patchelf
 GMS_RELEASE_SIGNING_KEY='<签名密钥ID>' \
     ./install.sh package --version 1.0.0 --dist-dir dist
 ~~~
