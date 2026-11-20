@@ -929,6 +929,15 @@ class KkAgentRedmineAnalyzer:
         merged.final_event = candidate  # The review JSON is never the displayed answer.
         merged.last_round_visible_output = trace.last_round_visible_output
         merged.last_round_output_tokens = trace.last_round_output_tokens
+        prior_ids = {call.tool_call_id for call in trace.tool_calls if call.tool_call_id}
+        extra = [
+            call for call in reviewed.tool_calls
+            if call.tool_call_id and call.tool_call_id not in prior_ids
+        ]
+        if extra:
+            findings = ["claim review invoked an unapproved tool; do not gather more evidence"]
+            merged.analysis_review_findings = findings
+            return None, merged, findings
         if reviewed.session_id and reviewed.session_id != trace.session_id:
             merged.status = merged.error_type = "claim_review_failed"
             merged.error = "结论复核返回了不同的会话，未发布分析结果。"
