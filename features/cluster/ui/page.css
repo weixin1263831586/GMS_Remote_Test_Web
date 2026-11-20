@@ -40,7 +40,6 @@
 
 /* author 的 display 覆盖会压掉 UA 的 [hidden]，显式兜底。 */
 .dash-tabs-actions [hidden]{display:none}
-.dash-tabs-actions .compact-filter{height:30px}
 
 .dash-tab-pane{margin:0 16px}
 
@@ -128,7 +127,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #dashboard .dash-panel-sub{margin-left:auto;color:var(--muted)}
 #dashboard .dash-gauges-host-tabs,#dashboard .dash-trend-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:9px 13px 6px;margin:0}
 #dashboard .dash-trend-tabs{box-sizing:border-box;min-height:41px}
-#dashboard .dash-trend-btn{padding:4px 10px;border-radius:5px;min-height:26px;background:#252430;border:1px solid #3a3848;color:#c4c0d0}
+#dashboard .dash-trend-btn{padding:4px 10px;border-radius:5px;min-height:var(--ui-control-height-small);background:#252430;border:1px solid #3a3848;color:#c4c0d0}
 #dashboard .dash-trend-btn.active{background:#795ac6;color:#fff;border-color:#997ee9}
 #dashboard .dash-trend-btn:hover:not(.active){color:#fff;background:#323040}
 #dashboard .dash-resource-list{padding:0 13px 12px;overflow:auto;flex:1;min-height:0;width:100%}
