@@ -997,18 +997,11 @@ body {
     display: flex;
     gap: 10px;
     justify-content: space-between;
-    margin-bottom: 6px;
+    /* Match the top of the single public body border on every Shell page.
+       A 6px default added a 5px offset to ordinary pages. */
+    margin-bottom: 1px;
     min-height: var(--ui-type-line-page);
     position: relative;
-}
-/* Single top boundary for full-height surfaces: iframe, report table,
-   desktop/terminal workspaces and utility-card pages. The shared frame begins
-   1px below the title row; the normal 6px gap adds a 5px top offset. */
-:is(#page-desktop, #page-terminal, #page-devices-console, #page-reports,
-    #page-architecture, #page-automation, #page-cluster,
-    #page-redmine-agent, #page-gerrit-dashboard,
-    #page-tools, #page-websites) > .page-header-row {
-    margin-bottom: 1px;
 }
 .page-header-row > .section-title {
     /* Single spacing source for page-heading icons and text. */
