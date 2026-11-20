@@ -263,7 +263,8 @@ def test_native_summary_cannot_complete_when_gate_stays_open():
         outcome = asyncio.run(analyzer.analyze(ENTRY))
     assert not outcome.ok
     assert outcome.error_type == "mcp_evidence_unavailable"
-    assert stream.await_count == 3
+    # No evidence was added, so repeated gaps converge after one repair.
+    assert stream.await_count == 2
 
 
 def test_native_summary_without_reproducible_source_requires_human_review():
