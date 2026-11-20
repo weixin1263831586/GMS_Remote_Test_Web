@@ -691,7 +691,8 @@ body {
 .tools-container {
     background: var(--card-bg);
     border-radius: 6px;
-    padding: 12px;
+    /* The public frame is the sole outer border; all cards inset by one edge token. */
+    padding: var(--ui-page-edge);
     display: flex;
     flex: 1;
     min-height: 0;
@@ -706,7 +707,8 @@ body {
 }
 
 .tools-grid-frame {
-    padding: 4px 8px 8px;
+    /* The parent .tools-container owns the 8px inset; no nested padding. */
+    padding: 0;
 }
 
 .tools-footer {
@@ -999,12 +1001,13 @@ body {
     min-height: var(--ui-type-line-page);
     position: relative;
 }
-/* Single top boundary for full-height surfaces: iframe, report table, and
-   desktop/terminal workspaces. The shared frame begins 1px below the 24px
-   page-heading row; a 6px margin would leave a second seam 5px below it. */
+/* Single top boundary for full-height surfaces: iframe, report table,
+   desktop/terminal workspaces and utility-card pages. The shared frame begins
+   1px below the title row; the normal 6px gap adds a 5px top offset. */
 :is(#page-desktop, #page-terminal, #page-devices-console, #page-reports,
     #page-architecture, #page-automation, #page-cluster,
-    #page-redmine-agent, #page-gerrit-dashboard) > .page-header-row {
+    #page-redmine-agent, #page-gerrit-dashboard,
+    #page-tools, #page-websites) > .page-header-row {
     margin-bottom: 1px;
 }
 .page-header-row > .section-title {
