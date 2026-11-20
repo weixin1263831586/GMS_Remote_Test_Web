@@ -2,9 +2,15 @@ name: On-prem Chromium UI geometry and audit regression
 
 on:
   push:
-    branches: ['audit/**', 'ui/**']
+    branches: [main, 'audit/**', 'ui/**']
     paths:
       - 'web/static/css/ui-sizing.css'
+      - 'web/static/css/aoa-workbench.css'
+      - 'web/static/css/workspace-panels.css'
+      - 'web/static/js/shell/utility-tools.js'
+      - 'web/shell/components/tools-page-body.html'
+      - 'web/shell/pages/tools.html'
+      - 'web/shell/pages/websites.html'
       - 'web/static/css/common.css'
       - 'web/static/css/common-layout.css'
       - 'web/shell/components/head.html'
