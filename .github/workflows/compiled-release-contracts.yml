@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Shell syntax
         run: bash -n install.sh scripts/release/install_compiled.sh scripts/release/install_from_github.sh scripts/release/publish_github_release.sh
       - name: Python release contract tests (stdlib only)

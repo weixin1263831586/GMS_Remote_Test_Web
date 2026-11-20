@@ -123,7 +123,13 @@ def test_architecture_page_uses_shared_styles_and_full_width():
     content = (ROOT / 'web/templates/architecture.html').read_text(encoding='utf-8')
     # Shared styles must preserve the full-width page and strict script policy.
     css = (ROOT / 'web/static/css/architecture-layers.css').read_text(encoding='utf-8')
-    assert 'main { margin: 0 auto;' in css
+    v2_css = (ROOT / 'web/static/css/architecture-v2.css').read_text(encoding='utf-8')
+    sizing = (ROOT / 'web/static/css/ui-sizing.css').read_text(encoding='utf-8')
+    # The architecture iframe uses the shared 8px page-edge primitive.
+    # The legacy `main { margin: 0 auto; }` rule was intentionally removed.
+    assert '<main class="ui-page-edge">' in content
+    assert '--ui-page-edge: 8px;' in sizing
+    assert '.architecture-v2 main{max-width:none}' in v2_css
     assert 'main { max-width' not in css
     assert '<style>' not in content
 
