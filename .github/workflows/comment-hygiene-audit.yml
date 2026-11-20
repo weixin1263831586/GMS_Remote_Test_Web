@@ -1,0 +1,23 @@
+name: Tracked-source comment hygiene audit
+on:
+  push:
+    branches: [ui/unify-page-edge-8px-20261120]
+    paths:
+      - 'tools/scripts/maintenance/audit_comment_hygiene.py'
+      - '.github/workflows/comment-hygiene-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit-comments:
+    name: Audit all tracked comments and docstrings (read-only)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Scan all tracked source files without changing them
+        run: python3 tools/scripts/maintenance/audit_comment_hygiene.py
