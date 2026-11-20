@@ -90,11 +90,12 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             page.close()
 
     def test_full_height_workspaces_have_one_top_boundary(self):
-        """Full-size iframe/table surfaces meet the shared shell frame without a second seam."""
+        """Full-height workspaces and their first panes meet the shell frame without a second seam."""
         page = self.new_page()
         names = (
             "devices-console", "reports", "architecture", "automation",
             "cluster", "redmine-agent", "gerrit-dashboard",
+            "desktop", "terminal",
         )
         try:
             self.goto_shell(page)
@@ -111,12 +112,17 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                               const root = document.getElementById('page-' + name);
                               const header = root.querySelector('.page-header-row');
                               const inner = root.querySelector(
-                                '.embedded-frame-shell, .list-table-wrap');
+                                '.embedded-frame-shell, .list-table-wrap, .host-workspace-grid');
                               if (!header || !inner) throw Error('Missing shared page surface');
                               const frame = getComputedStyle(root, '::after');
+                              const pane = inner.matches('.host-workspace-grid')
+                                ? inner.querySelector('.host-workspace-pane') : null;
                               return {
                                 outerTop: root.getBoundingClientRect().top + parseFloat(frame.top),
                                 contentTop: inner.getBoundingClientRect().top,
+                                paneTop: pane ? pane.getBoundingClientRect().top : null,
+                                gridPaddingTop: inner.matches('.host-workspace-grid')
+                                  ? parseFloat(getComputedStyle(inner).paddingTop) : null,
                                 headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
                                 outerBorderStyle: frame.borderTopStyle,
                                 outerBorderWidth: parseFloat(frame.borderTopWidth),
@@ -138,6 +144,16 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                         self.assertAlmostEqual(geometry["outerBorderWidth"], 1, delta=0.1)
                         self.assertAlmostEqual(geometry["innerBorderWidth"], 0, delta=0.1)
                         self.assertAlmostEqual(geometry["pageEdge"], 8, delta=0.1)
+                        if name in ("desktop", "terminal"):
+                            self.assertAlmostEqual(
+                                geometry["gridPaddingTop"], 0, delta=0.1,
+                                msg=str(geometry),
+                            )
+                            if geometry["paneTop"] is not None:
+                                self.assertAlmostEqual(
+                                    geometry["outerTop"], geometry["paneTop"],
+                                    delta=0.6, msg=str(geometry),
+                                )
         finally:
             page.close()
 
