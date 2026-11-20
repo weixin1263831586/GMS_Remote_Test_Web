@@ -14,7 +14,6 @@ else
     PROJECT_DIR="$(pwd)"
 fi
 ACTION="install"
-PRIVATE_RELEASE=false
 
 INSTALL_DIR="${GMS_INSTALL_DIR:-/opt/gms-remote-test/web_app}"
 SERVICE_NAME="${GMS_SERVICE_NAME:-gms-web-app}"
@@ -58,7 +57,6 @@ usage() {
 用法:
   ./install.sh [install] [选项]      一键安装到当前电脑
   ./install.sh package [选项]        生成可复制到其他电脑的安装包
-  ./install.sh package --private     编译并签名不含明文 Python 源码的安装包
 
 安装选项:
   --install-dir <path>       安装目录，默认: ${INSTALL_DIR}
@@ -72,7 +70,6 @@ usage() {
   --package-name <name>      安装包目录/文件名前缀，默认: ${PACKAGE_NAME}
   --version <version>        安装包版本，默认: 当前时间戳
   --package                  等同于 package 子命令
-  --private                  仅打包时适用：Nuitka 编译、无源码检查、签名
 
 环境变量:
   GMS_INSTALL_DIR / GMS_SERVICE_NAME / GMS_PORT / GMS_RUN_USER / GMS_HOST_IP
@@ -124,8 +121,6 @@ parse_args() {
                 PACKAGE_VERSION="${2:-}"; shift 2 ;;
             --package)
                 ACTION="package"; shift ;;
-            --private)
-                PRIVATE_RELEASE=true; shift ;;
             -h|--help)
                 usage; exit 0 ;;
             *)
@@ -134,9 +129,6 @@ parse_args() {
     done
 
     [[ "${PORT}" =~ ^[0-9]+$ ]] || fail "--port 必须是数字: ${PORT}"
-    if [[ "$PRIVATE_RELEASE" == true && "$ACTION" != package ]]; then
-        fail "--private 仅适用于 package 子命令"
-    fi
     refresh_user_paths
 }
 
@@ -1034,14 +1026,7 @@ main() {
     verify_install_source
     case "${ACTION}" in
         install) install_web_app ;;
-        package)
-            if [[ "$PRIVATE_RELEASE" == true ]]; then
-                GMS_RELEASE_SIGNING_KEY="${PACKAGE_SIGNING_KEY}" python3 "${PROJECT_DIR}/scripts/build_private_release.py" build \
-                    --version "${PACKAGE_VERSION}" --dist-dir "${DIST_DIR}"
-            else
-                package_web_app
-            fi
-            ;;
+        package) package_web_app ;;
         *) fail "未知动作: ${ACTION}" ;;
     esac
 }
