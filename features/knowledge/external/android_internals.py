@@ -356,7 +356,7 @@ class AndroidInternalsProvider:
         candidate_cap = min(MAX_RERANK_CANDIDATES, max(limit * 3, limit + 5))
         try:
             with self._connect() as conn:
-                # v4 之前部署的伴生索引没有 sections 表：按实际 schema 版本
+                # 旧索引可能没有 sections 表：按实际 schema 版本
                 # 决定是否查询 section 命中（reindex 后自动启用）。
                 index_schema = int(
                     conn.execute("PRAGMA user_version").fetchone()[0] or 0
