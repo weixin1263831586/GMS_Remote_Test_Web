@@ -20,6 +20,43 @@ from pathlib import Path
 def release_root() -> Path:
     return Path(os.environ.get("GMS_PROJECT_ROOT") or Path(sys.argv[0]).resolve().parent).resolve()
 
+# HTML/JS pages are read from disk by compiled routers, not imported by Nuitka.
+# Doctor and production smoke must enforce the same resources as the release
+# builder so a binary cannot be signed with only route registrations intact.
+REQUIRED_PAGE_ASSETS = (
+    "features/automation/ui/page.html",
+    "features/cluster/ui/page.html",
+    "features/devices/ui/page.html",
+    "features/gerrit/ui/page.html",
+    "features/redmine/ui/page.html",
+    "features/system/mainline_issues/ui/page.html",
+    "features/system/update_monitor/ui/page.html",
+    "features/system/update_radar/ui/page.html",
+    "web/templates/architecture.html",
+    "docs/architecture/platform-topology.mmd",
+    "docs/architecture/usbip-topology.mmd",
+    "docs/architecture/aoa-topology.mmd",
+    "docs/architecture/firmware-topology.mmd",
+    "docs/architecture/test-flow-topology.mmd",
+    "docs/architecture/agent-analysis-topology.mmd",
+)
+REQUIRED_PAGE_ROUTES = (
+    "/automation", "/cluster", "/devices-console", "/gerrit-dashboard",
+    "/redmine-agent", "/templates/architecture.html",
+)
+
+
+def _runtime_asset_checks(root: Path) -> dict[str, bool]:
+    files = (
+        "web/shell/shell.html", "configs/examples/config.example.json",
+        *REQUIRED_PAGE_ASSETS,
+    )
+    checks = {name: (root / name).is_file() and (root / name).stat().st_size > 0
+              for name in files}
+    checks["web/static"] = (root / "web/static").is_dir()
+    return checks
+
+
 
 def _set_env(root: Path) -> None:
     os.environ["GMS_PROJECT_ROOT"] = str(root)
@@ -320,6 +357,10 @@ def smoke() -> int:
     """
     root = release_root()
     _set_env(root)
+    asset_checks = _runtime_asset_checks(root)
+    missing_assets = [name for name, ok in asset_checks.items() if not ok]
+    if missing_assets:
+        raise RuntimeError(f"compiled Controller smoke: missing runtime resources {missing_assets}")
     from bootstrap.env_loader import load_runtime_env
     load_runtime_env()
     from bootstrap.application import create_app
@@ -329,8 +370,9 @@ def smoke() -> int:
     app = create_app()
     routes = {getattr(route, "path", "") for route in app.routes}
     needed = {"/api/auth/status", "/api/auth/setup"}
+    needed.update(REQUIRED_PAGE_ROUTES)
     if not needed.issubset(routes) or len(routes) < 30:
-        raise RuntimeError("compiled Controller smoke test: missing routes")
+        raise RuntimeError(f"compiled Controller smoke test: missing routes {sorted(needed - routes)}")
     if not callable(worker_entrypoint):
         raise RuntimeError("compiled Worker entrypoint missing")
     print(json.dumps({"smoke": "ok", "route_count": len(routes)}))
@@ -339,8 +381,7 @@ def smoke() -> int:
 
 def doctor() -> int:
     root = release_root()
-    required = ["web/shell/shell.html", "web/static", "configs/examples/config.example.json"]
-    checks = {entry: (root / entry).exists() for entry in required}
+    checks = _runtime_asset_checks(root)
     checks["binary_root"] = root.is_dir()
     print(json.dumps({"root": str(root), "checks": checks}, ensure_ascii=False))
     return 0 if all(checks.values()) else 1
