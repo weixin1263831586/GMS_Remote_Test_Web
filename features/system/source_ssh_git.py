@@ -440,7 +440,8 @@ class SSHGitProvider(LocalGitProvider):
         """Execute via the shared host limiter, including SSH connection setup."""
         deadline = _SEARCH_DEADLINE.get()
         if deadline is not None:
-            timeout = max(0, min(timeout, int(deadline - time.monotonic())))
+            remaining = deadline - time.monotonic()
+            timeout = min(timeout, max(1, int(remaining))) if remaining > 0 else 0
         if timeout <= 0:
             return CommandResult(code=-1, timed_out=True)
         permit = self._server_limit()
@@ -448,7 +449,8 @@ class SSHGitProvider(LocalGitProvider):
             return CommandResult(code=-1, timed_out=True)
         try:
             if deadline is not None:
-                timeout = max(0, min(timeout, int(deadline - time.monotonic())))
+                remaining = deadline - time.monotonic()
+                timeout = min(timeout, max(1, int(remaining))) if remaining > 0 else 0
             if timeout <= 0:
                 return CommandResult(code=-1, timed_out=True)
             with self._ssh.connection(self._connection_config()) as ssh:
@@ -725,10 +727,12 @@ class SSHGitProvider(LocalGitProvider):
     def search(
         self, revision: str, query: str, *, path_filter: str = "",
         limit: int = SEARCH_DEFAULT_LIMIT, repo_scope: str = "",
-        permission_scope: str = "", budget_seconds: int = SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS,
+        permission_scope: str = "", budget_seconds: int | None = None,
     ) -> dict[str, Any]:
         """Budget includes waiting, cold discovery and SSH execution."""
-        seconds = max(1, min(int(budget_seconds), 600))
+        seconds = max(0.01, min(
+            float(SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if budget_seconds is None else budget_seconds), 600
+        ))
         token = _SEARCH_DEADLINE.set(time.monotonic() + seconds)
         try:
             return self._search_impl(
