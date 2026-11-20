@@ -6,7 +6,7 @@ button:hover{border-color:#59677c;background:var(--lighter-bg)}
 button:disabled,input:disabled{cursor:not-allowed;opacity:.5}
 button.primary{background:var(--primary-gradient);border-color:var(--primary-color);color:white}
 button.danger{color:#ff8a94;border-color:rgba(240,106,117,.45)}
-.page-shell{display:flex;flex-direction:column;gap:14px;padding:14px 16px;max-width:1600px;margin:auto}
+.page-shell{display:flex;flex-direction:column;gap:14px;max-width:1600px;margin:auto}
 .toolbar,.section-heading,.toolbar-actions,.history-head,.history-actions,.modal-head,.modal-actions,.input-row{display:flex;align-items:center;gap:8px}
 
 h1,h2,h3,p{margin:0}
@@ -63,13 +63,13 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 #binding-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);}#binding-form label input,#binding-form label textarea,#binding-form label select{color:var(--text)}
 #binding-form .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.spacer{flex:1}
 @media(max-width:850px){.console-layout{grid-template-columns:1fr}.history-output{height:220px}.terminal{height:48vh}}
-@media(max-width:600px){.page-shell{padding:9px}.toolbar,.section-heading{align-items:flex-start}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
+@media(max-width:600px){.toolbar,.section-heading{align-items:flex-start}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
 html,body{height:100%;min-height:0;overflow:hidden}
-.page-shell{height:100%;min-height:0;max-width:none;margin:0;padding:0;gap:0}
+.page-shell{height:100%;min-height:0;max-width:none;margin:0;gap:0}
 
-.view-panel{flex:1;min-height:0;overflow:auto;padding:12px 16px}
+.view-panel{flex:1;min-height:0;overflow:auto}
 .console-panel{display:flex;min-height:0;flex-direction:column;overflow:hidden}
 .console-layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:8px;flex:1;min-height:0}
 .terminal-column{display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0}
@@ -79,7 +79,7 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .history-column{min-height:0;gap:7px;padding:8px;border:0;border-left:1px solid var(--border);border-radius:0;background:var(--card-bg)}
 .history-output{height:auto;min-height:120px;flex:1;padding:8px}.history-actions{margin-top:0}
 @media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.console-layout{grid-template-columns:1fr}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
-@media(max-width:600px){.view-panel{padding:10px}.toolbar-actions{flex-direction:column;align-items:flex-end}}
+@media(max-width:600px){.toolbar-actions{flex-direction:column;align-items:flex-end}}
 
 /* 标题与说明同行显示；过长时允许折行，不挤压右侧操作按钮。 */
 .heading-main{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 10px;min-width:0}
