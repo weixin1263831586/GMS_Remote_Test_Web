@@ -1015,15 +1015,24 @@ class SSHGitProvider(LocalGitProvider):
                     limited = True
                     break
                 wave = shards[wave_start:wave_start + SSH_GIT_SHARD_WAVE_SIZE]
-                futures = {executor.submit(self._run_shard, s, query, ""): s
-                           for s in wave}
+                futures = {
+                    executor.submit(self._run_shard, shard, query, "", deadline=deadline): shard
+                    for shard in wave
+                }
                 pending = set(futures)
                 while pending:
                     remaining = deadline - time.monotonic()
-                    # 波内始终等到本波分片完成：remaining 耗尽后以
-                    # timeout=None 继续等待（阻塞等完，不空转轮询）。
-                    done, pending = wait(pending, timeout=max(0.0, remaining) or None,
-                                         return_when=FIRST_COMPLETED)
+                    # All in-flight jobs share the same wall-clock budget.
+                    # Never turn zero remaining time into timeout=None.
+                    if remaining <= 0:
+                        limited = True
+                        break
+                    done, pending = wait(
+                        pending, timeout=remaining, return_when=FIRST_COMPLETED
+                    )
+                    if not done:
+                        limited = True
+                        break
                     for future in done:
                         repos_pending -= len(futures[future])
                         try:
@@ -1055,6 +1064,9 @@ class SSHGitProvider(LocalGitProvider):
                         matches.extend(shard_matches)
                         scanned += shard_scanned
                         limited = limited or shard_limited
+                if pending:
+                    limited = True
+                    break
                 if len(matches) >= limit:
                     limited = limited or len(matches) > limit or repos_pending > 0
                     break  # limit 已满：不再发起后续波
