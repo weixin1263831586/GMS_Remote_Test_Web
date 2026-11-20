@@ -51,6 +51,25 @@ def test_structured_review_actions_restrict_unproven_claims_and_source_scope():
     ) == actions
 
 
+
+def test_structured_review_actions_accepts_json_stream_message():
+    findings = ["缺少源码 frameworks/base/core/java/android/app/Activity.java"]
+    actions = [
+        {"action": "rewrite_only", "unit_id": "P001", "target": "",
+         "reason": "结论降级，无须取证"},
+        {"action": "reuse_existing_evidence", "unit_id": "P002", "target": "",
+         "reason": "预采集参考已存在"},
+    ]
+    # The process stream exposes the final JSON as text, not a parsed dict.
+    value = json.dumps({"status": "needs_revision", "actions": actions})
+    parsed = structured_review_actions(value, findings)
+    assert [item["action"] for item in parsed] == [
+        "rewrite_only", "reuse_existing_evidence",
+    ]
+    assert not any(item["action"] == "targeted_source" for item in parsed)
+    assert structured_review_actions("{invalid-json", findings)[0]["action"] == "targeted_source"
+
+
 def test_reviewer_prompt_forbids_evidence_collection():
     trace, result = candidate()
     prompt = review_prompt(result, trace, SUMMARY_ENTRY)
