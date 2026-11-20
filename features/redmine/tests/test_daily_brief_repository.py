@@ -88,7 +88,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.assertIsNotNone(self.repo.latest_issue_run("hcq_172_16_14_66", 1))
 
     def test_v5_migration_canonicalizes_legacy_owner_ids(self):
-        """v5 回填：legacy owner 改写为 canonical；与既有 canonical 行冲突
+        """owner 规范化回填：legacy owner 改写为 canonical；与既有 canonical 行冲突
         的孪生 run 连同子表记录删除（保留定时任务写入的权威报告）。"""
         import sqlite3
 
