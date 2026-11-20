@@ -337,6 +337,7 @@ def smoke() -> int:
 
 
 def doctor() -> int:
+    root = release_root()
     required = ["web/shell/shell.html", "web/static", "configs/examples/config.example.json"]
     checks = {entry: (root / entry).exists() for entry in required}
     checks["binary_root"] = root.is_dir()
