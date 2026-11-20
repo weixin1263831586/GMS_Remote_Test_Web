@@ -12,9 +12,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from foundation.runtime_settings import RuntimeSettings
-from scripts.release.verify_binary_tree import inspect
 from scripts.release import build_binary_release as release_builder
 from scripts.release import compiled_entry
+from scripts.release.verify_binary_tree import inspect
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -79,10 +79,9 @@ class CompiledReleaseContracts(unittest.TestCase):
             self.assertIn(route, compiled_entry.REQUIRED_PAGE_ROUTES)
 
     def test_staging_rejects_missing_embedded_page(self):
-        with tempfile.TemporaryDirectory() as directory:
-            with patch.object(release_builder, "ROOT", Path(directory)):
-                with self.assertRaisesRegex(RuntimeError, "missing required runtime assets"):
-                    release_builder._stage_assets(Path(directory) / "stage")
+        with tempfile.TemporaryDirectory() as directory, patch.object(release_builder, "ROOT", Path(directory)):
+            with self.assertRaisesRegex(RuntimeError, "missing required runtime assets"):
+                release_builder._stage_assets(Path(directory) / "stage")
 
     def test_release_rejects_python_and_key_files(self):
         with tempfile.TemporaryDirectory() as tmp:
