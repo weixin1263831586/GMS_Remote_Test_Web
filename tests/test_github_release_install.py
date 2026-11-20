@@ -38,6 +38,14 @@ class GitHubReleaseInstallContracts(unittest.TestCase):
         self.assertEqual(output.returncode, 0, output.stderr)
         self.assertIn("--download-only", output.stdout)
 
+    def test_release_notes_fences_are_safe_in_expanding_heredoc(self):
+        # An unescaped Markdown fence in <<EOF becomes Bash command
+        # substitution, not literal release-notes text.
+        publisher = PUBLISHER.read_text(encoding="utf-8")
+        self.assertIn(r"\`\`\`text", publisher)
+        self.assertIn(r"\`\`\`bash", publisher)
+        self.assertNotRegex(publisher, r"(?m)^```")
+
     def test_invalid_tag_and_fingerprint_refuse_before_network_or_sudo(self):
         for arguments in (
             ["--tag", "../main", "--fingerprint", "0" * 40],
