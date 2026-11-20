@@ -311,7 +311,7 @@ class DailyBriefRepository:
                 ON redmine_daily_brief_ai_executions(run_id, issue_id)
                 """
             )
-            # v5：owner 身份收敛回填。同一 per-owner 库里历史上有原始 display
+            # owner 身份规范化回填。per-owner 库可能同时存在原始 display
             # id（user@ip，Web 写入）与 sanitize 目录名（systemd/CLI 写入）两种
             # owner_id，按 owner 过滤会丢对方写入的 run。统一改写为 canonical；
             # 与既有 canonical 行冲突的 legacy run 连同子表记录一起删除。
