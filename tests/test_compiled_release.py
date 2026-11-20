@@ -87,9 +87,12 @@ class CompiledReleaseContracts(unittest.TestCase):
             self.assertIn(route, compiled_entry.REQUIRED_PAGE_ROUTES)
 
     def test_staging_rejects_missing_embedded_page(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(release_builder, "ROOT", Path(directory)):
-            with self.assertRaisesRegex(RuntimeError, "missing required runtime assets"):
-                release_builder._stage_assets(Path(directory) / "stage")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(release_builder, "ROOT", Path(directory)),
+            self.assertRaisesRegex(RuntimeError, "missing required runtime assets"),
+        ):
+            release_builder._stage_assets(Path(directory) / "stage")
 
     def test_release_materializes_only_in_tree_library_aliases(self):
         """Nuitka Tesseract SONAME symlinks are safe only within their asset tree."""
