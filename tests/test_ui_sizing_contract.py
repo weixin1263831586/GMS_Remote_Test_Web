@@ -63,6 +63,51 @@ class UiSizingContractTests(unittest.TestCase):
                 self.assertRegex(data, rf"--ui-{key}:\s*{px}px\s*;")
         self.assertNotRegex(data, r"(?<![\w-])font(?:-size|-family|-weight)?\s*:")
 
+    def test_perimeter_has_one_shared_template_and_no_business_selectors(self):
+        import re
+
+        source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        self.assertEqual(source.count("--ui-page-edge: 8px;"), 1)
+        self.assertRegex(
+            source,
+            r"\.ui-page-edge,\s*\.page-content\.container\s*\{[^}]*"
+            r"padding:\s*var\(--ui-page-edge\);",
+        )
+        self.assertNotRegex(
+            source, r"#page-|workspace-scope-|data-ui-type-root|\[data-page=",
+        )
+        shell = (CSS / "common.css").read_text(encoding="utf-8")
+        container = shell.split(".container {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("padding:", container)
+        for name in ("host-desktop-workspace.css", "host-terminal-workspace.css"):
+            self.assertNotIn(
+                "padding: 5px 8px 8px",
+                (CSS / name).read_text(encoding="utf-8"),
+            )
+
+    def test_page_roots_opt_in_to_same_shared_perimeter(self):
+        roots = {
+            "web/shell/pages/desktop.html": 1,
+            "web/shell/pages/terminal.html": 1,
+            "web/templates/architecture.html": 1,
+            "features/automation/ui/page.html": 1,
+            "features/cluster/ui/page.html": 2,
+            "features/devices/ui/page.html": 2,
+            "features/gerrit/ui/page.html": 3,
+            "features/redmine/ui/page.html": 7,
+            "features/system/mainline_issues/ui/page.html": 2,
+            "features/system/update_monitor/ui/page.html": 2,
+            "features/system/update_radar/ui/page.html": 1,
+        }
+        for path, expected in roots.items():
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                self.assertEqual(source.count("ui-page-edge"), expected)
+        # Standalone page headers use the same horizontal perimeter token.
+        tabs = (CSS / "workspace-tabs.css").read_text(encoding="utf-8")
+        self.assertIn("padding: 0 var(--ui-page-edge);", tabs)
+        self.assertNotIn("--workspace-header-inset:", tabs)
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
