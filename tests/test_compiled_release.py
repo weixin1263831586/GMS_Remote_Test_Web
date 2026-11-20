@@ -105,6 +105,18 @@ class CompiledReleaseContracts(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "escapes allowed tree"):
                 release_builder._copy_allowed(source, root / "unsafe-release")
 
+            leaked = source / "sensitive.py"
+            leaked.write_text("secret = 'nope'", encoding="utf-8")
+            (source / "source-alias.so").symlink_to(leaked.name)
+            with self.assertRaisesRegex(RuntimeError, "source or secret"):
+                release_builder._copy_allowed(source, root / "source-leak-release")
+
+    def test_missing_optional_release_tool_is_skipped(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            release_builder._copy_allowed(root / "missing-optional-tool", root / "out")
+            self.assertFalse((root / "out").exists())
+
     def test_release_rejects_broken_symlink(self):
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / "asset"
