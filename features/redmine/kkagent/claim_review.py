@@ -57,7 +57,7 @@ def review_prompt(result, trace, entry):
     }
     return """Review the preceding analysis as a skeptical evidence reviewer.
 Do not defend the previous answer. Re-read the actual successful tool results
-in this session; use native read-only GMS tools if a decisive passage is missing.
+in this session; do NOT call tools. If a decisive passage is missing, return a\ntargeted_source action with the exact path/commit or mark the conclusion unverified.
 The ledger below contains metadata and references, NOT proof of its claims.
 Controller official-reference query results below also contain the retained
 release excerpts. They can support what those notes state, but are not proof
