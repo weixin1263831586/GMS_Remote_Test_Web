@@ -228,16 +228,30 @@ def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
 def test_native_summary_repairs_missing_evidence_in_same_session():
     analyzer = KkAgentRedmineAnalyzer()
     repaired_report = "## 关键结论\n\n- [事实][file:PackageSignatureTest.java] 证据已补齐。\n"
+    initial = complete_trace()
+    # A targeted source gap: preflight completed issue/journals/history reads,
+    # but the source read is missing until the approved focused repair.
+    initial.tool_calls = initial.tool_calls[:-1]
+    corrected = complete_trace(report=repaired_report)
+    source_target = "packages/apps/PackageSignatureTest.java"
+    corrected.tool_calls[-1].tool_input["path"] = source_target
     stream = AsyncMock(side_effect=[
-        (final_trace(), _StreamFallback(), False),
-        (complete_trace(report=repaired_report), _StreamFallback(), False),
+        (initial, _StreamFallback(), False),
+        (corrected, _StreamFallback(), False),
         (review_trace(repaired_report), _StreamFallback(), False),
     ])
+    entry = {
+        **ENTRY,
+        "_review_action_plan": [
+            {"action": "targeted_source", "target": source_target,
+             "reason": "补齐此源码证据"}
+        ],
+    }
     with patch.object(analyzer, "_run_stream", stream), patch(
         "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
     ):
-        outcome = asyncio.run(analyzer.analyze(ENTRY))
+        outcome = asyncio.run(analyzer.analyze(entry))
     assert outcome.ok
     assert outcome.result["detailed_report"] == repaired_report
     assert outcome.result["needs_human_review"]
