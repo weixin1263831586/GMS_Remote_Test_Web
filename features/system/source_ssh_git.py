@@ -786,9 +786,6 @@ class SSHGitProvider(LocalGitProvider):
             self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
             revision, str(query), filter_value, scope, limit, budget_seconds,
         )
-        # Pinned, COMPLETE results are reusable irrespective of the request's
-        # budget. In-flight searches are not: a 1s owner cannot satisfy a 100s
-        # follower by handing back a partial result.
         cache_key = key[:-1]
         pinned = bool(_COMMIT_RE.fullmatch(revision) and (scope or not self._multi))
         with self._search_lock:
