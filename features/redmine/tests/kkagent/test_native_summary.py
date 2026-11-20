@@ -227,7 +227,7 @@ def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
 
 def test_native_summary_repairs_missing_evidence_in_same_session():
     analyzer = KkAgentRedmineAnalyzer()
-    repaired_report = "## 关键结论\n\n- [事实][file:PackageSignatureTest.java] 证据已补齐。\n"
+    repaired_report = "## 关键结论\n\n- [事实][EV-005] 证据已补齐。\n"
     initial = complete_trace()
     # A targeted source gap: preflight completed issue/journals/history reads,
     # but the source read is missing until the approved focused repair.
