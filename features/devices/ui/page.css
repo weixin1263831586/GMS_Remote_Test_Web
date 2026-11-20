@@ -6,7 +6,7 @@ button:hover{border-color:#59677c;background:var(--lighter-bg)}
 button:disabled,input:disabled{cursor:not-allowed;opacity:.5}
 button.primary{background:var(--primary-gradient);border-color:var(--primary-color);color:white}
 button.danger{color:#ff8a94;border-color:rgba(240,106,117,.45)}
-.page-shell{display:flex;flex-direction:column;gap:14px;max-width:1600px;margin:auto}
+.page-shell{display:flex;flex-direction:column}
 .toolbar,.section-heading,.toolbar-actions,.history-head,.history-actions,.modal-head,.modal-actions,.input-row{display:flex;align-items:center;gap:8px}
 
 h1,h2,h3,p{margin:0}
@@ -67,7 +67,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
 html,body{height:100%;min-height:0;overflow:hidden}
-.page-shell{height:100%;min-height:0;max-width:none;margin:0;gap:0}
+.page-shell{height:100%;min-height:0;gap:0}
 
 .view-panel{flex:1;min-height:0;overflow:auto}
 .console-panel{display:flex;min-height:0;flex-direction:column;overflow:hidden}
