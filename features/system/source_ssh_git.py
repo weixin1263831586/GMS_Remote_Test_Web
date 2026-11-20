@@ -252,6 +252,7 @@ class SSHGitProvider(LocalGitProvider):
         self._inflight_searches: dict[tuple, Future] = {}
         self._pinned_search_cache: dict[tuple, dict[str, Any]] = {}
         self._blob_cache: dict[tuple[str, str], bytes] = {}
+        self._scoped_repos: dict[str, str] = {}
         # 延迟 import：source.system.ssh 同包模块；连接池容量小、按需复用。
         from .ssh import SSHManager
 
@@ -269,6 +270,15 @@ class SSHGitProvider(LocalGitProvider):
     def _owning_repo_rel(self, path: str) -> str | None:
         """全 SDK 相对路径 → 所属子仓相对路径（最长前缀匹配）。"""
         best: str | None = None
+        # Explicitly validated repositories bypass cold full-tree discovery on read.
+        with self._search_lock:
+            scoped = tuple(self._scoped_repos.items())
+        for rel, _remote in scoped:
+            if path.startswith(rel + "/"):
+                if best is None or len(rel) > len(best):
+                    best = rel
+        if best is not None:
+            return best
         for repo in self._repos_all():
             rel = self._repo_rel(repo)
             if path == rel or path.startswith(rel + "/"):
@@ -810,6 +820,8 @@ class SSHGitProvider(LocalGitProvider):
                 raise SourceProviderError(
                     "repo_scope 必须精确指向 Git 子仓根目录", status_code=422
                 )
+        with self._search_lock:
+            self._scoped_repos[scope] = candidate
         pinned = bool(_COMMIT_RE.fullmatch(revision))
         if not pinned and not _is_head_label(revision, self.config.default_revision):
             raise SourceProviderError(
@@ -1150,6 +1162,11 @@ class SSHGitProvider(LocalGitProvider):
             safe_path = _safe_repo_path(path)
         except SourceProviderError:
             return None
+        cache_key = (commit, safe_path)
+        with self._search_lock:
+            cached = self._blob_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if self._multi:
             repo_rel = self._owning_repo_rel(safe_path)
             if repo_rel is None:
@@ -1185,4 +1202,8 @@ class SSHGitProvider(LocalGitProvider):
         blob = stdout.encode("utf-8")
         if len(blob) > MAX_BLOB_BYTES:
             return None
+        with self._search_lock:
+            if len(self._blob_cache) >= 256:
+                self._blob_cache.pop(next(iter(self._blob_cache)))
+            self._blob_cache[cache_key] = blob
         return blob
