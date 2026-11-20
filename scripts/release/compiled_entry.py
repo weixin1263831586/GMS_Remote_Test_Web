@@ -293,8 +293,33 @@ def worker() -> int:
     return 0
 
 
-def doctor() -> int:
+def smoke() -> int:
+    """Import and assemble a production Controller + Worker without listening.
+
+    Runs only against a disposable, fully initialized copy of the binary tree.
+    Missing native imports, dynamic routers and resource paths must fail before
+    any customer archive is signed.
+    """
     root = release_root()
+    _set_env(root)
+    from bootstrap.env_loader import load_runtime_env
+    load_runtime_env()
+    from bootstrap.application import create_app
+    from worker_agent.entrypoint import main as worker_entrypoint
+    from bootstrap.production_security import validate_production_security_configuration
+    validate_production_security_configuration()
+    app = create_app()
+    routes = {getattr(route, "path", "") for route in app.routes}
+    needed = {"/api/auth/status", "/api/auth/setup"}
+    if not needed.issubset(routes) or len(routes) < 30:
+        raise RuntimeError("compiled Controller smoke test: missing routes")
+    if not callable(worker_entrypoint):
+        raise RuntimeError("compiled Worker entrypoint missing")
+    print(json.dumps({"smoke": "ok", "route_count": len(routes)}))
+    return 0
+
+
+def doctor() -> int:
     required = ["web/shell/shell.html", "web/static", "configs/examples/config.example.json"]
     checks = {entry: (root / entry).exists() for entry in required}
     checks["binary_root"] = root.is_dir()
@@ -304,7 +329,7 @@ def doctor() -> int:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: gms-runtime {init|controller|worker|backup|doctor}", file=sys.stderr)
+        print("usage: gms-runtime {init|controller|worker|backup|doctor|smoke}", file=sys.stderr)
         return 2
     action = sys.argv[1]
     if action == "init":
@@ -320,6 +345,8 @@ def main() -> int:
         return backup_main(sys.argv[2:])
     if action == "doctor":
         return doctor()
+    if action == "smoke":
+        return smoke()
     print(f"unknown mode: {action}", file=sys.stderr)
     return 2
 
