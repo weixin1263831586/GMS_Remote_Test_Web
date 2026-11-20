@@ -840,85 +840,9 @@ class SSHGitProvider(LocalGitProvider):
     def _search_scoped(
         self, revision: str, query: str, path_filter: str, limit: int, scope: str,
     ) -> dict[str, Any]:
-        """Search exactly one verified child repo; never imply global absence."""
-        root = self.config.repo_root.rstrip("/")
-        candidate = root + "/" + scope
-        if not self.config.discover_repos:
-            allowed = {self._repo_rel(r): r for r in self._repos}
-            if scope not in allowed:
-                raise SourceProviderError(
-                    "repo_scope 未配置为有效子仓，请从已注册子仓中选择完整路径",
-                    status_code=422,
-                )
-            candidate = allowed[scope]
-        else:
-            # Direct validation avoids a cold 180-second full SDK discovery scan.
-            stdout = self._run_command_checked(
-                self._git_command("rev-parse", "--show-toplevel", repo=candidate),
-                "repo_scope 子仓校验", SSH_GIT_DEFAULT_TIMEOUT_SECONDS,
-                error_status=422,
-            ).strip()
-            if stdout.rstrip("/") != candidate.rstrip("/"):
-                raise SourceProviderError(
-                    "repo_scope 必须精确指向 Git 子仓根目录", status_code=422
-                )
-        with self._search_lock:
-            self._scoped_repos[scope] = candidate
-        pinned = bool(_COMMIT_RE.fullmatch(revision))
-        if not pinned and not _is_head_label(revision, self.config.default_revision):
-            raise SourceProviderError(
-                "多仓子仓范围仅支持 HEAD 或固定 40 位 commit", status_code=422
-            )
-        deadline = _SEARCH_DEADLINE.get() or (
-            time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
-        )
-        result = self._run_shard(
-            (candidate,), query, "", deadline=deadline,
-            revision=revision if pinned else "HEAD",
-        )
-        if result.timed_out:
-            matches, scanned, limited = [], 0, True
-        elif result.code not in (0, 1):
-            raise SourceProviderError(
-                f"指定子仓 git grep 失败: {_stderr_tail(result)}", status_code=502
-            )
-        else:
-            matches, scanned, limited = _parse_multi_output(
-                result.stdout, path_filter, limit, strip_root=self.config.repo_root
-            )
-        # Even zero-hit searches must report the real SHA pinned by the SSH shard.
-        headers = [
-            line[len(_REPO_SEP):].partition("\t")[2].strip()
-            for line in result.stdout.splitlines() if line.startswith(_REPO_SEP)
-        ]
-        commit = next((value for value in headers if _COMMIT_RE.fullmatch(value)), "")
-        if not commit and not limited:
-            limited = True
-        kept = []
-        for match in matches:
-            if match.get("repo") != scope or match.get("commit") != commit:
-                limited = True
-                continue
-            match.update(
-                source_id=self.config.source_id,
-                result_id=self._make_result_id(match["path"], commit),
-            )
-            kept.append(match)
-        payload = self._multi_payload(
-            revision, kept, scanned, limited,
-            repos_total=1, repos_pending=0 if commit else 1,
-        )
-        payload.update(
-            scope="repository", repo_scope=scope, searched_scope=scope,
-            searched_repos=[scope], commit=commit, revision_is_head=not pinned,
-            global_coverage_complete=False, coverage_scope="selected_repository",
-        )
-        if not kept:
-            payload["hint"] = (
-                "仅在指定子仓检索，零命中不代表全 SDK 不存在；"
-                "如需全库结论，请取消 repo_scope 并确认 coverage_complete"
-            )
-        return payload
+        from .source_ssh_scope import search_scoped
+
+        return search_scoped(self, revision, query, path_filter, limit, scope)
 
     # ------------------------------------------------------------- multi search
 
