@@ -135,6 +135,49 @@ class SSHGitProviderTests(unittest.TestCase):
         # blob_sha256 基于传输文本再编码（与原始字节语义的差异已在契约声明）。
         self.assertTrue(read["blob_sha256"])
 
+    def test_single_repo_pinned_query_cache_respects_permission_scope(self):
+        gateway = _FakeSSHGateway(_remote_git_handler(
+            grep_stdout=_grep_record(COMMIT, FILE_PATH, 2, "run"),
+        ))
+        provider = _make_provider(gateway)
+        first = provider.search(COMMIT, "run", permission_scope="alice")
+        count = sum(" grep " in command for command, _ in gateway.commands)
+        self.assertEqual(first, provider.search(COMMIT, "run", permission_scope="alice"))
+        self.assertEqual(
+            sum(" grep " in command for command, _ in gateway.commands), count
+        )
+        provider.search(COMMIT, "run", permission_scope="bob")
+        self.assertEqual(
+            sum(" grep " in command for command, _ in gateway.commands), count + 1
+        )
+
+    def test_single_repo_inflight_head_queries_are_coalesced(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event, Lock
+
+        started, release, guard = Event(), Event(), Lock()
+        calls = []
+
+        def handler(command, timeout):
+            if " grep " in command:
+                with guard:
+                    calls.append(command)
+                started.set()
+                if not release.wait(5):
+                    raise AssertionError("query did not resume")
+            return _remote_git_handler(
+                grep_stdout=_grep_record(COMMIT, FILE_PATH, 2, "run"),
+            )(command, timeout)
+
+        provider = _make_provider(_FakeSSHGateway(handler))
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(provider.search, "main", "run")
+            self.assertTrue(started.wait(3))
+            second = executor.submit(provider.search, "main", "run")
+            release.set()
+            self.assertEqual(first.result(timeout=5), second.result(timeout=5))
+        self.assertEqual(len(calls), 1)
+
     def test_readonly_guard_rejects_write_subcommands(self):
         gateway = _FakeSSHGateway(_remote_git_handler())
         provider = _make_provider(gateway)
