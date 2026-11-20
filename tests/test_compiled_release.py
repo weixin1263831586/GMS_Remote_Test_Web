@@ -14,6 +14,7 @@ from unittest.mock import patch
 from foundation.runtime_settings import RuntimeSettings
 from scripts.release.verify_binary_tree import inspect
 from scripts.release import build_binary_release as release_builder
+from scripts.release import compiled_entry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +63,20 @@ class CompiledReleaseContracts(unittest.TestCase):
                     self.assertTrue((staged / name).is_file(), name)
             self.assertFalse((staged / "features/redmine/ui/internal.py").exists())
             self.assertEqual(inspect(staged), [])
+            self.assertTrue(all(compiled_entry._runtime_asset_checks(staged).values()))
+
+    def test_runtime_smoke_and_builder_agree_on_required_pages(self):
+        self.assertTrue(
+            set(release_builder.REQUIRED_UI_PAGES).issubset(
+                set(compiled_entry.REQUIRED_PAGE_ASSETS)
+            )
+        )
+        self.assertTrue(all(
+            f"docs/architecture/{name}" in compiled_entry.REQUIRED_PAGE_ASSETS
+            for name in release_builder.ARCHITECTURE_SOURCES
+        ))
+        for route in ("/automation", "/cluster", "/redmine-agent", "/gerrit-dashboard"):
+            self.assertIn(route, compiled_entry.REQUIRED_PAGE_ROUTES)
 
     def test_staging_rejects_missing_embedded_page(self):
         with tempfile.TemporaryDirectory() as directory:
