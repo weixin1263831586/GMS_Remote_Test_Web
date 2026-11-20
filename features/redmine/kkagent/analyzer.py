@@ -758,6 +758,7 @@ class KkAgentRedmineAnalyzer:
                     break
                 output_repairs += 1
             _attempt = output_repairs + review_revisions - 1
+            review_round = review_pending
             review_pending = False
             evidence_state = tuple(
                 (call.tool_call_id, call.status, call.output_sha256)
@@ -767,7 +768,7 @@ class KkAgentRedmineAnalyzer:
             # Formatting repairs can retry within their own small budget:
             # they need no new evidence and the second prompt requests a full
             # report. Only identical *factual/evidence* gaps should converge.
-            formatting_only = not review_pending and (
+            formatting_only = not review_round and (
                 not native_summary or all(
                     any(token in str(finding).lower() for token in (
                         "schema", "missing field", "invalid field",
