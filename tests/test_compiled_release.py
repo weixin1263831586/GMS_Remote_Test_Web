@@ -83,6 +83,36 @@ class CompiledReleaseContracts(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "missing required runtime assets"):
                 release_builder._stage_assets(Path(directory) / "stage")
 
+    def test_release_materializes_only_in_tree_library_aliases(self):
+        """Nuitka Tesseract SONAME symlinks are safe only within their asset tree."""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "tools/tesseract"
+            source.mkdir(parents=True)
+            library = source / "libtesseract.so.4.0.0"
+            library.write_bytes(b"safe native library")
+            (source / "libtesseract.so.4").symlink_to(library.name)
+            target = root / "release/tools/tesseract"
+            release_builder._copy_allowed(source, target)
+            alias = target / "libtesseract.so.4"
+            self.assertTrue(alias.is_file())
+            self.assertFalse(alias.is_symlink())
+            self.assertEqual(alias.read_bytes(), library.read_bytes())
+
+            escaped = root / "outside-library.so"
+            escaped.write_bytes(b"outside")
+            (source / "unsafe.so").symlink_to(escaped)
+            with self.assertRaisesRegex(RuntimeError, "escapes allowed tree"):
+                release_builder._copy_allowed(source, root / "unsafe-release")
+
+    def test_release_rejects_broken_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "asset"
+            source.mkdir()
+            (source / "missing.so").symlink_to("absent.so")
+            with self.assertRaisesRegex(RuntimeError, "broken or cyclic"):
+                release_builder._copy_allowed(source, Path(directory) / "release")
+
     def test_release_rejects_python_and_key_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
