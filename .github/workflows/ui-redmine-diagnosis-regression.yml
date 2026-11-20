@@ -46,3 +46,14 @@ jobs:
             features/redmine/tests/test_daily_brief_review_regressions.py \
             features/redmine/tests/kkagent/test_claim_review.py \
             features/redmine/tests/kkagent/test_evidence_gate.py
+
+      - name: Full Redmine and SDK source-provider regression
+        env:
+          GMS_SKIP_RUNTIME_ENV: "1"
+        run: |
+          python -m pytest -q features/redmine/tests \
+            features/system/tests/test_source_provider.py \
+            features/system/tests/test_source_provider_boundaries.py \
+            features/system/tests/test_source_repo_rank.py \
+            features/system/tests/test_source_ssh_git.py \
+            features/system/tests/test_source_git_search.py
