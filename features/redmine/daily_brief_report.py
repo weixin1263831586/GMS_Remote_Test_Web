@@ -480,6 +480,11 @@ def issue_payload(
                         "unread_text_artifact_ids", "window_read_only_artifact_ids",
                     )
                 }
+                # Without an observed attachment manifest, snapshot count is
+                # unknown in a failed attempt. Never turn "zero observed" into
+                # an affirmative claim that all attachments were checked.
+                if not raw_gate.get("attachments_listed"):
+                    attempted_gate["attachments_checked"] = None
                 # Never leak file names/artifact IDs through this compact view.
                 for key in ("unread_text_artifact_ids", "window_read_only_artifact_ids"):
                     attempted_gate[key + "_count"] = len(attempted_gate.pop(key) or [])
@@ -517,9 +522,9 @@ def issue_payload(
         "attachments_checked": (gate or attempted_gate).get("attachments_checked") is True,
         # A successful sdk_search with zero hits or apk_resolve/analyze is NOT
         # source-level evidence. Use evidence-bearing calls, not tool names.
-        "source_evidence_checked": bool(
-            gate.get("source_evidence_checked") if gate else observed_source_count > 0
-        ),
+        "source_evidence_checked": (observed_source_count or int(
+            execution.get("source_evidence_tool_count") or 0
+        )) > 0,
         "source_evidence_tool_count": observed_source_count or int(
             execution.get("source_evidence_tool_count") or 0
         ),
@@ -539,7 +544,8 @@ def issue_payload(
         "output_tokens": int(execution.get("output_tokens") or 0),
         "recorded_at": execution.get("recorded_at") or "",
         "failed_attempt_evidence": attempted_gate,
-        "review_findings_count": len(execution.get("analysis_review_findings") or []),
+        "review_findings_count": len(execution.get("analysis_review_findings") or [])
+        if isinstance(execution.get("analysis_review_findings"), list) else 0,
     }
     return payload
 
