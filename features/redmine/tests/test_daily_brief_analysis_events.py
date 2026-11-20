@@ -100,6 +100,12 @@ class AnalysisEventStoreTests(unittest.TestCase):
                     },
                     "output_sha256": "ab" * 32,
                     "output_preview": "PRIVATE_PREVIEW",
+                }, {
+                    "tool_call_id": "unreadable", "status": "failed",
+                    "tool_name": "gms_rt_redmine_artifact_read",
+                    "tool_input": {"artifact_id": "artifact-1"},
+                    "artifact_unreadable": True,
+                    "output_preview": "PRIVATE_FAILURE_DETAILS",
                 }],
                 "final_event": {"message": "PRIVATE_MODEL_OUTPUT"},
             },
@@ -111,6 +117,8 @@ class AnalysisEventStoreTests(unittest.TestCase):
         self.assertEqual(loaded["trace"]["tools"][0]["tool_input"], {"query": "binder"})
         self.assertNotIn("final_event", loaded["trace"])
         self.assertEqual(loaded["trace"]["tools"][0]["output_preview"], "")
+        self.assertEqual(loaded["trace"]["tools"][1]["output_preview"], "")
+        self.assertTrue(loaded["trace"]["tools"][1]["artifact_unreadable"])
 
     def test_session_available_feeds_latest_session_id(self):
         """session_started 事件落库后，latest_session_id 返回最新会话 id。"""

@@ -68,6 +68,8 @@ class ToolTrace(_EngineToolTrace):
     # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
     search_artifact_ids: list[str] = field(default_factory=list)
     reference_lookup: dict[str, Any] = field(default_factory=dict)
+    # Sanitized semantic fact needed after a checkpoint clears output_preview.
+    artifact_unreadable: bool = False
 
     def to_summary(self) -> dict[str, Any]:
         return {
@@ -85,6 +87,7 @@ class ToolTrace(_EngineToolTrace):
             "search_coverage_complete": self.search_coverage_complete,
             "search_artifact_ids": self.search_artifact_ids,
             "reference_lookup": self.reference_lookup,
+            "artifact_unreadable": self.artifact_unreadable,
         }
 
 
@@ -262,7 +265,7 @@ class KkAgentTrace(KkAgentStreamTrace):
             artifact_id = str(call.tool_input.get("artifact_id") or "").strip()
             if not artifact_id:
                 continue
-            if call.succeeded or any(
+            if call.succeeded or call.artifact_unreadable or any(
                 marker in call.output_preview for marker in unreadable_markers
             ):
                 checked.add(artifact_id)
@@ -383,6 +386,12 @@ class KkAgentTrace(KkAgentStreamTrace):
     def record_tool_result(self, call: ToolTrace, event: dict[str, Any]) -> None:
         """引擎通用记录后的取证域富化（issue/artifact/snapshot/源码语义）。"""
         output = event.get("output")
+        if "artifact_read" in call.tool_name and not call.succeeded:
+            # Preserve only an enum-like fact, never the raw failure body.
+            call.artifact_unreadable = any(
+                marker in call.output_preview
+                for marker in ("没有可用文本", "artifact 文件缺失")
+            )
         if any(marker in call.tool_name for marker in ("apk_", "sdk_", "codesearch")):
             call.source_context = source_context(output)
         if "history_search" in call.tool_name or "redmine_issue_fetch" in call.tool_name:

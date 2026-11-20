@@ -751,6 +751,7 @@ class SSHGitProvider(LocalGitProvider):
             return self._search_impl(
                 revision, query, path_filter=path_filter, limit=limit,
                 repo_scope=repo_scope, permission_scope=permission_scope,
+                budget_seconds=seconds,
             )
         finally:
             _SEARCH_DEADLINE.reset(token)
@@ -764,6 +765,7 @@ class SSHGitProvider(LocalGitProvider):
         limit: int = SEARCH_DEFAULT_LIMIT,
         repo_scope: str = "",
         permission_scope: str = "",
+        budget_seconds: float = SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS,
     ) -> dict[str, Any]:
         """Search one explicit repository or all repositories, without changing path_filter.
 
@@ -782,12 +784,16 @@ class SSHGitProvider(LocalGitProvider):
         key = (
             permission_scope, self.config.source_id, self.config.ssh_host,
             self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
-            revision, str(query), filter_value, scope, limit,
+            revision, str(query), filter_value, scope, limit, budget_seconds,
         )
+        # Pinned, COMPLETE results are reusable irrespective of the request's
+        # budget. In-flight searches are not: a 1s owner cannot satisfy a 100s
+        # follower by handing back a partial result.
+        cache_key = key[:-1]
         pinned = bool(_COMMIT_RE.fullmatch(revision) and (scope or not self._multi))
         with self._search_lock:
-            if pinned and key in self._pinned_search_cache:
-                return copy.deepcopy(self._pinned_search_cache[key])
+            if pinned and cache_key in self._pinned_search_cache:
+                return copy.deepcopy(self._pinned_search_cache[cache_key])
             future = self._inflight_searches.get(key)
             owner = future is None
             if owner:
@@ -815,7 +821,7 @@ class SSHGitProvider(LocalGitProvider):
                 if pinned and not payload.get("limited") and (not self._multi or payload.get("coverage_complete")):
                     if len(self._pinned_search_cache) >= 128:
                         self._pinned_search_cache.pop(next(iter(self._pinned_search_cache)))
-                    self._pinned_search_cache[key] = copy.deepcopy(payload)
+                    self._pinned_search_cache[cache_key] = copy.deepcopy(payload)
             future.set_result(payload)
             return copy.deepcopy(payload)
         except BaseException as exc:
@@ -868,6 +874,7 @@ class SSHGitProvider(LocalGitProvider):
     def _run_shard(
         self, shard: tuple[str, ...], query: str, path_grep: str,
         *, deadline: float | None = None, revision: str = "HEAD",
+        per_repo_timeout: int | None = None,
     ) -> CommandResult:
         """Bound SSH connection acquisition and execution by the same deadline."""
         remaining = (
@@ -893,7 +900,8 @@ class SSHGitProvider(LocalGitProvider):
                     self._shard_grep_command(
                         query, path_grep, shard,
                         per_repo_timeout=min(
-                            SSH_GIT_PER_REPO_TIMEOUT_SECONDS, max(1, int(remaining))
+                            (SSH_GIT_PER_REPO_TIMEOUT_SECONDS if per_repo_timeout is None
+                             else max(1, per_repo_timeout)), max(1, int(remaining))
                         ),
                         revision=revision,
                     ),

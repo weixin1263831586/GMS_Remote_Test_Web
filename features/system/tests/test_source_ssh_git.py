@@ -151,6 +151,16 @@ class SSHGitProviderTests(unittest.TestCase):
             sum(" grep " in command for command, _ in gateway.commands), count + 1
         )
 
+    def test_pinned_cache_reuses_complete_result_across_different_budgets(self):
+        gateway = _FakeSSHGateway(_remote_git_handler(
+            grep_stdout=_grep_record(COMMIT, FILE_PATH, 2, "run"),
+        ))
+        provider = _make_provider(gateway)
+        provider.search(COMMIT, "run", permission_scope="alice", budget_seconds=10)
+        before = len(gateway.commands)
+        provider.search(COMMIT, "run", permission_scope="alice", budget_seconds=120)
+        self.assertEqual(len(gateway.commands), before)
+
     def test_single_repo_inflight_head_queries_are_coalesced(self):
         from concurrent.futures import Future, ThreadPoolExecutor
         from threading import Event, Lock
@@ -526,6 +536,19 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         self.assertEqual(result["repos_total"], 1)
         self.assertFalse(result["global_coverage_complete"])
         self.assertTrue(result["coverage_complete"])
+
+    def test_scoped_search_uses_its_deadline_instead_of_full_tree_15s_cap(self):
+        from unittest.mock import patch
+        self.provider = self._provider(self._handler(grep_stdout=self._scoped_grep_stdout()))
+        seen = []
+        original = self.provider._run_shard
+        def observer(*args, **kwargs):
+            seen.append(kwargs.get("per_repo_timeout"))
+            return original(*args, **kwargs)
+        with patch.object(self.provider, "_run_shard", side_effect=observer):
+            result = self.provider.search("", "run", repo_scope="frameworks/base", budget_seconds=80)
+        self.assertEqual(result["repos_total"], 1)
+        self.assertTrue(seen and seen[0] > 15)
 
     def test_explicit_repo_scope_rejects_unknown_or_unsafe_repo(self):
         for scope in ("../../etc", "frameworks/unknown"):

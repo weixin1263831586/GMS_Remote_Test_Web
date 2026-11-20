@@ -329,7 +329,7 @@ function singleIssueAnalysisReportBody(item) {
       + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
       + renderMarkdownDoc(report) + '</div></div>';
   }
-  return previousNotice + '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(issue.status || item.run.status)) + '</div>';
+  return previousNotice + '<div class="muted">' + esc(issue.error || singleIssueAnalysisStatus(singleIssueAnalysisEffectiveStatus(item.run || {}, issue))) + '</div>';
 }
 
 function showSingleIssueAnalysis(runId, statisticsOnly) {
@@ -347,7 +347,7 @@ function openSingleIssueReportModal(item, statisticsOnly) {
   if (!issue.issue_id) return;
   var statistics = renderDailyBriefIssueStatistics(issue.ai_statistics);
   var subject = String(issue.subject || '').trim();
-  var statusText = singleIssueAnalysisStatus(issue.status || item.run.status);
+  var statusText = singleIssueAnalysisStatus(singleIssueAnalysisEffectiveStatus(item.run || {}, issue));
   var currentResult = issue.result || {};
   var previousResult = (issue.previous_analysis || {}).result || {};
   var displayedResult = String(currentResult.detailed_report || '').trim()

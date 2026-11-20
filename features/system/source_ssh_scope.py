@@ -106,6 +106,10 @@ def search_scoped(
     result = provider._run_shard(
         (candidate,), query, "", deadline=deadline,
         revision=revision if pinned else "HEAD",
+        # An explicit one-repository request is intentionally allowed to use
+        # its whole budget; the 15s per-repository cap belongs to FULL-tree
+        # scans, where one huge repository must not starve the rest.
+        per_repo_timeout=max(1, int(deadline - time.monotonic())),
     )
     if result.timed_out:
         matches, scanned, limited = [], 0, True
