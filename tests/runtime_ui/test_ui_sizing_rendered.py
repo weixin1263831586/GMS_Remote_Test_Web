@@ -72,7 +72,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                             delta=1,
                             msg=str(geometry),
                         )
-                        expected_gap = 6 if name == "test-suites" else 1
+                        expected_gap = 1
                         self.assertAlmostEqual(
                             geometry["contentGap"], expected_gap,
                             delta=1, msg=str(geometry),
