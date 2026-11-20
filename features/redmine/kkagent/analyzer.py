@@ -30,6 +30,7 @@ from features.kkagent import (
 )
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
+from .repair_policy import native_policy_kwargs, approved_repair_call
 from .claim_review import (
     apply_review,
     review_prompt,
@@ -729,28 +730,6 @@ class KkAgentRedmineAnalyzer:
         result["history_checked"] = bool(gate.get("history_checked"))
         return self._failure(trace, raw)
 
-    @staticmethod
-    def _native_policy_kwargs(entry: dict[str, Any], targets: list[str]) -> dict[str, Any]:
-        env = dict(entry.get("_kkagent_config_env") or {})
-        env["GMS_MCP_REPAIR_POLICY"] = json.dumps(
-            {"mode": "targeted" if targets else "deny", "targets": targets},
-            ensure_ascii=False,
-        )
-        return {"config_env": env}
-
-    @staticmethod
-    def _approved_repair_call(call: ToolTrace, targets: list[str]) -> bool:
-        if call.tool_name == "gms_rt_sdk_search":
-            path = str(call.tool_input.get("path") or "")
-            scope = str(call.tool_input.get("repo_scope") or "").strip("/")
-            return path in targets and bool(scope) and path.startswith(scope + "/")
-        if call.tool_name == "gms_rt_sdk_read":
-            from .repair_policy import signed_source_path
-            path = signed_source_path(str(call.tool_input.get("result_id") or ""))
-            # Legacy test stubs supply path rather than an opaque result_id.
-            return (path or str(call.tool_input.get("path") or "")) in targets
-        return False
-
     async def _repair(
         self,
         entry: dict[str, Any],
@@ -858,7 +837,7 @@ class KkAgentRedmineAnalyzer:
                 )
             repair_trace, raw, timed_out = await self._run_stream(
                 analysis_command(self.build_repair_command(repair_prompt, session_id), entry), progress,
-                **(self._native_policy_kwargs(entry, targets) if native_summary else
+                **(native_policy_kwargs(entry, targets) if native_summary else
                    {"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
             )
             repair_trace.repair_attempts = 1
@@ -883,7 +862,7 @@ class KkAgentRedmineAnalyzer:
                 merged.errors.append("report-only correction called an unapproved tool")
                 return None, merged
             if native_summary and allow_new_tools and any(
-                not self._approved_repair_call(call, targets)
+                not approved_repair_call(call, targets)
                 for call in new_calls
             ):
                 merged = _merge_traces(merged, repair_trace)
@@ -967,7 +946,7 @@ class KkAgentRedmineAnalyzer:
         reviewed, review_raw, timed_out = await self._run_stream(
             analysis_command(self.build_repair_command(review_prompt(result, trace, entry), trace.session_id), entry),
             progress,
-            **self._native_policy_kwargs(entry, []),
+            **native_policy_kwargs(entry, []),
         )
         candidate = trace.final_event
         merged = _merge_traces(trace, reviewed)
