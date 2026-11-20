@@ -192,7 +192,6 @@ html[data-ui-type-root="shell"] .tool-icon { font-size: var(--ui-type-size-displ
 html[data-ui-type-root="shell"] .tool-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .tool-url { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .tool-actions button { font-size: var(--ui-type-size-small); }
-@media (max-width: 768px) { html[data-ui-type-root="shell"] .form-row label { font-size: var(--ui-type-size-body); } }
 @media (max-width: 768px) { html[data-ui-type-root="shell"] .tool-icon { font-size: var(--ui-type-size-page); } }
 @media (max-width: 768px) { html[data-ui-type-root="shell"] .tool-title { font-size: var(--ui-type-size-body); } }
 @media (max-width: 768px) { html[data-ui-type-root="shell"] .category-header span:first-child { font-size: var(--ui-type-size-dialog); } }
