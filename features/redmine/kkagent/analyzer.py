@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import json
 import logging
@@ -71,6 +72,15 @@ def analyzer_version() -> str:
 # in the same session, so formatting failures cannot consume all review fixes.
 REPAIR_RESUME_RETRIES = 2
 CLAIM_REVIEW_REVISION_RETRIES = 2
+
+# Per-async-task budget: one deadline spans initial run, retries, review and repair.
+# Do not store this on the reusable analyzer instance (batch issues run concurrently).
+_NORMAL_BUDGET_SECONDS = 1200
+_DEEP_BUDGET_SECONDS = 2700
+_IDLE_TIMEOUT_SECONDS = 180
+_ANALYSIS_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "kkagent_redmine_deadline", default=None
+)
 
 REPAIR_PROMPT_TEMPLATE = """The previous analysis output did not pass validation.
 
@@ -349,7 +359,21 @@ class KkAgentRedmineAnalyzer:
     # -------------------------------------------------------------- entry
 
     async def analyze(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
-        """执行 headless 分析；每类可识别的临时错误各自动重试一次。"""
+        """One wall-clock budget for analysis, reviews and bounded retries."""
+        mode = str(entry.get("analysis_mode") or "").lower()
+        default = _DEEP_BUDGET_SECONDS if mode in {"diagnostic", "full", "deep"} else _NORMAL_BUDGET_SECONDS
+        try:
+            budget = max(60, min(int(entry.get("_analysis_budget_seconds") or default), 7200))
+        except (TypeError, ValueError):
+            budget = default
+        token = _ANALYSIS_DEADLINE.set(time.monotonic() + budget)
+        try:
+            return await self._analyze_with_budget(entry)
+        finally:
+            _ANALYSIS_DEADLINE.reset(token)
+
+    async def _analyze_with_budget(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
+        """Execute headless analysis and bounded per-error retries within deadline."""
         outcome: KkAgentAnalysisResult | None = None
         retries_by_error: dict[str, int] = {}
         active_entry = dict(entry)
@@ -357,6 +381,14 @@ class KkAgentRedmineAnalyzer:
         budgeted_limit = None
         with ExitStack() as resources:
             while True:
+                deadline = _ANALYSIS_DEADLINE.get()
+                if deadline is not None and time.monotonic() >= deadline:
+                    return KkAgentAnalysisResult(
+                        ok=False, error_type="analysis_deadline_exceeded",
+                        error="Redmine 分析总预算耗尽，已停止重试并保留现有证据",
+                        trace=(outcome.trace if outcome else {}),
+                        session_id=(outcome.session_id if outcome else ""),
+                    )
                 limit = self._observed_context_limit
                 if limit is not None and budgeted_limit != limit:
                     try:
@@ -478,8 +510,13 @@ class KkAgentRedmineAnalyzer:
             assert process.stdout is not None
             while True:
                 try:
+                    deadline = _ANALYSIS_DEADLINE.get()
+                    remaining = (deadline - time.monotonic()) if deadline is not None else float("inf")
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    idle = self.timeout_seconds if self.timeout_seconds > 0 else _IDLE_TIMEOUT_SECONDS
                     line = await asyncio.wait_for(
-                        process.stdout.readline(), timeout=self.timeout_seconds or None
+                        process.stdout.readline(), timeout=min(idle, remaining)
                     )
                 except ValueError:
                     # 单行超过 STREAM_LINE_LIMIT_BYTES 时 StreamReader.readline
@@ -503,7 +540,11 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stdout(line)
                 if not consume_line(trace, line, on_event=tap.on_event):
                     continue
-            await process.wait()
+            deadline = _ANALYSIS_DEADLINE.get()
+            remaining = (deadline - time.monotonic()) if deadline is not None else float("inf")
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            await asyncio.wait_for(process.wait(), timeout=remaining)
         except asyncio.TimeoutError:
             logger.warning(
                 "terminating kkagent pid=%s after stdout idle timeout (%ss)",
@@ -513,9 +554,15 @@ class KkAgentRedmineAnalyzer:
             await terminate_process_tree(process)
             readers.cancel()
             await settle_reader_future(readers)
-            trace.status = "timeout"
-            trace.error_type = "timeout"
-            trace.error = f"kkagent timed out after {self.timeout_seconds}s"
+            deadline = _ANALYSIS_DEADLINE.get()
+            expired = deadline is not None and time.monotonic() >= deadline
+            reason = ("analysis_deadline_exceeded" if expired else
+                      ("timeout" if self.timeout_seconds else "analysis_idle_timeout"))
+            trace.status = trace.error_type = reason
+            trace.error = (
+                "kkagent analysis total deadline exceeded"
+                if expired else f"kkagent stream idle for {self.timeout_seconds or _IDLE_TIMEOUT_SECONDS}s"
+            )
             return trace, raw, True
         except asyncio.CancelledError:
             # 取消不得遗留 kkagent 或 stdio MCP 孤儿进程。
