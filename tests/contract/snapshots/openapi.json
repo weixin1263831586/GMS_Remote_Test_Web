@@ -135,8 +135,8 @@
       "ArtifactUploadComplete": {
         "properties": {
           "chunk_count": {
-            "maximum": 100000,
-            "minimum": 1,
+            "maximum": 100000.0,
+            "minimum": 1.0,
             "title": "Chunk Count",
             "type": "integer"
           }
@@ -159,14 +159,14 @@
             "type": "string"
           },
           "chunk_count": {
-            "maximum": 100000,
-            "minimum": 1,
+            "maximum": 100000.0,
+            "minimum": 1.0,
             "title": "Chunk Count",
             "type": "integer"
           },
           "chunk_size": {
-            "maximum": 67108864,
-            "minimum": 65536,
+            "maximum": 67108864.0,
+            "minimum": 65536.0,
             "title": "Chunk Size",
             "type": "integer"
           },
@@ -180,7 +180,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -213,8 +213,8 @@
           },
           "context": {
             "default": 200,
-            "maximum": 1000,
-            "minimum": 0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
             "title": "Context",
             "type": "integer"
           },
@@ -226,14 +226,14 @@
           },
           "per_query_limit": {
             "default": 20,
-            "maximum": 100,
-            "minimum": 1,
+            "maximum": 100.0,
+            "minimum": 1.0,
             "title": "Per Query Limit",
             "type": "integer"
           },
           "per_query_offset": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Per Query Offset",
             "type": "integer"
           },
@@ -537,8 +537,8 @@
           },
           "duration_minutes": {
             "default": 60,
-            "maximum": 120,
-            "minimum": 15,
+            "maximum": 120.0,
+            "minimum": 15.0,
             "title": "Duration Minutes",
             "type": "integer"
           },
@@ -1164,8 +1164,8 @@
           },
           "aoa_hid_settle_seconds": {
             "default": 2,
-            "maximum": 10,
-            "minimum": 0,
+            "maximum": 10.0,
+            "minimum": 0.0,
             "title": "Aoa Hid Settle Seconds",
             "type": "number"
           },
@@ -1242,8 +1242,8 @@
           },
           "effective_limit": {
             "default": 0,
-            "maximum": 5000,
-            "minimum": 0,
+            "maximum": 5000.0,
+            "minimum": 0.0,
             "title": "Effective Limit",
             "type": "integer"
           },
@@ -1307,8 +1307,8 @@
           },
           "wait_adb_seconds": {
             "default": 0,
-            "maximum": 600,
-            "minimum": 0,
+            "maximum": 600.0,
+            "minimum": 0.0,
             "title": "Wait Adb Seconds",
             "type": "integer"
           },
@@ -1324,8 +1324,8 @@
           "x": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1337,8 +1337,8 @@
           "y": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1367,8 +1367,8 @@
           },
           "device_count": {
             "default": 1,
-            "maximum": 32,
-            "minimum": 1,
+            "maximum": 32.0,
+            "minimum": 1.0,
             "title": "Device Count",
             "type": "integer"
           },
@@ -1448,7 +1448,7 @@
           },
           "size_bytes": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Size Bytes",
             "type": "integer"
           },
@@ -1596,7 +1596,7 @@
             "type": "object"
           },
           "sequence": {
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Sequence",
             "type": "integer"
           },
@@ -1661,15 +1661,15 @@
           },
           "limit": {
             "default": 100,
-            "maximum": 500,
-            "minimum": 1,
+            "maximum": 500.0,
+            "minimum": 1.0,
             "title": "Limit",
             "type": "integer"
           },
           "offset": {
             "default": 0,
-            "maximum": 1000000,
-            "minimum": 0,
+            "maximum": 1000000.0,
+            "minimum": 0.0,
             "title": "Offset",
             "type": "integer"
           },
@@ -1732,8 +1732,8 @@
           "duration_ms": {
             "anyOf": [
               {
-                "maximum": 2000,
-                "minimum": 1,
+                "maximum": 2000.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -1745,8 +1745,8 @@
           "end_x": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1758,8 +1758,8 @@
           "end_y": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1796,8 +1796,8 @@
           "x": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1809,8 +1809,8 @@
           "y": {
             "anyOf": [
               {
-                "maximum": 10000,
-                "minimum": 0,
+                "maximum": 10000.0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -1959,8 +1959,8 @@
           },
           "stage_max_age_days": {
             "default": 7,
-            "maximum": 3650,
-            "minimum": 1,
+            "maximum": 3650.0,
+            "minimum": 1.0,
             "title": "Stage Max Age Days",
             "type": "integer"
           }
@@ -1985,8 +1985,8 @@
           },
           "execution_timeout_seconds": {
             "default": 0,
-            "maximum": 604800,
-            "minimum": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
             "title": "Execution Timeout Seconds",
             "type": "integer"
           },
@@ -2009,8 +2009,8 @@
           },
           "output_idle_timeout_seconds": {
             "default": 0,
-            "maximum": 86400,
-            "minimum": 0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
             "title": "Output Idle Timeout Seconds",
             "type": "integer"
           },
@@ -2024,8 +2024,8 @@
           },
           "queue_timeout_seconds": {
             "default": 0,
-            "maximum": 604800,
-            "minimum": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
             "title": "Queue Timeout Seconds",
             "type": "integer"
           },
@@ -2037,8 +2037,8 @@
           },
           "shard_count": {
             "default": 0,
-            "maximum": 32,
-            "minimum": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
             "title": "Shard Count",
             "type": "integer"
           },
@@ -2073,8 +2073,8 @@
           "android_api_level": {
             "anyOf": [
               {
-                "maximum": 1000,
-                "minimum": 1,
+                "maximum": 1000.0,
+                "minimum": 1.0,
                 "type": "integer"
               },
               {
@@ -2085,8 +2085,8 @@
           },
           "limit": {
             "default": 5,
-            "maximum": 10,
-            "minimum": 1,
+            "maximum": 10.0,
+            "minimum": 1.0,
             "title": "Limit",
             "type": "integer"
           },
@@ -2115,8 +2115,8 @@
         "properties": {
           "aoa_boot_wait_seconds": {
             "default": 60,
-            "maximum": 600,
-            "minimum": 0,
+            "maximum": 600.0,
+            "minimum": 0.0,
             "title": "Aoa Boot Wait Seconds",
             "type": "integer"
           },
@@ -2188,7 +2188,7 @@
             "type": "object"
           },
           "sequence": {
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Sequence",
             "type": "integer"
           },
@@ -2356,7 +2356,7 @@
             "type": "boolean"
           },
           "version": {
-            "minimum": 1,
+            "minimum": 1.0,
             "title": "Version",
             "type": "integer"
           }
@@ -2373,8 +2373,8 @@
         "properties": {
           "interval_minutes": {
             "default": 1440,
-            "maximum": 10080,
-            "minimum": 5,
+            "maximum": 10080.0,
+            "minimum": 5.0,
             "title": "Interval Minutes",
             "type": "integer"
           },
@@ -2421,7 +2421,7 @@
             "type": "string"
           },
           "version": {
-            "minimum": 1,
+            "minimum": 1.0,
             "title": "Version",
             "type": "integer"
           }
@@ -2465,7 +2465,7 @@
           },
           "version": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Version",
             "type": "integer"
           }
@@ -2697,15 +2697,15 @@
         "properties": {
           "archive_days": {
             "default": 7,
-            "maximum": 3650,
-            "minimum": 1,
+            "maximum": 3650.0,
+            "minimum": 1.0,
             "title": "Archive Days",
             "type": "integer"
           },
           "delete_days": {
             "default": 30,
-            "maximum": 3650,
-            "minimum": 0,
+            "maximum": 3650.0,
+            "minimum": 0.0,
             "title": "Delete Days",
             "type": "integer"
           },
@@ -2758,7 +2758,7 @@
           },
           "cpu_percent": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Cpu Percent",
             "type": "number"
           },
@@ -2772,7 +2772,7 @@
           },
           "elapsed_seconds": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Elapsed Seconds",
             "type": "integer"
           },
@@ -2783,7 +2783,7 @@
           "last_output_age_seconds": {
             "anyOf": [
               {
-                "minimum": 0,
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -2815,13 +2815,13 @@
           },
           "process_count": {
             "default": 1,
-            "minimum": 1,
+            "minimum": 1.0,
             "title": "Process Count",
             "type": "integer"
           },
           "rss_mb": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Rss Mb",
             "type": "number"
           },
@@ -2964,8 +2964,8 @@
             "type": "array"
           },
           "issue_id": {
-            "exclusiveMinimum": 0,
-            "maximum": 9223372036854776000,
+            "exclusiveMinimum": 0.0,
+            "maximum": 9.223372036854776e+18,
             "title": "Issue Id",
             "type": "integer"
           }
@@ -3017,8 +3017,8 @@
           },
           "smtp_port": {
             "default": 465,
-            "maximum": 65535,
-            "minimum": 1,
+            "maximum": 65535.0,
+            "minimum": 1.0,
             "title": "Smtp Port",
             "type": "integer"
           },
@@ -3149,7 +3149,7 @@
           },
           "version": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Version",
             "type": "integer"
           }
@@ -3197,8 +3197,8 @@
           },
           "execution_timeout_seconds": {
             "default": 0,
-            "maximum": 604800,
-            "minimum": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
             "title": "Execution Timeout Seconds",
             "type": "integer"
           },
@@ -3219,8 +3219,8 @@
           },
           "output_idle_timeout_seconds": {
             "default": 0,
-            "maximum": 86400,
-            "minimum": 0,
+            "maximum": 86400.0,
+            "minimum": 0.0,
             "title": "Output Idle Timeout Seconds",
             "type": "integer"
           },
@@ -3234,8 +3234,8 @@
           },
           "queue_timeout_seconds": {
             "default": 0,
-            "maximum": 604800,
-            "minimum": 0,
+            "maximum": 604800.0,
+            "minimum": 0.0,
             "title": "Queue Timeout Seconds",
             "type": "integer"
           },
@@ -3251,8 +3251,8 @@
           },
           "shard_count": {
             "default": 0,
-            "maximum": 32,
-            "minimum": 0,
+            "maximum": 32.0,
+            "minimum": 0.0,
             "title": "Shard Count",
             "type": "integer"
           },
@@ -3390,8 +3390,8 @@
       "TransferComplete": {
         "properties": {
           "chunk_count": {
-            "maximum": 100000,
-            "minimum": 1,
+            "maximum": 100000.0,
+            "minimum": 1.0,
             "title": "Chunk Count",
             "type": "integer"
           },
@@ -3407,7 +3407,7 @@
             "type": "string"
           },
           "size_bytes": {
-            "minimum": 1,
+            "minimum": 1.0,
             "title": "Size Bytes",
             "type": "integer"
           }
@@ -3525,14 +3525,14 @@
             "type": "string"
           },
           "x": {
-            "maximum": 10000,
-            "minimum": 0,
+            "maximum": 10000.0,
+            "minimum": 0.0,
             "title": "X",
             "type": "integer"
           },
           "y": {
-            "maximum": 10000,
-            "minimum": 0,
+            "maximum": 10000.0,
+            "minimum": 0.0,
             "title": "Y",
             "type": "integer"
           }
@@ -3806,7 +3806,7 @@
           },
           "connection_generation": {
             "default": 0,
-            "minimum": 0,
+            "minimum": 0.0,
             "title": "Connection Generation",
             "type": "integer"
           },
@@ -3906,8 +3906,8 @@
             "type": "string"
           },
           "max_jobs": {
-            "maximum": 32,
-            "minimum": 1,
+            "maximum": 32.0,
+            "minimum": 1.0,
             "title": "Max Jobs",
             "type": "integer"
           },
