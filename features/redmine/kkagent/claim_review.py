@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import Any
 
 from .source_provenance import expected_module, module_matches
 
