@@ -151,7 +151,7 @@ class AttachmentAnalysisMixin:
                 "text_excerpt": "",
                 "failures": [],
             }
-        replacement_count = content.count("\\ufffd")
+        replacement_count = content.count(chr(0xFFFD))
         error_blocks = self._extract_error_blocks(content)
         interesting_count = len(self._extract_failure_like_lines(content))
         failures = []
