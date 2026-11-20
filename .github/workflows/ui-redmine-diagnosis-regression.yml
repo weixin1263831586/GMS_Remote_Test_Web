@@ -23,6 +23,16 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.10"
+      - name: Install OCR runtime used by evidence extraction tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \\
+            tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim
+          tesseract --list-langs | tee "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx eng "$RUNNER_TEMP/tesseract-languages.txt"
+          grep -qx chi_sim "$RUNNER_TEMP/tesseract-languages.txt"
       - name: Install pinned test requirements
         run: python -m pip install --disable-pip-version-check -r requirements-dev.txt
       - name: Compile changed Python modules
