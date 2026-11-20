@@ -83,7 +83,7 @@ def review_deployment(request: Request, request_id: str):
 <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8"><link rel="stylesheet" href="/static/css/typography.css?v=20261119-type-audit-v5">
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-deployment-review.js" defer></script></head>
-<body><main><h1>APK 部署审批</h1><p>请登录发起申请的 Agent 所属平台账号。核对制品和目标后，一次批准完成传输和安装。</p>
+<body class="ui-page-edge"><main><h1>APK 部署审批</h1><p>请登录发起申请的 Agent 所属平台账号。核对制品和目标后，一次批准完成传输和安装。</p>
 <button id="review-login-open" type="button">登录 / 切换审批账号</button>
 <dl id="details"></dl><p id="status" role="status">正在读取部署请求…</p>
 <button id="approve" disabled>批准并安装</button><a href="/">返回平台</a>
