@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
+from .users import RESOLVED_STATUS_NAMES
+
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,9 @@ async def search_issue_history(
         item["source"] = "local_db"
     seen = {int(item["issue_id"]) for item in items}
     remote_error = ""
-    remaining = max(0, limit - len(items))
+    # Local fixes are prioritized; fetch a bounded larger remote candidate pool
+    # so de-duplication and status filtering do not silently consume all slots.
+    remaining = max(0, min(50, max(1, int(limit)) - len(items)))
     # 远端条目同样标注 matched_terms/distinctive_matches：语料统计来自本地
     # 归档库（DF 是检索语料属性，与单条结果来源无关），命中判定按条目自身
     # 文本。统计不可用时保持字段缺省，消费方按无区分度信息处理。
@@ -51,7 +55,10 @@ async def search_issue_history(
             client = service.agent._make_client()
             try:
                 rows = await asyncio.wait_for(
-                    client.search_issues_by_subject(q, limit=remaining),
+                    client.search_issues_by_subject(
+                        q, limit=min(50, max(remaining * 3, remaining)),
+                        status_id="closed" if resolved_only else "*",
+                    ),
                     timeout=REMOTE_SEARCH_TIMEOUT_SECONDS,
                 )
             finally:
@@ -59,6 +66,10 @@ async def search_issue_history(
             for row in rows:
                 ref_id = int(row.get("issue_id") or 0)
                 if not ref_id or ref_id == exclude_issue_id or ref_id in seen:
+                    continue
+                # Redmine server-side status filtering and local case filtering must
+                # agree: "resolved_only" must never return open remote issues.
+                if resolved_only and not _status_looks_resolved(row.get("status_name")):
                     continue
                 item = {
                     "issue_id": ref_id,
@@ -80,14 +91,17 @@ async def search_issue_history(
                 if token_stats:
                     service.repository.annotate_match_terms(item, token_stats)
                 items.append(item)
+                seen.add(ref_id)
+                if len(items) >= max(1, int(limit)):
+                    break
         except Exception as exc:
             remote_error = str(exc)[:200]
     return {"query": q, "items": items, "remote_search_error": remote_error}
 
 
 def _status_looks_resolved(status_name: Any) -> bool:
-    text = str(status_name or "")
-    return "关闭" in text or "已解决" in text
+    text = str(status_name or "").strip().casefold()
+    return text in {name.casefold() for name in RESOLVED_STATUS_NAMES}
 
 
 __all__ = ["search_issue_history"]
