@@ -30,18 +30,14 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 
 /* web/static/css/modal-tech-dialogs.css */
 :is(.modal,.modal-backdrop,.auth-gate) .modal-content.tech-dialog { font-size: var(--ui-type-size-body); }
-:is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .tech-title-group :is(.modal-title,h2,h3) { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close { font-size: var(--ui-type-size-stat); font-weight: 300; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-body { font-size: var(--ui-type-size-body); }
-.tech-dialog .tech-intro { font-size: var(--ui-type-size-body); }
 .tech-dialog .tech-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 .tech-dialog .tech-field-card > label:not(:has(input)) { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 .tech-dialog .tech-field-stack > label { font-size: var(--ui-type-size-body); }
 .tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) { font-size: var(--ui-type-size-body); }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
 .tech-dialog .tech-row-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
-.tech-dialog .modal-info-text { font-size: var(--ui-type-size-body); }
-.tech-dialog .tech-notice { font-size: var(--ui-type-size-body); }
 #tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 #tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); }
 #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); }
