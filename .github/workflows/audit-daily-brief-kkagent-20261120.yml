@@ -1,0 +1,223 @@
+name: Read-only kkagent Daily Brief evidence audit 2026-11-20
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  onprem-readonly:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    steps:
+      - name: Summarize today's local kkagent metadata without exporting private Redmine contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          python3 - <<'PY'
+          import collections, json, re, sqlite3
+          from pathlib import Path
+          date="2026-11-20"
+          paths=sorted((Path.home()/"GMS_Remote_Test_Web/data/redmine/by_user").glob("*/daily_brief.sqlite3"))
+          print("AUDIT_DATE="+date)
+          print("DATABASE_COUNT="+str(len(paths)))
+          def parsed(x):
+              try:
+                  o=json.loads(x or "{}")
+                  return o if isinstance(o,dict) else {}
+              except (TypeError, ValueError): return {}
+          def clean(x):
+              s=str(x or "")
+              return s if re.fullmatch(r"[A-Za-z_]{1,35}",s) else "none_or_other"
+          def cat(name):
+              s=str(name or "").lower()
+              for key in ("history_search","issue_fetch","journals","attachments","artifact_search",
+                  "artifact_read","sdk_search","sdk_read","apk_resolve","apk_analyze",
+                  "apk_search","apk_source_search","devices_snapshot","device_console","knowledge_search",
+                  "references","selfcheck"):
+                  if key in s: return key
+              return "other"
+          counts=collections.Counter()
+          tools=collections.Counter()
+          fails=collections.Counter()
+          cases=[]
+          runs=[]
+          recent=collections.Counter()
+          attempted=0
+          owners=0
+          errors=0
+          for db in paths:
+              try:
+                  cn=sqlite3.connect(db.as_uri()+"?mode=ro",uri=True,timeout=2)
+                  cn.row_factory=sqlite3.Row
+                  cn.execute("PRAGMA query_only=ON")
+                  try:
+                      tables={r[0] for r in cn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                      if "redmine_daily_brief_runs" not in tables: continue
+                      for rec in cn.execute("SELECT brief_date,count(*) FROM redmine_daily_brief_runs GROUP BY brief_date ORDER BY brief_date DESC LIMIT 3"):
+                          recent[str(rec[0])]+=int(rec[1])
+                      runrows=cn.execute("SELECT run_id,mode,status,source_sync_status,data_quality,issue_count,report_json "
+                          "FROM redmine_daily_brief_runs WHERE brief_date=? ORDER BY started_at",(date,)).fetchall()
+                      if runrows: owners+=1
+                      for run in runrows:
+                          idx=len(runs)+1
+                          mode="single_issue" if str(run["mode"]).startswith("issue:") else clean(run["mode"])
+                          summary=parsed(run["report_json"]).get("counts") or {}
+                          runs.append({"run_index":idx,"mode":mode,"status":clean(run["status"]),
+                              "sync":clean(run["source_sync_status"]),"quality":clean(run["data_quality"]),
+                              "issues":int(run["issue_count"] or 0),
+                              "reported":{k:int(summary.get(k) or 0) for k in
+                                  ("completed","failed","needs_human_review","evidence_verified","evidence_partial","evidence_insufficient")}})
+                          counts["runs_"+mode]+=1
+                          rows=cn.execute("SELECT issue_id,status,attempt_count,duration_ms,error_type,result "
+                              "FROM redmine_daily_brief_issues WHERE run_id=? ORDER BY issue_id",(run["run_id"],)).fetchall()
+                          for item in rows:
+                              counts["cases"]+=1
+                              result=parsed(item["result"])
+                              gate=result.get("evidence_gate") or {}
+                              if not isinstance(gate,dict): gate={}
+                              review=result.get("analysis_review") or {}
+                              if not isinstance(review,dict): review={}
+                              gnames=("issue_fetched","journals_checked","attachments_checked",
+                                  "history_checked","source_evidence_required","source_evidence_checked",
+                                  "test_failure_subject","official_reference_attempted")
+                              g={k:gate.get(k) if isinstance(gate.get(k),bool) else None for k in gnames}
+                              for k in ("distinct_history_search_count","source_evidence_tool_count",
+                                        "reproducible_source_evidence_count","relevant_source_evidence_count",
+                                        "source_attempt_count","listed_attachment_count"):
+                                  try: g[k]=int(gate.get(k) or 0)
+                                  except (TypeError,ValueError): g[k]=0
+                              for k in ("unread_text_artifact_ids","window_read_only_artifact_ids"):
+                                  g[k+"_count"]=len(gate.get(k) or [])
+                              state=clean(item["status"])
+                              quality=clean(result.get("evidence_quality"))
+                              rstatus=clean(review.get("status"))
+                              counts["case_"+state]+=1
+                              counts["evidence_"+quality]+=1
+                              counts["review_"+rstatus]+=1
+                              if result.get("needs_human_review"):counts["human_review"]+=1
+                              for k in gnames:
+                                  if g[k] is False: counts["gate_"+k+"_false"]+=1
+                              if g["test_failure_subject"]:counts["test_failures"]+=1
+                              if g["window_read_only_artifact_ids_count"]:counts["window_only"]+=1
+                              if len(cases)<45:
+                                  cases.append({"case_index":counts["cases"],"run_index":idx,
+                                      "status":state,"quality":quality,"review":rstatus,
+                                      "human_review":bool(result.get("needs_human_review")),
+                                      "attempts":int(item["attempt_count"] or 0),
+                                      "duration_s":round(int(item["duration_ms"] or 0)/1000,1),
+                                      "error_type":clean(item["error_type"]),"gate":g})
+                          if "redmine_daily_brief_ai_executions" in tables:
+                              ex=cn.execute("SELECT payload_json FROM redmine_daily_brief_ai_executions "
+                                  "WHERE run_id=?",(run["run_id"],)).fetchall()
+                              attempted+=len(ex)
+                              for e in ex:
+                                  payload=parsed(e[0])
+                                  if not payload.get("final_ok"): counts["failed_executions"]+=1
+                                  calls=payload.get("tool_calls") or payload.get("tools") or []
+                                  for call in calls if isinstance(calls,list) else []:
+                                      if not isinstance(call,dict): continue
+                                      group=cat(call.get("tool_name") or call.get("name"))
+                                      tools[group]+=1
+                                      if call.get("status")=="failed" or call.get("is_error"): fails[group]+=1
+                  finally: cn.close()
+              except (sqlite3.Error,OSError): errors+=1
+          print("SUMMARY="+json.dumps({"owners_with_runs":owners,"runs":len(runs),
+              "cases":counts["cases"],"ai_executions":attempted,
+              "db_errors":errors,"metrics":dict(sorted(counts.items())),
+              "tool_calls":dict(sorted(tools.items())),"failed_tools":dict(sorted(fails.items())),
+              "recent_days":dict(sorted(recent.items(),reverse=True)[:5])},sort_keys=True))
+          print("RUNS="+json.dumps(runs[:25],sort_keys=True))
+          print("CASES="+json.dumps(cases,sort_keys=True))
+          print("AUDIT_DONE=YES")
+          PY
+
+      - name: Classify failures and source provenance from metadata only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          python3 - <<'PY'
+          import collections, json, re, sqlite3
+          from pathlib import Path
+          date="2026-11-20"
+          paths=sorted((Path.home()/"GMS_Remote_Test_Web/data/redmine/by_user").glob("*/daily_brief.sqlite3"))
+          def obj(x):
+              try:
+                  a=json.loads(x or "{}")
+                  return a if isinstance(a,dict) else {}
+              except (TypeError,ValueError): return {}
+          patterns={
+              "source_version":r"source.*(?:revision|version|module|commit)|sdk.*(?:version|mismatch)",
+              "source_missing":r"source.level|source.evidence|sdk.*(?:unavailable|unconfigured)|no successful source",
+              "history":r"history.search|distinct history|history_checked",
+              "attachments":r"attachment|artifact.read|artifact.search|text.layer",
+              "journals":r"journal|redmine.journals",
+              "issue_fetch":r"issue.fetch|redmine.issue",
+              "review":r"review|claim|paragraph|contradict|causal",
+              "official_refs":r"official|reference|mainline|cve",
+              "report_format":r"format|markdown|schema|json|report sections|no final",
+              "tool_protocol":r"mcp.*(?:error|failed|unavailable)|tool.*(?:error|failed|not found)",
+              "network_timeout":r"timeout|timed.out|connection|network",
+              "permission":r"permission|unauthoriz|token|credential|elevation|profile",
+          }
+          def type_of(name):
+              s=str(name or "").lower()
+              for c in ("redmine_issue_fetch","redmine_journals","redmine_attachments",
+                        "artifact_read","artifact_search","history_search","sdk_search","sdk_read",
+                        "apk_resolve","apk_analyze","apk_source_search","apk_search",
+                        "devices_snapshot","device_console","redmine_references"):
+                  if c in s:return c
+              return "other"
+          def enum(s):
+              v=str(s or "")
+              return v if re.fullmatch(r"[a-z][a-z_]{0,35}",v) else "other"
+          results=[]
+          for db in paths:
+              try:
+                  conn=sqlite3.connect(db.as_uri()+"?mode=ro",uri=True,timeout=2)
+                  conn.row_factory=sqlite3.Row
+                  conn.execute("PRAGMA query_only=ON")
+                  runs=conn.execute("SELECT run_id FROM redmine_daily_brief_runs WHERE brief_date=? ORDER BY started_at",(date,)).fetchall()
+                  for run in runs:
+                      cases=conn.execute("SELECT issue_id,status FROM redmine_daily_brief_issues WHERE run_id=? ORDER BY issue_id",(run[0],)).fetchall()
+                      for cidx,cas in enumerate(cases,1):
+                          ex=conn.execute("SELECT payload_json FROM redmine_daily_brief_ai_executions WHERE run_id=? AND issue_id=? ORDER BY rowid",
+                              (run[0],cas["issue_id"])).fetchall()
+                          for x in ex:
+                              t=obj(x[0])
+                              failures=str(t.get("failure_message") or "")
+                              more=t.get("analysis_review_findings") or []
+                              if isinstance(more,list): failures += " ".join(str(s) for s in more)
+                              elif isinstance(more,str): failures += more
+                              tags=[k for k,pattern in patterns.items() if re.search(pattern,failures,re.I)]
+                              tc=collections.Counter()
+                              fc=collections.Counter()
+                              sc=collections.Counter()
+                              for call in t.get("tool_calls") or []:
+                                  if not isinstance(call,dict):continue
+                                  typ=type_of(call.get("tool_name"))
+                                  tc[typ]+=1
+                                  if call.get("status")=="failed" or call.get("is_error"): fc[typ]+=1
+                                  if call.get("source_evidence_valid"):
+                                      context=call.get("source_context") or {}
+                                      provider=context.get("provider") or ""
+                                      if provider in ("codesearch","ssh_git","local_git"):sc[provider]+=1
+                                      else:sc["unknown"]+=1
+                              findings_count=len(more) if isinstance(more,list) else (1 if more else 0)
+                              results.append({
+                                  "case_index_in_run":cidx,"status":enum(cas["status"]),
+                                  "failure_stage":enum(t.get("failure_stage")),
+                                  "final_ok":bool(t.get("final_ok")),
+                                  "failure_tags":tags,"review_findings_count":findings_count,
+                                  "history_success_count":int(t.get("distinct_history_search_count") or 0),
+                                  "tool_calls":dict(sorted(tc.items())),"tool_failures":dict(sorted(fc.items())),
+                                  "valid_source_provider_calls":dict(sorted(sc.items())),
+                              })
+                  conn.close()
+              except (sqlite3.Error,OSError):pass
+          print("ANON_FAILURE_DETAIL="+json.dumps(results,sort_keys=True))
+          print("ANON_FAILURE_AUDIT_DONE=YES")
+          PY
