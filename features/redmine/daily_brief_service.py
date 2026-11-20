@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
 from typing import Any
 
 from . import daily_brief_cancellation as cancellation
@@ -901,37 +900,19 @@ class DailyBriefService:
             # 轮询与 profile 判定；原独立模块，已并回服务层编排）。
             analyze_entry["_progress_recorder"] = progress
             analyze_entry["_provider_started"] = mark_provider_started
-            # Resume only a previous *interrupted* attempt for this same frozen
-            # run/issue, under the currently valid job lease. Never replay a
-            # completed report or a checkpoint from another evidence snapshot.
-            if (
-                checkpoint and previous_status in {"pending", "running", "failed"}
-                and checkpoint.get("status") == "running"
-                and int(checkpoint.get("attempt_no") or 0) < record.attempt_count
-                and checkpoint.get("snapshot_hash") == run.snapshot_hash
-                and checkpoint.get("session_id")
-                and job_lease and job_lease.get("status") == "running"
-                and job_lease.get("lease_token")
-            ):
-                try:
-                    expiry = datetime.fromisoformat(
-                        str(job_lease["lease_expires_at"]).replace("Z", "+00:00")
-                    )
-                    trace_summary = checkpoint.get("trace") or {}
-                    if (
-                        expiry > datetime.now(timezone.utc)
-                        and trace_summary.get("session_id") == checkpoint["session_id"]
-                    ):
-                        from .kkagent.trace import trace_from_summary
+            from .daily_brief_resume import valid_resume_trace
 
-                        analyze_entry["_resume_trace"] = trace_from_summary(trace_summary)
-                        if progress is not None:
-                            progress.stage_changed(
-                                f"从第 {checkpoint['attempt_no']} 次尝试的检查点恢复",
-                                stage="resume",
-                            )
-                except (TypeError, ValueError, KeyError):
-                    logger.warning("checkpoint lease/session validation failed for issue %s", issue_id)
+            resumed = valid_resume_trace(
+                checkpoint, job_lease, previous_status=previous_status,
+                attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
+            )
+            if resumed is not None:
+                analyze_entry["_resume_trace"] = resumed
+                if progress is not None:
+                    progress.stage_changed(
+                        f"从第 {checkpoint['attempt_no']} 次尝试的检查点恢复",
+                        stage="resume",
+                    )
             await precollect_deep_evidence(
                 repository=self.repository, run=run, issue_id=issue_id,
                 analyzer=analyzer, entry=analyze_entry,
