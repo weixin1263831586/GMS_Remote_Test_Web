@@ -338,14 +338,15 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn(str(ENTRY["issue_id"]), prompt)
 
     def test_prompt_version_is_pinned(self):
-        # v32 将 Markdown 标题与正文共同复核，并恢复失败预采集后的官方检索。
+        # 提示词版本变更必须同步更新此断言。
         self.assertEqual(PROMPT_VERSION, "redmine_daily_triage_v32")
 
     def test_diagnostic_prompt_has_no_journal_timeline_section(self):
-        """处理时间线只是 Redmine journal 流水的复述，读者点开工单就有；
-        问题概况须钉死报告人=author、单号格式、禁内部 id、时间统一 UTC+8。
-        v23: 结构按工单性质分支——咨询/配置/流程类走 B 支章节，不套
-        失败现场框架，结论文不强制"真实失败 vs 测试侧噪音"二分。"""
+        """诊断报告区分失败类与咨询类工单，不重复完整 journal 时间线。
+
+        报告人、单号、证据 ID 和时区必须遵守统一格式约束。
+        咨询/配置/流程类使用专属章节，不强制将其归类为测试失败。
+        """
         prompt = KkAgentRedmineAnalyzer().build_prompt({
             **ENTRY, "analysis_mode": "diagnostic",
         })
@@ -371,7 +372,7 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertIn("branch B: state and answer the question directly", prompt)
         # 提示词内部术语不得泄漏进报告正文。
         self.assertIn("NEVER mention the words 分支/branch", prompt)
-        # v27：截图取证行为钉死——每个 image 附件先读后说。
+        # 图片证据必须先尝试读取，不能未经读取就声称截图不可用。
         self.assertIn("OCR'd by the platform", prompt)
         self.assertIn("at least one", prompt)
         self.assertIn("artifact-read call", prompt)
