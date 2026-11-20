@@ -89,50 +89,55 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_gerrit_frame_header_has_one_top_boundary(self):
-        """Shell frame top and Gerrit iframe content start on the same line."""
+    def test_full_height_workspaces_have_one_top_boundary(self):
+        """Full-size iframe/table surfaces meet the shared shell frame without a second seam."""
         page = self.new_page()
+        names = (
+            "devices-console", "reports", "architecture", "automation",
+            "cluster", "redmine-agent", "gerrit-dashboard",
+        )
         try:
             self.goto_shell(page)
             for width, height in ((1440, 900), (390, 844)):
-                with self.subTest(width=width):
-                    page.set_viewport_size({"width": width, "height": height})
-                    page.evaluate("() => switchPage('gerrit-dashboard', null)")
-                    page.wait_for_function(
-                        "document.querySelector('#page-gerrit-dashboard').classList.contains('active')"
-                    )
-                    geometry = page.evaluate(
-                        """() => {
-                          const root = document.querySelector('#page-gerrit-dashboard');
-                          const header = root.querySelector('.page-header-row');
-                          const shell = root.querySelector('.embedded-frame-shell');
-                          const iframe = shell.querySelector('iframe');
-                          const frame = getComputedStyle(root, '::after');
-                          return {
-                            outerTop: root.getBoundingClientRect().top + parseFloat(frame.top),
-                            iframeTop: shell.getBoundingClientRect().top,
-                            headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
-                            outerBorder: frame.borderTopStyle,
-                            outerBorderWidth: parseFloat(frame.borderTopWidth),
-                            iframeBorderWidth: parseFloat(getComputedStyle(iframe).borderTopWidth),
-                          };
-                        }"""
-                    )
-                    self.assertAlmostEqual(
-                        geometry["outerTop"], geometry["iframeTop"],
-                        delta=0.6, msg=str(geometry),
-                    )
-                    self.assertAlmostEqual(
-                        geometry["headerMarginBottom"], 1,
-                        delta=0.1, msg=str(geometry),
-                    )
-                    self.assertEqual(geometry["outerBorder"], "solid")
-                    self.assertAlmostEqual(
-                        geometry["outerBorderWidth"], 1, delta=0.1,
-                    )
-                    self.assertAlmostEqual(
-                        geometry["iframeBorderWidth"], 0, delta=0.1,
-                    )
+                page.set_viewport_size({"width": width, "height": height})
+                for name in names:
+                    with self.subTest(width=width, page=name):
+                        page.evaluate("(name) => switchPage(name, null)", name)
+                        page.wait_for_function(
+                            f"document.querySelector('#page-{name}').classList.contains('active')"
+                        )
+                        geometry = page.evaluate(
+                            """(name) => {
+                              const root = document.getElementById('page-' + name);
+                              const header = root.querySelector('.page-header-row');
+                              const inner = root.querySelector(
+                                '.embedded-frame-shell, .list-table-wrap');
+                              if (!header || !inner) throw Error('Missing shared page surface');
+                              const frame = getComputedStyle(root, '::after');
+                              return {
+                                outerTop: root.getBoundingClientRect().top + parseFloat(frame.top),
+                                contentTop: inner.getBoundingClientRect().top,
+                                headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
+                                outerBorderStyle: frame.borderTopStyle,
+                                outerBorderWidth: parseFloat(frame.borderTopWidth),
+                                innerBorderWidth: parseFloat(getComputedStyle(inner).borderTopWidth),
+                                pageEdge: parseFloat(getComputedStyle(root).paddingTop),
+                              };
+                            }""",
+                            name,
+                        )
+                        self.assertAlmostEqual(
+                            geometry["outerTop"], geometry["contentTop"],
+                            delta=0.6, msg=str(geometry),
+                        )
+                        self.assertAlmostEqual(
+                            geometry["headerMarginBottom"], 1,
+                            delta=0.1, msg=str(geometry),
+                        )
+                        self.assertEqual(geometry["outerBorderStyle"], "solid")
+                        self.assertAlmostEqual(geometry["outerBorderWidth"], 1, delta=0.1)
+                        self.assertAlmostEqual(geometry["innerBorderWidth"], 0, delta=0.1)
+                        self.assertAlmostEqual(geometry["pageEdge"], 8, delta=0.1)
         finally:
             page.close()
 
