@@ -89,6 +89,53 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_gerrit_frame_header_has_one_top_boundary(self):
+        """Shell frame top and Gerrit iframe content start on the same line."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (390, 844)):
+                with self.subTest(width=width):
+                    page.set_viewport_size({"width": width, "height": height})
+                    page.evaluate("() => switchPage('gerrit-dashboard', null)")
+                    page.wait_for_function(
+                        "document.querySelector('#page-gerrit-dashboard').classList.contains('active')"
+                    )
+                    geometry = page.evaluate(
+                        """() => {
+                          const root = document.querySelector('#page-gerrit-dashboard');
+                          const header = root.querySelector('.page-header-row');
+                          const shell = root.querySelector('.embedded-frame-shell');
+                          const iframe = shell.querySelector('iframe');
+                          const frame = getComputedStyle(root, '::after');
+                          return {
+                            outerTop: root.getBoundingClientRect().top + parseFloat(frame.top),
+                            iframeTop: shell.getBoundingClientRect().top,
+                            headerMarginBottom: parseFloat(getComputedStyle(header).marginBottom),
+                            outerBorder: frame.borderTopStyle,
+                            outerBorderWidth: parseFloat(frame.borderTopWidth),
+                            iframeBorderWidth: parseFloat(getComputedStyle(iframe).borderTopWidth),
+                          };
+                        }"""
+                    )
+                    self.assertAlmostEqual(
+                        geometry["outerTop"], geometry["iframeTop"],
+                        delta=0.6, msg=str(geometry),
+                    )
+                    self.assertAlmostEqual(
+                        geometry["headerMarginBottom"], 1,
+                        delta=0.1, msg=str(geometry),
+                    )
+                    self.assertEqual(geometry["outerBorder"], "solid")
+                    self.assertAlmostEqual(
+                        geometry["outerBorderWidth"], 1, delta=0.1,
+                    )
+                    self.assertAlmostEqual(
+                        geometry["iframeBorderWidth"], 0, delta=0.1,
+                    )
+        finally:
+            page.close()
+
     def test_embedded_dashboard_stat_geometry_matches_across_modules(self):
         """Cluster, Redmine and Gerrit keep the same KPI inset, height and chart gap."""
         page = self.new_page()
