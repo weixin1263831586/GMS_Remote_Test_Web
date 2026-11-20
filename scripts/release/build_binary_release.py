@@ -70,6 +70,20 @@ def _stage_assets(runtime: Path) -> None:
         raise RuntimeError(f"missing required runtime assets: {missing}")
 
 
+def _production_modules() -> list[str]:
+    """Explicit module inventory without accidentally compiling tests or fixtures."""
+    modules = []
+    for top in ("bootstrap", "foundation", "features", "worker_agent", "workflows", "scripts"):
+        for source in (ROOT / top).rglob("*.py"):
+            relative = source.relative_to(ROOT)
+            if "tests" in relative.parts or "test" in relative.parts:
+                continue
+            if source.name.startswith("test_") or source.name in {"conftest.py", "__init__.py"}:
+                continue
+            modules.append(".".join(relative.with_suffix("").parts))
+    return sorted(set(modules))
+
+
 def _compile_native(out: Path) -> Path:
     compiler = [
         sys.executable, "-m", "nuitka",
@@ -78,13 +92,7 @@ def _compile_native(out: Path) -> Path:
         "--python-flag=no_asserts",
         f"--output-dir={out}",
         "--output-filename=gms-runtime",
-        "--include-package=bootstrap",
-        "--include-package=foundation",
-        "--include-package=features",
-        "--include-package=worker_agent",
-        "--include-package=workflows",
-        "--include-module=scripts.gms_backup",
-        "--include-module=scripts.sanitize_release_config",
+        *[f"--include-module={module}" for module in _production_modules()],
         str(ROOT / "scripts/release/compiled_entry.py"),
     ]
     _run(compiler, cwd=ROOT)
