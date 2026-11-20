@@ -260,7 +260,8 @@ async def test_repeated_unsupported_verdict_never_becomes_a_completed_report(mon
     outcome = await analyzer.analyze(SUMMARY_ENTRY)
     assert not outcome.ok and outcome.result is None
     assert "不足以排除平台因素" in outcome.error
-    assert stream.await_count == 6
+    # Unchanged factual findings with no fresh evidence converge after one revision.
+    assert stream.await_count == 4
 
 
 @pytest.mark.asyncio
