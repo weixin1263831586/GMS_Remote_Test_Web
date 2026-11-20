@@ -31,6 +31,7 @@ redmineInitialLoad.catch(function() {}).finally(function() {
 // Auto-refresh status. Hidden iframe pages do not need to keep polling.
 var redmineStatusRefreshInterval = null;
 var redmineStatusRefreshPromise = null;
+var redminePreviousVisible = null;
 function refreshRedmineAgentStatus() {
   if (redmineStatusRefreshPromise) return redmineStatusRefreshPromise;
   redmineStatusRefreshPromise = (async function() {
@@ -55,12 +56,25 @@ function syncRedmineStatusRefresh(event) {
       ? window.GmsEmbeddedWorkspace.isVisible()
       : true;
   }
+  var becameVisible = visible && redminePreviousVisible === false;
+  redminePreviousVisible = visible;
   if (redmineStatusRefreshInterval) {
     clearInterval(redmineStatusRefreshInterval);
     redmineStatusRefreshInterval = null;
   }
-  if (!visible) return;
+  if (!visible) {
+    clearTimeout(dailyBriefAutoPollTimer);
+    dailyBriefAutoPollTimer = null;
+    return;
+  }
   refreshRedmineAgentStatus();
+  // The embedded iframe stays mounted across navigation. Refresh the
+  // Daily Brief and standalone Agent analysis history on re-entry.
+  if (becameVisible && currentTab === 'daily-brief') {
+    loadDailyBrief().catch(function(error) {
+      console.warn('[Redmine] Daily Brief re-entry refresh failed:', error);
+    });
+  }
   redmineStatusRefreshInterval = setInterval(refreshRedmineAgentStatus, 10000);
 }
 window.addEventListener('gms:embedded-visibility', syncRedmineStatusRefresh);

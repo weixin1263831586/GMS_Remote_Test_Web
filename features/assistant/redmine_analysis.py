@@ -244,7 +244,8 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
                     finish_run_state(session, "idle")
                     _append_message(session, "assistant", _summary(payload, issue_id), data={
                         "redmine_run_id": run_id, "redmine_issue_id": issue_id,
-                        "quick_actions": [{"label": "打开 Redmine 看板", "page": "redmine-agent"}],
+                        "quick_actions": [{"label": "查看 Redmine 每日晨报", "page": "redmine-agent",
+                                       "params": {"tab": "daily-brief"}}],
                     })
                     return
                 _update_step(session, active, "running", "排队中" if status == "pending" else "正在取证和分析")

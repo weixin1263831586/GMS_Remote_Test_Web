@@ -70,7 +70,17 @@ async function loadDailyBriefModelOptions(selectedModel) {
   }
 }
 
-async function loadDailyBrief() {
+// Tab changes, visibility events and polling share one refresh to avoid races.
+var dailyBriefLoadPromise = null;
+function loadDailyBrief() {
+  if (dailyBriefLoadPromise) return dailyBriefLoadPromise;
+  dailyBriefLoadPromise = loadDailyBriefOnce().finally(function() {
+    dailyBriefLoadPromise = null;
+  });
+  return dailyBriefLoadPromise;
+}
+
+async function loadDailyBriefOnce() {
   var card = document.getElementById('dailyBriefCard');
   if (!card) return;
   try {
@@ -81,9 +91,10 @@ async function loadDailyBrief() {
     dailyBriefCache = (data && data.success !== false) ? data : null;
     card.innerHTML = renderDailyBriefInner(dailyBriefCache);
     updateRedmineToolbar();
-    scheduleDailyBriefAutoRefresh(dailyBriefCache);
     await loadSingleIssueAnalysisHistory();
     await restoreSingleIssueAnalysis();
+    // Standalone Agent analysis can still be running after the daily batch ends.
+    scheduleDailyBriefAutoRefresh(dailyBriefCache);
   } catch (e) {
     card.innerHTML = renderDailyBriefInner(null);
     updateRedmineToolbar();
@@ -97,12 +108,23 @@ var dailyBriefStoppingRunId = '';    // 取消请求已提交，等待 Worker �
 var dailyBriefManualPoll = false;    // 手动触发后的轮询进行中标记
 function scheduleDailyBriefAutoRefresh(data) {
   var run = (data && data.run) || {};
-  var inflight = run.status === 'pending' || run.status === 'snapshotting' || run.status === 'analyzing';
-  if (!inflight || dailyBriefManualPoll) return; // 手动轮询已覆盖，不重复刷
-  if (dailyBriefAutoPollTimer) return; // 已有轮询在跑
-  dailyBriefAutoPollTimer = setTimeout(async function () {
+  var batchRunning = ['pending', 'snapshotting', 'analyzing', 'running'].includes(run.status);
+  var agentIssueRunning = singleIssueAnalysisHistory.some(function(item) {
+    return item && item.run && singleIssueAnalysisIsRunning(
+      item.run, (item.issues || [])[0] || {}
+    );
+  });
+  if ((!batchRunning && !agentIssueRunning) || dailyBriefManualPoll) {
+    clearTimeout(dailyBriefAutoPollTimer);
     dailyBriefAutoPollTimer = null;
-    if (currentTab !== 'daily-brief') return; // 离开每日晨报页后不再刷
+    return;
+  }
+  if (dailyBriefAutoPollTimer) return;
+  if (window.GmsEmbeddedWorkspace?.isVisible?.() === false) return;
+  dailyBriefAutoPollTimer = setTimeout(async function() {
+    dailyBriefAutoPollTimer = null;
+    if (currentTab !== 'daily-brief'
+        || window.GmsEmbeddedWorkspace?.isVisible?.() === false) return;
     await loadDailyBrief();
   }, 10000);
 }
