@@ -4,6 +4,11 @@ on:
     branches: [ui/unify-page-edge-8px-20261120]
     paths:
       - '.github/workflows/compiled-release-native-smoke.yml'
+      - 'scripts/release/build_binary_release.py'
+      - 'scripts/release/compiled_entry.py'
+      - 'scripts/release/verify_binary_tree.py'
+      - 'scripts/release/install_compiled.sh'
+      - 'requirements.txt'
   workflow_dispatch:
 
 permissions:
