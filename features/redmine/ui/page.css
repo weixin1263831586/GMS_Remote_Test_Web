@@ -76,7 +76,7 @@
 
 
     /* Panels */
-    .tab-content { display:none; padding:var(--ui-spacing-lg); }
+    .tab-content { display:none; }
     .tab-content.active { display:block; }
     #tab-cases.tab-content.active, #tab-runs.tab-content.active { display:flex; flex:1 1 auto; flex-direction:column; min-height:0; }
     #tab-cases .two-col, #tab-runs .two-col { flex:1 1 auto; min-height:0; }
