@@ -139,9 +139,19 @@ class AttachmentAnalysisMixin:
 
     def _analyze_text_attachment(self, path: str) -> dict[str, Any]:
         try:
-            content = Path(path).read_text(encoding="utf-8", errors="ignore")
-        except Exception:
-            content = ""
+            # "ignore" silently deleted invalid bytes, potentially removing
+            # error signatures from a customer log. Replacement is observable.
+            content = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            return {
+                "filename": os.path.basename(path),
+                "parsed": False,
+                "summary": {"interesting_lines": 0, "error_blocks": 0},
+                "details": {"type": "text", "read_error_kind": type(exc).__name__},
+                "text_excerpt": "",
+                "failures": [],
+            }
+        replacement_count = content.count("\\ufffd")
         error_blocks = self._extract_error_blocks(content)
         interesting_count = len(self._extract_failure_like_lines(content))
         failures = []
@@ -156,7 +166,11 @@ class AttachmentAnalysisMixin:
             "filename": os.path.basename(path),
             "parsed": True,
             "summary": {"interesting_lines": interesting_count, "error_blocks": len(error_blocks)},
-            "details": {"type": "text"},
+            "details": {
+                "type": "text",
+                "encoding_warning": bool(replacement_count),
+                "utf8_replacement_count": replacement_count,
+            },
             "text_excerpt": _truncate(content, 3000),
             "failures": failures,
         }
