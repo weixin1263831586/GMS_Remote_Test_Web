@@ -102,7 +102,7 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
         value TEXT NOT NULL DEFAULT ''
     );
     """,
-    # v2: unicode61 把连续 CJK 串当单个 token，查询侧 2-gram 匹配不上。
+    # unicode61 将连续 CJK 字符视为单个 token，无法匹配查询侧的 2-gram。
     # 新增 cjk 列（索引时预切重叠 2-gram）供中文查询命中；FTS5 虚表
     # 不支持 ADD COLUMN，只能重建。迁移后 fts 行数 < pages 行数，由
     # _ensure_schema 检测到缺口并清空 pages，触发下一轮全量重建。
@@ -116,13 +116,13 @@ _SCHEMA_MIGRATIONS: dict[int, str] = {
         tokenize = 'unicode61'
     );
     """,
-    # v3: frontmatter 完整投影（sources→anchors、tags 等 JSON 字段）。
+    # frontmatter 投影需包含 sources→anchors、tags 等字段。
     # 老库的 frontmatter 列是残缺标量投影，只能通过清空 pages 触发全量
     # 重建；FTS 列结构未变，虚表无需重建。
     3: """
     DELETE FROM wiki_pages;
     """,
-    # v4: Section 级检索。页 → 标题 Section → FTS 命中
+    # Section 级检索通过标题区段匹配 FTS，而不是整页匹配。
     # 携带 heading + start_line/end_line，Binder/Zygote/LMKD 这类机制词
     # 不再被上百 KB 的整页 snippet 淹没。Section 派生自 page body（增量
     # hash 不变时 body 不变，旧 section 仍有效）；清空 pages 触发全量
