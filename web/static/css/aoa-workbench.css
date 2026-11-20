@@ -182,8 +182,7 @@
 .aoa-screen-stage img[hidden], .aoa-screen-stage canvas[hidden] {
     display: none;
 }
-/* display:flex 同样覆盖 [hidden] 的 UA 隐藏样式：不显式声明则空态文案
-   与实时画面并排显示，把投屏挤到左侧（实机截图复现）。 */
+/* display:flex 覆盖 [hidden] 的默认隐藏行为，需显式隐藏空态元素。 */
 .aoa-screen-empty[hidden] { display: none; }
 /* AOA 命令坐标网格叠加层：几何（left/top/宽高）由 aoa-screen-grid.js
    按 object-fit: contain 的内容框逐帧计算；纯展示层不拦截投屏输入。 */
