@@ -406,6 +406,8 @@ class AnalysisProgressRecorder:
         self.subject = scrub_secrets(subject)[:120]
         self.model_name = str(model_name or "").strip()
         self.attempt_no = max(1, int(attempt_no))
+        self.snapshot_hash = ""
+        self.lease_token = ""
         self.tool_started_count = 0
         self.tool_completed_count = 0
         self.tool_failed_count = 0
@@ -421,6 +423,20 @@ class AnalysisProgressRecorder:
 
     def stage_changed(self, summary: str, *, stage: str = "") -> None:
         self._emit("stage_changed", stage=stage, summary=summary)
+
+    def checkpoint(self, trace: Any, *, status: str = "running") -> None:
+        """Store a bounded evidence snapshot for lease-validated resume."""
+        try:
+            summary = trace.to_summary()
+            session_id = str(summary.get("session_id") or "")
+            if session_id:
+                self.store.save_checkpoint(
+                    self.run_id, self.issue_id, attempt_no=self.attempt_no,
+                    session_id=session_id, snapshot_hash=self.snapshot_hash,
+                    lease_token=self.lease_token, trace=summary, status=status,
+                )
+        except Exception:
+            logger.debug("analysis checkpoint unavailable", exc_info=True)
 
     def session_available(self, session_id: str) -> None:
         """kkagent session 已创建（流开始时即可知）：落库供会话回放 tail。
