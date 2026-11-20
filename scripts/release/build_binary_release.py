@@ -109,13 +109,21 @@ def _smoke_compiled_runtime(runtime: Path, temp_root: Path) -> None:
     shutil.copytree(runtime, smoke_root)
     home = temp_root / "smoke-home"
     home.mkdir(mode=0o700)
+    # Never inherit developer production/Redmine/AI credentials into the
+    # staging instance. Production smoke must exercise newly generated
+    # identities, rather than silently succeeding with a real host's secrets.
+    blocked = ("GMS_", "REDMINE_", "GERRIT_", "APE_", "KKAGENT_", "UBUNTU_",
+               "OPENAI_", "ANTHROPIC_", "GROK_", "GOOGLE_")
     env = {
-        **os.environ,
+        key: value for key, value in os.environ.items()
+        if not key.upper().startswith(blocked)
+    }
+    env.update({
         "GMS_PROJECT_ROOT": str(smoke_root),
         "GMS_DATA_ROOT": str(smoke_root / "data"),
         "GMS_ENV": "production",
         "HOME": str(home),
-    }
+    })
     binary = str(smoke_root / "gms-runtime")
     _run([binary, "init", "--host", "127.0.0.1", "--port", "5001",
           "--no-admin-prompt"], cwd=smoke_root, env=env)
