@@ -20,7 +20,7 @@ import logging
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
-from features.auth import require_agent_scope
+from features.auth import principal_actor_id, require_agent_scope
 from foundation.errors import handle_api_errors
 
 from .source_provider import SourceProviderError, source_registry
@@ -72,14 +72,24 @@ def sdk_search(
     revision: str = Query(..., min_length=1, max_length=256),
     query: str = Query(..., min_length=1, max_length=256),
     path_filter: str = Query("", max_length=256),
+    repo_scope: str = Query("", max_length=256),
+    budget_seconds: int = Query(100, ge=1, le=600),
     limit: int = Query(50, ge=1, le=200),
 ):
     require_agent_scope("sdk.read")(request)
     try:
         provider = source_registry().get(source)
-        result = provider.search(
-            revision, query, path_filter=path_filter, limit=limit
-        )
+        kwargs = {"path_filter": path_filter, "limit": limit}
+        if repo_scope:
+            if provider.kind != "ssh_git":
+                raise SourceProviderError(
+                    "repo_scope 仅适用于 ssh_git 多仓 SDK 源", status_code=422
+                )
+            kwargs["repo_scope"] = repo_scope
+        if provider.kind == "ssh_git":
+            kwargs["permission_scope"] = principal_actor_id(request)
+            kwargs["budget_seconds"] = budget_seconds
+        result = provider.search(revision, query, **kwargs)
     except SourceProviderError as exc:
         return _error(exc)
     return {"success": True, "data": result}

@@ -6,7 +6,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _merge_traces, _StreamFallback
-from features.redmine.kkagent.claim_review import report_digest, report_units, review_prompt, validate_review
+from features.redmine.kkagent.claim_review import (
+    report_digest,
+    report_units,
+    review_prompt,
+    structured_review_actions,
+    validate_review,
+)
 from features.redmine.kkagent.evidence_gate import evaluate_evidence_gate
 from features.redmine.kkagent.mcp_health import McpHealthProbe
 from features.redmine.kkagent.native_summary import native_summary_result
@@ -23,6 +29,52 @@ SUMMARY = "测试进程分配失败后中止。\n\n高内存占用的起因与�
 def candidate(report=SUMMARY):
     trace = complete_trace(report=report)
     return trace, native_summary_result(trace, SUMMARY_ENTRY)
+
+
+def test_structured_review_actions_restrict_unproven_claims_and_source_scope():
+    findings = [
+        "P001: 不应把推断当成事实",
+        "P002: 遗漏预采集的官方参考",
+        "P003: 缺少源码 packages/SystemUI/src/com/example/Activity.java",
+        "P004: APK identity 与版本无法核实",
+    ]
+    actions = structured_review_actions(None, findings)
+    assert [row["action"] for row in actions] == [
+        "rewrite_only", "reuse_existing_evidence", "targeted_source", "mark_unverified",
+    ]
+    assert "packages/SystemUI" in actions[2]["target"]
+    assert structured_review_actions(
+        {"actions": [{"action": "targeted_source", "target": "unknown"}]}, findings
+    )[0]["action"] == "mark_unverified"
+    assert structured_review_actions(
+        {"actions": [{"action": "rm -rf /", "target": "frameworks/base"}]}, findings
+    ) == actions
+
+
+
+def test_structured_review_actions_accepts_json_stream_message():
+    findings = ["缺少源码 frameworks/base/core/java/android/app/Activity.java"]
+    actions = [
+        {"action": "rewrite_only", "unit_id": "P001", "target": "",
+         "reason": "结论降级，无须取证"},
+        {"action": "reuse_existing_evidence", "unit_id": "P002", "target": "",
+         "reason": "预采集参考已存在"},
+    ]
+    # The process stream exposes the final JSON as text, not a parsed dict.
+    value = json.dumps({"status": "needs_revision", "actions": actions})
+    parsed = structured_review_actions(value, findings)
+    assert [item["action"] for item in parsed] == [
+        "rewrite_only", "reuse_existing_evidence",
+    ]
+    assert not any(item["action"] == "targeted_source" for item in parsed)
+    assert structured_review_actions("{invalid-json", findings)[0]["action"] == "targeted_source"
+
+
+def test_reviewer_prompt_forbids_evidence_collection():
+    trace, result = candidate()
+    prompt = review_prompt(result, trace, SUMMARY_ENTRY)
+    assert "do NOT call tools" in prompt
+    assert "targeted_source action" in prompt
 
 
 def test_review_requires_every_paragraph_and_exact_report_hash():

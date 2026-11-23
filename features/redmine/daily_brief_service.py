@@ -18,7 +18,11 @@ from typing import Any
 
 from . import daily_brief_cancellation as cancellation
 from .ai_execution_ledger import AIExecutionLedger
-from .daily_brief_analysis_events import mask_secrets, start_analysis_progress
+from .daily_brief_analysis_events import (
+    event_store_for_repository,
+    mask_secrets,
+    start_analysis_progress,
+)
 from .daily_brief_models import (
     DailyBriefIssue,
     DailyBriefRun,
@@ -633,6 +637,9 @@ class DailyBriefService:
                 run.error = mask_secrets(auth_reason, 1000)
                 run.finished_at = _now()
                 self.repository.update_run(run)
+                # 预检失败不重试：issue 必须跟着收敛，否则前端读到
+                # 「run 失败 + issue 进行中」的矛盾状态。
+                self.repository.settle_pending_issues(run_id, "failed", run.error)
                 return self.repository.get_run(run_id)
             run = await self._snapshot_phase(run, config)
             await self._analyze_phase(run, config)
@@ -668,6 +675,8 @@ class DailyBriefService:
             run.error = mask_secrets(str(exc), 1000)
             run.finished_at = _now()
             self.repository.update_run(run)
+            # 未捕获异常即终态失败：同步收敛残留的进行中 issue 行。
+            self.repository.settle_pending_issues(run_id, "failed", run.error)
         finally:
             if task is not None and self._RUN_EXECUTIONS.get(run_id) is task:
                 self._RUN_EXECUTIONS.pop(run_id, None)
@@ -814,6 +823,9 @@ class DailyBriefService:
         record = self.repository.get_issue(run.run_id, issue_id)
         if record is None:
             return
+        previous_status = record.status
+        event_store = event_store_for_repository(self.repository)
+        checkpoint = event_store.load_checkpoint(run.run_id, issue_id)
         # 协作式取消点：每个 issue 开始前查一次标志位；用户点「停止分析」后，
         # 未开始的 issue 从这里直接终止整个 phase（正在跑的由 cancel 兜底）。
         if self.repository.is_cancel_requested(run.run_id):
@@ -825,6 +837,10 @@ class DailyBriefService:
         # 实时进度时间线（preflight/kkagent/终态统一落库点；终态事件由
         # analyze_with_persisted_cancel 收敛为完成/已停止）。
         progress = start_analysis_progress(self.repository, run, issue_id, record)
+        job_lease = self.repository.running_lease_for_issue(run.run_id, issue_id)
+        if progress is not None:
+            progress.snapshot_hash = run.snapshot_hash
+            progress.lease_token = str((job_lease or {}).get("lease_token") or "")
 
         # AI 逻辑调用账本（receipt）：同一逻辑键（owner+purpose+provider+
         # issue+证据快照+设备/hint+prompt+analyzer+model）存在活跃 receipt
@@ -891,6 +907,19 @@ class DailyBriefService:
             # 轮询与 profile 判定；原独立模块，已并回服务层编排）。
             analyze_entry["_progress_recorder"] = progress
             analyze_entry["_provider_started"] = mark_provider_started
+            from .daily_brief_resume import valid_resume_trace
+
+            resumed = valid_resume_trace(
+                checkpoint, job_lease, previous_status=previous_status,
+                attempt_no=record.attempt_count, snapshot_hash=run.snapshot_hash,
+            )
+            if resumed is not None:
+                analyze_entry["_resume_trace"] = resumed
+                if progress is not None:
+                    progress.stage_changed(
+                        f"从第 {checkpoint['attempt_no']} 次尝试的检查点恢复",
+                        stage="resume",
+                    )
             await precollect_deep_evidence(
                 repository=self.repository, run=run, issue_id=issue_id,
                 analyzer=analyzer, entry=analyze_entry,
@@ -978,6 +1007,23 @@ class DailyBriefService:
         record.finished_at = _now()
         record.duration_ms = int((time.monotonic() - started) * 1000)
         record.raw_response = outcome.raw_output
+        if progress is not None:
+            last = event_store.load_checkpoint(run.run_id, issue_id)
+            if last and int(last.get("attempt_no") or 0) == record.attempt_count:
+                # Retain the evidence snapshot, but do not resume a terminal attempt.
+                event_store.save_checkpoint(
+                    run.run_id, issue_id, attempt_no=record.attempt_count,
+                    session_id=str(last.get("session_id") or ""),
+                    snapshot_hash=run.snapshot_hash,
+                    lease_token=str((job_lease or {}).get("lease_token") or ""),
+                    trace=last.get("trace") or {},
+                    status="completed" if outcome.ok else (
+                        "running" if outcome.error_type in {
+                            "interrupted", "analysis_deadline_exceeded",
+                            "analysis_idle_timeout", "llm_timeout", "provider_overloaded",
+                        } else "failed"
+                    ),
+                )
         # Share the Issue→Case facts used by knowledge storage. A title or AI
         # hint alone is not an assertion reason and cannot authorize clustering.
         try:

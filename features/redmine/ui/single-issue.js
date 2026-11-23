@@ -18,6 +18,9 @@ var singleIssueStopRequested = {};
 // 已提交删除请求的 issue：防止轮询重绘期间重复点击/重复请求。
 var singleIssueDeleteRequested = {};
 var SINGLE_ISSUE_ANALYSIS_PAGE_SIZE = 8;
+// run 级终态（与 features/redmine/daily_brief_repository.py 的
+// TERMINAL_RUN_STATUSES 同步）：终态 run 的 issue 行不再表示「仍在进行」。
+var ANALYSIS_TERMINAL_STATUSES = ['completed', 'partial', 'failed', 'cancelled'];
 var singleIssueAnalysisHint = '';
 
 function updateSingleIssueAnalysisHintButton() {
@@ -89,7 +92,15 @@ function singleIssueAnalysisEffectiveStatus(run, issue) {
   // A cancelled run is terminal even if an older record still carries a
   // pending issue state. The run-level cancellation is authoritative.
   if (String((run || {}).status || '') === 'cancelled') return 'cancelled';
-  return String((issue || {}).status || (run || {}).status || '');
+  var runStatus = String((run || {}).status || '');
+  var issueStatus = String((issue || {}).status || '');
+  // 终态 run 决定整体状态：issue 行可能因旧版本收尾缺失而停在 pending，
+  // 若继续以 issue 为准，历史条目会永久渲染「停止分析」，而停止端点对
+  // 终态 run 只回 already_terminal —— 点击看起来毫无反应。
+  if (ANALYSIS_TERMINAL_STATUSES.indexOf(runStatus) >= 0) {
+    return issueStatus === 'cancelled' ? 'cancelled' : runStatus;
+  }
+  return issueStatus || runStatus;
 }
 
 function singleIssueAnalysisIsRunning(run, issue) {

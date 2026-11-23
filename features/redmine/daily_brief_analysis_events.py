@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sqlite3
@@ -76,6 +77,7 @@ _SCHEMA_DDL = (
         status TEXT NOT NULL DEFAULT '',
         summary TEXT NOT NULL DEFAULT '',
         duration_ms INTEGER NOT NULL DEFAULT 0,
+        attempt_no INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL DEFAULT ''
     )
     """,
@@ -83,11 +85,25 @@ _SCHEMA_DDL = (
     CREATE UNIQUE INDEX IF NOT EXISTS idx_brief_analysis_events_seq
     ON redmine_daily_brief_analysis_events(run_id, issue_id, sequence)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS redmine_daily_brief_analysis_checkpoints (
+        run_id TEXT NOT NULL,
+        issue_id INTEGER NOT NULL,
+        attempt_no INTEGER NOT NULL,
+        session_id TEXT NOT NULL DEFAULT '',
+        snapshot_hash TEXT NOT NULL DEFAULT '',
+        lease_token TEXT NOT NULL DEFAULT '',
+        trace_json TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'running',
+        updated_at TEXT NOT NULL DEFAULT '',
+        PRIMARY KEY(run_id, issue_id)
+    )
+    """,
 )
 
 _EVENT_COLUMNS = (
     "sequence", "event_type", "stage", "tool_name", "status",
-    "summary", "duration_ms", "created_at",
+    "summary", "duration_ms", "attempt_no", "created_at",
 )
 
 # summary 清洗：任何疑似凭据赋值片段（token=... / password: ...）整体
@@ -168,6 +184,16 @@ class DailyBriefAnalysisEventStore:
         conn.execute("BEGIN IMMEDIATE")
         for statement in _SCHEMA_DDL:
             conn.execute(statement)
+        columns = {
+            row[1] for row in conn.execute(
+                "PRAGMA table_info(redmine_daily_brief_analysis_events)"
+            ).fetchall()
+        }
+        if "attempt_no" not in columns:
+            conn.execute(
+                "ALTER TABLE redmine_daily_brief_analysis_events "
+                "ADD COLUMN attempt_no INTEGER NOT NULL DEFAULT 1"
+            )
         conn.commit()
         self._ready = True
 
@@ -199,8 +225,8 @@ class DailyBriefAnalysisEventStore:
             conn.execute(
                 "INSERT INTO redmine_daily_brief_analysis_events "
                 "(run_id, issue_id, sequence, event_type, stage, tool_name, "
-                " status, summary, duration_ms, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " status, summary, duration_ms, attempt_no, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     int(issue_id),
@@ -211,6 +237,7 @@ class DailyBriefAnalysisEventStore:
                     scrub_secrets(event.get("status", ""))[:32],
                     scrub_secrets(event.get("summary", "")),
                     max(0, int(event.get("duration_ms") or 0)),
+                    max(1, int(event.get("attempt_no") or 1)),
                     str(event.get("created_at") or _now()),
                 ),
             )
@@ -231,6 +258,85 @@ class DailyBriefAnalysisEventStore:
                 (run_id, int(issue_id), max(0, int(after_sequence)), max(1, min(int(limit), 200))),
             ).fetchall()
             return [dict(row) for row in rows]
+
+    def mark_interrupted_previous_attempt(
+        self, run_id: str, issue_id: int, new_attempt_no: int,
+    ) -> bool:
+        """Close unfinished previous attempt before appending the next attempt."""
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            last = conn.execute(
+                "SELECT attempt_no, event_type FROM redmine_daily_brief_analysis_events "
+                "WHERE run_id=? AND issue_id=? ORDER BY sequence DESC LIMIT 1",
+                (run_id, int(issue_id)),
+            ).fetchone()
+        if (
+            last is None or int(last["attempt_no"]) >= int(new_attempt_no)
+            or last["event_type"] in {"analysis_completed", "analysis_failed"}
+        ):
+            return False
+        self.append(run_id, issue_id, {
+            "event_type": "analysis_failed", "attempt_no": int(last["attempt_no"]),
+            "stage": "worker_recovery", "status": "interrupted",
+            "summary": "上次尝试因 Worker 中断或租约丢失，已重新进入队列",
+        })
+        return True
+
+    def save_checkpoint(
+        self, run_id: str, issue_id: int, *, attempt_no: int, session_id: str,
+        snapshot_hash: str, lease_token: str = "", trace: dict[str, Any] | None = None,
+        status: str = "running",
+    ) -> None:
+        """Save resumable evidence metadata; never persist raw MCP/model output."""
+        safe = dict(trace or {})
+        calls = []
+        for item in (safe.get("tools") or [])[:300]:
+            if not isinstance(item, dict):
+                continue
+            call = dict(item)
+            inputs = item.get("tool_input") or {}
+            call["tool_input"] = {
+                key: scrub_secrets(str(value))
+                for key, value in inputs.items()
+                if key in _IDENTITY_INPUT_KEYS and isinstance(value, (str, int, float))
+            } if isinstance(inputs, dict) else {}
+            # Full output and untrusted previews remain in kkagent's session store.
+            call["output_preview"] = ""
+            calls.append(call)
+        safe["tools"] = calls
+        safe.pop("final_event", None)
+        safe["error"] = scrub_secrets(str(safe.get("error") or ""))
+        body = json.dumps(safe, ensure_ascii=False, default=str)
+        if len(body.encode("utf-8")) > 180000:
+            raise ValueError("analysis checkpoint exceeds bounded metadata limit")
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            conn.execute(
+                "INSERT INTO redmine_daily_brief_analysis_checkpoints "
+                "(run_id,issue_id,attempt_no,session_id,snapshot_hash,lease_token,trace_json,status,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?) ON CONFLICT(run_id,issue_id) DO UPDATE SET "
+                "attempt_no=excluded.attempt_no,session_id=excluded.session_id,"
+                "snapshot_hash=excluded.snapshot_hash,lease_token=excluded.lease_token,"
+                "trace_json=excluded.trace_json,status=excluded.status,updated_at=excluded.updated_at",
+                (run_id, int(issue_id), int(attempt_no), session_id,
+                 snapshot_hash, lease_token, body, status, _now()),
+            )
+
+    def load_checkpoint(self, run_id: str, issue_id: int) -> dict[str, Any] | None:
+        with self._lock, self._connect() as conn:
+            self._ensure_schema(conn)
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_analysis_checkpoints "
+                "WHERE run_id=? AND issue_id=?", (run_id, int(issue_id)),
+            ).fetchone()
+        if row is None:
+            return None
+        payload = dict(row)
+        try:
+            payload["trace"] = json.loads(payload.pop("trace_json", "{}"))
+        except (TypeError, ValueError):
+            return None
+        return payload
 
     def latest_session_id(self, run_id: str, issue_id: int) -> str:
         """读取该 (run, issue) 最新已知的 kkagent session_id。
@@ -314,24 +420,50 @@ class AnalysisProgressRecorder:
 
     def __init__(
         self, store: DailyBriefAnalysisEventStore, run_id: str, issue_id: int,
-        subject: str = "", model_name: str = "",
+        subject: str = "", model_name: str = "", attempt_no: int = 1,
+        retry_reason: str = "",
     ):
         self.store = store
         self.run_id = str(run_id)
         self.issue_id = int(issue_id)
         self.subject = scrub_secrets(subject)[:120]
         self.model_name = str(model_name or "").strip()
+        self.attempt_no = max(1, int(attempt_no))
+        self.snapshot_hash = ""
+        self.lease_token = ""
         self.tool_started_count = 0
         self.tool_completed_count = 0
         self.tool_failed_count = 0
         try:
-            self.store.reset(self.run_id, self.issue_id)
-            self._emit("analysis_started", summary=f"开始分析 #{self.issue_id}".strip())
+            # Keep prior attempts, but close abandoned ones before a new attempt.
+            if self.attempt_no > 1:
+                self.store.mark_interrupted_previous_attempt(
+                    self.run_id, self.issue_id, self.attempt_no
+                )
+            reason = scrub_secrets(retry_reason or "") if self.attempt_no > 1 else ""
+            self._emit(
+                "analysis_started", stage="attempt_start",
+                summary=f"第 {self.attempt_no} 次尝试 · " + (reason or "开始分析"),
+            )
         except Exception:
             logger.debug("analysis progress start failed", exc_info=True)
 
     def stage_changed(self, summary: str, *, stage: str = "") -> None:
         self._emit("stage_changed", stage=stage, summary=summary)
+
+    def checkpoint(self, trace: Any, *, status: str = "running") -> None:
+        """Store a bounded evidence snapshot for lease-validated resume."""
+        try:
+            summary = trace.to_summary()
+            session_id = str(summary.get("session_id") or "")
+            if session_id:
+                self.store.save_checkpoint(
+                    self.run_id, self.issue_id, attempt_no=self.attempt_no,
+                    session_id=session_id, snapshot_hash=self.snapshot_hash,
+                    lease_token=self.lease_token, trace=summary, status=status,
+                )
+        except Exception:
+            logger.debug("analysis checkpoint unavailable", exc_info=True)
 
     def session_available(self, session_id: str) -> None:
         """kkagent session 已创建（流开始时即可知）：落库供会话回放 tail。
@@ -396,6 +528,7 @@ class AnalysisProgressRecorder:
                 "status": status,
                 "summary": scrub_secrets(summary),
                 "duration_ms": max(0, int(duration_ms or 0)),
+                "attempt_no": self.attempt_no,
                 "created_at": _now(),
             })
         except Exception:
@@ -412,6 +545,8 @@ def start_analysis_progress(
             store, str(getattr(run, "run_id", "") or ""), int(issue_id),
             subject=str(getattr(record, "subject", "") or ""),
             model_name=str(getattr(run, "model_name", "") or ""),
+            attempt_no=max(1, int(getattr(record, "attempt_count", 1) or 1)),
+            retry_reason=str(getattr(record, "error_type", "") or "Worker 恢复/重试"),
         )
     except Exception:
         logger.debug("analysis progress recorder unavailable", exc_info=True)

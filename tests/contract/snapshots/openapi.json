@@ -23975,6 +23975,29 @@
           },
           {
             "in": "query",
+            "name": "repo_scope",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Repo Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "budget_seconds",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 600,
+              "minimum": 1,
+              "title": "Budget Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {

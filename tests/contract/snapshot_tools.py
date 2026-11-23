@@ -136,7 +136,12 @@ def normalized_routes(app) -> list[dict[str, Any]]:
 def _remove_internal_openapi_fields(value: Any) -> Any:
     if isinstance(value, dict):
         return {
-            key: _remove_internal_openapi_fields(item)
+            key: (
+                int(item)
+                if key.lower().endswith(('minimum', 'maximum'))
+                and isinstance(item, float) and item.is_integer()
+                else _remove_internal_openapi_fields(item)
+            )
             for key, item in sorted(value.items())
             if key != 'operationId'
         }

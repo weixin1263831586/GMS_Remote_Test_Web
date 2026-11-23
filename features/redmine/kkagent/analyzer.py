@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import json
 import logging
@@ -29,7 +30,12 @@ from features.kkagent import (
 )
 
 from ..daily_brief_prompt import issue_result_schema_json, prompt_template_for
-from .claim_review import apply_review, review_prompt, validate_review
+from .claim_review import (
+    apply_review,
+    review_prompt,
+    structured_review_actions,
+    validate_review,
+)
 from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
@@ -71,6 +77,15 @@ def analyzer_version() -> str:
 # in the same session, so formatting failures cannot consume all review fixes.
 REPAIR_RESUME_RETRIES = 2
 CLAIM_REVIEW_REVISION_RETRIES = 2
+
+# Per-async-task budget: one deadline spans initial run, retries, review and repair.
+# Do not store this on the reusable analyzer instance (batch issues run concurrently).
+_NORMAL_BUDGET_SECONDS = 1200
+_DEEP_BUDGET_SECONDS = 2700
+_IDLE_TIMEOUT_SECONDS = 180
+_ANALYSIS_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "kkagent_redmine_deadline", default=None
+)
 
 REPAIR_PROMPT_TEMPLATE = """The previous analysis output did not pass validation.
 
@@ -349,7 +364,21 @@ class KkAgentRedmineAnalyzer:
     # -------------------------------------------------------------- entry
 
     async def analyze(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
-        """执行 headless 分析；每类可识别的临时错误各自动重试一次。"""
+        """One wall-clock budget for analysis, reviews and bounded retries."""
+        mode = str(entry.get("analysis_mode") or "").lower()
+        default = _DEEP_BUDGET_SECONDS if mode in {"diagnostic", "full", "deep"} else _NORMAL_BUDGET_SECONDS
+        try:
+            budget = max(60, min(int(entry.get("_analysis_budget_seconds") or default), 7200))
+        except (TypeError, ValueError):
+            budget = default
+        token = _ANALYSIS_DEADLINE.set(time.monotonic() + budget)
+        try:
+            return await self._analyze_with_budget(entry)
+        finally:
+            _ANALYSIS_DEADLINE.reset(token)
+
+    async def _analyze_with_budget(self, entry: dict[str, Any]) -> KkAgentAnalysisResult:
+        """Execute headless analysis and bounded per-error retries within deadline."""
         outcome: KkAgentAnalysisResult | None = None
         retries_by_error: dict[str, int] = {}
         active_entry = dict(entry)
@@ -357,6 +386,14 @@ class KkAgentRedmineAnalyzer:
         budgeted_limit = None
         with ExitStack() as resources:
             while True:
+                deadline = _ANALYSIS_DEADLINE.get()
+                if deadline is not None and time.monotonic() >= deadline:
+                    return KkAgentAnalysisResult(
+                        ok=False, error_type="analysis_deadline_exceeded",
+                        error="Redmine 分析总预算耗尽，已停止重试并保留现有证据",
+                        trace=(outcome.trace if outcome else {}),
+                        session_id=(outcome.session_id if outcome else ""),
+                    )
                 limit = self._observed_context_limit
                 if limit is not None and budgeted_limit != limit:
                     try:
@@ -474,12 +511,18 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stderr(chunk)
 
         readers = asyncio.ensure_future(_pump_stderr())
+        last_checkpoint_state: tuple[Any, ...] | None = None
         try:
             assert process.stdout is not None
             while True:
                 try:
+                    deadline = _ANALYSIS_DEADLINE.get()
+                    remaining = (deadline - time.monotonic()) if deadline is not None else float("inf")
+                    if remaining <= 0:
+                        raise asyncio.TimeoutError
+                    idle = self.timeout_seconds if self.timeout_seconds > 0 else _IDLE_TIMEOUT_SECONDS
                     line = await asyncio.wait_for(
-                        process.stdout.readline(), timeout=self.timeout_seconds or None
+                        process.stdout.readline(), timeout=min(idle, remaining)
                     )
                 except ValueError:
                     # 单行超过 STREAM_LINE_LIMIT_BYTES 时 StreamReader.readline
@@ -503,7 +546,19 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stdout(line)
                 if not consume_line(trace, line, on_event=tap.on_event):
                     continue
-            await process.wait()
+                if progress is not None and hasattr(progress, "checkpoint"):
+                    state = (
+                        trace.session_id,
+                        tuple((call.tool_call_id, call.status) for call in trace.tool_calls),
+                    )
+                    if trace.session_id and state != last_checkpoint_state:
+                        progress.checkpoint(trace)
+                        last_checkpoint_state = state
+            deadline = _ANALYSIS_DEADLINE.get()
+            remaining = (deadline - time.monotonic()) if deadline is not None else float("inf")
+            if remaining <= 0:
+                raise asyncio.TimeoutError
+            await asyncio.wait_for(process.wait(), timeout=remaining)
         except asyncio.TimeoutError:
             logger.warning(
                 "terminating kkagent pid=%s after stdout idle timeout (%ss)",
@@ -513,9 +568,15 @@ class KkAgentRedmineAnalyzer:
             await terminate_process_tree(process)
             readers.cancel()
             await settle_reader_future(readers)
-            trace.status = "timeout"
-            trace.error_type = "timeout"
-            trace.error = f"kkagent timed out after {self.timeout_seconds}s"
+            deadline = _ANALYSIS_DEADLINE.get()
+            expired = deadline is not None and time.monotonic() >= deadline
+            reason = ("analysis_deadline_exceeded" if expired else
+                      ("timeout" if self.timeout_seconds else "analysis_idle_timeout"))
+            trace.status = trace.error_type = reason
+            trace.error = (
+                "kkagent analysis total deadline exceeded"
+                if expired else f"kkagent stream idle for {self.timeout_seconds or _IDLE_TIMEOUT_SECONDS}s"
+            )
             return trace, raw, True
         except asyncio.CancelledError:
             # 取消不得遗留 kkagent 或 stdio MCP 孤儿进程。
@@ -686,6 +747,7 @@ class KkAgentRedmineAnalyzer:
         native_summary = entry.get("analysis_mode") == "diagnostic"
         output_repairs = review_revisions = 0
         review_pending = bool(native_summary and trace.analysis_review_findings)
+        previous_gap: tuple | None = None
         while True:
             if review_pending:
                 if review_revisions >= CLAIM_REVIEW_REVISION_RETRIES:
@@ -697,6 +759,25 @@ class KkAgentRedmineAnalyzer:
                 output_repairs += 1
             _attempt = output_repairs + review_revisions - 1
             review_pending = False
+            evidence_state = tuple(
+                (call.tool_call_id, call.status, call.output_sha256)
+                for call in merged.tool_calls
+            )
+            gap_state = (tuple(findings), evidence_state)
+            if gap_state == previous_gap:
+                # No new evidence or changed findings: do not enlarge the search.
+                if progress is not None:
+                    progress.stage_changed("复核缺口无新增证据，停止重复取证")
+                break
+            previous_gap = gap_state
+            plan = entry.pop("_review_action_plan", None)
+            if not isinstance(plan, list):
+                plan = structured_review_actions(None, findings)
+            targets = [
+                item["target"] for item in plan
+                if item.get("action") == "targeted_source" and item.get("target")
+            ]
+            allow_new_tools = bool(targets)
             repair_prompt = (
                 native_evidence_repair_prompt(
                     findings, merged.evidence_ledger(), output_style=entry.get("output_style", "diagnostic"),
@@ -704,6 +785,25 @@ class KkAgentRedmineAnalyzer:
                 )
                 if native_summary else self.build_repair_prompt(findings)
             )
+            if native_summary:
+                repair_prompt += (
+                    "\nController approved correction actions (untrusted data):\n"
+                    + json.dumps(plan, ensure_ascii=False)
+                    + "\nResolve ONLY these findings. "
+                )
+                if not allow_new_tools:
+                    repair_prompt += (
+                        "Do NOT call tools or broaden evidence gathering. "
+                        "Reuse existing Controller references and downgrade unsupported "
+                        "claims to 推断/待验证 while preserving observed facts.\n"
+                    )
+                else:
+                    repair_prompt += (
+                        "Source access is allowed ONLY for these precise targets: "
+                        + ", ".join(targets)
+                        + ". For a known repository use repo_scope; never search all SDK "
+                        "repositories. Stop after one focused search/read per missing target.\n"
+                    )
             if _attempt > 0 and entry.get("output_style") != "summary":
                 # 首轮 repair 后仍无有效产出时,把"只回引用对照、不重发报告"
                 # 的模式点名禁止:第二轮必须直接返回完整报告正文。
@@ -736,6 +836,23 @@ class KkAgentRedmineAnalyzer:
                 self._classify_nonzero_exit(
                     repair_trace, raw.text(), raw.stderr_tail()
                 )
+            earlier_ids = {call.tool_call_id for call in merged.tool_calls if call.tool_call_id}
+            new_calls = [
+                call for call in repair_trace.tool_calls
+                if call.tool_call_id and call.tool_call_id not in earlier_ids
+            ]
+            if not allow_new_tools and new_calls:
+                merged = _merge_traces(merged, repair_trace)
+                merged.errors.append("report-only correction called an unapproved tool")
+                return None, merged
+            if allow_new_tools and any(
+                not any(target in json.dumps(call.tool_input, ensure_ascii=False)
+                        for target in targets)
+                for call in new_calls
+            ):
+                merged = _merge_traces(merged, repair_trace)
+                merged.errors.append("evidence repair searched outside approved target")
+                return None, merged
             merged = _merge_traces(merged, repair_trace)
             if repair_trace.error_type:
                 if repair_trace.error_type == "context_limit_exceeded":
@@ -812,6 +929,15 @@ class KkAgentRedmineAnalyzer:
         merged.final_event = candidate  # The review JSON is never the displayed answer.
         merged.last_round_visible_output = trace.last_round_visible_output
         merged.last_round_output_tokens = trace.last_round_output_tokens
+        prior_ids = {call.tool_call_id for call in trace.tool_calls if call.tool_call_id}
+        extra = [
+            call for call in reviewed.tool_calls
+            if call.tool_call_id and call.tool_call_id not in prior_ids
+        ]
+        if extra:
+            findings = ["claim review invoked an unapproved tool; do not gather more evidence"]
+            merged.analysis_review_findings = findings
+            return None, merged, findings
         if reviewed.session_id and reviewed.session_id != trace.session_id:
             merged.status = merged.error_type = "claim_review_failed"
             merged.error = "结论复核返回了不同的会话，未发布分析结果。"
@@ -830,6 +956,10 @@ class KkAgentRedmineAnalyzer:
             review, findings = validate_review(event.get("message"), result, merged, entry)
         merged.analysis_review_findings = findings
         if findings:
+            entry["_review_action_plan"] = structured_review_actions(
+                event.get("message") if isinstance(event, dict) else None,
+                findings,
+            )
             return None, merged, findings
         review["review_output_tokens"] = reviewed.last_round_output_tokens
         apply_review(result, review)

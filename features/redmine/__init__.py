@@ -49,6 +49,13 @@ async def get_analysis_for_assistant(*args, **kwargs):
     return await implementation(*args, **kwargs)
 
 
+async def get_analysis_events_for_assistant(*args, **kwargs):
+    """Public Redmine facade for owner-checked analysis progress events."""
+    from .daily_brief_api import get_issue_analysis_events as implementation
+
+    return await implementation(*args, **kwargs)
+
+
 __all__ = [
     "COMPILED_REDMINE_ATTACHMENT_PATTERN",
     "COMPILED_REDMINE_ISSUE_PATTERN",
@@ -67,6 +74,7 @@ __all__ = [
     "extract_redmine_issue_id_from_text",
     "failure_identity",
     "find_user_mapping",
+    "get_analysis_events_for_assistant",
     "get_analysis_for_assistant",
     "get_redmine_config_for_request",
     "get_redmine_service_for_owner",

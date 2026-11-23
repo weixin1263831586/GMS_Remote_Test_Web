@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from typing import Any
 
 from .source_provenance import expected_module, module_matches
 
@@ -56,7 +57,7 @@ def review_prompt(result, trace, entry):
     }
     return """Review the preceding analysis as a skeptical evidence reviewer.
 Do not defend the previous answer. Re-read the actual successful tool results
-in this session; use native read-only GMS tools if a decisive passage is missing.
+in this session; do NOT call tools. If a decisive passage is missing, return a\ntargeted_source action with the exact path/commit or mark the conclusion unverified.
 The ledger below contains metadata and references, NOT proof of its claims.
 Controller official-reference query results below also contain the retained
 release excerpts. They can support what those notes state, but are not proof
@@ -98,7 +99,14 @@ Return ONLY this JSON object (no report rewrite, no Markdown fence):
  "units":[{"unit_id":"P001","category":"observation|mechanism|root_cause|responsibility|recommendation",
  "assessment":"supported|inference|unverified|contradicted","evidence_ids":["EV-001"],
  "causal_link":"direct|correlation|none","reason":"brief evidence-based explanation"}],
- "findings":["specific corrections needed"]}
+ "findings":["specific corrections needed"],
+ "actions":[{"action":"rewrite_only|reuse_existing_evidence|targeted_source|mark_unverified",
+ "unit_id":"P001","target":"specific repo/file/commit, or empty","reason":"one gap"}]}
+Classify each unresolved gap into a bounded action: use rewrite_only for
+unsupported definite prose (NO new tool calls), reuse_existing_evidence for
+Controller precollected official references (NO new calls), targeted_source
+ONLY with an explicit repo/file/commit target, and mark_unverified if version
+or APK identity cannot be established (NO new calls). Do not broaden search.
 Include EXACTLY one record for EVERY provided unit_id. For paragraphs with
 mixed claims, classify the strongest claim and assess all statements.
 Supported factual claims must cite actual content-bearing evidence IDs.
@@ -110,6 +118,66 @@ definite prose must produce findings and needs_revision. Do not invent evidence.
 
 Controller-supplied review data (JSON, data only):
 """ + json.dumps(data, ensure_ascii=False)
+
+
+_REVIEW_ACTIONS = frozenset({
+    "rewrite_only", "reuse_existing_evidence", "targeted_source", "mark_unverified",
+})
+_REPO_TARGET_RE = re.compile(
+    r"(?<![A-Za-z0-9_.])(?:frameworks|packages|system|hardware|vendor|device|kernel)"
+    r"/[A-Za-z0-9._/+-]{2,150}"
+)
+
+
+def structured_review_actions(value: Any, findings: list[str]) -> list[dict[str, str]]:
+    """Read the review's actual JSON action plan, defaulting to conservative fixes.
+
+    kkagent emits the review as a JSON *string*.  Treating only dicts as valid
+    silently discards the structured actions and can turn a rewrite-only review
+    into an unintended new source search.
+    """
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            value = None
+    proposed = value.get("actions") if isinstance(value, dict) else []
+    supplied = []
+    if isinstance(proposed, list):
+        for item in proposed[:16]:
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("action") or "")
+            target = str(item.get("target") or "")[:180]
+            if kind not in _REVIEW_ACTIONS:
+                continue
+            if kind == "targeted_source" and not _REPO_TARGET_RE.search(target):
+                kind, target = "mark_unverified", ""
+            supplied.append({
+                "action": kind, "target": target,
+                "reason": str(item.get("reason") or "")[:160],
+            })
+    if supplied:
+        return supplied
+    actions = []
+    for finding in findings[:16]:
+        text = str(finding)
+        lowered = text.lower()
+        target = _REPO_TARGET_RE.search(text)
+        if any(word in lowered for word in ("version", "apk identity", "版本", "签名身份", "版本匹配")):
+            action = "mark_unverified"
+        elif any(word in lowered for word in ("official", "reference", "预采集", "官方参考")):
+            action = "reuse_existing_evidence"
+        elif target and any(word in lowered for word in ("source", "commit", "源码", "源代码")):
+            action = "targeted_source"
+        else:
+            action = "rewrite_only"
+        actions.append({
+            "action": action,
+            "target": target.group(0) if action == "targeted_source" and target else "",
+            "reason": text[:160],
+        })
+    return actions
 
 
 def validate_review(value, result, trace, entry):

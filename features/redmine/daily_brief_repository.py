@@ -720,6 +720,22 @@ class DailyBriefRepository:
             ).fetchone()
             return self._row_to_issue(row) if row else None
 
+    def settle_pending_issues(self, run_id: str, status: str, error: str = "") -> int:
+        """收敛仍停留在进行中的 issue 行，与终态 run 保持一致。
+
+        一次 run 以 failed 终止时若 issue 行停在 pending/running，前端读到
+        「run 失败 + issue 进行中」的矛盾组合，会一直渲染「停止分析」按钮，
+        而停止端点对该 run 只返回 already_terminal —— 用户看到的就是点了
+        没反应。终态由 run 决定，issue 必须跟着收敛。
+        """
+        with self._lock, self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_issues SET status=?, finished_at=?, error=? "
+                "WHERE run_id=? AND status IN ('pending', 'snapshotting', 'analyzing', 'running')",
+                (status, _now(), error, run_id),
+            )
+            return max(cursor.rowcount, 0)
+
     def delete_issues(self, run_id: str) -> int:
         """清空一次 run 的旧 issue，供人工强制重跑时替换冻结快照。"""
         with self._lock, self._connect() as conn:
@@ -826,6 +842,18 @@ class DailyBriefRepository:
                 (run_id,),
             ).fetchone()
             return dict(row) if row is not None else None
+
+    def running_lease_for_issue(self, run_id: str, issue_id: int) -> dict[str, Any] | None:
+        """Only a currently owned running job may resume a persisted AI session."""
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? "
+                "AND status='running' AND lease_token<>'' "
+                "AND (kind='run' OR (kind='issue' AND issue_id=?)) "
+                "ORDER BY started_at DESC LIMIT 1",
+                (run_id, int(issue_id)),
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     # ----------------------------------------------------------- ai executions
 

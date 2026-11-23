@@ -9,7 +9,11 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from features.redmine import analyze_issue_for_assistant, get_analysis_for_assistant
+from features.redmine import (
+    analyze_issue_for_assistant,
+    get_analysis_events_for_assistant,
+    get_analysis_for_assistant,
+)
 from foundation.error_model import ApiError
 from foundation.redaction import redact_sensitive_data
 
@@ -138,6 +142,21 @@ async def query_analysis(session, request, params):
         "run_id", "status", "mode", "started_at", "finished_at", "error", "cancel_requested",
         "issue_count", "completed_count", "failed_count",
     }}, "issues": issues}
+    active = session.get("active_run") or {}
+    issue_id = active.get("redmine_issue_id")
+    if active.get("redmine_run_id") == run_id and isinstance(issue_id, int):
+        try:
+            response = await get_analysis_events_for_assistant(
+                request, run_id, issue_id,
+                after_sequence=int(active.get("progress_sequence") or 0),
+                limit=200,
+            )
+            progress = response.get("data") if isinstance(response, dict) else None
+            if isinstance(progress, dict):
+                outcome.data["progress_events"] = progress.get("events") or []
+                outcome.data["progress_next_sequence"] = progress.get("next_sequence")
+        except Exception:
+            logger.debug("Redmine progress unavailable for monitor", exc_info=True)
     outcome.formatted_text = _summary(outcome.data)
     return outcome
 
@@ -194,6 +213,53 @@ def _update_step(session, active, status, detail):
         _persist_transcript(session)
 
 
+def _activity_summary(active: dict, events: list[dict]) -> str:
+    """Only real persisted Worker events advance activity; polls are not activity."""
+    for event in events:
+        kind = str(event.get("event_type") or "")
+        stamp = str(event.get("created_at") or "")
+        if kind == "analysis_started":
+            active["attempt_no"] = max(1, int(event.get("attempt_no") or 1))
+            active["analysis_stage"] = "正在取证"
+            active["current_tool"] = ""
+            active["tool_started_at"] = ""
+        elif kind == "stage_changed":
+            active["analysis_stage"] = str(event.get("summary") or "正在分析")[:100]
+        elif kind == "tool_started":
+            active["current_tool"] = str(event.get("tool_name") or "工具调用")[:80]
+            active["tool_started_at"] = stamp
+        elif kind in {"tool_completed", "tool_failed", "analysis_completed", "analysis_failed"}:
+            active["current_tool"] = ""
+            active["tool_started_at"] = ""
+        if kind in {"analysis_started", "stage_changed", "tool_started",
+                    "tool_completed", "tool_failed", "progress"} and stamp:
+            active["last_analysis_activity"] = stamp
+    no = max(1, int(active.get("attempt_no") or 1))
+    stage = str(active.get("analysis_stage") or "正在取证和分析")
+    lines = [f"第 {no} 次尝试 · {stage}"]
+    tool = str(active.get("current_tool") or "")
+    if tool:
+        started = active.get("tool_started_at")
+        seconds = 0
+        try:
+            moment = datetime.fromisoformat(started)
+            now = datetime.now(moment.tzinfo) if moment.tzinfo else datetime.now()
+            seconds = max(0, int((now - moment).total_seconds()))
+        except (TypeError, ValueError):
+            pass
+        lines.append(f"当前工具：{tool} · 已等待 {seconds} 秒")
+    last = str(active.get("last_analysis_activity") or "")
+    if last:
+        try:
+            last = datetime.fromisoformat(last).strftime("%H:%M:%S")
+        except ValueError:
+            last = last[:19]
+        lines.append(f"最近活动：{last}")
+    else:
+        lines.append("等待 Worker 实际分析事件")
+    return "\n".join(lines)
+
+
 async def monitor_redmine_run(session_id, request, monitor_token=None):
     session = _agent_sessions.get(session_id)
     if not session or not monitor_run_is_current(session, monitor_token):
@@ -248,7 +314,15 @@ async def monitor_redmine_run(session_id, request, monitor_token=None):
                                        "params": {"tab": "daily-brief"}}],
                     })
                     return
-                _update_step(session, active, "running", "排队中" if status == "pending" else "正在取证和分析")
+                if status == "pending":
+                    detail = "排队中 · 尚未开始实际分析"
+                else:
+                    events = payload.get("progress_events") or []
+                    detail = _activity_summary(active, events)
+                    next_seq = payload.get("progress_next_sequence")
+                    if isinstance(next_seq, int):
+                        active["progress_sequence"] = next_seq
+                _update_step(session, active, "running", detail)
             await asyncio.sleep(POLL_SECONDS)
     except asyncio.CancelledError:
         raise

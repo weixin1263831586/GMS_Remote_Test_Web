@@ -28,11 +28,14 @@ SDK 仓库位于远端编译服务器时的只读检索 provider：经 ADR 0004 
 
 from __future__ import annotations
 
+import contextvars
+import copy
 import json
 import shlex
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from typing import Any
 
 from foundation.command_result import CommandResult
@@ -77,6 +80,13 @@ SSH_GIT_DISCOVER_MAX_REPOS = 8192     # 发现子仓数的防御上限
 # metadata 逐仓收集 HEAD 的仓数上限：超过则只返回 repo_count（上千仓的
 # 逐仓 rev-parse 是分钟级操作，metadata 不承担这个成本）。
 SSH_GIT_HEADS_MAX_REPOS = 64
+# Cross-provider per-server cap; individual searches must not multiply sshd load.
+SSH_GIT_SERVER_CONCURRENCY = 4
+_SERVER_LIMIT_LOCK = threading.Lock()
+_SERVER_LIMITERS: dict[tuple[str, int, str], threading.BoundedSemaphore] = {}
+_SEARCH_DEADLINE: contextvars.ContextVar[float | None] = contextvars.ContextVar(
+    "sdk_source_search_deadline", default=None
+)
 
 # 唯一放行的远端 git 子命令（只读）；其他子命令一律编程错误。
 _READONLY_GIT_SUBCOMMANDS = frozenset({"rev-parse", "log", "grep", "show"})
@@ -243,6 +253,11 @@ class SSHGitProvider(LocalGitProvider):
         self._discovered_repos: tuple[str, ...] | None = None
         self._discovered_at: float = 0.0
         self._discover_lock = threading.Lock()
+        self._search_lock = threading.Lock()
+        self._inflight_searches: dict[tuple, Future] = {}
+        self._pinned_search_cache: dict[tuple, dict[str, Any]] = {}
+        self._blob_cache: dict[tuple[str, str], bytes] = {}
+        self._scoped_repos: dict[str, str] = {}
         # 延迟 import：source.system.ssh 同包模块；连接池容量小、按需复用。
         from .ssh import SSHManager
 
@@ -260,6 +275,15 @@ class SSHGitProvider(LocalGitProvider):
     def _owning_repo_rel(self, path: str) -> str | None:
         """全 SDK 相对路径 → 所属子仓相对路径（最长前缀匹配）。"""
         best: str | None = None
+        # Explicitly validated repositories bypass cold full-tree discovery on read.
+        with self._search_lock:
+            scoped = tuple(self._scoped_repos.items())
+        for rel, _remote in scoped:
+            if path.startswith(rel + "/"):
+                if best is None or len(rel) > len(best):
+                    best = rel
+        if best is not None:
+            return best
         for repo in self._repos_all():
             rel = self._repo_rel(repo)
             if path == rel or path.startswith(rel + "/"):
@@ -365,9 +389,13 @@ class SSHGitProvider(LocalGitProvider):
             return repos
 
     def _discover_repos_remote(self) -> tuple[str, ...]:
+        deadline = _SEARCH_DEADLINE.get()
+        remaining = deadline - time.monotonic() if deadline is not None else SSH_GIT_DISCOVER_TIMEOUT_SECONDS
+        if remaining <= 0:
+            raise SourceProviderError("SDK 仓库发现预算已耗尽", status_code=504)
         stdout = self._run_command_checked(
             self._discover_command(), "git 仓库发现",
-            SSH_GIT_DISCOVER_TIMEOUT_SECONDS,
+            max(1, int(min(SSH_GIT_DISCOVER_TIMEOUT_SECONDS, remaining))),
         )
         repos = tuple(
             line.strip() for line in stdout.splitlines() if line.strip()
@@ -402,9 +430,30 @@ class SSHGitProvider(LocalGitProvider):
             "password": self.config.ssh_password,
         }
 
+    def _server_limit(self) -> threading.BoundedSemaphore:
+        key = (self.config.ssh_host, self.config.ssh_port, self.config.ssh_username)
+        with _SERVER_LIMIT_LOCK:
+            return _SERVER_LIMITERS.setdefault(
+                key, threading.BoundedSemaphore(SSH_GIT_SERVER_CONCURRENCY)
+            )
+
     def _run_remote(self, command: str, timeout: int) -> CommandResult:
-        """唯一远端执行入口：SSHManager 连接池 + SSHExecutor（ADR 0004）。"""
+        """Execute via the shared host limiter, including SSH connection setup."""
+        deadline = _SEARCH_DEADLINE.get()
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            timeout = min(timeout, max(1, int(remaining))) if remaining > 0 else 0
+        if timeout <= 0:
+            return CommandResult(code=-1, timed_out=True)
+        permit = self._server_limit()
+        if not permit.acquire(timeout=max(0.0, float(timeout))):
+            return CommandResult(code=-1, timed_out=True)
         try:
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                timeout = min(timeout, max(1, int(remaining))) if remaining > 0 else 0
+            if timeout <= 0:
+                return CommandResult(code=-1, timed_out=True)
             with self._ssh.connection(self._connection_config()) as ssh:
                 return self._ssh.execute_command(ssh, command, timeout=timeout)
         except RuntimeError as exc:
@@ -414,6 +463,8 @@ class SSHGitProvider(LocalGitProvider):
                 "请检查 sdk_sources.ssh_git 配置、网络与凭据",
                 status_code=502,
             ) from exc
+        finally:
+            permit.release()
 
     def _git_command(self, *args: str, repo: str = "") -> str:
         """构造远端只读 git 命令行：子命令白名单 + 全参数 shlex.quote。"""
@@ -444,9 +495,9 @@ class SSHGitProvider(LocalGitProvider):
 
     def _shard_grep_command(
         self, query: str, path_grep: str, repos: tuple[str, ...],
-        per_repo_timeout: int = 0,
+        per_repo_timeout: int = 0, revision: str = "HEAD",
     ) -> str:
-        """单分片固定模板：逐仓先解析 HEAD SHA，再在该 commit 上 grep。
+        """单分片固定模板：逐仓先解析请求 revision 的 commit，再 grep。
 
         rev-parse 与 grep 在同一循环体先后执行，结果头/记录引用同一个
         SHA（审核 P1）：编译服务器在搜索期间移动 HEAD 不影响本批证据的
@@ -461,11 +512,13 @@ class SSHGitProvider(LocalGitProvider):
         per_repo_guard = (
             f"timeout {int(per_repo_timeout)} " if per_repo_timeout > 0 else ""
         )
+        # Caller validates pinned revisions; pass only a quoted commit expression.
+        rev = shlex.quote(f"{revision}^{{commit}}")
         return (
             "in_q=" + shlex.quote(query) + "; "
             "in_f=" + (shlex.quote(path_grep) if path_grep else "''") + "; "
             + self._repos_stdin(repos)
-            + "c=$(git --no-optional-locks -C \"$r\" rev-parse --verify 'HEAD^{commit}' 2>/dev/null) "
+            + f"c=$(git --no-optional-locks -C \"$r\" rev-parse --verify {rev} 2>/dev/null) "
             "|| { printf '@@GMS_SDK_INCOMPLETE@@\\n'; continue; }; "
             "printf '@@GMS_SDK_REPO@@%s\\t%s\\n' \"$r\" \"$c\"; "
             f"{per_repo_guard}"
@@ -673,34 +726,106 @@ class SSHGitProvider(LocalGitProvider):
     # -------------------------------------------------------------- search
 
     def search(
+        self, revision: str, query: str, *, path_filter: str = "",
+        limit: int = SEARCH_DEFAULT_LIMIT, repo_scope: str = "",
+        permission_scope: str = "", budget_seconds: int | None = None,
+    ) -> dict[str, Any]:
+        """Budget includes waiting, cold discovery and SSH execution."""
+        seconds = max(0.01, min(
+            float(SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if budget_seconds is None else budget_seconds), 600
+        ))
+        token = _SEARCH_DEADLINE.set(time.monotonic() + seconds)
+        try:
+            return self._search_impl(
+                revision, query, path_filter=path_filter, limit=limit,
+                repo_scope=repo_scope, permission_scope=permission_scope,
+            )
+        finally:
+            _SEARCH_DEADLINE.reset(token)
+
+    def _search_impl(
         self,
         revision: str,
         query: str,
         *,
         path_filter: str = "",
         limit: int = SEARCH_DEFAULT_LIMIT,
+        repo_scope: str = "",
+        permission_scope: str = "",
     ) -> dict[str, Any]:
+        """Search one explicit repository or all repositories, without changing path_filter.
+
+        Only pinned commits can be cached beyond the request: HEAD is mutable.
+        Concurrent identical requests share a Future, including error propagation.
+        Cache keys include caller permission, source/SSH endpoint and scope.
+        """
         if not str(query or "").strip():
             raise SourceProviderError("query 不能为空", status_code=422)
         limit = max(1, min(int(limit or SEARCH_DEFAULT_LIMIT), SEARCH_MAX_LIMIT))
         filter_value = str(path_filter or "").strip().lower()
-        if self._multi:
-            return self._search_multi(revision, str(query), filter_value, limit)
+        scope = _safe_repo_path(repo_scope) if repo_scope else ""
+        revision = str(revision or "").strip() or self.config.default_revision
+        if scope and not self._multi:
+            raise SourceProviderError("单仓源无需 repo_scope", status_code=422)
+        if not self._multi and not scope:
+            return self._search_single(revision, str(query), filter_value, limit)
+        key = (
+            permission_scope, self.config.source_id, self.config.ssh_host,
+            self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
+            revision, str(query), filter_value, scope, limit,
+        )
+        pinned = bool(scope and _COMMIT_RE.fullmatch(revision))
+        with self._search_lock:
+            if pinned and key in self._pinned_search_cache:
+                return copy.deepcopy(self._pinned_search_cache[key])
+            future = self._inflight_searches.get(key)
+            owner = future is None
+            if owner:
+                future = Future()
+                self._inflight_searches[key] = future
+        if not owner:
+            # A follower has no fresh budget; it waits only for this request's remainder.
+            deadline = _SEARCH_DEADLINE.get()
+            remaining = max(0, deadline - time.monotonic()) if deadline is not None else 0
+            try:
+                return copy.deepcopy(future.result(timeout=remaining))
+            except FutureTimeoutError as exc:
+                raise SourceProviderError("相同源码查询仍在执行，等待预算已耗尽", status_code=504) from exc
+        try:
+            if scope:
+                payload = self._search_scoped(revision, str(query), filter_value, limit, scope)
+            else:
+                payload = self._search_multi(revision, str(query), filter_value, limit)
+                payload["scope"] = "all_repositories"
+                payload["searched_scope"] = "all_repositories"
+                payload["global_coverage_complete"] = payload["coverage_complete"]
+            with self._search_lock:
+                if pinned and payload.get("coverage_complete"):
+                    if len(self._pinned_search_cache) >= 128:
+                        self._pinned_search_cache.pop(next(iter(self._pinned_search_cache)))
+                    self._pinned_search_cache[key] = copy.deepcopy(payload)
+            future.set_result(payload)
+            return copy.deepcopy(payload)
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            with self._search_lock:
+                self._inflight_searches.pop(key, None)
+
+    def _search_single(
+        self, revision: str, query: str, filter_value: str, limit: int,
+    ) -> dict[str, Any]:
         self._verify_repo()
         commit = self.resolve_commit(revision)
-        # 与 local_git 相同的 -z -n -I 记录流；-I 在远端跳过二进制。
         command = self._git_command(
             "grep", "--fixed-strings", "--ignore-case", "--no-color",
             "--no-heading", "--no-break", "--no-column", "--full-name",
-            "-z", "-n", "-I", "-e", str(query), commit, "--",
+            "-z", "-n", "-I", "-e", query, commit, "--",
         )
         result = self._run_remote(command, SSH_GIT_GREP_TIMEOUT_SECONDS)
         if result.timed_out:
             matches, scanned, limited = [], 0, True
-        elif result.code == -1:
-            raise SourceProviderError(
-                f"git grep 执行失败: {_stderr_tail(result)}", status_code=502
-            )
         elif result.code not in (0, 1):
             raise SourceProviderError(
                 f"git grep 失败: {_stderr_tail(result)}", status_code=502
@@ -713,6 +838,13 @@ class SSHGitProvider(LocalGitProvider):
             match.update(source_id=self.config.source_id, commit=commit)
         return self._search_payload(commit, matches, scanned, limited)
 
+    def _search_scoped(
+        self, revision: str, query: str, path_filter: str, limit: int, scope: str,
+    ) -> dict[str, Any]:
+        from .source_ssh_scope import search_scoped
+
+        return search_scoped(self, revision, query, path_filter, limit, scope)
+
     # ------------------------------------------------------------- multi search
 
     def _new_shard_manager(self):
@@ -723,30 +855,45 @@ class SSHGitProvider(LocalGitProvider):
 
     def _run_shard(
         self, shard: tuple[str, ...], query: str, path_grep: str,
+        *, deadline: float | None = None, revision: str = "HEAD",
     ) -> CommandResult:
-        """一个分片 = 一条独立 SSH 连接上的一条串行循环命令（ADR 0004 层）。
-
-        分片连接不与主连接池共享（SSHManager 池按 destination 复用，
-        分片之间并行、各自开一条连接）；命令仍是固定模板。
-        """
-        manager = self._new_shard_manager()
+        """Bound SSH connection acquisition and execution by the same deadline."""
+        remaining = (
+            SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if deadline is None
+            else max(0.0, deadline - time.monotonic())
+        )
+        if remaining <= 0:
+            return CommandResult(timed_out=True, code=-1)
+        permit = self._server_limit()
+        if not permit.acquire(timeout=remaining):
+            return CommandResult(timed_out=True, code=-1)
         try:
+            remaining = (
+                SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS if deadline is None
+                else max(0.0, deadline - time.monotonic())
+            )
+            if remaining <= 0:
+                return CommandResult(timed_out=True, code=-1)
+            manager = self._new_shard_manager()
             with manager.connection(self._connection_config()) as ssh:
                 return manager.execute_command(
                     ssh,
                     self._shard_grep_command(
                         query, path_grep, shard,
-                        per_repo_timeout=SSH_GIT_PER_REPO_TIMEOUT_SECONDS,
+                        per_repo_timeout=min(
+                            SSH_GIT_PER_REPO_TIMEOUT_SECONDS, max(1, int(remaining))
+                        ),
+                        revision=revision,
                     ),
-                    timeout=SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS,
+                    timeout=max(1, int(remaining)),
                 )
         except RuntimeError as exc:
             raise SourceProviderError(
-                "无法连接 SDK 源服务器 "
-                f"{self.config.ssh_host}:{self.config.ssh_port}（SSH 连接失败）；"
-                "请检查 sdk_sources.ssh_git 配置、网络与凭据",
+                f"无法连接 SDK 源服务器 {self.config.ssh_host}:{self.config.ssh_port}",
                 status_code=502,
             ) from exc
+        finally:
+            permit.release()
 
     def _search_multi(
         self, revision: str, query: str, filter_value: str, limit: int,
@@ -831,7 +978,9 @@ class SSHGitProvider(LocalGitProvider):
         results: list[CommandResult] = []
         repos_pending = repos_total  # 尚未消费结果的仓库数，包含未发起的波。
         executor = ThreadPoolExecutor(max_workers=SSH_GIT_SHARD_WAVE_SIZE)
-        deadline = time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        deadline = _SEARCH_DEADLINE.get() or (
+            time.monotonic() + SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
+        )
         try:
             from concurrent.futures import FIRST_COMPLETED, wait
 
@@ -849,15 +998,24 @@ class SSHGitProvider(LocalGitProvider):
                     limited = True
                     break
                 wave = shards[wave_start:wave_start + SSH_GIT_SHARD_WAVE_SIZE]
-                futures = {executor.submit(self._run_shard, s, query, ""): s
-                           for s in wave}
+                futures = {
+                    executor.submit(self._run_shard, shard, query, "", deadline=deadline): shard
+                    for shard in wave
+                }
                 pending = set(futures)
                 while pending:
                     remaining = deadline - time.monotonic()
-                    # 波内始终等到本波分片完成：remaining 耗尽后以
-                    # timeout=None 继续等待（阻塞等完，不空转轮询）。
-                    done, pending = wait(pending, timeout=max(0.0, remaining) or None,
-                                         return_when=FIRST_COMPLETED)
+                    # All in-flight jobs share the same wall-clock budget.
+                    # Never turn zero remaining time into timeout=None.
+                    if remaining <= 0:
+                        limited = True
+                        break
+                    done, pending = wait(
+                        pending, timeout=remaining, return_when=FIRST_COMPLETED
+                    )
+                    if not done:
+                        limited = True
+                        break
                     for future in done:
                         repos_pending -= len(futures[future])
                         try:
@@ -889,6 +1047,9 @@ class SSHGitProvider(LocalGitProvider):
                         matches.extend(shard_matches)
                         scanned += shard_scanned
                         limited = limited or shard_limited
+                if pending:
+                    limited = True
+                    break
                 if len(matches) >= limit:
                     limited = limited or len(matches) > limit or repos_pending > 0
                     break  # limit 已满：不再发起后续波
@@ -972,6 +1133,11 @@ class SSHGitProvider(LocalGitProvider):
             safe_path = _safe_repo_path(path)
         except SourceProviderError:
             return None
+        cache_key = (commit, safe_path)
+        with self._search_lock:
+            cached = self._blob_cache.get(cache_key)
+        if cached is not None:
+            return cached
         if self._multi:
             repo_rel = self._owning_repo_rel(safe_path)
             if repo_rel is None:
@@ -1007,4 +1173,8 @@ class SSHGitProvider(LocalGitProvider):
         blob = stdout.encode("utf-8")
         if len(blob) > MAX_BLOB_BYTES:
             return None
+        with self._search_lock:
+            if len(self._blob_cache) >= 256:
+                self._blob_cache.pop(next(iter(self._blob_cache)))
+            self._blob_cache[cache_key] = blob
         return blob

@@ -66,19 +66,51 @@ class AnalysisEventStoreTests(unittest.TestCase):
         self.assertEqual([event["event_type"] for event in incremental], ["progress", "analysis_completed"])
         self.assertEqual(incremental[-1]["summary"], "分析完成 · 已执行 1 次工具调用 · 模型 glm-5.3")
 
-    def test_reset_on_restart_keeps_issues_isolated(self):
-        """重分析清空旧时间线；并行 issue 的事件互不串线。"""
-        first = AnalysisProgressRecorder(self.store, "run-1", 100)
+    def test_retries_preserve_attempt_history_and_isolate_issues(self):
+        """Retries append their own attempts without deleting prior evidence events."""
+        first = AnalysisProgressRecorder(self.store, "run-1", 100, attempt_no=1)
         first.progress("第一轮")
-        AnalysisProgressRecorder(self.store, "run-1", 100)
-        self.assertEqual(
-            [event["event_type"] for event in self.store.list_after("run-1", 100)],
-            ["analysis_started"],
+        AnalysisProgressRecorder(
+            self.store, "run-1", 100, attempt_no=2, retry_reason="Worker 重领",
         )
+        rows = self.store.list_after("run-1", 100)
+        self.assertEqual(
+            [event["event_type"] for event in rows],
+            ["analysis_started", "progress", "analysis_failed", "analysis_started"],
+        )
+        self.assertEqual([row["attempt_no"] for row in rows], [1, 1, 1, 2])
+        self.assertEqual(rows[2]["status"], "interrupted")
+        self.assertIn("第 2 次尝试", rows[-1]["summary"])
         self.store.append("run-1", 101, {"event_type": "analysis_started"})
-        self.assertEqual(len(self.store.list_after("run-1", 100)), 1)
+        self.assertEqual(len(self.store.list_after("run-1", 100)), 4)
         self.assertEqual(len(self.store.list_after("run-1", 101)), 1)
         self.assertEqual(self.store.list_after("run-1", 102), [])
+
+    def test_checkpoint_roundtrip_retains_only_safe_evidence_fields(self):
+        self.store.save_checkpoint(
+            "run-1", 100, attempt_no=2, session_id="aaaa1111bbbb",
+            snapshot_hash="sha123", lease_token="lease123", trace={
+                "session_id": "aaaa1111bbbb",
+                "tools": [{
+                    "tool_call_id": "t1", "status": "succeeded",
+                    "tool_name": "gms_rt_sdk_search",
+                    "tool_input": {
+                        "query": "binder", "token": "SHOULD_NOT_PERSIST",
+                        "output": "PRIVATE_LOG", "repo_scope": "frameworks/base",
+                    },
+                    "output_sha256": "ab" * 32,
+                    "output_preview": "PRIVATE_PREVIEW",
+                }],
+                "final_event": {"message": "PRIVATE_MODEL_OUTPUT"},
+            },
+        )
+        loaded = self.store.load_checkpoint("run-1", 100)
+        self.assertEqual(loaded["attempt_no"], 2)
+        self.assertEqual(loaded["session_id"], "aaaa1111bbbb")
+        self.assertEqual(loaded["snapshot_hash"], "sha123")
+        self.assertEqual(loaded["trace"]["tools"][0]["tool_input"], {"query": "binder"})
+        self.assertNotIn("final_event", loaded["trace"])
+        self.assertEqual(loaded["trace"]["tools"][0]["output_preview"], "")
 
     def test_session_available_feeds_latest_session_id(self):
         """session_started 事件落库后，latest_session_id 返回最新会话 id。"""
@@ -140,7 +172,7 @@ class AnalysisEventStoreTests(unittest.TestCase):
         for row in rows:
             self.assertEqual(
                 set(row),
-                {"sequence", "event_type", "stage", "tool_name", "status", "summary", "duration_ms", "created_at"},
+                {"sequence", "event_type", "stage", "tool_name", "status", "summary", "duration_ms", "attempt_no", "created_at"},
             )
 
     def test_cancelled_analysis_records_terminal_event(self):
