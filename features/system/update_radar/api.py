@@ -2,11 +2,12 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, Response
 
-from features.auth import require_authenticated_user_when_auth_required, require_role_when_auth_required
+from features.auth import access as auth_access
+from features.auth import is_elevated, require_authenticated_user_when_auth_required, require_role_when_auth_required
 from foundation.config import settings as runtime_settings
 
 from .models import CATEGORIES, RadarConfig
@@ -34,9 +35,19 @@ def radar_script():
 
 
 @router.get('/api/gms-update-radar/status')
-def status(_user=READ):
+def status(request: Request, response: Response, _user=READ):
+    # The capability is session-specific; do not cache it across account changes.
+    response.headers['Cache-Control'] = 'no-store'
     config = get_service().store.settings()
-    return {'success': True, 'data': {k: config[k] for k in ('enabled', 'scan_time', 'timezone', 'next_run_at', 'tasks')}}
+    # Read-only capability flag. Match the actual admin dependency, including
+    # anonymous dev mode and a temporarily elevated human session. Never expose
+    # private notification settings or use GET /settings as a role probe.
+    can_manage = (not auth_access.authentication_required()
+                  or (_user is not None and (_user.role == 'admin' or is_elevated(request))))
+    return {'success': True, 'data': {
+        **{k: config[k] for k in ('enabled', 'scan_time', 'timezone', 'next_run_at', 'tasks')},
+        'can_manage': can_manage,
+    }}
 
 
 @router.get('/api/gms-update-radar/settings')
@@ -72,8 +83,10 @@ def detail(run_id: int, limit: int = Query(100, ge=1, le=200), offset: int = Que
 
 @router.get('/api/gms-update-radar/runs/{run_id}/email')
 def email_preview(run_id: int, _user=ADMIN):
-    subject, body = get_service().preview(run_id)
-    return {'success': True, 'data': {'subject': subject, 'body': body}}
+    service = get_service()
+    subject, body = service.preview(run_id)
+    return {'success': True, 'data': {'subject': subject, 'body': body,
+                                     'html': service.preview_html(run_id)}}
 
 
 @router.post('/api/gms-update-radar/runs/{run_id}/email')

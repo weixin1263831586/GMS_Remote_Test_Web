@@ -123,7 +123,6 @@ html[data-ui-type-root="shell"] #config-modal .config-section-notice code { font
 html[data-ui-type-root="shell"] .modal-info-text { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .modal-hint-text { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .firmware-target-list { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-mono); }
-html[data-ui-type-root="shell"] .firmware-file-meta { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .modal-fieldset-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .modal-ssh-info { font-size: var(--ui-type-size-dialog); }
 html[data-ui-type-root="shell"] .file-browser-path { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }

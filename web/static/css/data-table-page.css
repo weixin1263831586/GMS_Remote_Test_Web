@@ -51,5 +51,6 @@ a:hover { text-decoration:underline; }
   .filters > * {
     min-width: 0;
     width: 100%;
+    box-sizing: border-box;
   }
 }

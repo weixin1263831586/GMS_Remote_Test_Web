@@ -16,8 +16,6 @@ async function burnFirmware() {
     if (!validateLocalUsbDeviceSelection('烧写固件')) return;
 
     renderFirmwareTargetDevices();
-    hookFirmwareFileMetaInput();
-    updateFirmwareFileMeta();
     const loading = loadFirmwareAoaProfiles();
     ModalManager.open('firmware-modal');
     await loading;
@@ -42,31 +40,6 @@ function renderFirmwareTargetDevices() {
         chip.textContent = model ? `${id}（${model}）` : id;
         target.appendChild(chip);
     });
-}
-
-// 本机文件显示名称+大小；服务器路径说明跳过浏览器上传，防止误判。
-function updateFirmwareFileMeta() {
-    const meta = document.getElementById('firmware-file-meta');
-    if (!meta) return;
-    const path = document.getElementById('firmware-path').value.trim();
-    if (!path) {
-        // 空状态保留标记，由紧凑弹框样式收起元信息占位。
-        meta.classList.add('is-empty');
-        meta.textContent = '';
-        return;
-    }
-    const file = document.getElementById('firmware-file-input')?.files?.[0] || null;
-    meta.classList.remove('is-empty');
-    meta.textContent = file
-        ? `${file.name}（${formatBytes(file.size)}）· 同名支持续传`
-        : `服务器路径 ${path} · 无需浏览器上传`;
-}
-
-function hookFirmwareFileMetaInput() {
-    const pathInput = document.getElementById('firmware-path');
-    if (!pathInput || pathInput.dataset.metaHook) return;
-    pathInput.addEventListener('input', updateFirmwareFileMeta);
-    pathInput.dataset.metaHook = '1';
 }
 
 let firmwareAoaLoadRevision = 0;
@@ -157,7 +130,6 @@ function browseLocalFileForFirmware() {
             const target = document.getElementById('firmware-path');
             if (target) {
                 target.value = file.name;  // 只显示文件名
-                updateFirmwareFileMeta();
                 const savedName = sessionStorage.getItem('firmwareUploadFileName');
                 const savedSize = parseInt(sessionStorage.getItem('firmwareUploadFileSize') || '0');
                 const savedLastModified = parseInt(sessionStorage.getItem('firmwareUploadLastModified') || '-1');

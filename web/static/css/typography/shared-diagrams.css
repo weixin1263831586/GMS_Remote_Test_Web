@@ -78,7 +78,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > label { font-size: var(--ui-type-size-body); }
 #report-diagnosis-modal .tech-diagnosis-panel-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 #firmware-modal .firmware-target-list { font-size: var(--ui-type-size-body); }
-#firmware-modal .firmware-file-meta { font-size: var(--ui-type-size-small); }
 #firmware-modal #firmware-aoa-hint { font-size: var(--ui-type-size-small); }
 #route-check-dialog .modal-content.tech-dialog--route-check .modal-title { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { font-size: var(--ui-type-size-body) !important; }

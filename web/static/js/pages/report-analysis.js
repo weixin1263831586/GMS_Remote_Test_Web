@@ -730,7 +730,8 @@ function displayReportAnalysis(data) {
         const sizingRoles = {
             '总用例数：': 'total', '通过：': 'pass', '失败：': 'fail',
             '通过率：': 'pass-rate', '测试类型：': 'test-type',
-            '套件版本：': 'suite-version', 'Android版本：': 'android-version'
+            '套件版本：': 'suite-version', 'Android版本：': 'android-version',
+            'SOC平台：': 'soc-platform'
         };
         [...summaryDiv.children].forEach(field => {
             const label = field.querySelector('.summary-label')?.textContent?.trim();

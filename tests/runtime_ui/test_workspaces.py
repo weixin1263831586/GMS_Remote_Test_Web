@@ -960,7 +960,7 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                         grid_box["x"], page_box["x"] + frame_geometry["inset"], delta=0.5
                     )
                     self.assertAlmostEqual(
-                        grid_box["y"], page_box["y"] + frame_geometry["top"] + 5, delta=0.5
+                        grid_box["y"], page_box["y"] + frame_geometry["top"], delta=0.5
                     )
                     self.assertAlmostEqual(
                         grid_box["width"],
@@ -1025,8 +1025,19 @@ class RuntimeWorkspacesTests(RuntimeUiHarness):
                     if scope_mode == "single":
                         self.assertEqual(set(pane_style.values()), {"0px"})
                     else:
-                        self.assertGreaterEqual(pane_box["x"], grid_box["x"] + 8)
-                        self.assertGreaterEqual(pane_box["y"], grid_box["y"] + 5)
+                        # The shared 8px page inset is owned by the grid's frame.
+                        # Cluster panes must align with it without a second inset.
+                        self.assertEqual(set(pane_style.values()), {"1px"})
+                        self.assertAlmostEqual(pane_box["x"], grid_box["x"], delta=0.5)
+                        self.assertAlmostEqual(pane_box["y"], grid_box["y"], delta=0.5)
+                        self.assertLessEqual(
+                            pane_box["x"] + pane_box["width"],
+                            grid_box["x"] + grid_box["width"] + 0.5,
+                        )
+                        self.assertLessEqual(
+                            pane_box["y"] + pane_box["height"],
+                            grid_box["y"] + grid_box["height"] + 0.5,
+                        )
                     history = page.evaluate("window.__scopeClassHistory")
                     wrong_class = (
                         "workspace-scope-cluster"

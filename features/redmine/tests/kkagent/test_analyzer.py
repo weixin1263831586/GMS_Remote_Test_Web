@@ -269,8 +269,8 @@ class AnalyzerE2ETests(unittest.TestCase):
         self.assertTrue(outcome.trace["resumed"])
         self.assertTrue(outcome.result["history_checked"])
         self.assertEqual(outcome.result["confidence"], 0.72)
-        # 修复轮与首轮共用一个 session（初跑 + 修复轮工具轨迹合并）。
-        self.assertEqual(outcome.trace["tool_call_count"], 10)
+        # Schema-only repair reuses evidence without new tool calls.
+        self.assertEqual(outcome.trace["tool_call_count"], 5)
         self.assertEqual(outcome.trace["repair_attempts"], 1)
 
     def test_schema_failure_survives_failed_repair(self):

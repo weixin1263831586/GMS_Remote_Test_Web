@@ -35,7 +35,17 @@
 .tech-dialog--ut-tool #ut-tool-filepath { min-width: 0; }
 .tech-dialog--device-group .tech-field-card:has(.group-picklist) { display: grid; grid-template-columns: 38px minmax(0,1fr); }
 .tech-dialog--device-group .group-picklist { grid-column: 1 / -1; width: 100%; box-sizing: border-box; padding: 12px; background: var(--tech-input); border: 1px solid var(--tech-edge-soft); border-radius: 7px; }
-.tech-dialog--client-account-switch .modal-body > div:not(.tech-intro) { border-radius: 9px; }
+/* Account choices first; keep help below as a quiet two-line note, not warning cards. */
+.tech-dialog--client-account-switch .client-account-switch-help {
+  display: grid; gap: 4px; margin-top: 12px; padding-top: 10px;
+  border-top: 1px solid var(--tech-edge-soft);
+}
+.tech-dialog--client-account-switch .client-account-switch-help p {
+  margin: 0; color: var(--text-secondary); line-height: 1.55;
+}
+.tech-dialog--client-account-switch .client-account-switch-help strong {
+  color: var(--text-primary); overflow-wrap: anywhere;
+}
 .tech-dialog--add-local-suite .tech-field-card { flex-wrap: wrap; }
 .tech-dialog--add-local-suite .tech-field-card > input { width: 100%; flex-basis: 100%; }
 .tech-dialog--extract-suite .tech-field-card { margin-bottom: 12px; }
@@ -53,7 +63,6 @@
 .tech-dialog--firmware .firmware-artifact-card .tech-field-card { display: block; padding: 0; border: 0; background: transparent; }
 .tech-dialog--firmware .input-with-btn { display: flex; flex-wrap: nowrap; gap: 6px; }
 .tech-dialog--firmware #firmware-path { flex: 1 1 0; width: 0; }
-.tech-dialog--firmware .firmware-file-meta { margin-top: 10px; color: var(--text-secondary); }
 .tech-dialog--firmware .firmware-aoa-options { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px 12px; align-items: center; padding: 6px 0; }
 .tech-dialog--firmware .firmware-aoa-options .tech-field-card { display: flex; align-items: center; flex-wrap: nowrap; gap: 8px; padding: 0; margin: 0; border: 0; background: transparent; }
 .tech-dialog--firmware .firmware-aoa-options .tech-field-card > label { flex: none; min-width: 0; padding: 0; border: 0; white-space: nowrap; }
@@ -595,14 +604,12 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   }
 }
 
-/* Compact preflight cards follow the input height; empty metadata owns no row. */
+/* Compact preflight cards follow the input height. */
 #firmware-modal .firmware-preflight-grid .modal-form-row { margin-bottom: 0; }
 #firmware-modal .firmware-artifact-card .tech-field-card { min-height: 0; }
 #firmware-modal .input-with-btn > button { height: var(--ui-control-height); padding: 4px 8px; flex: none; line-height: 1.4; }
 #firmware-modal .firmware-target-list {  line-height: 1.4; }
 #firmware-modal .tech-section-title { margin-bottom: 7px; padding-bottom: 6px; }
-#firmware-modal .firmware-file-meta { min-height: 0; margin-top: 6px;  }
-#firmware-modal .firmware-file-meta.is-empty { display: none; }
 #firmware-modal .firmware-target-chip { white-space: normal; overflow-wrap: anywhere; }
 #firmware-modal #firmware-aoa-hint { min-height: 0; margin: 6px 0;  }
 #firmware-modal .tech-notice { margin-top: 10px; }

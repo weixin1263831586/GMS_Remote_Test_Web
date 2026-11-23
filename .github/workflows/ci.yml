@@ -512,9 +512,17 @@ jobs:
         run: python tools/scripts/agent/build_package.py --out dist
 
   browser-e2e:
-    name: browser-e2e
+    name: browser-e2e (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # A single 420+ case process previously stalled after 31% progress and
+    # hit the 30-minute job deadline without a useful failure trace. Run
+    # disjoint file groups in separate processes, concurrently, without
+    # reducing coverage or relaxing the release-ready aggregate gate.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [early, dashboards, late]
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -532,8 +540,56 @@ jobs:
           python -m playwright install --with-deps chromium || \
             python -m playwright install chromium
 
+      - name: Verify browser test shards cover every test module exactly once
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          root = Path("tests/runtime_ui")
+          groups = [
+              list(root.glob("test_[a-c]*.py")),
+              list(root.glob("test_[d-m]*.py")),
+              list(root.glob("test_[n-z]*.py")),
+          ]
+          all_tests = list(root.glob("test_*.py"))
+          selected = [path for group in groups for path in group]
+          assert all(groups), "empty browser E2E shard"
+          assert len(selected) == len(set(selected)) == len(all_tests)
+          assert set(selected) == set(all_tests), "browser E2E test file omitted"
+          PY
+
       - name: Browser E2E and smoke tests
-        run: pytest tests/e2e tests/runtime_ui -q
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          # Verbose node ids and faulthandler provide an exact last-running
+          # test and Python stacks if a browser/iframe request stops progressing.
+          case "${{ matrix.shard }}" in
+            early)
+              pytest tests/e2e tests/runtime_ui/test_[a-c]*.py -vv \
+                -o faulthandler_timeout=180 --durations=25 \
+                --junitxml=artifacts/browser-early.xml ;;
+            dashboards)
+              pytest tests/runtime_ui/test_[d-m]*.py -vv \
+                -o faulthandler_timeout=180 --durations=25 \
+                --junitxml=artifacts/browser-dashboards.xml ;;
+            late)
+              pytest tests/runtime_ui/test_[n-z]*.py -vv \
+                -o faulthandler_timeout=180 --durations=25 \
+                --junitxml=artifacts/browser-late.xml ;;
+            *)
+              echo "::error::Unknown browser shard"; exit 1 ;;
+          esac
+
+      - name: Upload browser E2E JUnit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: junit-browser-${{ matrix.shard }}
+          path: artifacts/
+          if-no-files-found: warn
+          retention-days: 7
 
   release-ready:
     name: release-ready

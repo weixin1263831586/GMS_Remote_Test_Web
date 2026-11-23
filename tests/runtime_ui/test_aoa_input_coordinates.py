@@ -108,21 +108,54 @@ class RuntimeAoaInputCoordinatesTests(RuntimeUiHarness):
         try:
             self.prepare(page, inputs)
             # Force object-fit bars *inside* the canvas element's bounding box.
-            point = page.evaluate("""() => {
-                const canvas = aoaEl('aoa-screen-canvas');
-                canvas.style.width = '100%'; canvas.style.height = '100%';
-                const box = canvas.getBoundingClientRect();
-                return {bar:{x:box.left+1,y:box.top+box.height/2},
-                    center:{x:box.left+box.width/2,y:box.top+box.height/2}};
+            canvas = page.locator('#aoa-screen-canvas')
+            # Deliberately make a wide display box around the portrait frame.
+            # object-fit:contain then creates measurable letterbox side bars.
+            canvas.evaluate(
+                "element => {element.style.width = 'min(100%, 320px)'; "
+                "element.style.height = '180px';}"
+            )
+            expect(canvas).to_be_visible()
+            canvas.scroll_into_view_if_needed()
+            positions = canvas.evaluate("""element => {
+                const box = element.getBoundingClientRect();
+                const scale = Math.min(box.width / element.width, box.height / element.height);
+                const leftBar = (box.width - element.width * scale) / 2;
+                const topBar = (box.height - element.height * scale) / 2;
+                const center = {x: box.width / 2, y: box.height / 2};
+                if (leftBar > 2) {
+                    return {bar: {x: leftBar / 2, y: center.y}, center};
+                }
+                if (topBar > 2) {
+                    return {bar: {x: center.x, y: topBar / 2}, center};
+                }
+                throw new Error('Test fixture did not produce object-fit bars');
             }""")
-            page.mouse.click(point['bar']['x'], point['bar']['y'])
+            # Locator actions respect scroll containers and pointer hit testing.
+            bar, center = positions["bar"], positions["center"]
+            assert canvas.evaluate(
+                """(element, position) => {
+                    const box = element.getBoundingClientRect();
+                    return aoaPointFromPointer({
+                        clientX: box.left + position.x,
+                        clientY: box.top + position.y
+                    }) === null;
+                }""",
+                bar,
+            )
+            canvas.click(position=bar)
             assert inputs == []
-            page.mouse.move(point['center']['x'], point['center']['y'])
+            canvas.hover(position=center)
             page.mouse.down()
-            page.locator('#aoa-screen-canvas').dispatch_event('pointercancel', {'pointerId': 1})
+            pointer_id = page.evaluate('aoaPanelState.pointer?.id')
+            assert pointer_id is not None, "PointerDown must reach the live canvas"
+            canvas.dispatch_event('pointercancel', {'pointerId': pointer_id})
+            assert page.evaluate('aoaPanelState.pointer === null')
             page.mouse.up()
             assert inputs == []
+            canvas.hover(position=center)
             page.mouse.down()
+            assert page.evaluate('aoaPanelState.pointer?.id') is not None
             page.evaluate("aoaEl('aoa-screen-canvas').width = 1024; aoaEl('aoa-screen-canvas').height = 576")
             page.mouse.up()
             assert inputs == []

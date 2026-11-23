@@ -30,6 +30,9 @@ on:
       - 'tests/runtime_ui/test_desktop_workspace_visual.py'
       - 'tests/runtime_ui/test_terminal_workspace_visual.py'
       - 'web/static/css/analysis-workbench-tokens.css'
+      - 'web/static/css/report-workbench.css'
+      - 'web/static/js/pages/report-analysis.js'
+      - 'tests/runtime_ui/test_report_workbench.py'
       - 'web/static/css/vpn-proxy-panel.css'
       - 'web/static/css/agent-access.css'
       - 'features/cluster/ui/page.html'
@@ -117,6 +120,7 @@ jobs:
             tests/runtime_ui/test_ui_controls_matrix.py \
             tests/runtime_ui/test_modal_compact_layout.py \
             tests/runtime_ui/test_apk_workbench.py \
+            tests/runtime_ui/test_report_workbench.py \
             tests/runtime_ui/test_api_catalog.py \
             tests/runtime_ui/test_outbox_detail_races.py \
             tests/runtime_ui/test_disk_audit_refresh.py \

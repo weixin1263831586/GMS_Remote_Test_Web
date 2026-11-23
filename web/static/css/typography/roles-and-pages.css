@@ -78,6 +78,9 @@ html[data-ui-type-root="shell"] #page-test .section-title {
 }
 .tech-dialog :is(.tech-section-title, .tech-field-card > label,
   .tech-field-stack > label) { font-weight: var(--ui-type-weight-semibold); }
+.tech-dialog--client-account-switch .client-account-switch-help strong {
+  font-weight: var(--ui-type-weight-semibold);
+}
 .tech-dialog :is(.tech-hint, .tech-tailscale-help, .tech-caption) {
   font-size: var(--ui-type-size-small);
 }

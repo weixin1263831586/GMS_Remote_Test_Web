@@ -93,15 +93,12 @@ class CompactModalLayoutTests(RuntimeUiHarness):
             page.evaluate('''() => {
                 document.getElementById('firmware-target-devices').textContent = 'fixture-device-01';
                 document.getElementById('firmware-path').value = '';
-                hookFirmwareFileMetaInput();
-                updateFirmwareFileMeta();
                 ModalManager.open('firmware-modal');
             }''')
             modal = page.locator('#firmware-modal')
             for viewport in VIEWPORTS:
                 with self.subTest(viewport=viewport):
                     page.set_viewport_size(viewport)
-                    expect(page.locator('#firmware-file-meta')).to_be_hidden()
                     for card_selector, field_selector in [
                         ('.firmware-target-card', '#firmware-target-devices'),
                         ('.firmware-artifact-card', '#firmware-path'),
@@ -114,8 +111,41 @@ class CompactModalLayoutTests(RuntimeUiHarness):
                         self.assertLessEqual(button.bounding_box()['height'], 34)
                     expect(modal.locator('.modal-title')).to_have_css('font-size', '16px')
                     self.capture(page, 'firmware')
-            page.locator('#firmware-path').fill('/tmp/rendering-fixture.img')
-            expect(page.locator('#firmware-file-meta')).to_be_visible()
-            expect(page.locator('#firmware-file-meta')).to_contain_text('rendering-fixture.img')
+            self.assertEqual(page.locator('#firmware-file-meta').count(), 0)
+            # The field itself must retain its height for both local files and
+            # server paths; no auxiliary metadata row may resize the dialog.
+            for viewport in VIEWPORTS:
+                with self.subTest(selected_file_viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.locator('#firmware-path').fill('')
+                    before_modal = modal.bounding_box()['height']
+                    before_card = modal.locator('.firmware-artifact-card').bounding_box()['height']
+                    page.locator('#firmware-path').fill('/tmp/rendering-fixture.img')
+                    self.assertAlmostEqual(modal.bounding_box()['height'], before_modal, delta=1)
+                    self.assertAlmostEqual(
+                        modal.locator('.firmware-artifact-card').bounding_box()['height'],
+                        before_card, delta=1,
+                    )
+                    # Simulate native file selection without actually uploading.
+                    page.evaluate("""() => {
+                        const id = 'firmware-file-input';
+                        let input = document.getElementById(id);
+                        if (!input) {
+                            input = document.createElement('input');
+                            input.type = 'file';
+                            input.id = id;
+                            input.hidden = true;
+                            document.body.append(input);
+                        }
+                        const transfer = new DataTransfer();
+                        transfer.items.add(new File(['fixture'], 'update.img'));
+                        input.files = transfer.files;
+                        document.getElementById('firmware-path').value = 'update.img';
+                    }""")
+                    self.assertAlmostEqual(modal.bounding_box()['height'], before_modal, delta=1)
+                    self.assertAlmostEqual(
+                        modal.locator('.firmware-artifact-card').bounding_box()['height'],
+                        before_card, delta=1,
+                    )
         finally:
             page.close()

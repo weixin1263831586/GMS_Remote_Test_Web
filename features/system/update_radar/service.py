@@ -14,7 +14,7 @@ from foundation.redaction import redact_sensitive_text
 
 from . import scanning
 from .models import utc_now
-from .notifications import build_email
+from .notifications import build_email, build_email_html
 from .repository import RadarStore
 
 
@@ -87,6 +87,10 @@ class RadarService:
         run = self.store.run(run_id)
         return build_email(run, self.store.changes(run_id, limit=50)['items'])
 
+    def preview_html(self, run_id):
+        run = self.store.run(run_id)
+        return build_email_html(run, self.store.changes(run_id, limit=20)['items'])
+
     def notify(self, run_id, *, retry=False):
         with hold_sync_lock(self.store.mail_lock):
             run = self.store.run(run_id)
@@ -104,7 +108,8 @@ class RadarService:
                 return
             run['config'] = config
             try:
-                subject, body = build_email(run, self.store.changes(run_id, limit=50)['items'])
+                subject, _plain_body = build_email(run, self.store.changes(run_id, limit=50)['items'])
+                body = build_email_html(run, self.store.changes(run_id, limit=20)['items'])
             except Exception as exc:
                 logger.exception('Radar email preview %s failed', run_id)
                 self.store.mark_email(run_id, 'failed', redact_sensitive_text(
@@ -113,7 +118,7 @@ class RadarService:
                 return
             self.store.mark_email(run_id, 'sending')
             try:
-                result = self.mailer(config['recipients'], subject, body, channel='update_radar',
+                result = self.mailer(config['recipients'], subject, body, is_html=True, channel='update_radar',
                                      owner_id=run['owner_id'], username=run['username'],
                                      ref_type='gms_update_radar_run', ref_id=str(run_id))
                 self.store.mark_email(run_id, 'sent' if result.get('sent') else 'failed',

@@ -48,6 +48,7 @@ class RuntimeDataRecoveryTests(unittest.TestCase):
             env.update({
                 "GMS_PORT": str(port),
                 "GMS_DATA_ROOT": str(data_root),
+                "GMS_ENV": "development",
                 "GMS_AUTH_REQUIRED": "false",
                 "GMS_SECURE_COOKIES": "false",
                 "ATS_WORKER_ENABLED": "0",

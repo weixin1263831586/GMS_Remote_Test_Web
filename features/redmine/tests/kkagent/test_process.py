@@ -162,7 +162,7 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
         "schema-then-ok": (
             "import json, sys\n"
             "if '--resume' in sys.argv:\n"
-            f"    _emit(sys.stdout, json.loads({result_literal!r}), 'sess-bad-schema')\n"
+            f"    emit_result(sys.stdout, json.loads({result_literal!r}), 'sess-bad-schema')\n"
             "else:\n"
             f"    _emit_bad(sys.stdout, json.loads({result_literal!r}))\n"
         ),
@@ -173,7 +173,7 @@ def _write_fake_kkagent(directory: Path, behavior: str) -> Path:
             "count = int(counter.read_text() if counter.exists() else '0')\n"
             "counter.write_text(str(count + 1))\n"
             "if '--resume' in sys.argv and count >= 2:\n"
-            f"    _emit(sys.stdout, json.loads({result_literal!r}), 'sess-bad-schema')\n"
+            f"    emit_result(sys.stdout, json.loads({result_literal!r}), 'sess-bad-schema')\n"
             "else:\n"
             f"    _emit_bad(sys.stdout, json.loads({result_literal!r}))\n"
         ),

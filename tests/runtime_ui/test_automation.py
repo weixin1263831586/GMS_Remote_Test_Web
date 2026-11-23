@@ -611,8 +611,10 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 page.locator(f'.workflow-tab[data-workflow="{workflow_name}"]').click()
                 pane_top_gap = page.locator(f"#workflow-pane-{workflow_name}").evaluate(
                     """pane => {
-                        const surface = pane.closest('.workflow-surface').getBoundingClientRect();
-                        return pane.getBoundingClientRect().top - surface.top;
+                        const surface = pane.closest('.workflow-surface');
+                        const top = surface.getBoundingClientRect().top;
+                        const inset = parseFloat(getComputedStyle(surface).paddingTop) || 0;
+                        return pane.getBoundingClientRect().top - top - inset;
                     }"""
                 )
                 self.assertLessEqual(abs(pane_top_gap), 1)
@@ -622,8 +624,10 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 page.evaluate(f"switchWorkflowPane('{workflow_name}', {{persist: false}})")
                 pane_top_gap = page.locator(f"#workflow-pane-{workflow_name}").evaluate(
                     """pane => {
-                        const surface = pane.closest('.workflow-surface').getBoundingClientRect();
-                        return pane.getBoundingClientRect().top - surface.top;
+                        const surface = pane.closest('.workflow-surface');
+                        const top = surface.getBoundingClientRect().top;
+                        const inset = parseFloat(getComputedStyle(surface).paddingTop) || 0;
+                        return pane.getBoundingClientRect().top - top - inset;
                     }"""
                 )
                 self.assertLessEqual(abs(pane_top_gap), 1)

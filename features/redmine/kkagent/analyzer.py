@@ -764,11 +764,7 @@ class KkAgentRedmineAnalyzer:
                 for call in merged.tool_calls
             )
             gap_state = (tuple(findings), evidence_state)
-            if gap_state == previous_gap:
-                # No new evidence or changed findings: do not enlarge the search.
-                if progress is not None:
-                    progress.stage_changed("复核缺口无新增证据，停止重复取证")
-                break
+            previous_gap_unchanged = gap_state == previous_gap
             previous_gap = gap_state
             plan = entry.pop("_review_action_plan", None)
             if not isinstance(plan, list):
@@ -778,6 +774,13 @@ class KkAgentRedmineAnalyzer:
                 if item.get("action") == "targeted_source" and item.get("target")
             ]
             allow_new_tools = bool(targets)
+            if previous_gap_unchanged and allow_new_tools:
+                # Avoid repeating an identical targeted source search.
+                # Bounded report-only/schema/review corrections can improve
+                # without new evidence and must retain their own retry budget.
+                if progress is not None:
+                    progress.stage_changed("复核缺口无新增证据，停止重复取证")
+                break
             repair_prompt = (
                 native_evidence_repair_prompt(
                     findings, merged.evidence_ledger(), output_style=entry.get("output_style", "diagnostic"),

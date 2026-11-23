@@ -415,6 +415,62 @@ def test_email_contains_field_differences_and_plain_text_upstream_evidence(store
     assert '?run=' in body and 'GMS包更新' in body
 
 
+def test_html_radar_email_uses_tables_highlights_changes_and_escapes_upstream(store):
+    store.save_settings(config(dashboard_url='https://controller.example.test/gms-update-radar'))
+    run_id = store.claim('manual')
+    counts = result(changes=3, errors={'exemptions': '404: <script>bad()</script>'})
+    counts['categories']['packages'].update(added=1, modified=1, removed=1)
+    changes = [
+        {'category': 'packages', 'key': 'one', 'type': 'added',
+         'before': None, 'after': {'file_name': 'new.apk', 'description': '<script>alert(1)</script>'}},
+        {'category': 'packages', 'key': 'two', 'type': 'modified',
+         'before': {'file_name': 'old.apk', 'description': 'older'},
+         'after': {'file_name': 'old.apk', 'description': 'newer'}},
+        {'category': 'packages', 'key': 'three', 'type': 'removed',
+         'before': {'file_name': 'removed.apk'}, 'after': None},
+    ]
+    store.finish(run_id, 'partial', counts, changes)
+    mailer = Mock(return_value={'sent': True})
+    radar = service(store, mailer=mailer)
+    html_body = radar.preview_html(run_id)
+    assert '<table' in html_body and html_body.count('<table') >= 3
+    assert 'GMS包更新' in html_body and '保留旧数据' in html_body
+    assert 'new.apk' in html_body and 'removed.apk' in html_body
+    assert '#137a4b' in html_body and '#a26608' in html_body and '#b4233b' in html_body
+    assert '<script>alert(1)</script>' not in html_body
+    assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html_body
+    assert '&lt;script&gt;bad()&lt;/script&gt;' in html_body
+    assert 'values_json' not in html_body and 'headers_json' not in html_body
+    assert '?run=' in html_body
+    radar.notify(run_id)
+    assert mailer.call_args.kwargs['is_html'] is True
+    assert '<table' in mailer.call_args.args[2]
+
+
+def test_html_radar_email_no_changes_shows_uncertainty_not_false_clean(store):
+    run_id = store.claim('manual')
+    store.finish(run_id, 'partial', result(errors={'exemptions': '404 Not Found'}), [])
+    html_body = service(store).preview_html(run_id)
+    assert '0 项变更不代表所有来源均无更新' in html_body
+    assert '失败组保留扫描前的数据' in html_body
+    assert '变更明细（最多 20 条）' not in html_body
+
+
+def test_html_radar_email_renders_requirement_table_as_business_fields(store):
+    run_id = store.claim('manual')
+    store.finish(run_id, 'completed', result(changes=1), [
+        {'category': 'requirements', 'key': 'r', 'type': 'added', 'before': None,
+         'after': {'row_key': 'opaque', 'source_key': 'requirements',
+                   'headers_json': '["Name", "Type", "Package name", "Description"]',
+                   'values_json': '["TrichromeLibrary", "APK", "com.google.android.trichromelibrary", "Browser library"]'}}
+    ])
+    html_body = service(store).preview_html(run_id)
+    assert 'TrichromeLibrary' in html_body
+    assert 'com.google.android.trichromelibrary' in html_body
+    assert 'headers_json' not in html_body
+    assert 'values_json' not in html_body
+
+
 @pytest.fixture
 def client(store, monkeypatch):
     from features.auth import access
@@ -440,6 +496,35 @@ def test_api_requires_auth_and_admin_for_settings_scan_and_mail(client, store):
     for method, path in [('get', '/settings'), ('put', '/settings'), ('post', '/scan'), ('post', '/runs/1/email')]:
         assert getattr(client, method)('/api/gms-update-radar' + path, headers={'x-test-role': 'user'}).status_code == 403
     assert store.history()['total'] == 0
+
+
+def test_status_exposes_read_only_scan_capability_without_admin_settings_probe(client, store, monkeypatch):
+    status_url = '/api/gms-update-radar/status'
+    forbidden = client.get(status_url, headers={'x-test-role': 'user'})
+    assert forbidden.status_code == 200
+    assert forbidden.json()['data']['can_manage'] is False
+    assert forbidden.headers['cache-control'] == 'no-store'
+    assert 'recipients' not in forbidden.json()['data']
+
+    admin = client.get(status_url, headers={'x-test-role': 'admin'})
+    assert admin.status_code == 200
+    assert admin.json()['data']['can_manage'] is True
+
+    # A successful temporary admin verification also grants admin-only routes.
+    from features.auth import access
+    monkeypatch.setattr(access, 'is_elevated', lambda _: True)
+    monkeypatch.setattr(api, 'is_elevated', lambda _: True)
+    elevated = client.get(status_url, headers={'x-test-role': 'user'})
+    assert elevated.json()['data']['can_manage'] is True
+    assert client.get('/api/gms-update-radar/settings',
+                      headers={'x-test-role': 'user'}).status_code == 200
+
+    # Preserve anonymous development mode semantics (no global login).
+    monkeypatch.setattr(access, 'authentication_required', lambda: False)
+    development = client.get(status_url)
+    assert development.status_code == 200
+    assert development.json()['data']['can_manage'] is True
+    assert client.get(status_url, headers={'x-test-role': 'user'}).json()['data']['can_manage'] is True
 
 
 def test_admin_configuration_roundtrip_and_private_recipient_masking(client, store):

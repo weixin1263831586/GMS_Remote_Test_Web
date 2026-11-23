@@ -1,7 +1,7 @@
 name: Redmine diagnosis correctness regressions
 on:
   push:
-    branches: [main, 'ui/**']
+    branches: [main, 'ui/**', 'audit/**']
     paths:
       - 'features/redmine/**'
       - 'features/kkagent/**'

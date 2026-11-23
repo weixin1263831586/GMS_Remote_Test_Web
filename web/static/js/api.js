@@ -625,8 +625,8 @@ function renderClientAccountSwitchIdentity(identity) {
         option.setAttribute('aria-current', current ? 'true' : 'false');
     });
     if (status) status.textContent = identity
-        ? '仅可切换以下账号；切换后需要输入目标账号密码。'
-        : '客户端身份尚未识别完成，请稍候再选择当前客户端账号。';
+        ? '仅切换网页登录账号，需输入目标账号密码。'
+        : '仅切换网页登录账号，需输入目标账号密码；客户端身份识别中。';
 }
 
 async function openClientAccountSwitchModal() {

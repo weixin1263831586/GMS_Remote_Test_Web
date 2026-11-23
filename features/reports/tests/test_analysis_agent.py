@@ -143,6 +143,39 @@ class ReportAnalysisAgentTests(unittest.TestCase):
             outer.writestr("outer/readme.txt", "nested report")
             outer.writestr("outer/report_payload.zip", inner_buffer.getvalue())
 
+    def test_report_zip_distinguishes_gts_root_from_gts_by_explicit_suite_plan(self):
+        from features.reports import ReportAnalysisAgent
+
+        cases = (
+            ('suite_name="GTS" suite_plan="gts-root"', 'GTS-ROOT'),
+            ('suite_name="GTS" suite_plan="gts_root"', 'GTS-ROOT'),
+            ('suite_name="GTS" suite_plan="gts"', 'GTS'),
+            ('suite_name="GTS"', 'GTS'),
+            ('suite_name="CTS" suite_plan="gts-root"', 'CTS'),
+        )
+        with TemporaryDirectory() as tmp:
+            for index, (xml_header, expected) in enumerate(cases):
+                with self.subTest(header=xml_header):
+                    report_xml = TEST_XML.replace('suite_name="GTS"', xml_header, 1)
+                    archive = Path(tmp) / f"report-{index}.zip"
+                    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr("results/test_result.xml", report_xml)
+                    report = ReportAnalysisAgent(temp_dir=tmp).analyze_path(str(archive))
+                    self.assertIsNotNone(report)
+                    self.assertEqual(report["details"]["test_type"], expected)
+
+    def test_build_level_gts_root_plan_is_supported_if_root_does_not_declare_one(self):
+        from features.reports import XMLReportParser
+
+        xml = TEST_XML.replace(
+            '<Build build_version_release="16"',
+            '<Build suite_plan="gts-root" build_version_release="16"',
+            1,
+        )
+        report = XMLReportParser().parse_content(xml)
+        self.assertIsNotNone(report)
+        self.assertEqual(report.test_type, "GTS-ROOT")
+
     def test_agent_recursively_analyzes_nested_report_archives_and_logs(self):
         from features.reports import ReportAnalysisAgent
 

@@ -225,24 +225,23 @@ def test_native_summary_passes_without_repair_when_evidence_gate_is_complete():
     assert stream.await_count == 2
 
 
-def test_native_summary_repairs_missing_evidence_in_same_session():
+def test_native_summary_rejects_unapproved_new_evidence_in_same_session():
+    """Report-only correction does not authorize new MCP evidence calls."""
     analyzer = KkAgentRedmineAnalyzer()
     repaired_report = "## 关键结论\n\n- [事实][file:PackageSignatureTest.java] 证据已补齐。\n"
     stream = AsyncMock(side_effect=[
         (final_trace(), _StreamFallback(), False),
         (complete_trace(report=repaired_report), _StreamFallback(), False),
-        (review_trace(repaired_report), _StreamFallback(), False),
     ])
     with patch.object(analyzer, "_run_stream", stream), patch(
         "features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
     ):
         outcome = asyncio.run(analyzer.analyze(ENTRY))
-    assert outcome.ok
-    assert outcome.result["detailed_report"] == repaired_report
-    assert outcome.result["needs_human_review"]
-    assert outcome.result["confidence"] == 0.58
-    assert stream.await_count == 3
+    assert not outcome.ok
+    assert outcome.result is None
+    assert outcome.error_type == "evidence_gate_failed"
+    assert stream.await_count == 2
     repair_command = stream.await_args_list[1].args[0]
     assert "--resume" in repair_command
     assert "native gms_rt_* MCP tools directly" in repair_command[-1]

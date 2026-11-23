@@ -1186,22 +1186,6 @@ select option {
     white-space: nowrap;
 }
 
-/* 烧写弹框：固件文件元信息。占位行常驻 + 单行省略，保证选择固件
-   前后弹框尺寸稳定，不因内容出现/换行而跳动。 */
-.firmware-file-meta {
-    min-height: 18px;
-    color: var(--text-secondary);
-
-    margin-top: 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.firmware-file-meta.is-empty {
-    color: var(--text-muted);
-}
-
 /* 烧写弹框：固件 / AOA 分组框 */
 .modal-fieldset {
     border: 1px solid var(--border-color);

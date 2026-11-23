@@ -15,9 +15,9 @@
     .status{white-space:pre-wrap;color:var(--primary-light)}#message{min-height:24px;white-space:pre-wrap}#message[data-error=true],.error{color:var(--danger-color)}
     .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;white-space:nowrap}th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border-color)}th{color:var(--text-secondary)}.pagination{display:flex;align-items:center;justify-content:flex-end;gap:10px;margin-top:12px}
     form{max-width:850px;display:grid;gap:16px}label{display:grid;gap:5px}label.check{display:flex;align-items:center;gap:8px}input:not([type=checkbox]),select,textarea{width:100%;padding:8px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);color:var(--text-primary)}input:not([type=checkbox]),select{min-height:var(--ui-control-height)}textarea{min-height:85px;resize:vertical}.form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px}small{color:var(--text-secondary)}
-    .category-counts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}.count{padding:12px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg)}.count strong{display:block;margin-bottom:4px}
+    .radar-section{margin:12px 0;border:1px solid var(--border-color);border-radius:6px;overflow:auto}.radar-subtitle{font-weight:700;margin:18px 0 9px}.radar-section table{font-variant-numeric:tabular-nums}.radar-section th{background:var(--light-bg)}.radar-section td{vertical-align:middle}.radar-num{text-align:right}.radar-added{color:#4fd5a0!important;font-weight:700}.radar-modified{color:#ffc46e!important;font-weight:700}.radar-removed{color:#ff8796!important;font-weight:700}.radar-warning{color:#ffc46e!important;font-weight:700}.radar-pill{display:inline-block;padding:2px 8px;border:1px solid currentColor;border-radius:5px}.radar-description{white-space:normal;overflow-wrap:anywhere;min-width:220px;max-width:610px;line-height:1.6}.radar-evidence summary{color:var(--primary-light);cursor:pointer}.radar-evidence .diff{margin-top:6px}.radar-record-title{white-space:normal;overflow-wrap:anywhere}.radar-note{margin:10px 0;color:var(--text-secondary)}#email-preview-html{display:block;width:100%;height:620px;border:1px solid var(--border-color);border-radius:6px;background:white;margin:12px 0}
     details{border:1px solid var(--border-color);border-radius:6px;margin-top:8px;padding:10px}summary{cursor:pointer;overflow-wrap:anywhere}.diff{display:grid;grid-template-columns:1fr 1fr;gap:12px}pre{white-space:pre-wrap;overflow-wrap:anywhere;background:var(--dark-bg);border-radius:6px;padding:12px;max-height:440px;overflow:auto}a{color:var(--primary-light)}[hidden]{display:none!important}
-    @media(max-width:700px){.category-counts,.form-row,.diff{grid-template-columns:1fr}.panel{padding:12px}.workspace-actions{overflow-x:auto}.workspace-actions button{flex:none}button,input,select{min-height:var(--ui-touch-target-height)}}
+    @media(max-width:700px){.form-row,.diff{grid-template-columns:1fr}.panel{padding:12px}.workspace-actions{overflow-x:auto}.workspace-actions button{flex:none}button,input,select{min-height:var(--ui-touch-target-height)}}
   </style>
   <!-- .modal/.modal-content/.modal-header 基础档位在 modal.css（shell 同源）；
        缺它时关闭弹框移除 .show 后元素仍按默认 display 可见。 -->
@@ -29,7 +29,7 @@
   <script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller" defer></script>
   <script src="/static/js/update-radar-settings.js?v=20261117-radar-fixed-footer" defer></script>
   <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
-  <script src="/gms-update-radar/page.js?v=20261116-aligned-corner-path" defer></script>
+  <script src="/gms-update-radar/page.js?v=20261123-radar-access-capability-v1" defer></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs" defer></script>
     <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
@@ -59,10 +59,12 @@
       <div class="pagination"><button id="runs-prev" type="button">上一页</button><span id="runs-page"></span><button id="runs-next" type="button">下一页</button></div>
     </div>
     <section id="detail" class="panel" hidden>
-      <h2 id="detail-title"></h2><p id="detail-state" class="muted"></p><div id="counts" class="category-counts"></div>
-      <p id="scan-errors" class="error"></p><p id="mail-error" class="error"></p>
+      <h2 id="detail-title"></h2><p id="detail-state" class="muted"></p>
+      <h3 class="radar-subtitle">监控项统计</h3><div id="counts" class="radar-section"></div>
+      <div id="scan-errors" hidden></div><p id="mail-error" class="error"></p>
       <div class="actions"><button id="preview-mail" type="button" disabled>预览邮件</button><button id="retry-mail" type="button" disabled>重发本次汇总</button></div>
-      <pre id="email-preview" hidden></pre><div id="changes"></div>
+      <iframe id="email-preview-html" sandbox title="HTML邮件预览" referrerpolicy="no-referrer" hidden></iframe>
+      <pre id="email-preview" hidden></pre><h3 class="radar-subtitle">变更明细</h3><div id="changes" class="radar-section"></div>
       <div class="pagination"><button id="changes-prev" type="button">上一页</button><span id="changes-page"></span><button id="changes-next" type="button">下一页</button></div>
     </section>
   </section>

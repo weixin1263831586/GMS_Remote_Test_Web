@@ -10,6 +10,55 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeUpdateRadarTests(RuntimeUiHarness):
+    def test_manual_scan_explains_access_and_rechecks_after_account_switch(self):
+        page = self.new_page()
+        restricted = {'enabled': True}
+        requested_settings = []
+
+        def status(route):
+            if restricted['enabled']:
+                route.fulfill(content_type='application/json', body=json.dumps({
+                    'success': True,
+                    'data': {'enabled': False, 'scan_time': '04:00',
+                             'timezone': 'Asia/Shanghai', 'next_run_at': None,
+                             'tasks': ['packages'], 'can_manage': False},
+                }))
+            else:
+                route.continue_()
+
+        try:
+            page.on('request', lambda request: requested_settings.append(request.url)
+                    if '/api/gms-update-radar/settings' in request.url else None)
+            page.route('**/api/gms-update-radar/status', status)
+            page.goto(self.base_url + '/gms-update-radar', wait_until='domcontentloaded')
+            expect(page.locator('#scan')).to_be_disabled()
+            expect(page.locator('#modify')).to_be_disabled()
+            expect(page.locator('#message')).to_contain_text('请在主页面切换管理员账号')
+            self.assertIn('管理员账号', page.locator('#scan').get_attribute('title'))
+            self.assertEqual(requested_settings, [], 'read-only page must not probe private settings')
+
+            # Refresh must recover permissions without reloading the whole page.
+            restricted['enabled'] = False
+            page.locator('#refresh').click()
+            expect(page.locator('#scan')).to_be_enabled()
+            expect(page.locator('#modify')).to_be_enabled()
+            expect(page.locator('#message')).not_to_contain_text('切换管理员账号')
+            self.assertEqual(requested_settings, [])
+
+            # An active server-side scan still disables manual triggering.
+            store = RadarStore(Path(self.runtime_dir.name) / 'gms_update_radar.sqlite3')
+            run_id = store.claim('manual', owner_id='ui-test')
+            self.assertIsNotNone(run_id)
+            page.locator('#refresh').click()
+            expect(page.locator('#scan')).to_be_disabled()
+            self.assertIn('正在运行', page.locator('#scan').get_attribute('title'))
+            store.finish(run_id, 'completed',
+                         {'categories': {}, 'errors': {}, 'changes_total': 0, 'tasks': []}, [])
+            page.locator('#refresh').click()
+            expect(page.locator('#scan')).to_be_enabled()
+        finally:
+            page.close()
+
     def test_radar_settings_history_and_mail_actions_after_reentry(self):
         page = self.new_page()
         popup = None
@@ -82,14 +131,17 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
             popup.locator('#scan').click()
             expect(popup.locator('#detail-title')).to_contain_text(f'扫描 #{run_id}')
             expect(popup.locator('#mail-error')).to_contain_text('记录已保留')
-            expect(popup.locator('#counts .count')).to_have_count(2)
-            popup.locator('#changes summary').click()
+            expect(popup.locator('#counts tbody tr')).to_have_count(2)
+            expect(popup.locator('#changes .radar-pill')).to_have_text('修改')
+            popup.locator('#changes details summary').click()
             expect(popup.locator('#changes pre').first).to_contain_text('old-demo.zip')
             expect(popup.locator('#changes pre').last).to_contain_text(evidence)
             self.assertFalse(popup.evaluate('Boolean(window.radarEvidenceExecuted)'))
             popup.get_by_role('button', name='预览邮件').click()
-            expect(popup.locator('#email-preview')).to_contain_text('1 项变更')
-            expect(popup.locator('#email-preview')).to_contain_text('old-demo.zip')
+            expect(popup.locator('#email-preview-html')).to_be_visible()
+            expect(popup.frame_locator('#email-preview-html').get_by_text('监控项统计')).to_be_visible()
+            expect(popup.frame_locator('#email-preview-html').get_by_text('old-demo.zip')).to_be_visible()
+            self.assertFalse(popup.evaluate('Boolean(window.radarEvidenceExecuted)'))
 
             def mail(route):
                 if route.request.method == 'POST':

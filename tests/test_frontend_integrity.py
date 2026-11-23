@@ -469,6 +469,26 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
         self.assertIn("loginHost !== String(result.client_ip || '')", api_script)
 
+    def test_account_switch_modal_keeps_choices_above_concise_help(self):
+        markup = read_text("web/shell/dialogs/client-account-switch.html")
+        api = read_text("web/static/js/api.js")
+        styles = read_text("web/static/css/modal-tech-cases.css")
+
+        # Account controls appear immediately after the header; help remains below.
+        choices = markup.index('class="client-account-switch-options"')
+        status = markup.index('id="client-account-switch-status"')
+        identity = markup.index('id="client-account-switch-identity"')
+        self.assertLess(choices, status)
+        self.assertLess(status, identity)
+        self.assertNotIn('class="tech-intro"', markup)
+        self.assertNotIn('class="modal-info-text"', markup)
+        self.assertIn('仅切换网页登录账号，需输入目标账号密码。', markup)
+        self.assertIn('客户端保持不变：', markup)
+        self.assertIn('仅切换网页登录账号，需输入目标账号密码。', api)
+        self.assertIn('.tech-dialog--client-account-switch .client-account-switch-help', styles)
+        for key in ('admin', 'client'):
+            self.assertIn(f'data-a0="{key}"', markup)
+
     def test_page_title_rows_use_the_shared_header_component(self):
         """页面标题行组件化：几何单点收敛（components/page-header*.html +
         .page-header-row），页面只保留标题文本与动作内容。

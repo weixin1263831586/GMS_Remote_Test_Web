@@ -6,16 +6,17 @@
                     <span class="tech-header-ticks" aria-hidden="true"></span><button type="button" class="modal-close" aria-label="关闭" data-click="closeClientAccountSwitchModal">&times;</button>
                 <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
                 <div class="modal-body">
-<p class="tech-intro">切换用于访问当前系统的网页登录账号。</p>
-                    <p class="modal-info-text">客户端保持不变：<strong id="client-account-switch-identity">检测中...</strong></p>
-                    <p id="client-account-switch-status" class="modal-info-text">仅可切换以下账号；切换后需要输入目标账号密码。</p>
-                    <div class="client-account-switch-options">
+                    <div class="client-account-switch-options" role="group" aria-label="可切换的网页登录账号">
                         <button id="client-account-switch-admin-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="admin">
                             <span>★ 管理员账号</span><small>管理平台与用户</small>
                         </button>
                         <button id="client-account-switch-client-option" type="button" class="client-account-switch-option" data-click="selectClientAccountSwitch" data-a0="client">
                             <span id="client-account-switch-client-label">当前客户端账号</span><small>可运行每日晨报</small>
                         </button>
+                    </div>
+                    <div class="client-account-switch-help" role="note">
+                        <p id="client-account-switch-status">仅切换网页登录账号，需输入目标账号密码。</p>
+                        <p>客户端保持不变：<strong id="client-account-switch-identity">识别中…</strong></p>
                     </div>
                 </div>
             </div>

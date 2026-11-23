@@ -1,0 +1,175 @@
+name: Audit GTS binding report evidence (read-only)
+on:
+  push:
+    branches: ['audit/main-ci-fix-20261123']
+    paths: ['.github/workflows/audit-gts-binding-report-readonly.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  report-evidence:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    steps:
+      - name: Check registered host (read-only)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+          echo "Targeted, read-only GtsAppBindingTestCases archive inspection"
+      - name: Locate targeted archive and inspect observed Tradefed XML metadata
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import time
+          import zipfile
+          import xml.parsers.expat
+          from pathlib import Path
+
+          roots = [
+              (Path.home() / "GMS_Remote_Test_Web", 14),
+              (Path.home() / "Downloads", 6),
+              (Path.home() / "GMS-Suite", 10),
+              (Path("/tmp"), 9),
+              (Path("/var/tmp"), 8),
+              (Path("/srv"), 8),
+              (Path("/data"), 8),
+              (Path.home(), 6),
+          ]
+          skip = {
+              ".git", ".venv", "venv", "__pycache__", "node_modules",
+              ".cache", "Android_SDK", "android_sdk", ".gradle",
+              "out", "build", "target", "objects", ".rustup",
+              ".cargo", ".npm", "actions-runner", ".local",
+          }
+          started = time.monotonic()
+          found = []
+          visited = 0
+          seen = set()
+          timed_out = False
+          for root, maxdepth in roots:
+              if not root.is_dir():
+                  continue
+              for directory, folders, files in os.walk(root, followlinks=False):
+                  visited += 1
+                  if time.monotonic() - started > 100:
+                      timed_out = True
+                      break
+                  depth = len(Path(directory).relative_to(root).parts)
+                  folders[:] = sorted(f for f in folders if f not in skip) if depth < maxdepth else []
+                  for name in files:
+                      low = name.lower()
+                      if not low.endswith(".zip") or not (
+                          "gtsappbindingtestcases" in low or
+                          ("662309" in low and "gts" in low)
+                      ):
+                          continue
+                      path = Path(directory) / name
+                      try:
+                          stat = path.stat()
+                          key = (stat.st_dev, stat.st_ino)
+                          if key in seen:
+                              continue
+                          seen.add(key)
+                          found.append((stat.st_mtime, stat.st_size, path))
+                      except OSError:
+                          continue
+              if timed_out:
+                  break
+          found.sort(reverse=True)
+          print("REPORT_DISCOVERY=" + json.dumps({
+              "archive_count": len(found), "scan_timeout": timed_out,
+              "directories_visited": visited,
+              "archive_names": [p.name for _, _, p in found[:10]],
+          }, ensure_ascii=False))
+          if not found:
+              print("REPORT_EVIDENCE_JSON=" + json.dumps({
+                  "status": "not_found",
+                  "note": "Targeted archive not found in accessible host directories; cannot determine its suite_plan",
+              }))
+          for _mtime, size, path in found[:4]:
+              evidence = {"status": "found", "archive": path.name, "archive_size": size}
+              try:
+                  with zipfile.ZipFile(path) as zf:
+                      members = zf.infolist()
+                      xmls = [
+                          item for item in members
+                          if Path(item.filename).name.lower() == "test_result.xml"
+                          and not item.is_dir()
+                      ]
+                      evidence["zip_entries"] = len(members)
+                      evidence["test_result_xml_count"] = len(xmls)
+                      evidence["xml"] = []
+                      for member in sorted(xmls, key=lambda i: len(i.filename))[:3]:
+                          detail = {"xml_member": member.filename,
+                                    "uncompressed_bytes": member.file_size}
+                          if member.file_size > 128 * 1024 * 1024:
+                              detail["status"] = "oversize_skipped"
+                              evidence["xml"].append(detail)
+                              continue
+                          root_attrs = {}
+                          clues = []
+                          markers = set()
+                          parser = xml.parsers.expat.ParserCreate()
+                          def on_start(tag, attrs):
+                              tag = tag.split(":")[-1].lower()
+                              if tag == "result" and not root_attrs:
+                                  for key in ("suite_name", "suite_plan", "suite_version",
+                                              "test_type", "testType", "plan", "suite"):
+                                      if attrs.get(key):
+                                          root_attrs[key] = attrs[key][:200]
+                              for key, value in attrs.items():
+                                  lk = key.lower()
+                                  lv = str(value).lower()
+                                  if "gts-root" in lv or "gts_root" in lv or "gts-root-tradefed" in lv:
+                                      markers.add("explicit_gts_root_marker")
+                                  if ((("plan" in lk or "suite" in lk or lk in ("test_type", "testtype"))
+                                       and len(value) <= 200 and len(clues) < 30)
+                                      or (tag == "option" and
+                                          attrs.get("name", "").lower() in ("plan", "suite-plan", "suite_plan"))):
+                                      if lk not in ("commandline", "command_line", "commandlineargs"):
+                                          clues.append({"tag": tag, "attribute": key, "value": value[:150]})
+                          parser.StartElementHandler = on_start
+                          processed = 0
+                          with zf.open(member) as stream:
+                              while processed < 24 * 1024 * 1024:
+                                  chunk = stream.read(65536)
+                                  if not chunk:
+                                      parser.Parse(b"", True)
+                                      break
+                                  parser.Parse(chunk, False)
+                                  processed += len(chunk)
+                          detail.update(root_attributes=root_attrs,
+                                        plan_metadata=clues[:24],
+                                        markers=sorted(markers),
+                                        inspected_bytes=processed)
+                          evidence["xml"].append(detail)
+                      log_names = [x for x in members if re.search(
+                          r"(?:^|/)(?:host_log|invoc_complete_host_log|end_host_log).*\.txt$",
+                          x.filename, re.I)]
+                      evidence["host_log_count"] = len(log_names)
+                      execution_markers = set()
+                      for item in log_names[:12]:
+                          if item.file_size > 500 * 1024 * 1024:
+                              continue
+                          with zf.open(item) as f:
+                              raw = f.read(4 * 1024 * 1024).decode("utf-8", "replace").lower()
+                          if re.search(r"gts[-_]root(?:-tradefed)?", raw):
+                              execution_markers.add("host_log_gts_root")
+                          if "gts-tradefed" in raw:
+                              execution_markers.add("host_log_gts_tradefed")
+                      evidence["host_log_markers"] = sorted(execution_markers)
+              except (OSError, ValueError, RuntimeError, zipfile.BadZipFile,
+                      xml.parsers.expat.ExpatError) as exc:
+                  evidence["status"] = "parse_error"
+                  evidence["error_class"] = type(exc).__name__
+              print("REPORT_EVIDENCE_JSON=" + json.dumps(evidence, ensure_ascii=False))
+          PY

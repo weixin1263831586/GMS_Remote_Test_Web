@@ -129,10 +129,12 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                                 labelWidth: node.querySelector('.summary-label').getBoundingClientRect().width,
                                 valueWidth: node.querySelector('.summary-value').getBoundingClientRect().width
                             })),
-                            reportValueFits: (() => {
-                                const value = document.querySelector('.report-summary-report .summary-value');
-                                return value.scrollWidth <= value.clientWidth + 2;
-                            })(),
+                            reportNameTitle: document.querySelector(
+                                '#report-summary .report-summary-report'
+                            ).title,
+                            reportNameWrap: getComputedStyle(document.querySelector(
+                                '#report-summary .report-summary-report'
+                            )).whiteSpace,
                             actionTop: rect('.report-overview-actions').top,
                             summaryWidth: rect('#report-summary').width,
                             summaryContentRight: rect('#report-summary .report-summary-report').right,
@@ -154,13 +156,20 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     self.assertEqual(metrics["control"], "32px", metrics)
                     self.assertLessEqual(metrics["summaryHeight"], 46, metrics)
                     self.assertLessEqual(metrics["overviewHeight"], 50, metrics)
-                    self.assertGreaterEqual(len(metrics["summaryItems"]), 8, metrics)
+                    self.assertEqual(len(metrics["summaryItems"]), 9, metrics)
                     for item in metrics["summaryItems"][:-1]:
-                        self.assertGreaterEqual(item["width"], item["labelWidth"] + item["valueWidth"])
-                    if width == 1792:
-                        self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 440, metrics)
-                        self.assertTrue(metrics["reportValueFits"], metrics)
-                        self.assertFalse(metrics["summaryOverflow"], metrics)
+                        self.assertAlmostEqual(item["width"], 150, delta=1, msg=metrics)
+                        self.assertGreaterEqual(
+                            item["width"], item["labelWidth"] + item["valueWidth"], metrics
+                        )
+                    self.assertGreaterEqual(metrics["summaryItems"][-1]["width"], 300, metrics)
+                    self.assertEqual(metrics["reportNameWrap"], "nowrap", metrics)
+                    self.assertEqual(
+                        metrics["reportNameTitle"],
+                        "Redmine-48231-2026.11.16_17.04.22.327_8108_CtsWindowManagerDeviceActivity.zip",
+                    )
+                    if width == 1280:
+                        self.assertTrue(metrics["summaryOverflow"], metrics)
                     self.assertLessEqual(
                         max(item["top"] for item in metrics["summaryItems"])
                         - min(item["top"] for item in metrics["summaryItems"]), 1, metrics
@@ -204,7 +213,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_large_cts_counts_fit_compact_single_row_summary_chips(self):
+    def test_large_cts_counts_fit_fixed_single_row_summary_chips(self):
         page = self.new_page()
         try:
             self.goto_shell(page)
@@ -212,7 +221,10 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
             page.evaluate("""() => displayReportAnalysis({
                 report_name: '2026.10.14_15.28.47.806_5426',
                 summary: {total: 3038784, pass: 3036568, fail: 2216, pass_rate: '99.93%'},
-                details: {test_type: 'CTS', suite_version: '17_r2', android_version: '17'},
+                details: {
+                    test_type: 'CTS', suite_version: '17_r2',
+                    android_version: '17', soc_platform: 'RK3572S'
+                },
                 failures: [{module: 'CtsAppOps2TestCases',
                             name: 'android.app.appops2.cts.AppOpsLoggingTest#requestInstall',
                             reason: 'java.lang.IndexOutOfBoundsException'}]
@@ -225,6 +237,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                 (".report-summary-test-type", "CTS"),
                 (".report-summary-suite-version", "17_r2"),
                 (".report-summary-android-version", "17"),
+                (".report-summary-soc-platform", "RK3572S"),
             )
             for selector, value in expected:
                 cell = page.locator("#report-summary " + selector)
@@ -235,11 +248,72 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     valueFits: el.querySelector('.summary-value').scrollWidth
                         <= el.querySelector('.summary-value').clientWidth + 1
                 })""")
-                self.assertLessEqual(geom["width"], 150, msg=geom)
+                self.assertAlmostEqual(geom["width"], 150, delta=1, msg=geom)
                 self.assertTrue(geom["valueFits"], (selector, geom))
             self.assertEqual(page.locator("#report-summary").evaluate(
                 "el => getComputedStyle(el).flexWrap"
             ), "nowrap")
+        finally:
+            page.close()
+
+
+    def test_gts_eight_fixed_summary_cells_on_lab_chromium(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('report-analysis', null)")
+            page.evaluate("""() => displayReportAnalysis({
+                report_name: 'Redmine-662309-GtsAppBindingTestCases.zip',
+                summary: {total: 1, pass: 0, fail: 1, pass_rate: '0.00%'},
+                details: {
+                    test_type: 'GTS', suite_version: '14_r3',
+                    android_version: '17', soc_platform: 'RK3572S'
+                },
+                failures: [{
+                    module: 'GtsAppBindingTestCases',
+                    name: 'com.google.android.gts.appbinding.AppBindingTest#testDispatchAppService',
+                    reason: 'FAILURE: expected not to be: 2'
+                }]
+            })""")
+            expected = (
+                ("总用例数：", "1"), ("通过：", "0"), ("失败：", "1"),
+                ("通过率：", "0.00%"), ("测试类型：", "GTS"),
+                ("套件版本：", "14_r3"), ("Android版本：", "17"),
+                ("SOC平台：", "RK3572S"),
+            )
+            for width in (1792, 1440, 1280):
+                with self.subTest(viewport_width=width):
+                    page.set_viewport_size({"width": width, "height": 856})
+                    measured = page.locator(
+                        "#report-summary .report-summary-stats > div, "
+                        "#report-summary .report-summary-context > div"
+                    ).evaluate_all("""nodes => nodes.map(node => ({
+                        label: node.querySelector('.summary-label')?.textContent,
+                        value: node.querySelector('.summary-value')?.textContent,
+                        width: node.getBoundingClientRect().width,
+                        top: node.getBoundingClientRect().top,
+                        valueFits: node.querySelector('.summary-value').scrollWidth
+                            <= node.querySelector('.summary-value').clientWidth + 1
+                    }))""")
+                    self.assertEqual(len(measured), 9, measured)
+                    for item, (label, value) in zip(measured[:8], expected):
+                        self.assertEqual((item["label"], item["value"]), (label, value))
+                        self.assertAlmostEqual(item["width"], 150, delta=1, msg=measured)
+                        self.assertTrue(item["valueFits"], (item, measured))
+                    self.assertEqual(measured[8]["label"], "测试报告：")
+                    self.assertGreaterEqual(measured[8]["width"], 300)
+                    self.assertLessEqual(
+                        max(item["top"] for item in measured)
+                        - min(item["top"] for item in measured), 1, measured
+                    )
+                    self.assertLessEqual(page.evaluate(
+                        "document.documentElement.scrollWidth - innerWidth"
+                    ), 2)
+                    screenshot_dir = os.getenv("GMS_UI_PREVIEW_DIR")
+                    if screenshot_dir:
+                        target = Path(screenshot_dir)
+                        target.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(target / f"report-gts-150px-{width}.png"))
         finally:
             page.close()
 
