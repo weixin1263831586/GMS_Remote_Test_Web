@@ -152,6 +152,10 @@ class ReportAnalysisAgentTests(unittest.TestCase):
             ('suite_name="GTS" suite_plan="gts"', 'GTS'),
             ('suite_name="GTS"', 'GTS'),
             ('suite_name="CTS" suite_plan="gts-root"', 'CTS'),
+            ('suite_name="GTS" suite_plan="gts-interactive"', 'GTS-INTERACTIVE'),
+            ('suite_name="GTS" suite_plan="gts_interactive"', 'GTS-INTERACTIVE'),
+            ('suite_name="GTS-INTERACTIVE"', 'GTS-INTERACTIVE'),
+            ('suite_name="CTS" suite_plan="gts-interactive"', 'CTS'),
         )
         with TemporaryDirectory() as tmp:
             for index, (xml_header, expected) in enumerate(cases):
@@ -175,6 +179,15 @@ class ReportAnalysisAgentTests(unittest.TestCase):
         report = XMLReportParser().parse_content(xml)
         self.assertIsNotNone(report)
         self.assertEqual(report.test_type, "GTS-ROOT")
+
+        interactive_xml = TEST_XML.replace(
+            '<Build build_version_release="16"',
+            '<Build suite_plan="gts-interactive" build_version_release="16"',
+            1,
+        )
+        report = XMLReportParser().parse_content(interactive_xml)
+        self.assertIsNotNone(report)
+        self.assertEqual(report.test_type, "GTS-INTERACTIVE")
 
     def test_agent_recursively_analyzes_nested_report_archives_and_logs(self):
         from features.reports import ReportAnalysisAgent

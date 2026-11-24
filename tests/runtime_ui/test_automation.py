@@ -550,7 +550,7 @@ class RuntimeAutomationTests(RuntimeUiHarness):
             expect(page.locator("#flash-mode-hint")).to_contain_text("仅测试")
             self.assertEqual(
                 page.locator("#automation-test-type option").all_text_contents(),
-                ["CTS", "GSI", "GTS", "GTS-ROOT", "STS", "VTS", "APTS"],
+                ["CTS", "GSI", "GTS", "GTS-ROOT", "GTS-INTERACTIVE", "STS", "VTS", "APTS"],
             )
             expect(page.locator("#automation-test-suite")).to_have_value(
                 "/suite/android-cts-16_r2/tools"
@@ -560,6 +560,10 @@ class RuntimeAutomationTests(RuntimeUiHarness):
                 page.locator("#automation-test-suite option").all_text_contents(),
             )
             page.select_option("#automation-test-type", "GTS-ROOT")
+            expect(page.locator("#automation-test-suite")).to_have_value(
+                "/suite/android-gts-14.1-R1/tools"
+            )
+            page.select_option("#automation-test-type", "GTS-INTERACTIVE")
             expect(page.locator("#automation-test-suite")).to_have_value(
                 "/suite/android-gts-14.1-R1/tools"
             )

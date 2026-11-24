@@ -44,8 +44,8 @@ die() { log "❌ $*"; exit 1; }
 show_help() {
 cat <<EOF
 用法:
-  $0 <cts|gsi|gts|sts|vts|apts> [模块] [用例]
-  $0 <cts|gsi|gts|sts|vts|apts> retry <RESULT_TIMESTAMP>
+  $0 <cts|gsi|gts|gts-root|gts-interactive|sts|vts|apts> [模块] [用例]
+  $0 <cts|gsi|gts|gts-root|gts-interactive|sts|vts|apts> retry <RESULT_TIMESTAMP>
 
 必需参数:
   --test-suite path         测试套件完整路径(如：/home/user/GMS-Suite/android-cts-16_r3-1/android-cts/tools)
@@ -62,7 +62,7 @@ cat <<EOF
   $0 cts CtsSecurityTestCases --device-args '-s DEVICE1' --test-suite "$HOME/GMS-Suite/android-cts/tools" --local-server "$USER@$(hostname -I | awk '{print $1}')"
   $0 cts retry 2026.01.12_14.36.17.772_8696 --device-args '-s DEVICE1' --test-suite "$HOME/GMS-Suite/android-cts/tools" --local-server "$USER@$(hostname -I | awk '{print $1}')"
 
-支持测试类型: cts, gsi, gts, sts, vts, apts
+支持测试类型: cts, gsi, gts, gts-root, gts-interactive, sts, vts, apts
 EOF
 }
 
@@ -189,6 +189,10 @@ parse_args() {
             SUITE_PREFIX="gts"
             TEST_COMMAND="gts-root"
             ;;
+        gts-interactive)
+            SUITE_PREFIX="gts"
+            TEST_COMMAND="gts-interactive"
+            ;;
         sts)
             SUITE_PREFIX="sts"
             TEST_COMMAND="sts-dynamic-full"
@@ -202,7 +206,7 @@ parse_args() {
             TEST_COMMAND="apts"
             ;;
         *)
-            die "不支持的测试类型: $Test_Type (目前仅支持: cts, gsi, gts, gts-root, sts, vts, apts)"
+            die "不支持的测试类型: $Test_Type (目前仅支持: cts, gsi, gts, gts-root, gts-interactive, sts, vts, apts)"
             ;;
     esac
 }
@@ -296,11 +300,11 @@ result_matches_current_run() {
     if [[ -n "$TEST_COMMAND" ]]; then
         local match_cmd="$TEST_COMMAND"
         # sts-dynamic-full 在结果 XML 中可能仅记录为 sts-dynamic，
-        # 用更短的前缀匹配避免漏掉有效结果。
-        if [[ "$TEST_COMMAND" == sts-dynamic-* ]]; then
-            match_cmd="sts-dynamic"
+        # 这两个名称都按完整参数匹配。
+        if [[ "$TEST_COMMAND" == sts-dynamic-full ]]; then
+            match_cmd='sts-dynamic(-full)?'
         fi
-        grep -Fq "command_line_args=\"$match_cmd" "$xml_file" || return 1
+        grep -Eq -- "command_line_args=\"${match_cmd}([[:space:]]|\")" "$xml_file" || return 1
     fi
     if [[ -n "$Test_Module" ]] && ! grep -Fq -- "-m $Test_Module" "$xml_file"; then
         return 1

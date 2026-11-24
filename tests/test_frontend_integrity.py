@@ -264,6 +264,10 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertRegex(shell, r'/static/js/navigation\.js\?v=[A-Za-z0-9_-]+')
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
+        self.assertIn("testTypeLower === 'gts-interactive'", navigation)
+        self.assertIn("GTS-INTERACTIVE使用GTS测试套件", navigation)
+        test_shell = read_text("web/shell/pages/test.html")
+        self.assertIn('<option value="GTS-INTERACTIVE">GTS-INTERACTIVE</option>', test_shell)
 
     def test_server_file_browser_uses_resolved_suite_path(self):
         navigation_text = read_all_frontend_js()

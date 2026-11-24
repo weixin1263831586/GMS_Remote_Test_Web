@@ -386,21 +386,21 @@ gms-rt-test-start() {
 _gms_rt_test_start_help() {
     cat << EOF
 Usage:
-  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE] [--wait] [--max-wait SECONDS]
-  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] [SUITE] [--wait]
+  Mode 1 (Direct test): gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] <SUITE> [--worker ID] [--wait] [--max-wait SECONDS]
+  Mode 2 (Retry report): gms-rt-test-start --retry <REPORT_TIMESTAMP> [DEVICE] [TYPE] <SUITE> [--wait]
 
 智能参数识别：
   - 包含 '/' 的参数自动识别为路径（test_suite）
   - 以 android- 开头的短套件名（如 android-cts-17_r1）自动解析为套件 tools 路径
   - 其他参数按位置识别为 test_module, test_case
+  - 启动或重试均需指定所选 Worker 上的套件；远端 Worker 建议使用完整 tools 路径
 
 示例:
   gms-rt-test-start RK3572GMS4 CTS android-cts-17_r1
   gms-rt-test-start RK3572GMS4 CTS /path/to/android-cts/tools
-  gms-rt-test-start RK3572GMS4 CTS TestModuleName
-  gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName /path/to/android-cts/tools
   gms-rt-test-start RK3572GMS4 CTS TestModuleName TestCaseName /path/to/suite
-  gms-rt-test-start RK3572GMS4 CTS TestModuleName --wait --max-wait 3600
+  gms-rt-test-start RK3572GMS4 CTS TestModuleName /path/to/android-cts/tools --wait --max-wait 3600
 
 模块名说明:
   - MODULE 必须是 tradefed 模块名（即套件 testcases/ 下的文件名去掉扩展名，如 CtsHardwareTestCases），
@@ -413,16 +413,17 @@ Supported Test Types:
   CTS      - Compatibility Test Suite
   GTS      - Google Mobile Services Test Suite
   GTS-ROOT - GTS with root permissions
+  GTS-INTERACTIVE - GTS interactive plan (gts-tradefed run gts-interactive)
   STS      - Security Test Suite
   VTS      - Vendor Test Suite
   APTS     - Android Peripheral Test Suite
   GSI      - Generic System Image tests (uses CTS suite)
 
 Examples:
-  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases
-  gms-rt-test-start RF8TC2W4JNH GTS-ROOT
-  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS
-  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH /path/to/suite
+  gms-rt-test-start RF8TC2W4JNH CTS CtsPermissionTestCases /path/to/android-cts/tools
+  gms-rt-test-start RF8TC2W4JNH GTS-ROOT /path/to/android-gts/tools
+  gms-rt-test-start RF8TC2W4JNH GTS-INTERACTIVE /path/to/android-gts/tools
+  gms-rt-test-start --retry 2026.04.11_17.27.04.421_2920 RF8TC2W4JNH GTS-INTERACTIVE /path/to/android-gts/tools
 EOF
 }
 

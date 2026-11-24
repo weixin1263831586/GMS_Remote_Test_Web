@@ -41,7 +41,8 @@ gms-rt-devices-wait <devices> --state online --max-wait 300   # 有界等待设�
 
 ```bash
 gms-rt-test-start RK3572 CTS android-cts-17_r1
-# 用法：gms-rt-test-start <DEVICE> [TYPE] [MODULE/SUITE] [CASE/SUITE] [SUITE] [--wait] [--max-wait SECONDS]
+gms-rt-test-start RK3572 GTS-INTERACTIVE /path/to/android-gts/tools
+# 用法：gms-rt-test-start <DEVICE> [TYPE] [MODULE] [CASE] <SUITE> [--worker ID] [--wait] [--max-wait SECONDS]
 # 长任务（CTS 模块几十分钟）不要带 --wait：直接拿 job_id 后轮询
 ```
 
@@ -58,7 +59,7 @@ gms-rt-jobs-list [limit]                       # 便宜的忙碌检查（limit 1
 
 - 设备忙/冲突 → exit `5`：先 `gms-rt-jobs-list` 检查占用，不要盲目重试。
 - 只有 exit `6`（网络）适合有界自动重试；exit `4` 表示需人工提权。
-- 失败重跑用 retry 模式：`gms-rt-test-start --retry <report_timestamp>`。
+- 失败重跑时传入报告时间戳和原测试套件，例如 `gms-rt-test-start --retry REPORT_TIMESTAMP RK3572 GTS-INTERACTIVE /path/to/android-gts/tools`。
 
 ### 5. 读取结果与报告
 

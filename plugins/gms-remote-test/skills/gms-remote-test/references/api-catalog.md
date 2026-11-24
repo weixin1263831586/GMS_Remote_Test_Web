@@ -244,9 +244,10 @@ gms-rt-devices-console usb-FTDI_FT232R_USB_UART_A6022883-if00-port0 --tail 500
 gms-rt-devices-wait DEVICE-1 --state online --max-wait 300 --json --non-interactive
 gms-rt-devices-info 'DEVICE-1 DEVICE-2'
 gms-rt-test-status
-gms-rt-test-start DEVICE-1 CTS CtsPermissionTestCases
+gms-rt-test-start DEVICE-1 CTS CtsPermissionTestCases /path/to/android-cts/tools
 gms-rt-test-start DEVICE-1 CTS android-cts-17_r1 --wait
-gms-rt-test-start --retry REPORT_TIMESTAMP DEVICE-1 GTS /path/to/suite
+gms-rt-test-start DEVICE-1 GTS-INTERACTIVE /path/to/android-gts/tools
+gms-rt-test-start --retry REPORT_TIMESTAMP DEVICE-1 GTS-INTERACTIVE /path/to/android-gts/tools
 gms-rt-test-suites-result android-cts-17_r1
 gms-rt-jobs-wait JOB_ID --max-wait 21600 --json --non-interactive
 gms-rt-reports-list
@@ -315,7 +316,7 @@ error when the reference is ambiguous or unknown.
 
 ```bash
 gms-rt-test-suites-result android-cts-17_r1
-gms-rt-test-start RK3572 CTS CtsPermissionTestCases --wait --max-wait 3600
+gms-rt-test-start RK3572 CTS CtsPermissionTestCases /path/to/android-cts/tools --wait --max-wait 3600
 gms-rt-burn-firmware firmware.zip RK3572 --wait-online
 gms-rt-burn-gsi system.img RK3572 --wait-online=900
 ```

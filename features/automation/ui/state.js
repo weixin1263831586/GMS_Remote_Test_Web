@@ -132,12 +132,12 @@ const STATUS_LABELS_ZH = {
     test_failed: '测试失败', analysis_failed: '分析失败',
     reporting_failed: '上报失败',
 };
-const TEST_TYPE_OPTIONS = ['CTS', 'GSI', 'GTS', 'GTS-ROOT', 'STS', 'VTS', 'APTS'];
+const TEST_TYPE_OPTIONS = ['CTS', 'GSI', 'GTS', 'GTS-ROOT', 'GTS-INTERACTIVE', 'STS', 'VTS', 'APTS'];
 
 function suiteTypeForTest(testType) {
     const normalized = String(testType || '').trim().toUpperCase();
     if (normalized === 'GSI') return 'CTS';
-    if (normalized === 'GTS-ROOT' || normalized === 'APTS') return 'GTS';
+    if (normalized === 'GTS-ROOT' || normalized === 'GTS-INTERACTIVE' || normalized === 'APTS') return 'GTS';
     return normalized;
 }
 

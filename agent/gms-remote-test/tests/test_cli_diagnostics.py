@@ -142,6 +142,17 @@ gms-rt-sdk-search --source sdk --revision HEAD --query needle \\
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("Usage: gms-rt-devices-info", result.stdout)
 
+    def test_test_start_help_provides_gts_interactive_suite_paths(self):
+        usage = self.run_cli("gms-rt-test-start", "--help")
+        self.assertEqual(usage.returncode, 0, usage.stderr)
+        self.assertIn("<suite>", usage.stdout)
+        result = self.run_snippet("_gms_rt_test_start_help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        examples = [line.strip() for line in result.stdout.splitlines()
+                    if line.strip().startswith("gms-rt-test-start ") and " GTS-INTERACTIVE " in line]
+        self.assertEqual(len(examples), 2)
+        self.assertTrue(all(line.endswith("/path/to/android-gts/tools") for line in examples))
+
     def test_help_flag_respects_json_output_contract(self):
         result = self.run_cli("gms-rt-devices-wait", "--json", "--help")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -337,10 +337,21 @@
     min-height: 26px;
 }
 /* Eight semantic summary cells have a stable fixed width. The report name
-   alone absorbs remaining space; narrow viewports scroll inside #report-summary. */
+   alone absorbs remaining space; narrow viewports scroll inside #report-summary.
+   Fail / pass-rate are narrower (130px) because their values are short;
+   test type is wider (190px) so variant names such as GTS-INTERACTIVE fit. */
 #page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div:not(.report-summary-report) {
     flex: 0 0 150px;
     width: 150px;
+}
+#page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div.report-summary-fail,
+#page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div.report-summary-pass-rate {
+    flex: 0 0 130px;
+    width: 130px;
+}
+#page-report-analysis #report-summary :is(.report-summary-stats, .report-summary-context) > div.report-summary-test-type {
+    flex: 0 0 190px;
+    width: 190px;
 }
 /* Report filename remains the flexible last chip and never wraps. */
 #page-report-analysis #report-summary .report-summary-context > .report-summary-report {

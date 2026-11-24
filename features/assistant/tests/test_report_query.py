@@ -85,6 +85,24 @@ async def test_latest_compares_all_matching_suite_versions(native_environment, t
 
 
 @pytest.mark.asyncio
+async def test_variant_query_keeps_the_plan_with_a_gts_suite(native_environment):
+    _, request, queue, plain, _ = native_environment
+    interactive = make_result(plain.parent.parent, "2026.11.14_14.22.45.723_8397",
+                              suite_plan="gts-interactive", start=1794637373770)
+    for message, expected_type, expected_path in (
+        ("最新gts_interactive报告", "GTS-INTERACTIVE", interactive),
+        ("最新GTS报告", "GTS", plain),
+    ):
+        params = report_query.apply_report_goal_params("reports_list", {"worker_id": "worker-1"}, message)
+        outcome = await report_query.query_reports({}, request, params)
+        assert outcome.success and outcome.data["latest_confirmed"]
+        assert [(report["test_type"], report["result_dir"]) for report in outcome.data["reports"]] == [
+            (expected_type, str(expected_path)),
+        ]
+        assert queue.await_args.args[2]["test_type"] == expected_type
+
+
+@pytest.mark.asyncio
 async def test_native_failure_never_turns_into_no_reports_or_confirmed_latest(native_environment):
     _, request, queue, _, _ = native_environment
     from foundation.error_model import ApiError

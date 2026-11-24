@@ -7,11 +7,11 @@ from worker_agent.report_summaries import native_report_summaries
 from worker_agent.suite_actions import execute_suite_action
 
 
-def make_result(root, directory, *, start=1794550973770, test_type="GTS", padding=""):
+def make_result(root, directory, *, start=1794550973770, test_type="GTS", suite_plan="", padding=""):
     run = root / "results" / directory
     run.mkdir(parents=True)
     (run / "test_result.xml").write_text(
-        f'<Result suite_name="{test_type}" suite_version="14_r4" start="{start}" '
+        f'<Result suite_name="{test_type}" suite_plan="{suite_plan}" suite_version="14_r4" start="{start}" '
         'start_display="Fri Nov 13 14:22:53 CST 2026" end_display="Fri Nov 13 15:21:01 CST 2026" '
         f'devices="RK3326GMS1">{padding}<Summary pass="1236" failed="28" '
         'modules_done="186" modules_total="188"/></Result>', encoding="utf-8",
@@ -28,6 +28,20 @@ def test_all_headers_are_compared_before_limit_and_type_filter(tmp_path):
     assert result["scanned_results"] == 3 and result["count"] == 2
     assert result["coverage_complete"] and not result["errors"]
     assert result["reports"][0]["pass"] == 1236 and result["reports"][0]["fail"] == 28
+
+
+def test_gts_plan_metadata_is_used_before_filtering(tmp_path):
+    scenarios = [
+        ("2026.11.13_14.00.00", "gts", "", "GTS"),
+        ("2026.11.13_15.00.00", "gts-interactive", "", "GTS-INTERACTIVE"),
+        ("2026.11.13_16.00.00", "", '<Build suite_plan="gts_root"/>', "GTS-ROOT"),
+    ]
+    for directory, plan, build, _ in scenarios:
+        make_result(tmp_path, directory, suite_plan=plan, padding=build)
+    for directory, _, _, test_type in scenarios:
+        result = native_report_summaries(tmp_path, test_type=test_type)
+        assert result["coverage_complete"]
+        assert [(item["timestamp"], item["test_type"]) for item in result["reports"]] == [(directory, test_type)]
 
 
 def test_large_metadata_prefix_is_not_skipped(tmp_path):

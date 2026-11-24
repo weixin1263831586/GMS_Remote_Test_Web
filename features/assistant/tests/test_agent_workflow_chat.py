@@ -352,6 +352,19 @@ def test_unprivileged_plan_generation_never_touches_remote_lookups(monkeypatch):
         api._agent_sessions.update(saved)
 
 
+def test_suite_lookup_selects_installed_gts_for_interactive_plan(monkeypatch):
+    from features.assistant.workflow_execution import workflow_preflight_lookups
+
+    def list_suites(context):
+        assert context["worker_id"] == "w1"
+        return [{"suite_type": "gts", "tools_path": "/suite/android-gts/tools"}]
+
+    monkeypatch.setattr("features.assistant.workflow_execution._list_suites", list_suites)
+    suite_lookup = workflow_preflight_lookups({}, "u1")["suite_lookup"]
+    assert suite_lookup("GTS-INTERACTIVE", "w1")["tools_path"] == "/suite/android-gts/tools"
+    assert not suite_lookup("VTS", "w1")["ok"]
+
+
 def test_suite_lookup_isolates_ssh_failures(monkeypatch):
     """审核 P1：套件 SSH/网络异常转为阻塞项，不得中断对话预检。"""
     from features.assistant.workflow_draft import preflight_draft

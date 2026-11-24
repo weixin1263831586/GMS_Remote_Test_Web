@@ -534,7 +534,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
         {
             "name": "gms_rt_test_start",
             "description": (
-                "Start a GMS test (CTS/GTS/VTS/STS) on a device, or retry a "
+                "Start a GMS test (CTS/GTS/GTS-ROOT/GTS-INTERACTIVE/VTS/STS) on a device, or retry a "
                 "previous report (retry=<timestamp> from a failed report). "
                 "Returns a cluster_job_id; follow up with gms_rt_jobs_status "
                 "polling (every 20-30s) and gms_rt_jobs_events instead of "
@@ -562,13 +562,19 @@ ALL_TOOLS: list[dict[str, Any]] = [
                     },
                     "type": {
                         "type": "string",
-                        "description": "Test type, e.g. CTS, GTS, VTS.",
+                        "description": (
+                            "Test type, e.g. CTS, GTS, GTS-ROOT, "
+                            "GTS-INTERACTIVE, STS, VTS."
+                        ),
                     },
                     "module": {"type": "string", "description": "Module name."},
                     "case": {"type": "string", "description": "Optional case filter."},
                     "suite": {
                         "type": "string",
-                        "description": "Suite short name, e.g. android-cts-17_r1.",
+                        "description": (
+                            "Required for launch and retry. Use the suite tools path from the "
+                            "target Worker, or its short name for a locally resolvable suite."
+                        ),
                     },
                     "retry": {
                         "type": "string",

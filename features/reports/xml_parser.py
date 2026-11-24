@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from foundation.tradefed_report_type import report_test_type
+
 from .models import _LXML_PARSER, ET, USE_LXML, TestFailure, TestReport, etree
 
 
@@ -84,31 +86,8 @@ class XMLReportParser:
         return ''
 
     def _get_test_type(self, root) -> str:
-        """Resolve the executed test type without conflating GTS and GTS-ROOT.
-
-        Tradefed can record the common suite_name=GTS for both modes. Its
-        explicit suite_plan is authoritative for the GTS-ROOT distinction;
-        merely seeing a GTS module or binary does not imply root execution.
-        """
-        suite = self._first_attr(
-            root, 'suite_name', 'suite', 'test_type', 'testType', 'type', 'Type'
-        )
         build = root.find('.//Build')
-        if not suite and build is not None:
-            suite = self._first_attr(build, 'test_type', 'testType')
-        suite_normalized = suite.strip().lower().replace('_', '-')
-        if suite_normalized == 'gts-root':
-            return 'GTS-ROOT'
-        plan = self._first_attr(
-            root, 'suite_plan', 'test_plan', 'suitePlan', 'testPlan', 'plan'
-        )
-        if not plan and build is not None:
-            plan = self._first_attr(
-                build, 'suite_plan', 'test_plan', 'suitePlan', 'testPlan', 'plan'
-            )
-        if plan.strip().lower().replace('_', '-') == 'gts-root' and suite_normalized in ('', 'gts'):
-            return 'GTS-ROOT'
-        return suite or 'GTS'
+        return report_test_type(root.attrib, build.attrib if build is not None else {}) or 'GTS'
 
     def _get_device_info(self, root) -> str:
         """获取设备信息"""

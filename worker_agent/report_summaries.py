@@ -7,6 +7,8 @@ import stat
 from pathlib import Path
 from xml.parsers import expat
 
+from foundation.tradefed_report_type import report_test_type
+
 
 _RUN_DIRECTORY = re.compile(r"\d{4}\.\d{2}\.\d{2}_\d{2}\.\d{2}\.\d{2}(?:\.\d+)?(?:_\d+)?")
 
@@ -16,8 +18,9 @@ class _HeaderCompleteError(Exception):
 
 
 def read_report_header(xml_path: Path) -> dict:
-    """Only return observed Result/Summary attributes; forbid DTDs/entities."""
+    """Read report metadata through Summary and forbid DTDs/entities."""
     result = {}
+    build = {}
     parser = expat.ParserCreate()
 
     def reject_doctype(*_args):
@@ -26,6 +29,8 @@ def read_report_header(xml_path: Path) -> dict:
     def start(name, attributes):
         if name == "Result" and not result:
             result.update(attributes)
+        elif name == "Build" and result and not build:
+            build.update(attributes)
         elif name == "Summary" and result:
             result["summary"] = dict(attributes)
             raise _HeaderCompleteError
@@ -40,6 +45,7 @@ def read_report_header(xml_path: Path) -> dict:
                 parser.Parse(block, False)
             parser.Parse(b"", True)
         except _HeaderCompleteError:
+            result["report_test_type"] = report_test_type(result, build).strip().upper()
             return result
     raise ValueError("Result/Summary metadata is missing")
 
@@ -82,7 +88,7 @@ def native_report_summaries(suite_root: Path, *, test_type="", limit=100) -> dic
                 raise ValueError("report XML is not a regular file")
             scanned += 1
             header = read_report_header(xml)
-            actual_type = str(header.get("suite_name") or "").upper()
+            actual_type = header["report_test_type"]
             if test_type and actual_type != test_type.upper():
                 continue
             summary = header["summary"]

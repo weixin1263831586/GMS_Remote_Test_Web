@@ -116,7 +116,7 @@
 | `gms-rt-test-clean` | Clean the test execution environment | gms-rt-test-clean |
 | `gms-rt-test-logs-stream` | Stream live test logs until interrupted | gms-rt-test-logs-stream |
 | `gms-rt-test-modules` | List available tradefed modules for a suite (testcases/ directory) | gms-rt-test-modules <tools_path\|suite_name> [--filter PATTERN] |
-| `gms-rt-test-start` | Start a test with smart args, suite short names, device prefixes, and optional --wait | gms-rt-test-start <device> [type] [module] [case] [suite] [--worker ID] [--wait[=SECONDS]] [--max-wait SECONDS] \| --retry <timestamp> [device] [type] [suite] [options] |
+| `gms-rt-test-start` | Start a test with smart args, suite short names, device prefixes, and optional --wait | gms-rt-test-start <device> [type] [module] [case] <suite> [--worker ID] [--wait[=SECONDS]] [--max-wait SECONDS] \| --retry <timestamp> [device] [type] <suite> [options] |
 | `gms-rt-test-status` | Read the legacy aggregate test execution status | gms-rt-test-status |
 | `gms-rt-test-stop` | Compatibility stop entry: cancel an explicit job, or the only active owned test job | gms-rt-test-stop [job_id] |
 | `gms-rt-test-suites` | List available test suite installations and tools paths | gms-rt-test-suites [base_path] |

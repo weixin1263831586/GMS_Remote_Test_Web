@@ -347,6 +347,7 @@ function displayTestReports(reports) {
     const typeColors = {
         'CTS': '#3B82F6',
         'GTS': '#10B981',
+        'GTS-INTERACTIVE': '#2DD4BF',
         'STS': '#F59E0B',
         'VTS': '#8B5CF6',
         'XTS': '#EC4899',
@@ -371,6 +372,7 @@ function displayTestReports(reports) {
         tr.dataset.timestamp = report.timestamp;
         tr.dataset.testType = report.test_type || '';
         tr.dataset.suitePath = report.suite_path || '';
+        tr.dataset.suiteVersion = report.suite_version || '';
         tr.dataset.workerId = report.worker_id || workspaceLocalWorkerId();
         tr.dataset.clusterJobId = report.cluster_job_id || '';
         tr.dataset.attemptId = report.attempt_id || '';
@@ -443,7 +445,9 @@ function handleReportAction(event) {
             analyzeReport(timestamp, reportContext.report_id);
             break;
         case 'retry':
-            retryReportWithSuite(reportContext.report_name || timestamp, testType, suitePath, reportContext);
+            retryReportWithSuite(reportContext.report_name || timestamp, testType, suitePath, {
+                ...reportContext, suite_version: tr.dataset.suiteVersion
+            });
             break;
         case 'download':
             downloadReport(timestamp, reportContext.report_id, reportContext.report_name);
@@ -536,85 +540,54 @@ async function deleteReport(timestamp, reportId = '', reportName = '') {
 }
 
 
+let reportRetryGeneration = 0;
+
 async function retryReportWithSuite(timestamp, testType, suitePath, reportContext = {}) {
+    const generation = ++reportRetryGeneration;
     try {
+        await window.GmsWorkspace?.ready;
+        if (generation !== reportRetryGeneration) return;
         const workerId = reportContext.worker_id || workspaceLocalWorkerId();
-        const workerSelect = document.getElementById('cluster-worker');
-        if (workerSelect) {
+        if (workspaceWorkerId() !== workerId) {
             await loadClusterWorkers();
-            if (Array.from(workerSelect.options).some(option => option.value === workerId)) {
-                workerSelect.value = workerId;
-                await switchTestWorker();
+            if (generation !== reportRetryGeneration) return;
+            const workerSelect = document.getElementById('cluster-worker');
+            if (!workerSelect || !Array.from(workerSelect.options).some(option => option.value === workerId)) {
+                showToast('报告所属测试主机当前不可用', 'warning');
+                return;
             }
+            workerSelect.value = workerId;
+            await switchTestWorker();
         }
+        if (generation !== reportRetryGeneration || workspaceWorkerId() !== workerId) return;
+
         switchPage('test');
+        const signal = window.GmsPageLifecycle.signalFor('test');
+        await window.GmsPageLifecycle.ready;
+        if (signal?.aborted || currentPage !== 'test' || workspaceWorkerId() !== workerId
+                || generation !== reportRetryGeneration) return;
 
-        // 等待页面切换完成后填充数据
-        setTimeout(() => {
-            debugLog(`[Retry] 开始填充数据, timestamp=${timestamp}, testType=${testType}, suitePath=${suitePath}`);
+        const testTypeSelect = document.getElementById('test-type');
+        const suiteSelect = document.getElementById('test-suite');
+        const plan = normalizeReportTestType(testType).toUpperCase();
+        if (plan) testTypeSelect.value = plan;
+        document.getElementById('retry-result').value = timestamp;
+        enforceFieldExclusion('retry');
 
-            const reportNameInput = document.getElementById('retry-result');
-            if (reportNameInput) {
-                reportNameInput.value = timestamp;
-                debugLog(`[Retry] 已填入报告名称: ${timestamp}`);
-            } else {
-                console.error('[Retry] 未找到 retry-result 元素');
-            }
-
-            // 互斥：填入报告时清空模块和用例
-            enforceFieldExclusion('retry');
-
-            const testTypeSelect = document.getElementById('test-type');
-            if (testTypeSelect) {
-                if (testType) {
-                    testTypeSelect.value = testType;
-                    debugLog(`[Retry] 已设置测试类型: ${testType}, 当前值: ${testTypeSelect.value}`);
-                } else {
-                    console.warn('[Retry] testType 为空');
-                }
-            } else {
-                console.error('[Retry] 未找到 test-type 元素');
-            }
-
-            const suitePathInput = document.getElementById('test-suite');
-            if (suitePathInput) {
-                if (suitePath && suitePath !== 'null' && suitePath !== '') {
-                    suitePathInput.value = suitePath;
-                    debugLog(`[Retry] 已设置测试套件路径(原始): ${suitePath}, 当前值: ${suitePathInput.value}`);
-                } else {
-                    const suitePaths = {
-                        'CTS': 'android-cts',
-                        'GSI': 'android-gsi',
-                        'GTS': 'android-gts',
-                        'STS': 'android-sts',
-                        'VTS': 'android-vts',
-                        'APTS': 'android-apts'
-                    };
-
-                    if (testType && suitePaths[testType]) {
-                        suitePathInput.value = suitePaths[testType];
-                        debugLog(`[Retry] 已设置测试套件路径(默认): ${suitePaths[testType]}, 当前值: ${suitePathInput.value}`);
-                    } else {
-                        console.warn(`[Retry] testType=${testType} 没有对应的套件路径`);
-                    }
-                }
-            } else {
-                console.error('[Retry] 未找到 test-suite 元素');
-            }
-
-            debugLog('[Retry] 当前字段值:', {
-                reportName: document.getElementById('retry-result')?.value,
-                testType: document.getElementById('test-type')?.value,
-                suitePath: document.getElementById('test-suite')?.value
-            });
-        }, 200);
-
-        showToast(`已填入报告名称: ${timestamp}${testType ? ' (类型: ' + testType + ')' : ''}`, 'success');
-
-        // 可选：自动开始测试（如果需要的话，取消下面的注释）
-        // setTimeout(() => {
-        //     startTest();
-        // }, 500);
+        const originalPath = String(suitePath || '').trim();
+        const version = value => normalizeReportTestType(value).replace(/^android-[a-z]+-/, '');
+        const reportVersion = version(reportContext.suite_version);
+        const candidates = testSuitesWorkerId === workerId ? testSuitesCache.filter(suite => {
+            if (!currentTestSuiteStillValid(suite.tools_path, testTypeSelect.value)) return false;
+            if (originalPath && originalPath !== 'null') return suite.tools_path === originalPath;
+            return !reportVersion || version(suite.version) === reportVersion;
+        }) : [];
+        const [path, ...otherPaths] = new Set(candidates.map(suite => suite.tools_path));
+        suiteSelect.value = path && !otherPaths.length ? path : '';
+        showToast(
+            suiteSelect.value ? `已填入报告名称: ${timestamp}` : '请为该报告选择原测试套件',
+            suiteSelect.value ? 'success' : 'warning'
+        );
     } catch (error) {
         console.error('Retry report error:', error);
         showToast('操作失败: ' + error.message, 'error');

@@ -9,6 +9,7 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from features.auth import require_authenticated_user
+from foundation.execution_spec import suite_type_for_test
 
 from .execution_result import ToolResult
 from .report_access import bind_report_access
@@ -36,9 +37,11 @@ def apply_report_goal_params(tool_name, params, message):
     result = dict(params)
     if tool_name != "reports_list":
         return result
-    types = set(re.findall(r"(?<![A-Za-z])(CTS|GTS|VTS|STS)(?![A-Za-z])", message, re.I))
+    types = {name.upper().replace("_", "-") for name in re.findall(
+        r"(?<![A-Za-z])(CTS|GTS(?:[-_](?:ROOT|INTERACTIVE))?|VTS|STS)(?![A-Za-z])", message, re.I,
+    )}
     if len(types) == 1:
-        result["test_type"] = types.pop().upper()
+        result["test_type"] = types.pop()
     if re.search(r"最新|\blatest\b|\bmost recent\b", message, re.I):
         count = re.search(r"最新\s*(\d+)\s*(?:份|个|次)", message)
         result.update(latest=True, limit=min(int(count.group(1)), 100) if count else 1)
@@ -77,8 +80,9 @@ async def _native_reports(session, request, query):
     suites = (inventory.data or {}).get("suites")
     if not isinstance(suites, list):
         return [], [{"source": "native_suite", "error": "套件清单返回格式无效"}], 0
-    suites = [suite for suite in suites if not query.test_type or
-              str(suite.get("test_type") or suite.get("suite_type") or "").upper() == query.test_type]
+    suite_type = suite_type_for_test(query.test_type)
+    suites = [suite for suite in suites if not suite_type or
+              suite_type_for_test(suite.get("test_type") or suite.get("suite_type") or "") == suite_type]
     semaphore = asyncio.Semaphore(4)
 
     async def collect(suite):

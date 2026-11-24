@@ -325,10 +325,11 @@ class AutomationService:
 
         test_type = str(plan.get('test_type') or '').strip().upper()
         test_mode_skip = str(plan.get('test_mode') or '').strip().lower() == 'skip'
-        # 与主测试界面保持一致：GSI 运行 CTS 套件，GTS-ROOT 运行 GTS 套件。
+        # 与主测试界面保持一致：GSI 运行 CTS 套件，GTS-ROOT/GTS-INTERACTIVE 运行 GTS 套件。
         suite_test_type = {
             'GSI': 'CTS',
             'GTS-ROOT': 'GTS',
+            'GTS-INTERACTIVE': 'GTS',
         }.get(test_type, test_type)
         worker_id = str(
             plan.get('worker_id') or cluster.config.local_worker_id

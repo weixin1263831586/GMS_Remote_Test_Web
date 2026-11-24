@@ -100,7 +100,7 @@ _NAV_ALIASES: dict[str, str] = {
 
 def _extract_test_type(text: str) -> str:
     upper = text.upper()
-    for test_type in ["GTS-ROOT", "CTS", "GTS", "STS", "VTS", "APTS", "GSI", "CTS_VERIFIER"]:
+    for test_type in ["GTS-ROOT", "GTS-INTERACTIVE", "CTS", "GTS", "STS", "VTS", "APTS", "GSI", "CTS_VERIFIER"]:
         if test_type in upper:
             return test_type
     return ""

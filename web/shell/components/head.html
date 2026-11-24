@@ -21,7 +21,7 @@
     <link rel="stylesheet" href="/static/css/api-docs-workbench.css?v=20261119-api-audit-layout" data-shell-styles>
     <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261120-type-size-dedup-v1" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261123-summary-150px-v1" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261124-summary-cell-widths" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/auth-dialog.css?v=20261117-compact-dialogs" data-shell-styles>
@@ -132,7 +132,7 @@
     <script src="/static/js/pages/vpn-control.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261118-text-only-test-toggle" defer></script>
-    <script src="/static/js/pages/test-reports.js?v=20261119-analysis-status" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20261124-retry-suite" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20261123-summary-150px-v1" defer></script>
     <script src="/static/js/pages/report-analysis-activity.js?v=20261119-shared-status-v2" defer></script>
     <script src="/static/js/pages/report-failure-workbench.js?v=20261119-hostlog-source" defer></script>
@@ -146,7 +146,7 @@
     <script src="/static/js/pages/security-audit.js?v=20261119-disk-inventory" defer></script>
     <script src="/static/js/pages/audit-disk.js?v=20261119-disk-interactions" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20261123-openapi-catalog" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20261124-gts-interactive" defer crossorigin="anonymous"></script>
 
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
 <script src="/static/js/shell/shell-early-boot.js" fetchpriority="high"></script>

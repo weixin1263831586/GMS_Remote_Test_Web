@@ -15,10 +15,10 @@ import re
 from foundation.test_execution_options import validate_execution_options
 
 
-_VALID_TEST_TYPES = {"cts", "gsi", "gts", "gts-root", "sts", "vts", "apts"}
+_VALID_TEST_TYPES = {"cts", "gsi", "gts", "gts-root", "gts-interactive", "sts", "vts", "apts"}
 _SUITE_TEST_TYPES = {
     "cts": {"cts", "gsi"},
-    "gts": {"gts", "gts-root", "apts"},
+    "gts": {"gts", "gts-root", "gts-interactive", "apts"},
     "sts": {"sts"},
     "vts": {"vts"},
 }
@@ -26,6 +26,12 @@ _DEVICE_SERIAL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")
 _LOCAL_SERVER_RE = re.compile(
     r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}@[A-Za-z0-9][A-Za-z0-9.:[\]_-]{0,254}"
 )
+
+
+def suite_type_for_test(test_type: str) -> str:
+    """Return the installed suite family for a test plan."""
+    plan = str(test_type or "").strip().lower().replace("_", "-")
+    return next((suite for suite, plans in _SUITE_TEST_TYPES.items() if plan in plans), plan)
 
 
 class ExecutionSpecError(ValueError):

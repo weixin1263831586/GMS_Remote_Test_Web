@@ -52,11 +52,11 @@ def generate_per_api_help_text(method: str, path: str) -> str | None:
             'description': '启动GMS测试(CTS/VTS/GTS等)',
             'params': [
                 {'name': 'devices', 'type': 'array', 'required': True, 'desc': '设备序列号数组'},
-                {'name': 'test_type', 'type': 'string', 'required': True, 'desc': '测试类型: CTS|VTS|STS|GTS|CTS_VERIFIER'},
-                {'name': 'test_module', 'type': 'string', 'required': True, 'desc': '测试模块名称'},
+                {'name': 'test_type', 'type': 'string', 'required': True, 'desc': '测试类型: CTS|GSI|GTS|GTS-ROOT|GTS-INTERACTIVE|STS|VTS|APTS'},
+                {'name': 'test_module', 'type': 'string', 'required': False, 'desc': '测试模块名称，省略可运行整个测试计划'},
                 {'name': 'test_case', 'type': 'string', 'required': False, 'desc': '具体测试用例(可选)'},
                 {'name': 'retry_dir', 'type': 'string', 'required': False, 'desc': '重试目录(可选)'},
-                {'name': 'test_suite', 'type': 'string', 'required': False, 'desc': '测试套件路径(可选)'}
+                {'name': 'test_suite', 'type': 'string', 'required': True, 'desc': '所选 Worker 清单中的套件 tools 路径'}
             ],
             'response': '{"success": true, "message": "测试已启动"}',
             'usage': '核心接口'

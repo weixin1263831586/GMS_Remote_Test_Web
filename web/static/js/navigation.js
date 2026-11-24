@@ -523,9 +523,9 @@ function currentTestSuiteStillValid(selectedPath, testType) {
     if (!testType) return true;
     const selectedType = String(selected.test_type || '').toLowerCase();
     const requested = String(testType || '').toLowerCase();
-    // GSI rides CTS suites; GTS-ROOT/APTS ride GTS suites.
+    // GSI rides CTS suites; GTS-ROOT/GTS-INTERACTIVE/APTS ride GTS suites.
     if (requested === 'gsi') return selectedType === 'cts';
-    if (requested === 'gts-root' || requested === 'apts') return selectedType === 'gts';
+    if (requested === 'gts-root' || requested === 'gts-interactive' || requested === 'apts') return selectedType === 'gts';
     return selectedType === requested;
 }
 
@@ -538,7 +538,7 @@ function autoSelectTestSuite(testType) {
         debugLog('[autoSelectTestSuite] keeping user selection:', currentSelection);
         return;
     }
-    // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT和APTS使用GTS的测试套件
+    // 特殊处理：GSI使用CTS的测试套件，GTS-ROOT/GTS-INTERACTIVE和APTS使用GTS的测试套件
     let matchingSuites;
     const testTypeLower = testType.toLowerCase();
 
@@ -552,6 +552,12 @@ function autoSelectTestSuite(testType) {
             suite.test_type.toLowerCase() === 'gts'
         );
         addLogEntry('GTS-ROOT使用GTS测试套件', 'info');
+    } else if (testTypeLower === 'gts-interactive') {
+        // GTS-INTERACTIVE 通过 gts-tradefed run gts-interactive 执行，使用 GTS 套件
+        matchingSuites = testSuitesCache.filter(suite =>
+            suite.test_type.toLowerCase() === 'gts'
+        );
+        addLogEntry('GTS-INTERACTIVE使用GTS测试套件', 'info');
     } else if (testTypeLower === 'apts') {
         // APTS使用GTS套件（APTS测试通过gts-tradefed执行）
         matchingSuites = testSuitesCache.filter(suite =>

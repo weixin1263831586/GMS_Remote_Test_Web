@@ -49,6 +49,7 @@ from features.assistant.workflow_draft import (
     update_draft,
 )
 from foundation.error_model import record_internal_error
+from foundation.execution_spec import suite_type_for_test
 
 
 logger = logging.getLogger(__name__)
@@ -282,9 +283,10 @@ def workflow_preflight_lookups(
             # 预检 reason 会回显给 Agent：SSH/网络细节只进日志。
             logger.warning("[Agent] suite lookup failed during preflight", exc_info=True)
             return {"ok": False, "reason": "测试套件查询暂不可用（远程访问失败）"}
+        requested_suite = suite_type_for_test(test_type)
         matched = [
             suite for suite in suites
-            if str(suite.get("test_type") or suite.get("suite_type") or "").upper() == test_type
+            if suite_type_for_test(suite.get("test_type") or suite.get("suite_type") or "") == requested_suite
         ]
         if matched:
             suite = matched[0]

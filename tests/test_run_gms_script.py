@@ -8,11 +8,10 @@ from pathlib import Path
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_GMS_Test_Auto.sh"
 
 
-def _write_result(path: Path, *, module: str, case: str, serial: str) -> None:
+def _write_result(path: Path, *, module: str, case: str, serial: str, plan: str = "vts") -> None:
     path.mkdir(parents=True)
     (path / "test_result.xml").write_text(
-        '<Result command_line_args="vts '
-        f'-m {module} -t {case} -s {serial} --disable-reboot">\n'
+        f'<Result command_line_args="{plan} -m {module} -t {case} -s {serial} --disable-reboot">\n'
         '  <Summary pass="0" failed="1" />\n'
         '</Result>\n',
         encoding="utf-8",
@@ -65,6 +64,30 @@ def test_vts_result_fallback_matches_current_invocation(tmp_path):
     assert f"RESULT DIRECTORY: {matching}" in completed.stdout
     assert f"resolved={matching} pass=0 fail=1" in completed.stdout
     assert str(unrelated) not in completed.stdout
+
+
+def test_result_fallback_requires_the_complete_tradefed_plan(tmp_path):
+    for plan in ("gts", "gts-root", "gts-interactive", "sts-dynamic", "sts-dynamic-full", "sts-dynamic-other"):
+        _write_result(tmp_path / plan, module="SharedModule", case="SharedCase", serial="DEVICE", plan=plan)
+
+    completed = subprocess.run(
+        ["bash", "-c", '''
+            source "$1"
+            Test_Module=SharedModule Test_Case=SharedCase DEVICE_ARGS='-s DEVICE'
+            for TEST_COMMAND in gts gts-root gts-interactive sts-dynamic-full; do
+                for candidate in "$2"/*; do
+                    if result_matches_current_run "$candidate/test_result.xml"; then
+                        printf '%s:%s\\n' "$TEST_COMMAND" "${candidate##*/}"
+                    fi
+                done
+            done
+        ''', "bash", str(SCRIPT), str(tmp_path)],
+        check=True, capture_output=True, text=True,
+    )
+    assert completed.stdout.splitlines() == [
+        "gts:gts", "gts-root:gts-root", "gts-interactive:gts-interactive",
+        "sts-dynamic-full:sts-dynamic", "sts-dynamic-full:sts-dynamic-full",
+    ]
 
 
 def test_tradefed_arguments_are_not_evaluated_as_shell_code(tmp_path):

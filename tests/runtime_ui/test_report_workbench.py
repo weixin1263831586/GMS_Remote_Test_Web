@@ -157,8 +157,11 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     self.assertLessEqual(metrics["summaryHeight"], 46, metrics)
                     self.assertLessEqual(metrics["overviewHeight"], 50, metrics)
                     self.assertEqual(len(metrics["summaryItems"]), 9, metrics)
-                    for item in metrics["summaryItems"][:-1]:
-                        self.assertAlmostEqual(item["width"], 150, delta=1, msg=metrics)
+                    # Fail / pass-rate cells are 130px, the test-type cell is
+                    # 190px, and every other semantic cell stays at 150px.
+                    expected_widths = (150, 150, 130, 130, 190, 150, 150, 150)
+                    for item, width in zip(metrics["summaryItems"][:-1], expected_widths):
+                        self.assertAlmostEqual(item["width"], width, delta=1, msg=metrics)
                         self.assertGreaterEqual(
                             item["width"], item["labelWidth"] + item["valueWidth"], metrics
                         )
@@ -230,16 +233,16 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                             reason: 'java.lang.IndexOutOfBoundsException'}]
             })""")
             expected = (
-                (".report-summary-total", "3038784"),
-                (".report-summary-pass", "3036568"),
-                (".report-summary-fail", "2216"),
-                (".report-summary-pass-rate", "99.93%"),
-                (".report-summary-test-type", "CTS"),
-                (".report-summary-suite-version", "17_r2"),
-                (".report-summary-android-version", "17"),
-                (".report-summary-soc-platform", "RK3572S"),
+                (".report-summary-total", "3038784", 150),
+                (".report-summary-pass", "3036568", 150),
+                (".report-summary-fail", "2216", 130),
+                (".report-summary-pass-rate", "99.93%", 130),
+                (".report-summary-test-type", "CTS", 190),
+                (".report-summary-suite-version", "17_r2", 150),
+                (".report-summary-android-version", "17", 150),
+                (".report-summary-soc-platform", "RK3572S", 150),
             )
-            for selector, value in expected:
+            for selector, value, width in expected:
                 cell = page.locator("#report-summary " + selector)
                 expect(cell).to_have_count(1)
                 expect(cell.locator(".summary-value")).to_have_text(value)
@@ -248,7 +251,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     valueFits: el.querySelector('.summary-value').scrollWidth
                         <= el.querySelector('.summary-value').clientWidth + 1
                 })""")
-                self.assertAlmostEqual(geom["width"], 150, delta=1, msg=geom)
+                self.assertAlmostEqual(geom["width"], width, delta=1, msg=(selector, geom))
                 self.assertTrue(geom["valueFits"], (selector, geom))
             self.assertEqual(page.locator("#report-summary").evaluate(
                 "el => getComputedStyle(el).flexWrap"
@@ -276,10 +279,10 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                 }]
             })""")
             expected = (
-                ("总用例数：", "1"), ("通过：", "0"), ("失败：", "1"),
-                ("通过率：", "0.00%"), ("测试类型：", "GTS"),
-                ("套件版本：", "14_r3"), ("Android版本：", "17"),
-                ("SOC平台：", "RK3572S"),
+                ("总用例数：", "1", 150), ("通过：", "0", 150), ("失败：", "1", 130),
+                ("通过率：", "0.00%", 130), ("测试类型：", "GTS", 190),
+                ("套件版本：", "14_r3", 150), ("Android版本：", "17", 150),
+                ("SOC平台：", "RK3572S", 150),
             )
             for width in (1792, 1440, 1280):
                 with self.subTest(viewport_width=width):
@@ -296,9 +299,11 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                             <= node.querySelector('.summary-value').clientWidth + 1
                     }))""")
                     self.assertEqual(len(measured), 9, measured)
-                    for item, (label, value) in zip(measured[:8], expected):
+                    for item, (label, value, cell_width) in zip(measured[:8], expected):
                         self.assertEqual((item["label"], item["value"]), (label, value))
-                        self.assertAlmostEqual(item["width"], 150, delta=1, msg=measured)
+                        self.assertAlmostEqual(
+                            item["width"], cell_width, delta=1, msg=measured
+                        )
                         self.assertTrue(item["valueFits"], (item, measured))
                     self.assertEqual(measured[8]["label"], "测试报告：")
                     self.assertGreaterEqual(measured[8]["width"], 300)
@@ -313,7 +318,7 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
                     if screenshot_dir:
                         target = Path(screenshot_dir)
                         target.mkdir(parents=True, exist_ok=True)
-                        page.screenshot(path=str(target / f"report-gts-150px-{width}.png"))
+                        page.screenshot(path=str(target / f"report-gts-cell-widths-{width}.png"))
         finally:
             page.close()
 

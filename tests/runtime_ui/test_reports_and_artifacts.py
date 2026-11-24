@@ -7,6 +7,33 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
+    def test_gts_interactive_retry_resolves_the_report_suite_from_worker_inventory(self):
+        page = self.new_page()
+        suite = "/suite/android-gts-14-R2/android-gts/tools"
+
+        def respond(route, payload):
+            route.fulfill(status=200, content_type="application/json", body=json.dumps(payload))
+
+        page.route("**/api/test/suites*", lambda route: respond(route, {"success": True, "suites": [
+            {"test_type": "gts", "version": "android-gts-14-R2", "tools_path": suite},
+            {"test_type": "gts", "version": "android-gts-14-R3", "tools_path": "/suite/android-gts-14-R3/android-gts/tools"},
+        ]}))
+        page.route("**/api/reports/list*", lambda route: respond(route, {"success": True, "reports": [
+            {"timestamp": "2026.11.23_10.00.00", "test_type": "GTS-INTERACTIVE", "suite_version": "14_r2"},
+            {"timestamp": "2026.11.23_11.00.00", "test_type": "GTS-INTERACTIVE"},
+        ]}))
+        try:
+            self.goto_shell(page)
+            for report_timestamp, expected in (("2026.11.23_10.00.00", suite), ("2026.11.23_11.00.00", "")):
+                page.evaluate("switchPage('reports')")
+                page.locator(f'tr[data-timestamp="{report_timestamp}"] [data-action="retry"]').click()
+                expect(page.locator("#retry-result")).to_have_value(report_timestamp)
+                expect(page.locator("#test-type")).to_have_value("GTS-INTERACTIVE")
+                expect(page.locator("#test-suite")).to_have_value(expected)
+            expect(page.locator("#toast")).to_contain_text("选择原测试套件")
+        finally:
+            page.close()
+
     def test_user_actions_and_report_identity_use_friendly_horizontal_display(self):
         page = self.new_page()
         try:

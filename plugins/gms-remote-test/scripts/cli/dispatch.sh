@@ -67,7 +67,7 @@ _gms_rt_command_usage() {
         gms-rt-system-skills) printf '%s' 'gms-rt-system-skills [skill_name]' ;;
         gms-rt-terminal-open) printf '%s' 'gms-rt-terminal-open [host] [user] [port]' ;;
         gms-rt-terminal-push) printf '%s' 'gms-rt-terminal-push <file_path> [target_path]' ;;
-        gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] [suite] [--worker ID] [--wait[=SECONDS]] [--max-wait SECONDS] | --retry <timestamp> [device] [type] [suite] [options]' ;;
+        gms-rt-test-start) printf '%s' 'gms-rt-test-start <device> [type] [module] [case] <suite> [--worker ID] [--wait[=SECONDS]] [--max-wait SECONDS] | --retry <timestamp> [device] [type] <suite> [options]' ;;
         gms-rt-test-stop) printf '%s' 'gms-rt-test-stop [job_id]' ;;
         gms-rt-test-suites) printf '%s' 'gms-rt-test-suites [base_path]' ;;
         gms-rt-test-suites-result) printf '%s' 'gms-rt-test-suites-result <tools_path|suite_name> [--force-refresh]' ;;
@@ -659,8 +659,9 @@ ${YELLOW}Examples:${NC}
   gms-rt-devices-wait DEVICE --state online --max-wait 300
   gms-rt-devices-bootloader-lock '["DEVICE-1", "DEVICE-2"]'
   gms-rt-desktop-vnc-start
-  gms-rt-test-start DEVICE CTS TestModule
+  gms-rt-test-start DEVICE CTS TestModule /path/to/android-cts/tools
   gms-rt-test-start DEVICE CTS android-cts-17_r1 --wait
+  gms-rt-test-start DEVICE GTS-INTERACTIVE /path/to/android-gts/tools
   gms-rt-test-suites-result android-cts-17_r1
   gms-rt-burn-firmware firmware.zip DEVICE --wait-online
   gms-rt-test-logs-stream

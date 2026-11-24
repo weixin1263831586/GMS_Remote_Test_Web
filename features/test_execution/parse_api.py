@@ -79,7 +79,7 @@ Direct test mode params:
 Retry mode params:
   params: ["--retry", "REPORT_TIMESTAMP", "DEVICE", "TYPE", "SUITE"]
 
-Supported Test Types: CTS, GTS, GTS-ROOT, STS, VTS, APTS, GSI
+Supported Test Types: CTS, GTS, GTS-ROOT, GTS-INTERACTIVE, STS, VTS, APTS, GSI
 """
         return PlainTextResponse(content=help_text, headers={"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=300"})
 
