@@ -1,7 +1,7 @@
 name: Native GMS compiled release smoke
 on:
   push:
-    branches: [main, 'ui/**']
+    branches: [main, 'ui/**', 'audit/main-ci-fix-*']
     paths:
       - '.github/workflows/compiled-release-native-smoke.yml'
       - 'scripts/release/build_binary_release.py'
@@ -20,6 +20,7 @@ on:
       - 'scripts/run_Device_Lock.sh'
       - 'scripts/configure_local_worker_software.sh'
       - 'requirements.txt'
+      - 'foundation/routing_introspection.py'
       - 'features/**/ui/**'
       - 'web/templates/architecture.html'
       - 'docs/architecture/*.mmd'
