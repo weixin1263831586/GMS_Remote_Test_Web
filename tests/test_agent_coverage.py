@@ -36,6 +36,13 @@ class AgentCoverageTests(unittest.TestCase):
 
         self.assertEqual(sorted(documented_paths - registered_paths), [])
 
+    def test_client_config_uses_the_sanitized_readonly_endpoint(self):
+        tool = registry.get("config_client")
+        self.assertEqual(tool.api_path, "/api/config/client")
+        self.assertEqual(tool.method, "GET")
+        self.assertTrue(tool.is_readonly)
+        self.assertEqual(tool.executor_ref, "features.users.config_api:get_client_config")
+
     def test_agent_executor_refs_resolve_after_refactor(self):
         missing = []
         for tool in registry.get_all_tools():

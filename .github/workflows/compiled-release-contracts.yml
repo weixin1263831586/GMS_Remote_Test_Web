@@ -4,6 +4,7 @@ on:
     branches:
       - main
       - 'ui/**'
+      - 'audit/main-ci-fix-*'
     paths:
       - 'scripts/release/**'
       - 'scripts/gms_backup.py'
@@ -20,6 +21,7 @@ on:
       - 'features/system/agent_package_registry.py'
       - 'README.md'
       - 'foundation/runtime_settings.py'
+      - 'foundation/routing_introspection.py'
       - 'foundation/config.py'
       - 'bootstrap/env_loader.py'
       - 'install.sh'

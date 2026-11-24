@@ -31,6 +31,7 @@ function startStatusPolling() {
             return;
         }
         pollRunning = true;
+        const documentSignal = window.GmsDocumentAbort.signal;
         try {
             if (state.clusterJobId) {
                 const jobId = encodeURIComponent(state.clusterJobId);
@@ -43,12 +44,12 @@ function startStatusPolling() {
                 state.clusterEventSequenceByJob = state.clusterEventSequenceByJob || {};
                 const jobCursor = state.clusterEventSequenceByJob[state.clusterJobId] ?? -1;
                 const [jobResponse, eventResponse] = await Promise.all([
-                    apiCall(`/api/cluster/jobs/${jobId}`, 'GET', null, {background: true}),
-                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(jobCursor))}&limit=1000`, 'GET', null, {background: true})
+                    apiCall(`/api/cluster/jobs/${jobId}`, 'GET', null, {background: true, signal: documentSignal}),
+                    apiCall(`/api/cluster/jobs/${jobId}/events?after=${encodeURIComponent(String(jobCursor))}&limit=1000`, 'GET', null, {background: true, signal: documentSignal})
                 ]);
                 // Stale-response guard: if the user switched jobs (or stopped
                 // polling) while these requests were in flight, drop them.
-                if (stopped) return;
+                if (stopped || documentSignal.aborted) return;
                 if (String(state.clusterJobId || '') !== polledJobId) {
                     debugLog('[StatusPolling] Discarding stale poll response for', polledJobId);
                     return;
@@ -127,7 +128,8 @@ function startStatusPolling() {
             const statusUrl = shouldFetchLogs
                 ? `/api/test/status?since=${encodeURIComponent(String(state.lastLogCount || 0))}`
                 : '/api/test/status?logs=false';
-            const status = await apiCall(statusUrl, 'GET', null, {background: true});
+            const status = await apiCall(statusUrl, 'GET', null, {background: true, signal: documentSignal});
+            if (stopped || documentSignal.aborted) return;
 
             // Durable jobs survive a Controller restart and do not depend on
             // sessionStorage.  Recover the newest active job for the selected
@@ -220,6 +222,7 @@ function startStatusPolling() {
             }
 
         } catch (error) {
+            if (stopped || isApiRequestCancelled(error, documentSignal)) return;
             console.error('Status polling error:', error);
             // 失败也要退避：会话失效（401）时轮询曾以 2 秒频率无限重试，
             // 单个后台标签页一天可产生数万次请求，持续占用本机连接。

@@ -512,6 +512,41 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_document_abort_cancels_status_poll_without_console_error(self):
+        page = self.new_page()
+        self.install_api_mocks(page, [])
+        try:
+            self.goto_shell(page)
+            self.wait_for_shell_scripts(page)
+            page.evaluate("""() => {
+                stopTestStatusPolling();
+                state.clusterJobId = '';
+                const original = window.apiCall;
+                window.__statusPollPending = false;
+                window.apiCall = (url, method, data, options = {}) => {
+                    if (!String(url).startsWith('/api/test/status')) {
+                        return original(url, method, data, options);
+                    }
+                    const signal = options.signal || window.GmsDocumentAbort.signal;
+                    window.__statusPollPending = true;
+                    return new Promise((resolve, reject) => {
+                        signal.addEventListener('abort', () => reject(signal.reason), {once: true});
+                    });
+                };
+                startStatusPolling();
+            }""")
+            page.wait_for_function("window.__statusPollPending === true")
+            captured = self.capture_errors(page)
+            page.evaluate("""async () => {
+                window.GmsDocumentAbort.abort();
+                await new Promise(resolve => setTimeout(resolve, 0));
+                stopTestStatusPolling();
+            }""")
+            self.assertEqual(captured['console_errors'], [])
+            self.assertEqual(captured['page_errors'], [])
+        finally:
+            page.close()
+
     def test_navigation_cancels_pending_suite_initialization_without_errors(self):
         page = self.new_page()
         self.install_api_mocks(page, [])
