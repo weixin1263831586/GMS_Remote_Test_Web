@@ -157,6 +157,7 @@ _RESPONSE_TYPE_MAP = {
 _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/system/health": "features.system.health_api:health_check",
     "/api/config/read": "features.users.config_api:get_config",
+    "/api/config/client": "features.users.config_api:get_client_config",
     "/api/config/update": "features.users.config_api:update_config",
     "/api/users/current": "features.users.users_api:get_client_info",
     "/api/users/detect": "features.users.users_api:detect_client",

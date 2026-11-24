@@ -15,7 +15,7 @@ SOURCE_FILES = (
 
 def test_every_shell_dialog_has_its_own_structural_variant() -> None:
     dialog_files = sorted(DIALOG_ROOT.glob("*.html"))
-    assert len(dialog_files) == 41
+    assert len(dialog_files) == 40
     for path in dialog_files:
         source = path.read_text(encoding="utf-8")
         assert "tech-dialog--" + ("tailscale" if path.stem == "tailscale-info" else path.stem) in source, path.name

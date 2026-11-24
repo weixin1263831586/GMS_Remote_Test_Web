@@ -106,6 +106,31 @@ class CompiledReleaseContracts(unittest.TestCase):
         for route in ("/automation", "/cluster", "/redmine-agent", "/gerrit-dashboard"):
             self.assertIn(route, compiled_entry.REQUIRED_PAGE_ROUTES)
 
+    def test_smoke_routes_expand_included_routers_and_reject_incomplete_apps(self):
+        from fastapi import APIRouter, FastAPI
+
+        def endpoint():
+            return {}
+
+        required = {"/api/auth/status", "/api/auth/setup", *compiled_entry.REQUIRED_PAGE_ROUTES}
+
+        def build_app(paths):
+            app = FastAPI()
+            outer = APIRouter()
+            inner = APIRouter()
+            for path in sorted(paths):
+                inner.add_api_route(path, endpoint)
+            outer.include_router(inner)
+            app.include_router(outer)
+            return app
+
+        filler = {f"/extra/{index}" for index in range(30)}
+        self.assertTrue(required.issubset(compiled_entry._validate_smoke_routes(build_app(required | filler))))
+        with self.assertRaisesRegex(RuntimeError, "/api/auth/setup"):
+            compiled_entry._validate_smoke_routes(build_app((required - {"/api/auth/setup"}) | filler))
+        with self.assertRaisesRegex(RuntimeError, "minimum 30"):
+            compiled_entry._validate_smoke_routes(build_app(required))
+
     def test_staging_rejects_missing_embedded_page(self):
         with (
             tempfile.TemporaryDirectory() as directory,

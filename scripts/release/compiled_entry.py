@@ -381,6 +381,20 @@ def worker() -> int:
     return 0
 
 
+def _validate_smoke_routes(app) -> set[str]:
+    from foundation.routing_introspection import flatten_app_routes
+
+    routes = {route.path for route in flatten_app_routes(app) if getattr(route, "path", "")}
+    needed = {"/api/auth/status", "/api/auth/setup", *REQUIRED_PAGE_ROUTES}
+    missing = needed - routes
+    if missing or len(routes) < 30:
+        raise RuntimeError(
+            f"compiled Controller smoke test: missing routes {sorted(missing)}; "
+            f"route count {len(routes)} (minimum 30)"
+        )
+    return routes
+
+
 def smoke() -> int:
     """Import and assemble a production Controller + Worker without listening.
 
@@ -402,11 +416,7 @@ def smoke() -> int:
     from worker_agent.config import WorkerConfig
     validate_production_security_configuration()
     app = create_app()
-    routes = {getattr(route, "path", "") for route in app.routes}
-    needed = {"/api/auth/status", "/api/auth/setup"}
-    needed.update(REQUIRED_PAGE_ROUTES)
-    if not needed.issubset(routes) or len(routes) < 30:
-        raise RuntimeError(f"compiled Controller smoke test: missing routes {sorted(needed - routes)}")
+    routes = _validate_smoke_routes(app)
     os.environ.setdefault("GMS_WORKER_CONFIG", str(Path(os.environ["GMS_DATA_ROOT"]) / "local-worker/config.json"))
     WorkerConfig.load()
     _load_key(root / "configs/secrets/backup.key")
