@@ -32,6 +32,9 @@ from .utils import DeviceUtils
 
 logger = logging.getLogger(__name__)
 _local_adb_devices_lock = threading.Lock()
+# 并发刷新（自动刷新 + 手动刷新）应排队等待而不是丢弃扫描：直接跳过会让
+# 前端把「0 台设备」当成真实结果。扫描自身有 5s 超时，等待上界取 8s。
+_local_adb_lock_wait_seconds = 8
 
 
 def _device_info_error(device_id, result, stage, *, adb_state="unknown"):
@@ -100,10 +103,54 @@ def _make_ssh_adb_runner_for_adb_ops(ssh_manager, ssh, device_id: str):
     return run_adb
 
 
+# adb 常驻进程：server 守护进程与长连接客户端（设备监听 / logcat /
+# wait-for）。它们是健康状态，不能被当作"卡住的 adb devices"。
+_ADB_RESIDENT_TOKENS = frozenset({
+    "fork-server", "server", "start-server", "kill-server",
+    "track-devices", "logcat", "wait-for-device", "wait-for-any-device",
+})
+# 健康的一次性 ``adb devices`` 是毫秒级；超过该时长仍未返回才视为卡住。
+_STUCK_ADB_SECONDS = 10
+
+
+def _blocked_adb_from_ps(ps_output: str) -> bool:
+    """按 ``ps -eo stat,etimes,args`` 输出判定本地 adb 是否真的卡死。
+
+    只有两种情况算卡住：adb 进程处于 D（不可中断内核等待），或一次性
+    ``adb devices`` 长时间不返回。常驻 server/监听/logcat 一律忽略，
+    否则 ``adb track-devices`` 之类的正常客户端会把设备枚举整体短路。
+    """
+    slow_oneshot = 0
+    for line in ps_output.splitlines():
+        fields = line.strip().split(None, 2)
+        if len(fields) < 3:
+            continue
+        stat, elapsed_raw, args = fields
+        argv = args.split()
+        if not argv or (argv[0] != "adb" and not argv[0].endswith("/adb")):
+            continue
+        if stat.startswith("D"):
+            return True
+        tokens = set(argv[1:])
+        if tokens & _ADB_RESIDENT_TOKENS:
+            continue
+        # 只把裸 ``adb devices``（全局枚举）算作探测查询；带 -s 的是一次性
+        # 单设备查询，卡住不影响枚举。
+        if "devices" not in tokens or "-s" in tokens:
+            continue
+        try:
+            elapsed = int(elapsed_raw)
+        except ValueError:
+            continue
+        if elapsed >= _STUCK_ADB_SECONDS:
+            slow_oneshot += 1
+    return slow_oneshot >= 2
+
+
 def has_blocked_adb_process() -> bool:
     try:
         result = subprocess.run(
-            ["ps", "-eo", "stat,args"],
+            ["ps", "-eo", "stat,etimes,args"],
             capture_output=True,
             text=True,
             timeout=1,
@@ -111,22 +158,10 @@ def has_blocked_adb_process() -> bool:
     except Exception:
         return False
 
-    adb_waiting_count = 0
-    for line in result.stdout.splitlines():
-        fields = line.strip().split(maxsplit=1)
-        if len(fields) != 2:
-            continue
-        stat, args = fields
-        argv0 = args.split(maxsplit=1)[0]
-        is_adb = argv0 == "adb" or argv0.endswith("/adb")
-        if not is_adb:
-            continue
-        if stat.startswith("D"):
-            return True
-        if "devices" in args or "fork-server server" in args:
-            adb_waiting_count += 1
-    if adb_waiting_count >= 5:
-        logger.warning("[Device] Found %s pending adb processes; treating local adb as unhealthy", adb_waiting_count)
+    if _blocked_adb_from_ps(result.stdout):
+        logger.warning(
+            "[Device] Detected hung local adb process; skipping local adb scan"
+        )
         return True
     return False
 
@@ -159,9 +194,8 @@ class DeviceManager:
             acquired = False
             try:
                 if has_blocked_adb_process():
-                    logger.warning("[Device] Local adb server is blocked in kernel state; skipping adb devices scan")
                     return []
-                acquired = _local_adb_devices_lock.acquire(blocking=False)
+                acquired = _local_adb_devices_lock.acquire(timeout=_local_adb_lock_wait_seconds)
                 if not acquired:
                     logger.warning("[Device] Local adb devices query skipped because a previous query is still running")
                     return []
@@ -568,10 +602,17 @@ class DeviceManager:
             # cache 可能不存在（super 动态分区板型），失败不阻断。
             run_fastboot('erase cache', 120)
             # bootloader 可能吞掉 reboot：复验离开 fastboot，最多重发 3 次。
+            # get_fastboot_devices 在探测失败时返回空列表；这里不能把
+            # 一次失败的 fastboot devices 当成「已经离开 fastboot」。
             for _ in range(3):
                 run_fastboot('reboot', 30)
                 for _ in range(6):
-                    if device_id not in self.get_fastboot_devices(ssh):
+                    probe = self.ssh_manager.execute_command(
+                        ssh, "fastboot devices", timeout=10,
+                    )
+                    if probe.ok and device_id not in DeviceUtils.parse_fastboot_devices(
+                        probe.stdout or probe.stderr
+                    ):
                         return {'success': True,
                                 'message': '已擦除 userdata 并重启，设备正在重新开机（首次开机需数分钟）'}
                     time.sleep(3)

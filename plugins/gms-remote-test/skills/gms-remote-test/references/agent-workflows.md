@@ -183,7 +183,7 @@ both.
 | boot/u-boot serial prints | `gms_rt_device_console(device=..., worker_id=...)` then `gms_rt_device_console(port_key=..., tail=...)` | `gms-rt-devices-console --device <serial> [--worker <id>]`, then `gms-rt-devices-console <port_key>` | empty result -> read `data.capture_status.hint` (bound? online? capture on?) |
 | one-shot overview | `gms_rt_devices_snapshot` | `gms-rt-devices-snapshot <dev>` | envelope has `collected/total` + `errors[]` per probe |
 | screenshot | `gms_rt_devices_screencap` | human-only (returns base64 payload) | |
-| state-changing command | `gms_rt_shell_exec` + approval token | `gms-rt-devices-shell --approval-token ...` | human mints token via `gms-rt-approval-create` |
+| state-changing command | `gms_rt_shell_exec` + approval token | `gms-rt-devices-shell <device_id> --approval-token TOKEN <command>` | human mints token via `gms-rt-approval-create` |
 
 ### 5.3 Approved one-shot shell (`gms_rt_shell_exec`, plugin >= 0.9.0)
 

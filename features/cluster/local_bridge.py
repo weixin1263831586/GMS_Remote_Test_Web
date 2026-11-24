@@ -5,7 +5,6 @@ from __future__ import annotations
 import getpass
 import logging
 import os
-import shutil
 import socket
 import threading
 import time
@@ -14,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from foundation.config import settings
+from foundation.host_metrics import collect_host_metrics
 from worker_agent.inventory import aoa_capabilities, probe_devices
 from worker_agent.process_inventory import discover_tradefed_processes
 from worker_agent.suite_actions import tradefed_launcher_families
@@ -64,36 +65,8 @@ def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
     return suites
 
 
-def _host_metrics() -> dict[str, float]:
-    usage = shutil.disk_usage(Path.home())
-    memory_percent = 0.0
-    memory_total_gb = 0.0
-    memory_available_gb = 0.0
-    try:
-        values: dict[str, int] = {}
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            key, value = line.split(":", 1)
-            values[key] = int(value.strip().split()[0])
-        memory_percent = 100 * (1 - values["MemAvailable"] / values["MemTotal"])
-        memory_total_gb = values["MemTotal"] / 1024 ** 2
-        memory_available_gb = values["MemAvailable"] / 1024 ** 2
-    except Exception:
-        # best-effort 采集:/proc/meminfo 异常时回退 0 值,但要留痕迹,
-        # 否则资源面板长期显示 0 无法归因。
-        logger.debug("host memory metrics unavailable", exc_info=True)
-    try:
-        load = os.getloadavg()[0]
-        cpu_percent = min(100.0, load * 100 / max(1, os.cpu_count() or 1))
-    except OSError:
-        cpu_percent = 0.0
-    return {
-        "cpu_percent": round(cpu_percent, 2),
-        "memory_percent": round(memory_percent, 2),
-        "memory_total_gb": round(memory_total_gb, 2),
-        "memory_available_gb": round(memory_available_gb, 2),
-        "load_1m": round(load if 'load' in locals() else 0.0, 2),
-        "disk_free_gb": round(usage.free / 1024 ** 3, 2),
-    }
+def _host_metrics() -> dict[str, float | int | None]:
+    return collect_host_metrics(settings.data_root)
 
 
 def _suite_roots() -> list[Path]:
@@ -116,7 +89,6 @@ class LocalWorkerBridge:
         self._suites: list[dict[str, Any]] = []
         self._last_suite_scan = 0.0
         self._suite_scan_interval = 300.0
-        self._device_interval = 10.0
         self._heartbeat_interval = 15.0
         self._initial_heartbeat_delay = 1.0
         self._registered = False

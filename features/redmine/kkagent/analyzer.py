@@ -40,6 +40,7 @@ from .evidence_gate import gate_and_errors, gate_errors
 from .mcp_health import probe_kkagent_mcp_health
 from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import parse_issue_result
+from .repair_policy import approved_repair_call, repair_policy_env
 from .trace import KkAgentTrace, ToolTrace, consume_line, trace_from_summary
 
 
@@ -453,7 +454,8 @@ class KkAgentRedmineAnalyzer:
         try:
             with model_config(self.model, self.env_extra) as (path, env):
                 return await self._run_configured_stream(
-                    [command[0], "--config", str(path), *command[1:]], progress, on_started, env
+                    [command[0], "--config", str(path), *command[1:]],
+                    progress, on_started, {**env, **(config_env or {})},
                 )
         except ContextBudgetError as error:
             trace = KkAgentTrace(status="model_config_unavailable",
@@ -825,7 +827,7 @@ class KkAgentRedmineAnalyzer:
                 )
             repair_trace, raw, timed_out = await self._run_stream(
                 analysis_command(self.build_repair_command(repair_prompt, session_id), entry), progress,
-                **({"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
+                config_env=repair_policy_env(entry, targets),
             )
             repair_trace.repair_attempts = 1
             if repair_trace.session_id and repair_trace.session_id != session_id:
@@ -849,8 +851,7 @@ class KkAgentRedmineAnalyzer:
                 merged.errors.append("report-only correction called an unapproved tool")
                 return None, merged
             if allow_new_tools and any(
-                not any(target in json.dumps(call.tool_input, ensure_ascii=False)
-                        for target in targets)
+                not approved_repair_call(call, targets)
                 for call in new_calls
             ):
                 merged = _merge_traces(merged, repair_trace)
@@ -925,7 +926,7 @@ class KkAgentRedmineAnalyzer:
         reviewed, review_raw, timed_out = await self._run_stream(
             analysis_command(self.build_repair_command(review_prompt(result, trace, entry), trace.session_id), entry),
             progress,
-            **({"config_env": entry["_kkagent_config_env"]} if "_kkagent_config_env" in entry else {}),
+            config_env=repair_policy_env(entry, []),
         )
         candidate = trace.final_event
         merged = _merge_traces(trace, reviewed)

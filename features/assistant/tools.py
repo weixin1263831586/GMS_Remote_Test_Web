@@ -1,7 +1,7 @@
 """
 Agent Tool Registry — 注册所有项目 API 为可调用的 Agent 工具。
 
-从 core/api_docs_list.API_DOCS_LIST 种子数据构建工具目录，
+从 features.system.API_DOCS_LIST 种子数据构建工具目录，
 附加关键词索引用于意图匹配。
 """
 from __future__ import annotations
@@ -64,7 +64,7 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "usbip": ["USB", "usbip", "USB共享", "ADB转发", "adb-forward", "端口转发"],
     "file": ["文件", "file", "上传", "upload", "源码搜索", "opengrok", "搜索代码"],
     "burn": ["烧写", "burn", "flash", "固件", "firmware", "GSI", "镜像", "刷机",
-             "序列号", "serial", "烧录"],
+             "烧录"],
     "apk": ["APK", "apk", "反编译", "APK反编译", "反编译APK", "jadx", "源码分析", "decompile",
             "manifest", "权限", "源码查看", "android package"],
     "notification": ["通知", "notification", "消息", "提醒"],
@@ -96,7 +96,6 @@ _PATH_KEYWORDS: dict[str, list[str]] = {
     "/api/desktop/vnc": ["VNC", "vnc", "桌面", "远程"],
     "/api/burn/firmware": ["烧写固件", "firmware burn", "刷固件"],
     "/api/burn/gsi": ["烧写GSI", "GSI burn", "刷GSI", "刷系统"],
-    "/api/burn/serial": ["烧写序列号", "serial number", "改序列号"],
     "/api/vpn/connect": ["连接VPN", "VPN连接", "vpn connect"],
     "/api/vpn/disconnect": ["断开VPN", "VPN断开", "vpn disconnect"],
     "/api/vpn/status": ["VPN状态", "VPN连接状态"],
@@ -116,7 +115,7 @@ _READONLY_PATHS = {
     "GET": True, "WebSocket": True,
 }
 _DANGEROUS_PATHS = {
-    "/api/burn/firmware", "/api/burn/gsi", "/api/burn/serial",
+    "/api/burn/firmware", "/api/burn/gsi",
     "/api/reports/delete",
     "/api/devices/bootloader-lock", "/api/devices/bootloader-unlock",
     "/api/devices/factory-reset",
@@ -124,7 +123,7 @@ _DANGEROUS_PATHS = {
 }
 _CONFIRM_PATHS = {
     "/api/test/start", "/api/test/stop", "/api/test/clean",
-    "/api/burn/firmware", "/api/burn/gsi", "/api/burn/serial",
+    "/api/burn/firmware", "/api/burn/gsi",
     "/api/devices/reboot", "/api/devices/remount",
     "/api/devices/bootloader-lock", "/api/devices/bootloader-unlock",
     "/api/devices/factory-reset",
@@ -207,8 +206,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/opengrok/search": "features.system.assets:search_opengrok",
     "/api/burn/upload-progress": "features.firmware.firmware_api:get_firmware_upload_progress",
     "/api/burn/firmware": "features.firmware.firmware_api:burn_firmware",
-    "/api/burn/gsi": "features.firmware.gsi_sn_burn:burn_gsi",
-    "/api/burn/serial": "features.firmware.gsi_sn_burn:burn_sn",
+    "/api/burn/gsi": "features.firmware.gsi_burn:burn_gsi",
     "/api/terminal/open": "features.system.terminal_api:get_ssh_terminal_info",
     "/api/terminal/push": "features.system.terminal_api:upload_file",
     "/api/system/skills": "features.system.api:download_skills_zip",

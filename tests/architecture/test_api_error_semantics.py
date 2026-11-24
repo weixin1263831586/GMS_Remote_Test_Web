@@ -78,7 +78,8 @@ class ApiErrorSemanticsTests(unittest.TestCase):
                     continue
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"))
-                except SyntaxError:
+                except SyntaxError as exc:
+                    offenders.append(f"{relative}: {exc}")
                     continue
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.ExceptHandler):
@@ -131,7 +132,8 @@ class RecordInternalErrorContractTests(unittest.TestCase):
                     continue
                 try:
                     tree = ast.parse(path.read_text(encoding="utf-8"))
-                except SyntaxError:
+                except SyntaxError as exc:
+                    offenders.append(f"{relative}: {exc}")
                     continue
                 for node in ast.walk(tree):
                     if not isinstance(node, ast.Call):

@@ -113,6 +113,7 @@ def _load_typed_tools(name):
 
 
 mcp_deployment_tools = _load_typed_tools("mcp_deployment_tools")
+mcp_repair_policy = _load_typed_tools("mcp_repair_policy")
 mcp_debug_tools = _load_typed_tools("mcp_debug_tools")
 version_guard = _load_typed_tools("version_guard")
 
@@ -134,7 +135,7 @@ def _follow_current_version() -> None:
 
 
 SERVER_NAME = "gms-remote-test"
-SERVER_VERSION = "0.22.88"
+SERVER_VERSION = "0.22.90"
 # Long enough for gms-rt-jobs-wait --max-wait and firmware uploads.
 DEFAULT_TIMEOUT_SECONDS = 6 * 60 * 60
 MAX_OUTPUT_BYTES = 1024 * 1024
@@ -1678,13 +1679,44 @@ def _split_short_option(token: str) -> list[str]:
     return [f"-{ch}" for ch in body]
 
 
-def _is_long_option_prefix(token: str, long_name: str) -> bool:
-    """True when token is --name or --name=value or an unambiguous
-    abbreviation that getopt_long would still accept as --name."""
-    if not token.startswith("--"):
-        return False
-    body = token[2:].split("=", 1)[0]
-    return long_name.startswith(body) and body  # non-empty prefix of long_name
+_LOGCAT_DUMP_FLAGS = frozenset({"-d", "-t", "-g", "-p", "-L", "-S", "--last", "--statistics"})
+
+
+def _validate_logcat_arguments(args: list[str]) -> tuple[bool, str]:
+    short_options = "dvtTgbsemnrQpLDBS"
+    long_options = {
+        "dividers", "buffer", "format", "tag", "uid", "pid",
+        "last", "print", "statistics", "help",
+    }
+    short_values = "vbtTemnr"
+    long_values = {"buffer", "format", "tag", "uid", "pid"}
+    dump = False
+    expect_value = False
+    for arg in args:
+        if expect_value:
+            if arg.startswith("-"):
+                return False, "logcat option requires a value"
+            expect_value = False
+            continue
+        if arg.startswith("--"):
+            name, separator, _ = arg[2:].partition("=")
+            if name not in long_options:
+                return False, f"logcat option '--{name}' is outside the read-only allowlist"
+            expect_value = name in long_values and not separator
+            dump |= f"--{name}" in _LOGCAT_DUMP_FLAGS
+        elif arg.startswith("-") and arg != "-":
+            for index, flag in enumerate(arg[1:], 2):
+                if flag not in short_options:
+                    return False, f"logcat option '-{flag}' is outside the read-only allowlist"
+                dump |= f"-{flag}" in _LOGCAT_DUMP_FLAGS
+                if flag in short_values:
+                    expect_value = index == len(arg)
+                    break
+    if expect_value:
+        return False, "logcat option requires a value"
+    if not dump and args != ["--help"]:
+        return False, "streaming logcat is not allowed; add -d or -t (dump mode)"
+    return True, ""
 
 
 def _validate_single_shell_command(command: str) -> tuple[bool, str]:
@@ -1715,66 +1747,7 @@ def _validate_single_shell_command(command: str) -> tuple[bool, str]:
         if len(rest) != 1 or rest[0] not in ("size", "density"):
             return False, "only 'wm size' / 'wm density' (read-only) is allowed"
     elif binary == "logcat":
-        # Positive structural allowlist: expand clustered shorts, then every
-        # option token must be a known read-only flag. '-c' inside '-dc',
-        # abbreviated '--cle', and attached-value '-fPATH' all fail here.
-        allowed_logcat_flags = {
-            "-d", "-v", "-t", "-T", "-g", "-b", "-s", "-e", "-m",
-            "-n", "-r", "-P", "-Q", "-p", "-L", "-D", "-B", "-G", "-S",
-            "--dividers", "--buffer", "--format", "--tag", "--uid",
-            "--pid", "--print", "--statistics", "--help",
-        }
-        needs_value = {"-v", "-b", "-t", "-T", "-e", "-m", "-n", "-r", "-D", "-G", "-s"}
-        i = 0
-        has_dump_mode = False
-        while i < len(rest):
-            token = rest[i]
-            if token.startswith("--"):
-                if _is_long_option_prefix(token, "clear") or _is_long_option_prefix(token, "file"):
-                    return False, (
-                        "logcat --clear/--file mutate or write and are not allowed"
-                    )
-                matched = any(
-                    _is_long_option_prefix(token, flag[2:])
-                    for flag in allowed_logcat_flags
-                    if flag.startswith("--")
-                )
-                if not matched:
-                    if token in ("--filename",):
-                        return False, "logcat --filename writes files"
-                    return False, (
-                        f"logcat option '{token}' is not in the read-only allowlist"
-                    )
-                if token in ("--print", "--statistics", "--dividers"):
-                    has_dump_mode = has_dump_mode or token == "--print"
-                i += 1
-                continue
-            cluster = _split_short_option(token)
-            for flag in cluster:
-                if flag == "-c":
-                    return False, (
-                        "logcat -c clears the log buffer and is not allowed "
-                        "(including inside clustered flags like -dc)"
-                    )
-                if flag == "-f":
-                    return False, (
-                        "logcat -f writes files and is not allowed "
-                        "(including attached-value forms like -f/path)"
-                    )
-                if flag not in allowed_logcat_flags:
-                    return False, (
-                        f"logcat option '{flag}' (from '{token}') is not in "
-                        "the read-only allowlist"
-                    )
-                if flag == "-d":
-                    has_dump_mode = True
-            # Skip the value consumed by value-taking flags.
-            value_takers = [f for f in cluster if f in needs_value]
-            i += 1 + len(value_takers)
-        if not has_dump_mode and "-t" not in rest and "-T" not in rest:
-            return False, (
-                "streaming logcat is not allowed; add -d/-t/-T (dump mode)"
-            )
+        return _validate_logcat_arguments(rest)
     elif binary == "dmesg":
         # dmesg -c (and -C, including inside clusters like -tc) clear
         # the kernel ring buffer; positively allow only read-only flags.
@@ -1940,54 +1913,6 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
             True,
         )
     for item in items:
-        if (
-            item == "-c"
-            or item == "--clear"
-            or item.startswith("--cle")
-            or (item.startswith("-") and not item.startswith("--") and "-c" in item[1:])
-        ):
-            return (
-                "denied: clearing the logcat buffer destroys diagnostic "
-                "evidence and is human-only. Ask the user to run "
-                "'gms-rt-devices-logcat DEVICE -c' in their own CLI "
-                "session; this tool captures dumps only (no -c anywhere "
-                "in args).",
-                True,
-            )
-    if items:
-        # since/until 会在后续追加 -t <time>，这里先按最终形态校验：
-        # -t/-T 的值由本工具控制，校验时预留其位置。
-        probe_items = list(items)
-        since_probe = arguments.get("since")
-        if since_probe is not None and str(since_probe).strip() \
-                and "-t" not in probe_items and "-T" not in probe_items:
-            probe_items.extend(["-t", "00-00 00:00:00"])
-        # 校验器按空格切分字符串，无法识别"带空格的单个 argv 值"
-        # （如 -t 的时间戳）；把取值选项的后续 token 替换为占位符，
-        # 值本身的格式已由本工具/校验器另行限制。
-        _VALUE_TAKING = ("--format", "--buffer", "-v", "-b", "-t", "-T",
-                         "-e", "-m", "-n", "-r", "-D", "-G", "-s")
-        masked: list[str] = []
-        expect_value = False
-        for token in probe_items:
-            if expect_value:
-                masked.append("TIME")
-                expect_value = False
-                continue
-            masked.append(token)
-            if token in _VALUE_TAKING:
-                expect_value = True
-        probe_command = "logcat " + " ".join(masked)
-        # 工具会在没有 dump 标志时注入 -d，校验应针对最终 argv 形态。
-        if not any(
-            flag in probe_items
-            for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
-        ):
-            probe_command = "logcat -d " + " ".join(masked)
-        allowed, reason = _validate_shell_command(probe_command)
-        if not allowed:
-            return f"denied: {reason}", True
-    for item in items:
         if any(ch in _LOGCAT_FORBIDDEN_CHARS for ch in item):
             return (
                 "denied: logcat arguments must not contain shell "
@@ -2030,14 +1955,11 @@ def logcat_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         items.extend(["-t", since_text])
         if len(items) > _LOGCAT_MAX_ARGS + 2:
             return f"too many logcat arguments (max {_LOGCAT_MAX_ARGS})", True
-    # Dump mode keeps the call bounded for unattended agents; the CLI adds
-    # -d itself in --non-interactive mode when no dump flag is present.
-    if not any(
-        flag in items for flag in ("-d", "-t", "-T", "-g", "-L", "-p", "-print")
-    ):
+    if not any(flag in _LOGCAT_DUMP_FLAGS for flag in items):
         items = ["-d", *items]
-    # No -c is ever injected from the adapter — buffer
-    # clearing is human-only and every clear form was rejected above.
+    allowed, reason = _validate_logcat_arguments(items)
+    if not allowed:
+        return f"denied: {reason}", True
     timeout = 180
     if arguments.get("timeout") is not None:
         try:
@@ -2142,6 +2064,12 @@ def shell_exec_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     )
 
 
+# Per-process call budget for an approved repair: a target file may be
+# searched once and read once through a signed result_id.
+_REPAIR_ISSUED_SEARCHES: set[str] = set()
+_REPAIR_ISSUED_READS: set[str] = set()
+
+
 def tools() -> list[dict[str, Any]]:
     all_tools = _all_tools()
     if _SERVICE_TOKEN_MODE:
@@ -2171,6 +2099,13 @@ def tools() -> list[dict[str, Any]]:
             if tool["name"] in always
             or bool(_TOOLSETS.get(tool["name"], {"core"}) & requested)
         ]
+    # Claim review may run under a Controller-set repair policy: only the
+    # approved source tools stay visible (pre-dispatch fence, not advice).
+    policy = mcp_repair_policy.current_policy()
+    all_tools = [
+        tool for tool in all_tools
+        if mcp_repair_policy.tool_visible(tool["name"], policy)
+    ]
     return [_decorate_tool(tool) for tool in all_tools]
 
 
@@ -2906,7 +2841,7 @@ def sdk_sources_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
     return run_cli("gms-rt-sdk-sources")
 
 
-def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
+def sdk_search_tool(arguments: dict[str, Any], *, exact_path: bool = False) -> tuple[str, bool]:
     source = str(arguments.get("source") or "").strip()
     revision = str(arguments.get("revision") or "").strip()
     # keywords 是 query 的别名：codesearch 风格工具用 keywords，调用方
@@ -2943,6 +2878,8 @@ def sdk_search_tool(arguments: dict[str, Any]) -> tuple[str, bool]:
         if repo_scope.startswith("/") or ".." in repo_scope.split("/"):
             return "repo_scope must be an exact child repository path", True
         args.extend(["--repo-scope", repo_scope])
+    if exact_path:
+        args.append("--exact-path")
     budget = arguments.get("budget_seconds")
     if budget is not None:
         if isinstance(budget, bool) or not isinstance(budget, int) or not 1 <= budget <= 600:
@@ -3080,8 +3017,22 @@ def handle(message: dict[str, Any]) -> None:
                 error={"code": -32601, "message": f"Unknown tool: {name}"},
             )
             return
+        repair_policy = mcp_repair_policy.current_policy()
+        violation = mcp_repair_policy.authorize(
+            name, arguments, repair_policy,
+            _REPAIR_ISSUED_SEARCHES, _REPAIR_ISSUED_READS,
+        )
+        if violation:
+            response(request_id, {
+                "content": [{"type": "text", "text": violation}],
+                "isError": True,
+            })
+            return
         try:
-            result = handler(arguments)
+            if repair_policy is not None and name == "gms_rt_sdk_search":
+                result = sdk_search_tool(arguments, exact_path=True)
+            else:
+                result = handler(arguments)
         except Exception as error:  # MCP boundary: convert failures to tool errors.
             text = f"gms-rt tool failed: {error}"
             is_error = True

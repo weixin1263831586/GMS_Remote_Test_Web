@@ -1,8 +1,8 @@
 /* Task-specific composition. Each selector corresponds to a real dialog body. */
 .tech-form-section { min-width: 0; }
 .tech-form-section > .tech-section-title { color: var(--text-secondary);  }
-/* Identity: connection summary first, then editable credentials. */
-:is(.modal,.modal-backdrop) .modal-content.tech-dialog--username-detect { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
+/* Identity: connection summary first, then editable credentials.
+   Width is owned by the later #username-detect-modal rule (740px). */
 .tech-dialog--username-detect .tech-field-card { min-height: 54px; }
 .tech-dialog--username-detect .modal-ssh-info { margin-top: 18px; color: var(--text-secondary); padding: 12px 0 0; border: 0; background: transparent;  }
 .tech-dialog--username-detect .tech-field-card:has(#username-detect-ip) { background: var(--tech-panel); border-color: var(--tech-edge-soft); }
@@ -11,7 +11,6 @@
 .tech-dialog--elevate #elevate-action-label { border-color: #997148; background: #2a2226; }
 .tech-dialog--vpn-credential .tech-field-card { min-height: 60px; }
 .tech-dialog--wifi .tech-form-section { display: grid; gap: 4px; }
-.tech-dialog--sn .tech-field-card { margin-top: 18px; }
 .tech-dialog--gms-assistant-config .tech-field-card > label { min-width: 100px; }
 /* Creation forms: paired metadata in tool editors; simple categories stay stacked. */
 .tech-dialog--category .tech-field-card,
@@ -345,9 +344,8 @@
  #route-check-dialog .route-check-form small { grid-column: 1; }
  #route-check-dialog .route-check-actions { padding: 14px 18px 26px; }
 }
-/* Content-sized information and transfer dialogs must reveal all primary fields. */
-#username-detect-modal > .modal-content.tech-dialog { width: min(620px,calc(100vw - 32px)); max-width: min(620px,calc(100vw - 32px)); }
-#username-detect-modal .modal-ssh-info { background: transparent; padding: 12px 0 0;  }
+/* Content-sized information and transfer dialogs must reveal all primary fields.
+   Username-detect width and SSH summary live in the reference block below. */
 #report-copy-modal > .report-copy-modal-content { width: min(760px,calc(100vw - 32px)); max-width: min(760px,calc(100vw - 32px)); height: auto; max-height: calc(100dvh - 32px); }
 #tailscale-info-modal [data-modal-initial-focus]:focus { outline: none; }
 .tech-dialog--firmware .btn-small { min-height: var(--ui-control-height-dialog); padding: 7px 12px; border-color: var(--tech-edge-soft); background: var(--tech-control); }

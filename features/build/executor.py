@@ -210,7 +210,13 @@ class SshTmuxBuildBackend:
             # 窗口耗尽而死锁（stderr 填满窗口→远端阻塞→stdout EOF 永不到达）。
             result = ssh_executor.run(ssh, command, timeout=timeout)
             if result.code == -1:
-                raise BuildExecutionError(f"构建服务器命令执行失败：{result.stderr}")
+                if result.timed_out:
+                    raise BuildExecutionError("构建服务器命令执行超时") from TimeoutError(
+                        "build command timed out"
+                    )
+                raise BuildExecutionError("构建服务器命令执行失败") from OSError(
+                    "build command failed"
+                )
             return result.code, result.stdout, result.stderr
         except BuildExecutionError:
             raise
@@ -280,9 +286,11 @@ class SshTmuxBuildBackend:
             f"echo __DONE__; cat {shlex.quote(rc_path)} 2>/dev/null || echo 1; "
             f"else echo __RUNNING__; fi"
         )
-        code, out, err = self._run(server, command, timeout=10)
+        code, out, _err = self._run(server, command, timeout=10)
         if code != 0:
-            return {"status": "failed", "error": err or out or "failed to poll build"}
+            raise BuildExecutionError("查询构建状态失败") from OSError(
+                "build status probe failed"
+            )
         lines = [line.strip() for line in out.splitlines() if line.strip()]
         if "__RUNNING__" in lines:
             return {"status": "running"}
@@ -303,7 +311,23 @@ class SshTmuxBuildBackend:
         return out if code == 0 else err
 
     def cancel(self, *, server: dict[str, Any], session: str) -> None:
-        self._run(server, f"tmux send-keys -t {shlex.quote(session)} C-c 2>/dev/null || true; tmux kill-session -t {shlex.quote(session)} 2>/dev/null || true", timeout=10)
+        code, out, err = self._run(
+            server,
+            f"tmux send-keys -t {shlex.quote(session)} C-c 2>/dev/null || true; "
+            f"tmux kill-session -t {shlex.quote(session)}",
+            timeout=10,
+        )
+        if code == 0:
+            return
+        detail = (err or out or "").lower()
+        if (
+            "can't find session" in detail
+            or "no server running" in detail
+        ):
+            return
+        raise BuildExecutionError("取消远端构建失败") from OSError(
+            "tmux kill-session failed"
+        )
 
     @contextmanager
     def open_artifact(self, *, server: dict[str, Any], path: str):
@@ -376,7 +400,12 @@ class LocalBuildBackend(SshTmuxBuildBackend):
     def _run(self, server: dict[str, Any], command: str, timeout: int = 30) -> tuple[int, str, str]:
         # Build templates are operator-controlled shell programs; request
         # parameters are schema-validated before rendering.
-        proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)  # nosec B602
+        try:
+            proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)  # nosec B602
+        except subprocess.TimeoutExpired:
+            raise BuildExecutionError("本地构建命令执行超时") from TimeoutError(
+                "local build command timed out"
+            )
         return proc.returncode, proc.stdout, proc.stderr
 
     @contextmanager

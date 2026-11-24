@@ -30,9 +30,9 @@ from guide_fixtures import DEVICES, REPORTS, SUITE, install_guide_fixtures
 
 ROOT = find_repo_root()
 OUTPUT = ROOT / "web/static/images/guide"
-VIEWPORT = {"width": 1600, "height": 920}
+VIEWPORT = {"width": 1912, "height": 914}
+CAPTION_HEIGHT = 144
 CAPTURED: set[str] = set()
-ANNOTATION: dict = {}
 
 
 def free_port() -> int:
@@ -98,17 +98,12 @@ def install_routes(page) -> None:
 
 
 ANNOTATION_SCRIPT = """
-({items, title, notes}) => {
+(items) => {
   document.querySelectorAll('[data-guide-annotation]').forEach(node => node.remove());
   document.querySelectorAll('[data-guide-highlight]').forEach(node => {
     node.style.removeProperty('outline');
     node.style.removeProperty('outline-offset');
     node.removeAttribute('data-guide-highlight');
-  });
-  document.querySelectorAll('[data-guide-position-host]').forEach(node => {
-    node.style.position = node.dataset.guideOriginalPosition || '';
-    node.removeAttribute('data-guide-original-position');
-    node.removeAttribute('data-guide-position-host');
   });
   const style = document.createElement('style');
   style.dataset.guideAnnotation = 'true';
@@ -118,11 +113,6 @@ ANNOTATION_SCRIPT = """
     .guide-shot-badge{position:absolute;z-index:2147483647;width:24px;height:24px;border-radius:50%;
       display:flex;align-items:center;justify-content:center;background:#ffb000;color:#111;font:700 13px Arial;
       box-shadow:0 0 0 2px #111,0 2px 8px rgba(0,0,0,.55);pointer-events:none}
-    .guide-shot-card{position:fixed;right:18px;bottom:18px;z-index:2147483646;width:min(520px,44vw);
-      padding:16px 18px;border:2px solid #ffb000;border-radius:10px;background:rgba(7,10,16,.96);
-      color:#eef2ff;box-shadow:0 12px 36px rgba(0,0,0,.55);font:13px/1.55 Arial,sans-serif;pointer-events:none}
-    .guide-shot-card h3{margin:0 0 9px;font-size:18px}.guide-shot-card div{display:flex;gap:8px;margin:4px 0}
-    .guide-shot-card b{flex:0 0 20px;height:20px;border-radius:50%;background:#ffb000;color:#111;text-align:center;line-height:20px}
   `;
   document.head.append(style);
   const obstacles = [];
@@ -145,6 +135,9 @@ ANNOTATION_SCRIPT = """
     const rect = target.getBoundingClientRect();
     if (!rect.width || !rect.height || getComputedStyle(target).visibility === 'hidden')
       throw new Error(`Hidden guide control: ${item.selector}`);
+    const modalBody = target.closest('.modal-body')?.getBoundingClientRect();
+    if (modalBody && (rect.top < modalBody.top || rect.bottom > modalBody.bottom))
+      throw new Error(`Guide control is outside the visible dialog area: ${item.selector}`);
     target.dataset.guideHighlight = 'true';
     target.style.outline = '3px solid #ffb000';
     target.style.outlineOffset = '2px';
@@ -179,27 +172,14 @@ ANNOTATION_SCRIPT = """
 """
 
 
-def annotate(page_or_frame, title: str, items: list[tuple[str, str]], notes: list[str]) -> None:
-    global ANNOTATION
-    payload = {
-        "title": title,
-        "items": [{"selector": selector, "number": number} for number, selector in items],
-        "notes": notes,
-    }
-    ANNOTATION = payload
+def annotate(page_or_frame, items: list[tuple[str, str]]) -> None:
+    payload = [{"selector": selector, "number": number} for number, selector in items]
     page_or_frame.evaluate(ANNOTATION_SCRIPT, payload)
     # Several views finish an async status render after their first visible
     # result.  Recalculate against the settled layout so badges stay attached
     # to their highlighted controls in the captured guide image.
     page_or_frame.wait_for_timeout(300)
     page_or_frame.evaluate(ANNOTATION_SCRIPT, payload)
-    page_or_frame.evaluate("""() => {
-      const highlighted = [...document.querySelectorAll('[data-guide-highlight]')]
-        .map(node => node.getBoundingClientRect().toJSON());
-      const badges = [...document.querySelectorAll('.guide-shot-badge')]
-        .map(node => node.getBoundingClientRect().toJSON());
-      return {highlighted, badges};
-    }""")
 
 
 def clear_annotations(page_or_frame) -> None:
@@ -210,11 +190,6 @@ def clear_annotations(page_or_frame) -> None:
             node.style.removeProperty('outline');
             node.style.removeProperty('outline-offset');
             node.removeAttribute('data-guide-highlight');
-          });
-          document.querySelectorAll('[data-guide-position-host]').forEach(node => {
-            node.style.position = node.dataset.guideOriginalPosition || '';
-            node.removeAttribute('data-guide-original-position');
-            node.removeAttribute('data-guide-position-host');
           });
         }
     """)
@@ -228,35 +203,58 @@ def close_elevation(page) -> None:
     """)
 
 
-def capture(page, filename: str) -> None:
-    page.evaluate("document.fonts.ready")
-    screenshot = base64.b64encode(page.screenshot(caret='hide')).decode('ascii')
-    width = page.viewport_size['width']
-    notes = ''.join(
-        f'<div class="note"><b>{index}</b><span>{html.escape(note)}</span></div>'
-        for index, note in enumerate(ANNOTATION['notes'], 1)
+def write_guide_image(page, screenshot: bytes, destination: Path) -> None:
+    button = page.locator(f'.project-guide-image-button:has(img[src^="/static/images/guide/{destination.name}"])')
+    title = button.get_attribute('data-guide-title')
+    notes = (button.get_attribute('data-guide-steps') or '').strip().splitlines()
+    steps = ''.join(
+        f'<li><b>{index}</b>{html.escape(note.strip())}</li>'
+        for index, note in enumerate(filter(str.strip, notes), 1)
     )
-    # Keep all controls visible: the explanation sits below the authentic UI
-    # capture, rather than obscuring buttons or modal fields with an overlay.
+    if not title or not steps:
+        raise RuntimeError(f'Missing guide caption for {destination.name}')
+    width = VIEWPORT['width']
+    height = VIEWPORT['height'] + CAPTION_HEIGHT
+    picture = base64.b64encode(screenshot).decode('ascii')
     preview = page.context.new_page()
-    preview.set_viewport_size({'width': width, 'height': 1200})
     try:
-        preview.set_content(f'''<!DOCTYPE html><html lang="zh-CN"><meta charset="utf-8">
+        preview.set_viewport_size({'width': width, 'height': height})
+        preview.set_content(f'''<!doctype html><html lang="zh-CN"><meta charset="utf-8">
           <style>
           body,figure{{margin:0;background:#15141e;color:#eef2ff;font:14px/1.6 "Noto Sans CJK SC",sans-serif}}
-          figure{{width:{width}px}}img{{display:block;width:100%}}
-          figcaption{{padding:16px 24px 20px;border-top:2px solid #ffb000}}
-          h3{{margin:0 0 12px;font-size:19px}}small{{float:right;font-size:12px;color:#aaa;font-weight:400}}
-          .notes{{display:grid;grid-template-columns:repeat(3,1fr);gap:10px 24px}}
-          .note{{display:flex;align-items:baseline;gap:9px}}b{{flex:0 0 22px;text-align:center;
-          border-radius:50%;background:#ffb000;color:#111;font:700 13px/22px sans-serif}}
-          </style><figure id="guide-figure"><img src="data:image/png;base64,{screenshot}">
-          <figcaption><h3>{html.escape(ANNOTATION['title'])}<small>演示数据 · 当前界面操作示例</small></h3>
-          <div class="notes">{notes}</div></figcaption></figure></html>''')
+          img{{display:block}}
+          figcaption{{box-sizing:border-box;min-height:{CAPTION_HEIGHT}px;border-top:2px solid #ffb000;
+            padding:16px 24px 20px}}
+          h3{{margin:0 0 12px;font-size:19px}}small{{float:right;color:#aaa;font-size:12px;font-weight:400}}
+          ol{{margin:0;padding:0;list-style:none;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px 24px}}
+          li{{display:flex;align-items:baseline;gap:9px}}li b{{flex:0 0 22px;text-align:center;
+            border-radius:50%;background:#ffb000;color:#111;font:700 13px/22px sans-serif}}
+          </style><figure><img src="data:image/png;base64,{picture}">
+          <figcaption><h3>{html.escape(title)}<small>演示数据 · 当前界面操作示例</small></h3>
+          <ol>{steps}</ol></figcaption></figure></html>''')
         preview.evaluate('document.fonts.ready')
-        preview.locator('#guide-figure').screenshot(path=OUTPUT / filename)
+        image_size = preview.locator('figure img').evaluate('''async img => {
+            await img.decode();
+            return {width: img.naturalWidth, height: img.naturalHeight};
+        }''')
+        if image_size != VIEWPORT:
+            raise RuntimeError(f'Unexpected screenshot size for {destination.name}: {image_size}')
+        figure = preview.locator('figure')
+        bounds = figure.bounding_box()
+        if bounds['width'] != width or bounds['height'] != height:
+            raise RuntimeError(f'Unexpected guide layout for {destination.name}: {bounds}')
+        figure.screenshot(path=destination, scale='css')
     finally:
         preview.close()
+
+
+def capture(page, filename: str, *, modal_id: str | None = None) -> None:
+    if page.viewport_size != VIEWPORT:
+        raise RuntimeError(f'{filename} must use the shared guide viewport')
+    page.evaluate("document.fonts.ready")
+    if modal_id and (page.locator('.modal.show').count() != 1 or not page.locator(f'#{modal_id}.show').is_visible()):
+        raise RuntimeError(f'{filename} must show only the {modal_id} dialog')
+    write_guide_image(page, page.screenshot(caret='hide', scale='css'), OUTPUT / filename)
     CAPTURED.add(filename)
     print(f"Captured {filename}", flush=True)
 
@@ -284,19 +282,7 @@ def capture_apk(page) -> None:
     """)
     close_elevation(page)
     page.wait_for_timeout(600)
-    annotate(
-        page,
-        "APK 分析：任务可恢复、结果可追溯",
-        [("1", ".sidebar-item[data-page='apk-analysis']"), ("2", "#apk-task-history"), ("3", "#apk-upload-zone"), ("4", "#apk-btn-download"), ("5", ".apk-tab-actions"), ("6", "#apk-manifest-info")],
-        [
-            "进入 APK 分析，支持 APK 与 JAR。",
-            "从“最近任务”恢复刷新前的分析进度或历史结果。",
-            "上传新文件会创建独立任务，不会覆盖其他用户任务。",
-            "完成后可下载反编译源码；失败任务可重新分析。",
-            "在 Manifest、权限和源码间切换并搜索定位。",
-            "先核对包名、版本、SDK，再检查权限和实现。",
-        ],
-    )
+    annotate(page, [("1", ".sidebar-item[data-page='apk-analysis']"), ("2", "#apk-task-history"), ("3", "#apk-upload-zone"), ("4", "#apk-btn-download"), ("5", ".apk-tab-actions"), ("6", "#apk-manifest-info")])
     capture(page, "apk-analysis.png")
 
 
@@ -324,18 +310,7 @@ def capture_usbip(page) -> None:
           ModalManager.open('usbip-attach-modal');
         }
     """)
-    annotate(
-        page,
-        "本地设备：USB/IP 精确接入",
-        [("1", "#usbip-source-host"), ("2", "#usbip-target-worker"), ("3", "#usbip-source-device"), ("4", "#usbip-assignments"), ("5", "#usbip-attach-submit")],
-        [
-            "选择实际连接 Android USB 的 Windows / Ubuntu 来源主机。",
-            "目标可为 Controller 或具备 USB/IP 能力的在线 Worker。",
-            "按 BUSID 多选设备；同一设备同一时间只接入一个目标。",
-            "当前接入逐端口显示；可单独断开且不会影响同来源其他端口。",
-            "连接/断开期间服务端拒绝同来源重复操作；测试占用时禁止断开。",
-        ],
-    )
+    annotate(page, [("1", "#usbip-source-host"), ("2", "#usbip-target-worker"), ("3", "#usbip-source-device"), ("4", "#usbip-assignments"), ("5", "#usbip-attach-submit")])
     capture(page, "usbip-local-device.png")
     page.evaluate("ModalManager.close('usbip-attach-modal')")
 
@@ -368,18 +343,7 @@ def capture_agent(page) -> None:
         }
     """)
     close_elevation(page)
-    annotate(
-        page,
-        "对话 Agent：资源查询、预检与确认",
-        [("1", "#agent-engine-status"), ("2", "#agent-model-status"), ("3", "#agent-chat-messages"), ("4", "#agent-steps"), ("5", "#agent-chat-messages button[data-click='confirmAgentPlan']")],
-        [
-            "对话引擎由 kkagent 规划并选择项目工具，状态单独显示。",
-            "分析模型负责报告与知识分析，与对话引擎分别查看。",
-            "先查询资源并补齐参数，再核对 Worker、设备、套件和重试次数。",
-            "步骤区显示预检、执行、等待确认与错误；失败可按提示重试。",
-            "需确认的计划通过预检后才可执行；阻塞时先处理原因再重新规划。",
-        ],
-    )
+    annotate(page, [("1", "#agent-engine-status"), ("2", "#agent-model-status"), ("3", "#agent-chat-messages"), ("4", "#agent-steps"), ("5", "#agent-chat-messages button[data-click='confirmAgentPlan']")])
     page.evaluate('async () => { await loadAgentModelStatus(false, true); }')
     model = page.locator('#agent-model-status')
     if model.get_attribute('data-state') != 'available' or 'demo-analyzer' not in (model.get_attribute('title') or ''):
@@ -410,17 +374,7 @@ def capture_cluster(page) -> None:
     if not child.locator('#refresh').is_disabled():
         raise RuntimeError('Guide cluster refresh must reject duplicate clicks')
     close_elevation(page)
-    annotate(
-        child,
-        "主机集群：刷新时保留稳定页面",
-        [("1", "#dashboard-stats"), ("2", "#refresh"), ("3", "#dash-gauges"), ("4", "#dashboard-tests")],
-        [
-            "已渲染的主机、设备和任务摘要在刷新期间继续保留。",
-            "刷新期间按钮暂不可点击，防止重复刷新。",
-            "资源图表仅在新数据齐备后原子替换，旧内容不会跳动。",
-            "局部接口失败只提示对应错误，其余面板仍可查看和操作。",
-        ],
-    )
+    annotate(child, [("1", "#dashboard-stats"), ("2", "#refresh"), ("3", "#dash-gauges"), ("4", "#dashboard-tests")])
     child.wait_for_function(
         '() => Object.values(dashCharts).every(chart => !chart || chart.getZr().animation.isFinished())'
     )
@@ -449,39 +403,21 @@ def capture_test_workflows(page) -> None:
       document.querySelector('#script-path').value = '/opt/gms/run_GMS_Test_Auto.sh';
       switchLogTab('system');
     }""", {'devices': DEVICES, 'suite': SUITE})
-    annotate(page, '测试参数：先选主机，再确认套件与范围', [
+    annotate(page, [
         ('1', '#cluster-worker'), ('2', '#test-type'), ('3', '#test-suite'),
         ('4', '#test-module'), ('5', '#test-case'), ('6', '#retry-result'),
-    ], [
-        '先核对测试 Worker，设备与套件必须来自同一执行主机。',
-        '选择 CTS / GTS / VTS / STS 等测试类型。',
-        '确认套件版本与目标 Android 版本相符。',
-        '按需填写测试模块；模块名必须存在于当前套件。',
-        '指定用例可缩小测试范围；留空使用模块或套件默认范围。',
-        'Retry 使用同一 Worker 的原始报告，开始后查看测试日志。',
     ])
     capture(page, 'test-parameters.png')
     clear_annotations(page)
-    annotate(page, '设备投屏：设备画面显示在主机桌面', [
+    annotate(page, [
         ('1', '#device-canvas'), ('2', '[data-click="showDeviceScreen"]'),
         ('3', '.sidebar-item[data-page="desktop"]'), ('4', '[data-log-tab="system"]'),
-    ], [
-        '选择当前 Worker 下可用的设备；占用与离线设备不可操作。',
-        '点击设备投屏，在目标 Worker 上启动 scrcpy。',
-        '进入主机桌面查看 scrcpy 窗口；画面来自所选 Worker。',
-        '连接与设备操作的提示在系统日志中查看。',
     ])
     capture(page, 'device-screen.png')
     clear_annotations(page)
-    annotate(page, '设备烧写：核对目标与固件，跟踪系统日志', [
+    annotate(page, [
         ('1', '#device-canvas'), ('2', '#btn-device-info'), ('3', '#btn-burn-firmware'),
         ('4', '#btn-burn-gsi'), ('5', '[data-log-tab="system"]'),
-    ], [
-        '先确认唯一目标设备、所属 Worker 与接入方式。',
-        '核对设备信息与镜像适配关系。',
-        '整包固件先分块暂存并校验，再进入最终烧写。',
-        'GSI 入口用于系统镜像；ADB Proxy 不支持 Fastboot / 烧写。',
-        '最终烧写期间不要断电或拔线；异常保留日志与任务编号。',
     ])
     capture(page, 'device-flashing.png')
 
@@ -491,13 +427,9 @@ def capture_reports(page) -> None:
     page.evaluate("switchPage('reports', null)")
     page.wait_for_selector('#reports-table-body [data-report-name]')
     page.evaluate('reports => displayTestReports(reports)', REPORTS)
-    annotate(page, '报告管理：确认报告身份，再分析或重试', [
+    annotate(page, [
         ('1', '#reports-worker-filter'), ('2', '#filter-user-checkbox'),
         ('3', '#reports-table-body tr:first-child'),
-    ], [
-        '先按 Worker 筛选，报告筛选不会改变测试执行主机。',
-        '按需只显示本人报告，再核对套件版本、报告名称和统计。',
-        '按行分析、Retry、下载或打开目录；删除前核对报告身份。',
     ])
     capture(page, 'report-management.png')
     clear_annotations(page)
@@ -513,12 +445,8 @@ def capture_reports(page) -> None:
          reason:'演示失败：Expected a validated network.'}
       ]
     })""")
-    annotate(page, '报告分析：从统计定位到失败用例', [
+    annotate(page, [
         ('1', '#report-upload-zone'), ('2', '#report-summary'), ('3', '#report-failure-list'),
-    ], [
-        '从报告管理打开，或上传 XML / 压缩包 / 结果目录。',
-        '先核对 Android、套件版本与通过 / 失败统计。',
-        '查看模块、用例与错误堆栈，可回填单测或进入报错诊断。',
     ])
     capture(page, 'report-analysis.png')
 
@@ -529,15 +457,9 @@ def capture_suites(page) -> None:
     page.wait_for_selector('.suite-suite-item')
     page.evaluate('path => selectTestSuiteForBrowser(path)', SUITE['tools_path'])
     page.wait_for_selector('.suite-file-row')
-    annotate(page, '测试套件：原生 results / logs 从这里查找', [
+    annotate(page, [
         ('1', '#suite-worker-select'), ('2', '#suite-download-url'),
         ('3', '#suite-browser-list'), ('4', '#suite-file-list'), ('5', '#btn-test-results'),
-    ], [
-        '选择产生测试结果的 Worker；套件浏览选择与执行上下文独立。',
-        '支持下载、解压或添加该 Worker 已有的本地套件。',
-        '按套件类型与版本选择对应套件。',
-        '原生运行产物在 results / logs；未登记到报告管理也可在这里查看。',
-        '测试结果入口查询 Tradefed 结果，按运行时间戳匹配目录。',
     ])
     capture(page, 'test-suites.png')
 
@@ -564,63 +486,44 @@ def capture_ats(page) -> None:
       demoOption('automation-worker', 'Controller（演示）', 'ats-worker-controller');
       demoOption('automation-test-suite', 'CTS 16_r2（演示）', 'cts-16-r2');
     }""")
-    annotate(child, 'GMS ATS：发起、预检、追踪与诊断', [
+    annotate(child, [
         ('1', '#automation-profile'), ('2', '#build-workspace'),
         ('3', '#build-lunch-target'), ('4', '#automation-worker'),
         ('5', '#automation-test-suite'),
-    ], [
-        '从“发起”选择 Profile；也可在“平台”配置资源。',
-        '使用已有固件，或选择编译服务器、构建模板与源码目录。',
-        'Lunch Target 只取当前源码目录扫描结果。',
-        '核对 Worker 与可用设备，烧写模式限选 1 台本地 USB / USB-IP 设备。',
-        '选测试类型与套件，完成预检后创建运行；在“追踪与诊断”查看进度。',
     ])
     capture(page, 'ats-create-run.png')
 
 
 def capture_access(page) -> None:
     clear_annotations(page)
-    page.set_viewport_size({'width': 1600, 'height': 1100})
     page.evaluate("switchPage('users', null)")
     close_elevation(page)
     page.locator('#sdk-config-tab').click()
+    page.locator('#agent-sdk-stat-row .page-stat-card').first.wait_for()
     page.locator('#agent-sdk-sources-add').click()
     page.locator('#agent-sdk-add-target').fill('builder@192.0.2.20')
     page.locator('#agent-sdk-add-discover-btn').click()
     page.wait_for_function("document.querySelectorAll('#agent-sdk-add-path-list input').length === 2")
-    page.locator('#agent-sdk-add-android-version').fill('Android16')
     page.locator('#agent-sdk-add-revision').fill('HEAD')
-    annotate(page, 'SDK 配置：发现源码目录并核对版本', [
+    page.locator('#agent-sdk-add-modal .modal-body').evaluate('(body) => { body.scrollTop = 0; }')
+    annotate(page, [
         ('1', '#agent-sdk-add-type'), ('2', '#agent-sdk-add-target'),
-        ('3', '#agent-sdk-add-path-list'), ('4', '#agent-sdk-add-android-version'),
+        ('3', '#agent-sdk-add-path-list'),
         ('5', '#agent-sdk-add-revision'), ('6', '#agent-sdk-add-probe-btn'),
-    ], [
-        '选择本机 Git 或编译服务器 SSH 只读源码。',
-        '填写服务器，按回车或点击“发现目录”。',
-        '仅列出 Android 源码树；可多选批量添加，也可手动输入路径。',
-        '目录可自动识别 Android 版本，识别不准时手动修正。',
-        '核对默认 revision；分析时还需绑定匹配问题版本的 commit。',
-        '校验路径后添加，返回列表查看版本统计与校验状态。',
     ])
-    capture(page, 'sdk-config.png')
+    capture(page, 'sdk-config.png', modal_id='agent-sdk-add-modal')
     clear_annotations(page)
     page.evaluate("sdkConfigToggleAddSdk(false)")
     page.locator('#agent-access-tab').click()
+    page.wait_for_function("document.querySelector('#agent-token-total-count').textContent !== '—'")
     page.locator('#agent-access-create-toggle').click()
+    page.locator('#agent-access-scopes input').first.wait_for()
     page.locator('#agent-access-name').fill('codex-lab-demo')
-    annotate(page, 'Agent 接入：配置范围，再创建一次性配对码', [
+    annotate(page, [
         ('1', '#agent-access-name'), ('2', '#agent-access-days'),
-        ('3', '#agent-access-scope-details'), ('4', '#agent-access-workers'),
-        ('5', '#agent-access-devices'), ('6', '#agent-access-create-submit'),
-    ], [
-        'Agent 名称建议包含客户端与主机，方便后续识别。',
-        '凭据有效期与配对码的 5 分钟有效期分别设置。',
-        '只授予需要的 scope；可恢复推荐、全选或清空。',
-        '按 Worker ID 限制执行目标，多个 ID 用逗号分隔。',
-        '按设备序列号限制范围，* 表示全部。',
-        '生成时验证管理员身份，配对码单次使用；截图未创建凭据。',
+        ('3', '.agent-access-scope-fieldset > legend'), ('6', '#agent-access-create-submit'),
     ])
-    capture(page, 'agent-enrollment.png')
+    capture(page, 'agent-enrollment.png', modal_id='agent-access-create-modal')
     page.evaluate('agentAccessToggleCreate(false)')
 
 
@@ -693,20 +596,15 @@ def main() -> None:
             if not login.ok:
                 raise RuntimeError(f"guide login failed: {login.text()}")
             install_routes(page)
-            page.add_init_script("""
-                localStorage.setItem('gms_sidebar_visible_pages', JSON.stringify([
-                  'test','desktop','terminal','users','devices','reports','report-analysis',
-                  'test-suites','apk-analysis','architecture','automation','cluster','agent'
-                ]));
-            """)
-            page.goto(base_url, wait_until="domcontentloaded")
-            page.wait_for_selector(".sidebar-item[data-page]")
+            with page.expect_response(f"{base_url}/api/sidebar-order") as navigation:
+                page.goto(base_url)
+            if not navigation.value.ok:
+                raise RuntimeError(f"Could not load default sidebar preferences: HTTP {navigation.value.status}")
             page.wait_for_timeout(1600)
             page.evaluate("""
                 () => {
                   document.querySelectorAll('.modal.show').forEach(modal => ModalManager.close(modal.id));
                   window.requestElevatedAccess = async () => false;
-                  applySidebarVisibility(['test','desktop','terminal','users','devices','reports','report-analysis','test-suites','apk-analysis','architecture','automation','cluster','agent']);
                 }
             """)
             groups = [

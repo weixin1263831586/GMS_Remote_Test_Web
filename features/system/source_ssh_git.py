@@ -166,7 +166,7 @@ def _parse_remote_grep_output(
 
 
 def _parse_multi_output(
-    stdout: str, path_filter: str, limit: int, strip_root: str = "",
+    stdout: str, path_filter: str, limit: int, strip_root: str = "", *, exact_path: bool = False,
 ) -> tuple[list[dict], int, bool]:
     """解析多仓聚合的 grep 记录流，返回 (matches, scanned, limited)。
 
@@ -224,7 +224,9 @@ def _parse_multi_output(
         if not label.startswith(prefix) or not line_number.isdigit():
             raise SourceProviderError("git grep 远端输出格式无效", status_code=502)
         full_path = current[0] + "/" + label[len(prefix):]
-        if path_filter and path_filter not in full_path.lower():
+        if exact_path and full_path != path_filter:
+            raise SourceProviderError("限定文件检索返回了其他路径", status_code=502)
+        if not exact_path and path_filter and path_filter not in full_path.lower():
             continue
         matches.append({
             "path": full_path,
@@ -500,7 +502,7 @@ class SSHGitProvider(LocalGitProvider):
         """单分片固定模板：逐仓先解析请求 revision 的 commit，再 grep。
 
         rev-parse 与 grep 在同一循环体先后执行，结果头/记录引用同一个
-        SHA（审核 P1）：编译服务器在搜索期间移动 HEAD 不影响本批证据的
+        SHA。编译服务器在搜索期间移动 HEAD 不影响本批证据的
         可复现性——结果绑定的就是 grep 时实际检索的 commit，而不是聚合
         后回查得到的"现在的 HEAD"。rev-parse 失败按该仓不完整处理。
 
@@ -521,10 +523,12 @@ class SSHGitProvider(LocalGitProvider):
             + f"c=$(git --no-optional-locks -C \"$r\" rev-parse --verify {rev} 2>/dev/null) "
             "|| { printf '@@GMS_SDK_INCOMPLETE@@\\n'; continue; }; "
             "printf '@@GMS_SDK_REPO@@%s\\t%s\\n' \"$r\" \"$c\"; "
+            "if [ -n \"$in_f\" ] && [ \"$(git --no-optional-locks -C \"$r\" cat-file -t \"$c:$in_f\" 2>/dev/null)\" != blob ]; "
+            "then continue; fi; "
             f"{per_repo_guard}"
             "git --no-optional-locks -C \"$r\" grep --fixed-strings --ignore-case "
             "--no-color --no-heading --no-break --no-column --full-name "
-            "-z -n -I -e \"$in_q\" $in_f \"$c\" -- 2>/dev/null; "
+            "-z -n -I -e \"$in_q\" \"$c\" -- ${in_f:+\":(literal)$in_f\"} 2>/dev/null; "
             'rc=$?; if [ "$rc" -gt 1 ]; then '
             "printf '@@GMS_SDK_INCOMPLETE@@\\n'; fi; "
             "done"
@@ -570,16 +574,16 @@ class SSHGitProvider(LocalGitProvider):
     def _run_command_checked(
         self, command: str, label: str, timeout: int, error_status: int = 502,
     ) -> str:
-        """执行并校验：超时→504；执行器异常/远端非零退出→error_status。"""
+        """超时返回 504，SSH 失败返回 502，Git 非零退出使用 error_status。"""
         result = self._run_remote(command, timeout)
         if result.timed_out:
             raise SourceProviderError(
                 f"{label} 在远端执行超时（{timeout}s）", status_code=504
             )
         if result.code == -1:
-            raise SourceProviderError(
-                f"{label} 执行失败: {_stderr_tail(result)}", status_code=error_status
-            )
+            # 执行器用 -1 表示 SSH 异常（超时已在上面单独处理）。
+            # 这不是 git 的真实退出码，不能沿用调用方的 422/404。
+            raise SourceProviderError(f"{label} 执行失败", status_code=502)
         if result.code != 0:
             raise SourceProviderError(
                 f"{label}: {_stderr_tail(result)}", status_code=error_status
@@ -624,9 +628,11 @@ class SSHGitProvider(LocalGitProvider):
         try:
             self._run_remote_checked(
                 "rev-parse", "--is-inside-work-tree",
-                timeout=SSH_GIT_DEFAULT_TIMEOUT_SECONDS,
+                timeout=SSH_GIT_DEFAULT_TIMEOUT_SECONDS, error_status=422,
             )
-        except SourceProviderError:
+        except SourceProviderError as exc:
+            if exc.status_code != 422:
+                raise
             raise SourceProviderError(
                 "配置的 repo_root 不是远端有效 Git 仓库；"
                 "请联系管理员检查 sdk_sources.ssh_git 配置",
@@ -728,7 +734,7 @@ class SSHGitProvider(LocalGitProvider):
     def search(
         self, revision: str, query: str, *, path_filter: str = "",
         limit: int = SEARCH_DEFAULT_LIMIT, repo_scope: str = "",
-        permission_scope: str = "", budget_seconds: int | None = None,
+        permission_scope: str = "", budget_seconds: int | None = None, exact_path: bool = False,
     ) -> dict[str, Any]:
         """Budget includes waiting, cold discovery and SSH execution."""
         seconds = max(0.01, min(
@@ -738,7 +744,7 @@ class SSHGitProvider(LocalGitProvider):
         try:
             return self._search_impl(
                 revision, query, path_filter=path_filter, limit=limit,
-                repo_scope=repo_scope, permission_scope=permission_scope,
+                repo_scope=repo_scope, permission_scope=permission_scope, exact_path=exact_path,
             )
         finally:
             _SEARCH_DEADLINE.reset(token)
@@ -752,6 +758,7 @@ class SSHGitProvider(LocalGitProvider):
         limit: int = SEARCH_DEFAULT_LIMIT,
         repo_scope: str = "",
         permission_scope: str = "",
+        exact_path: bool = False,
     ) -> dict[str, Any]:
         """Search one explicit repository or all repositories, without changing path_filter.
 
@@ -762,8 +769,10 @@ class SSHGitProvider(LocalGitProvider):
         if not str(query or "").strip():
             raise SourceProviderError("query 不能为空", status_code=422)
         limit = max(1, min(int(limit or SEARCH_DEFAULT_LIMIT), SEARCH_MAX_LIMIT))
-        filter_value = str(path_filter or "").strip().lower()
+        filter_value = _safe_repo_path(path_filter) if exact_path else str(path_filter or "").strip().lower()
         scope = _safe_repo_path(repo_scope) if repo_scope else ""
+        if exact_path and (not scope or filter_value != path_filter or not filter_value.startswith(scope + "/")):
+            raise SourceProviderError("文件路径必须完整且位于指定子仓内", status_code=422)
         revision = str(revision or "").strip() or self.config.default_revision
         if scope and not self._multi:
             raise SourceProviderError("单仓源无需 repo_scope", status_code=422)
@@ -772,7 +781,7 @@ class SSHGitProvider(LocalGitProvider):
         key = (
             permission_scope, self.config.source_id, self.config.ssh_host,
             self.config.ssh_port, self.config.ssh_username, self.config.repo_root,
-            revision, str(query), filter_value, scope, limit,
+            revision, str(query), filter_value, scope, limit, exact_path,
         )
         pinned = bool(scope and _COMMIT_RE.fullmatch(revision))
         with self._search_lock:
@@ -793,7 +802,7 @@ class SSHGitProvider(LocalGitProvider):
                 raise SourceProviderError("相同源码查询仍在执行，等待预算已耗尽", status_code=504) from exc
         try:
             if scope:
-                payload = self._search_scoped(revision, str(query), filter_value, limit, scope)
+                payload = self._search_scoped(revision, str(query), filter_value, limit, scope, exact_path=exact_path)
             else:
                 payload = self._search_multi(revision, str(query), filter_value, limit)
                 payload["scope"] = "all_repositories"
@@ -840,10 +849,11 @@ class SSHGitProvider(LocalGitProvider):
 
     def _search_scoped(
         self, revision: str, query: str, path_filter: str, limit: int, scope: str,
+        *, exact_path: bool,
     ) -> dict[str, Any]:
         from .source_ssh_scope import search_scoped
 
-        return search_scoped(self, revision, query, path_filter, limit, scope)
+        return search_scoped(self, revision, query, path_filter, limit, scope, exact_path=exact_path)
 
     # ------------------------------------------------------------- multi search
 
@@ -898,7 +908,7 @@ class SSHGitProvider(LocalGitProvider):
     def _search_multi(
         self, revision: str, query: str, filter_value: str, limit: int,
     ) -> dict[str, Any]:
-        """全量/多仓聚合检索：分片并行 HEAD grep，命中仓后置解析 commit。
+        """全量多仓检索，按相关度排序并行 grep，每个分片绑定实际 commit。
 
         - path_filter 是**排序优先级**而非排除条件：仓库名命中的子仓排到
           检索序列最前（预算内优先出结果），但全集合都参与检索；文件级
@@ -906,8 +916,7 @@ class SSHGitProvider(LocalGitProvider):
           （旧的「命中仓名就收窄仓库集合」会漏掉其他仓内路径含过滤词的
           命中，且 coverage_complete=true 时构成假阴性）；
         - 全量发现模式的子仓清单经 ``_repos_all()`` 自动枚举（TTL 缓存）；
-        - 分片并行检索，墙钟预算在波间检查，客户端 HTTP 预算由 CLI 覆盖；
-          超时分片返回部分结果 + limited=True + hint。
+        - 发现和排序占用请求预算。分片提交和等待使用剩余时间，超时返回已收集的结果并标记 limited。
         """
         label = str(revision or "").strip() or self.config.default_revision
         if label and (label.startswith("-") or ".." in label):
@@ -924,51 +933,21 @@ class SSHGitProvider(LocalGitProvider):
                 status_code=422,
             )
         repos = self._repos_all()
-        ranking: list[tuple[str, float, str]] = []
         from .source_repo_rank import (
             codesearch_hints_for_query,
             knowledge_hints_for_query,
             rank_repos,
         )
 
+        rel_to_abs = {self._repo_rel(repo): repo for repo in repos}
+        ranking = rank_repos(
+            query, list(rel_to_abs),
+            knowledge_hints=knowledge_hints_for_query(query),
+            codesearch_hints=codesearch_hints_for_query(query),
+        )
         if filter_value:
-            # path_filter 只是**排序优先级**，不是排除条件（审核 P1）：
-            # 旧逻辑「任一子仓名命中就只搜这些仓」会在部分匹配时漏掉
-            # 其他仓内文件路径含过滤词的命中（如 filter=base 命中
-            # frameworks/base 却丢掉 device/.../base_service）。仓库命中的
-            # 仓排到最前，全集合都参与检索；文件级过滤仍由
-            # _parse_multi_output 按完整路径逐条保证正确性。
-            repo_hit_rels = {
-                self._repo_rel(repo).lower() for repo in repos
-                if filter_value in self._repo_rel(repo).lower()
-            }
-            ranking = rank_repos(
-                query, [self._repo_rel(r) for r in repos],
-                knowledge_hints=knowledge_hints_for_query(query),
-                codesearch_hints=codesearch_hints_for_query(query),
-            )
-            rel_to_abs = {self._repo_rel(r): r for r in repos}
-            ordered = [(rel, score, reason) for rel, score, reason in ranking]
-            if repo_hit_rels:
-                hits_first = [item for item in ordered if item[0].lower() in repo_hit_rels]
-                rest = [item for item in ordered if item[0].lower() not in repo_hit_rels]
-                ordered = [
-                    *hits_first,
-                    *rest,
-                ]
-                ranking = ordered
-            repos = tuple(rel_to_abs[rel] for rel, _, _ in ordered)
-        else:
-            # 无 path_filter：按强相关排序（codesearch 符号落点 / knowledge
-            # 锚点 / 子系统映射 / 路径词法），强相关仓集中在首批分片，
-            # 预算内优先完成。
-            ranking = rank_repos(
-                query, [self._repo_rel(r) for r in repos],
-                knowledge_hints=knowledge_hints_for_query(query),
-                codesearch_hints=codesearch_hints_for_query(query),
-            )
-            rel_to_abs = {self._repo_rel(r): r for r in repos}
-            repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
+            ranking.sort(key=lambda item: filter_value not in item[0].lower())
+        repos = tuple(rel_to_abs[rel] for rel, _, _ in ranking)
         repos_total = len(repos)  # 计划检索的子仓数（全集合，path_filter 不收窄）
         shards = self._shards(repos)
         matches: list[dict[str, Any]] = []
@@ -988,13 +967,7 @@ class SSHGitProvider(LocalGitProvider):
             # （远端 sshd MaxStartups 约束）；强相关仓经排序已集中在前
             # 几片，通常第一波就产出全部命中。
             for wave_start in range(0, len(shards), SSH_GIT_SHARD_WAVE_SIZE):
-                # 全局预算检查在**波间**：deadline 一过不再发起新波
-                # （已聚合的部分结果 + limited=True 返回）。进行中的波
-                # 总是等完——强相关仓集中在首批，砍掉在飞的波会把最
-                # 有价值的命中一起丢掉；单波墙钟由每分片的
-                # execute_command 超时（SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS）
-                # 兜底，不会无限等待。
-                if wave_start > 0 and time.monotonic() >= deadline:
+                if time.monotonic() >= deadline:
                     limited = True
                     break
                 wave = shards[wave_start:wave_start + SSH_GIT_SHARD_WAVE_SIZE]
@@ -1059,7 +1032,7 @@ class SSHGitProvider(LocalGitProvider):
             raise first_error
         matches = matches[:limit]
         # 命中的 commit 由分片命令在 grep 前解析并随结果头携带（与检索
-        # 同一循环绑定，审核 P1）；没有真实 commit 的记录无法复现读取，
+        # 同一循环绑定）；没有真实 commit 的记录无法复现读取，
         # 降级丢弃并如实上报 limited。
         kept: list[dict[str, Any]] = []
         for match in matches:

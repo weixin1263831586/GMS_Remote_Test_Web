@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import time
@@ -41,7 +42,9 @@ router = APIRouter()
 
 MAX_RECIPIENTS = 30            # to + cc 合计
 MAX_SUBJECT_CHARS = 500
-MAX_BODY_CHARS = 2_000_000     # ~2MB 正文(HTML 报告)
+MAX_BODY_CHARS = 2_000_000
+# A JSON-escaped supplementary character can occupy twelve bytes.
+MAX_JSON_BODY_BYTES = MAX_BODY_CHARS * 12 + 65_536
 RATE_LIMIT_WINDOW_SECONDS = 60
 RATE_LIMIT_MAX_SENDS = 10      # 每用户每窗口
 
@@ -125,7 +128,17 @@ async def send_email_endpoint(request: Request):
             f"{RATE_LIMIT_MAX_SENDS} 封)", status_code=429,
         )
 
-    body = await request.json()
+    raw_body = bytearray()
+    async for chunk in request.stream():
+        if len(raw_body) + len(chunk) > MAX_JSON_BODY_BYTES:
+            return error_response("JSON 请求体过大", status_code=413)
+        raw_body.extend(chunk)
+    try:
+        body = json.loads(raw_body)
+    except (ValueError, RecursionError):
+        return error_response("请求体必须是 JSON 对象", status_code=400)
+    if not isinstance(body, dict):
+        return error_response("请求体必须是 JSON 对象", status_code=400)
     to = _normalize_recipients(body.get("to"))
     cc = _normalize_recipients(body.get("cc"))
     if to is None or cc is None:
@@ -218,10 +231,12 @@ async def send_email_endpoint(request: Request):
             user.username, len(to) + len(cc), subject[:80],
             result.get("error", ""),
         )
+        mode = str(result.get("mode") or "")
+        status_code = {"invalid": 400, "unconfigured": 400, "disabled": 409}.get(mode, 503)
         return error_response(
             result.get("error", "邮件发送失败"),
-            status_code=503,
-            mode=result.get("mode"),
+            status_code=status_code,
+            mode=mode,
         )
 
     # result 已含 sent/mode/to/cc/recipients，补上 subject 即可
@@ -333,7 +348,7 @@ def save_smtp_config(body: SmtpConfigRequest, admin: CurrentUser = Depends(requi
     email.pop("password", None)  # 历史遗留明文字段一律清除
     dashboard["email"] = email
     if not config_manager.update_runtime_config({"redmine_dashboard": dashboard}):
-        return error_response("保存 SMTP 配置失败", status_code=500)
+        return error_response("保存 SMTP 配置失败", status_code=503)
     logger.info(
         "[EMAIL_SMTP] saved global smtp config by %s (host=%s)",
         admin.username, body.smtp_host,

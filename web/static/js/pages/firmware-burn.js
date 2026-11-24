@@ -494,22 +494,6 @@ function streamCommandEvents(commandId, workerId) {
     return () => { stopped = true; };
 }
 
-function closeSnModal() {
-    ModalManager.close('sn-modal');
-}
-
-async function submitSnBurn() {
-    const snCode = document.getElementById('sn-code').value.trim();
-    if (!snCode) {
-        showToast('SN码不能为空', 'error');
-        return;
-    }
-
-    await executeBurnOperation('/api/burn/serial', {
-        sn_code: snCode
-    }, '烧写SN码', closeSnModal);
-}
-
 // ==================== 烧写操作辅助函数 ====================
 async function executeBurnOperation(endpoint, data, operationName, closeModalFunc) {
     const devices = endpoint === '/api/burn/gsi'

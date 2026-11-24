@@ -15,6 +15,7 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.cluster import commands_api
 from features.cluster.config import ClusterConfig
+from features.cluster.models import WorkerHeartbeat
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
 
@@ -70,6 +71,20 @@ class ClusterRepositoryTests(unittest.TestCase):
         self.assertEqual(device["id"], "worker-246:ABC")
         self.assertEqual(device["properties"]["product"], "rk")
         self.assertEqual(self.repo.list_suites("worker-246")[0]["suite_key"], "CTS:17_r1")
+
+    def test_worker_disk_percent_is_optional_and_follows_latest_heartbeat(self):
+        self.register()
+        capacities = {"disk_total_gb": 100, "disk_free_gb": 20}
+        measured = WorkerHeartbeat(**capacities, disk_percent=78)
+        self.repo.heartbeat("worker-246", measured.model_dump())
+        self.assertEqual(self.repo.get_worker("worker-246")["disk_percent"], 78)
+
+        older_worker = WorkerHeartbeat(**capacities)
+        self.repo.heartbeat("worker-246", older_worker.model_dump())
+        worker = self.repo.get_worker("worker-246")
+        self.assertIsNone(worker["disk_percent"])
+        self.assertEqual(worker["disk_total_gb"], 100)
+        self.assertEqual(worker["disk_free_gb"], 20)
 
     def test_refresh_devices_replaces_inventory_without_touching_worker_session(self):
         """本地烧写完成的库存刷新：只写设备表，不碰会话/状态/心跳时间。"""

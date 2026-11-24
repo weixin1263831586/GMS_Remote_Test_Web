@@ -1,5 +1,6 @@
 import ast
 import unittest
+from importlib.util import resolve_name
 from pathlib import Path
 
 
@@ -8,14 +9,33 @@ MIGRATION_FEATURE_IMPORT_EXEMPTIONS = set()
 MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
 
+def resolved_module(path: Path, node: ast.ImportFrom) -> str | None:
+    """Resolve ``ImportFrom`` to a dotted name, including relative imports.
+
+    ``level`` is counted from the package that contains the module.
+    ``features/foo/bar.py`` is package ``features.foo``; its
+    ``__init__.py`` is package ``features.foo``. ``from ..redmine.internal``
+    in ``features/foo/bar.py`` is ``features.redmine.internal``.
+    """
+    if node.level <= 0:
+        return node.module
+    package = ".".join(path.relative_to(ROOT).parent.parts)
+    try:
+        return resolve_name("." * node.level + (node.module or ""), package)
+    except ImportError:
+        return None
+
+
 def imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding='utf-8'))
     result = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            result.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            module = resolved_module(path, node)
+            if module:
+                result.add(module)
     return result
 
 
@@ -24,9 +44,12 @@ def imported_symbols(path: Path) -> list[tuple[str, str]]:
     tree = ast.parse(path.read_text(encoding='utf-8'))
     result: list[tuple[str, str]] = []
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module:
+        if isinstance(node, ast.ImportFrom):
+            module = resolved_module(path, node)
+            if not module:
+                continue
             for alias in node.names:
-                result.append((node.module, alias.name))
+                result.append((module, alias.name))
     return result
 
 

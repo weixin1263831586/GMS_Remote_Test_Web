@@ -229,21 +229,22 @@ async function browseRemoteFile(mode) {
     state.fileBrowser.clusterWorkerId = '';
     state.fileBrowser.clusterSuitePath = '';
 
+    const testSuiteSelect = document.getElementById('test-suite');
+    const toolsPath = testSuiteSelect?.value || '';
+    const workerId = workspaceWorkerId();
+
+    if (!toolsPath && !isLocalWorkspaceWorker(workerId)) {
+        showToast('请先选择当前 Worker 上的测试套件', 'warning');
+        return;
+    }
+
     document.getElementById('file-browser-title').textContent = title;
 
     ModalManager.open('file-browser-modal');
 
     let defaultPath = getDefaultSuitesPath();
 
-    const testSuiteSelect = document.getElementById('test-suite');
-    const toolsPath = testSuiteSelect?.value || '';
-    const workerId = workspaceWorkerId();
-
     if (!toolsPath) {
-        if (!isLocalWorkspaceWorker(workerId)) {
-            showToast('请先选择当前 Worker 上的测试套件', 'warning');
-            return;
-        }
         addLogEntry(`未选择测试套件，使用默认路径: ${defaultPath}`, 'info');
         await loadFileDirectory(defaultPath);
         return;
@@ -551,8 +552,11 @@ function confirmFileSelection() {
 
         closeFileBrowserModal();
     } else if (state.fileBrowser.mode === 'gsi' || state.fileBrowser.mode === 'gsi-system') {
-        // For GSI system image, use the selected path directly
-        fullPath
+        if (isDirectory) {
+            showToast('请选择一个镜像文件，而非文件夹', 'warning');
+            return;
+        }
+        fullPath = `${state.fileBrowser.currentPath}/${selectedItem.name}`;
         if (targetInput) {
             targetInput.value = fullPath;
             state.gsiSystemFile = null;
@@ -638,7 +642,8 @@ function confirmFileSelection() {
             showToast('请选择一个目录（已解压的测试套件），而非文件', 'warning');
             return;
         }
-        fullPath = state.fileBrowser.currentPath + '/';
+        const suiteBase = String(state.fileBrowser.currentPath || '').replace(/\/+$/, '');
+        fullPath = `${suiteBase}/${selectedItem.name}/`;
         if (targetInput) {
             targetInput.value = fullPath;
             addLogEntry(`已选择测试套件目录: ${fullPath}`, 'info');

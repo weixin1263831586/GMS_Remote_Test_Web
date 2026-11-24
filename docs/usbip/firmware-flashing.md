@@ -4,10 +4,9 @@
 
 ## Overview
 
-平台的完整固件烧写只使用 Rockchip `upgrade_tool uf` 整包路径。当前 API 的
-`burn_mode` 仅接受 `auto` 与 `uf`；历史上的 USB/IP Fastboot 分区烧写、
-`partition`（同会话 DI）、`transport-probe-force` 等实验性 backend 已删除，
-不再属于当前架构。
+平台完整固件使用 Rockchip `update.img`。Ubuntu 测试主机用 `upgrade_tool uf`，
+Windows 来源主机通过 Source Agent 调度 RKDevTool。API 的 `burn_mode` 接受
+`auto` 和 `uf`。
 
 两条烧写链路按设备接入方式分流：
 
@@ -47,15 +46,17 @@ USB/IP 设备的完整固件烧写流程：
 1. 平台解析设备到 (Source Host, BUSID) 的持久物理路由，并确认
    usbipd-win AutoBind 策略（Windows 来源，4.2+）或用户态 usbipd 导出
    进程（Ubuntu 来源）。
-2. 烧写前显式完成所有权交还：暂停目标设备的通用重连 watchdog，目标
+2. Controller 先准备可供 Source Agent 上传的本地镜像。固件仅在测试主机时先复制
+   到 Controller。Agent 请求复核实际待烧镜像的审批摘要。
+3. 烧写前显式完成所有权交还：暂停目标设备的通用重连 watchdog，目标
    Worker 侧 vhci detach，并 fail-closed 复核端口已释放——只有确认
    Source Host 物理持有设备后才开始烧写。
-3. **Windows Source**：由运行在交互桌面会话中的 Windows Source Agent 调度
+4. **Windows Source**：由运行在交互桌面会话中的 Windows Source Agent 调度
    RKDevTool 完成（Controller SFTP 上传固件与任务文件，轮询结果）。
-4. **Ubuntu/Linux Source**：支持设备共享、分配与重连；在 Linux Source
+5. **Ubuntu/Linux Source**：支持设备共享、分配与重连；在 Linux Source
    完整烧写 backend 实现之前，API 拒绝（HTTP 409）对 Linux 来源 USB/IP
    设备的完整固件烧写，不会误送入 Windows backend。
-5. 烧写完成或失败后，平台按原物理路由恢复 USB/IP 导出与 Worker attach。
+6. 烧写完成或失败后，平台按原物理路由恢复 USB/IP 导出与 Worker attach。
 
 ## ADB → Loader → MaskROM 状态迁移
 

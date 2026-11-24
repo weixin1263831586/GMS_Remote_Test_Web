@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
+import tempfile
 import threading
 import time
 
@@ -178,6 +180,62 @@ async def upload_firmware_to_test_host(
             current = runtime.global_state.firmware_upload_progress.get(client_id) or {}
             if not upload_id or current.get('upload_id') == upload_id:
                 runtime.global_state.firmware_upload_progress.pop(client_id, None)
+
+
+async def download_remote_firmware(ssh, remote_path: str, local_path: str) -> None:
+    """Copy a test-host firmware file onto the Controller filesystem."""
+
+    def _get() -> None:
+        sftp = ssh.open_sftp()
+        try:
+            with open(local_path, "r+b") as destination:
+                sftp.getfo(remote_path, destination)
+        finally:
+            sftp.close()
+
+    timeout_seconds = transfer_timeout_seconds()
+    try:
+        await asyncio.wait_for(
+            asyncio.to_thread(_get),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        _abort_transport(ssh)
+        raise ApiError.dependency_timeout("从测试主机读取固件超时") from exc
+    except asyncio.CancelledError:
+        _abort_transport(ssh)
+        raise
+    except Exception as exc:
+        logger.error("firmware download from test host failed: %s", type(exc).__name__)
+        raise ApiError.upstream_failure(
+            "从测试主机读取固件失败", service="sftp",
+        ) from exc
+
+
+async def controller_firmware_for_source_flash(
+    ssh,
+    remote_firmware: str,
+    local_firmware_path: str | None,
+) -> tuple[str, str | None]:
+    """Return a Controller-local image path and an optional temp to delete.
+
+    ``remote_firmware`` is on the test host. Passing it to Source Agent
+    ``SFTP.put`` would open a same-named Controller file, or fail after USB
+    ownership was already returned.
+    """
+    if local_firmware_path and os.path.isfile(local_firmware_path):
+        return local_firmware_path, None
+    descriptor, local_path = tempfile.mkstemp(
+        prefix="gms-source-firmware-", suffix=".img",
+    )
+    os.close(descriptor)
+    try:
+        await download_remote_firmware(ssh, remote_firmware, local_path)
+    except (Exception, asyncio.CancelledError):
+        with contextlib.suppress(OSError):
+            os.remove(local_path)
+        raise
+    return local_path, local_path
 
 
 async def _send_progress(

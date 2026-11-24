@@ -340,8 +340,18 @@ class HttpAutomationExecutor(RecoveryExecutorMixin):
                     result["artifact_path"] = artifact.get("path", "")
                     result["artifact_url"] = artifact.get("path", "")
                     result["artifact"] = artifact
-                if job.get("status") == "failed":
-                    return {"success": False, "error": job.get("error") or "Build failed", **result}
+                if job.get("status") not in {"queued", "running", "completed"}:
+                    fallback = (
+                        "Build failed"
+                        if job.get("status") == "failed"
+                        else "Build cancelled"
+                    )
+                    return {
+                        **result,
+                        "success": False,
+                        "building": False,
+                        "error": job.get("error") or fallback,
+                    }
                 return result
             except Exception as exc:
                 return {"success": False, "error": str(exc)}

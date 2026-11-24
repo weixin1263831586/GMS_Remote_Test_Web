@@ -42,6 +42,10 @@ def dashboard():
                 "/gerrit-dashboard/render.js": (
                     ROOT / "features/gerrit/ui/render.js", "text/javascript",
                 ),
+                **{
+                    f"/static/js/{name}": (ROOT / "web/static/js" / name, "text/javascript")
+                    for name in ("workspace-tabs.js", "dialog-prompts.js", "dialog-frame.js")
+                },
                 "/static/js/utils.js": (
                     ROOT / "web/static/js/utils.js", "text/javascript",
                 ),

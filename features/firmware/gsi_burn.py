@@ -1,10 +1,4 @@
-"""GSI and serial-number burn endpoints.
-
-Split out of firmware_api.py so the main firmware API stays
-under the reviewable-size limit. Both endpoints reuse the firmware runtime
-bindings; the /api/burn/gsi script flow and the SN stub previously lived
-inline at the tail of firmware_api.py.
-"""
+"""GSI firmware burning for Ubuntu test hosts."""
 from __future__ import annotations
 
 import asyncio
@@ -13,9 +7,9 @@ import logging
 import re
 import shlex
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from features.auth import require_elevated_admin_when_auth_required
 from features.test_execution import get_default_suites_path
@@ -84,23 +78,28 @@ async def _lock_devices(
     )
 
 
+class GSIBurnRequest(BaseModel):
+    devices: list[str] = Field(default_factory=list, description="设备序列号列表")
+    script_path: str = Field("", description="测试主机上的 GSI 烧写脚本路径")
+    system_img: str = Field("", description="System 镜像路径")
+    vendor_img: str = Field("", description="Vendor Boot 镜像路径")
+
+
 @router.post("/api/burn/gsi")
 async def burn_gsi(
+    req: GSIBurnRequest,
     request: Request,
     _admin=Depends(require_elevated_admin_when_auth_required),
 ):
     """GSI burning using run_GSI_Burn.sh script."""
     try:
         client_id = runtime.get_client_id_from_request(request)
-        req_data = await request.json()
         # devices 进入远端 fastboot/脚本命令，先过与固件烧写一致的
         # sanitize_device_ids 归一（拒绝即 400，绝不静默丢弃设备）。
-        devices, invalid_devices = _normalize_firmware_devices(
-            req_data.get("devices", [])
-        )
-        script_path = req_data.get("script_path", "").strip()
-        system_img = req_data.get("system_img", "").strip()
-        vendor_img = req_data.get("vendor_img", "").strip()
+        devices, invalid_devices = _normalize_firmware_devices(req.devices)
+        script_path = req.script_path.strip()
+        system_img = req.system_img.strip()
+        vendor_img = req.vendor_img.strip()
 
         if invalid_devices:
             return ApiError.malformed_request("Invalid device serial").to_response()
@@ -367,57 +366,6 @@ async def burn_gsi(
             logger, "GSI 烧写", "Error in burn_gsi"
         )
         return ApiError.internal(message).to_response()
-
-
-
-@router.post("/api/burn/serial")
-async def burn_sn(
-    req: SNBurnRequest,
-    _admin=Depends(require_elevated_admin_when_auth_required),
-):
-    """SN burning - burn serial number to selected devices."""
-    try:
-        # 与 burn_gsi 相同的设备归一：非法序列号拒绝而不是静默丢弃。
-        devices, invalid_devices = _normalize_firmware_devices(req.devices)
-        sn_code = req.sn_code
-
-        if invalid_devices:
-            return error_response("Invalid device serial", 400)
-        if not devices:
-            return error_response("No devices selected", 400)
-        if not sn_code:
-            return error_response("SN code is required", 400)
-
-        config = runtime.config_manager.load_config()
-        async with runtime.ssh_manager.async_optional_connection(config) as ssh:
-            if not ssh:
-                # SSH 建连失败属远端基础设施故障（502），500 仅编程错误。
-                return ApiError.upstream_failure(
-                    "SSH connection failed", service="ssh"
-                ).to_response()
-
-            results = [
-                {
-                    "device": device_id,
-                    "success": False,
-                    "error": "SN burning requires device in loader mode. Feature needs specific tool support.",
-                }
-                for device_id in devices
-            ]
-
-            return JSONResponse(content={"success": True, "results": results})
-    except HTTPException:
-        raise
-    except Exception:
-        message = record_internal_error(
-            logger, "写入 SN", "Error burning SN"
-        )
-        return ApiError.internal(message).to_response()
-
-
-class SNBurnRequest(BaseModel):
-    devices: list[str]
-    sn_code: str
 
 
 def diagnose_gsi_burn_failure(output: str) -> str:

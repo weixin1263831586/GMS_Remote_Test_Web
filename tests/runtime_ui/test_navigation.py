@@ -92,11 +92,11 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(report).to_have_count(0)
             page.reload()
             page.evaluate("switchPage('tools', null)")
+            expect(page.locator('#ut-grid .category-section[data-category="测试工具"]')).to_be_visible()
             expect(report).to_have_count(0)
             self.assertNotIn('报告工具', page.evaluate(
                 "() => Object.keys(JSON.parse(localStorage.getItem('gms_utility_tools_categories')))"
             ))
-            self.assertGreaterEqual(page.locator('#ut-grid .category-section').count(), 1)
 
             # Recreating the name explicitly restores the built-in card.
             page.evaluate("""() => {
@@ -1203,7 +1203,16 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.locator(".sidebar-brand").click()
-            page.locator('[data-sidebar-settings-tab="guide"]').click()
+            tabs = page.locator("#sidebar-visibility-modal [role=tab]")
+            visibility_tab, guide_tab = tabs.nth(0), tabs.nth(1)
+            backgrounds = "tabs => tabs.map(tab => getComputedStyle(tab).backgroundColor)"
+            expect(visibility_tab).to_have_attribute("aria-selected", "true")
+            selected, unselected = tabs.evaluate_all(backgrounds)
+            self.assertNotEqual(selected, unselected)
+            guide_tab.click()
+            expect(guide_tab).to_have_attribute("aria-selected", "true")
+            expect(visibility_tab).to_have_attribute("aria-selected", "false")
+            self.assertEqual(tabs.evaluate_all(backgrounds), [unselected, selected])
 
             guide = page.locator("#sidebar-settings-panel-guide")
             expect(guide).to_be_visible()
@@ -1218,7 +1227,8 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(guide_images).to_have_count(13)
             for image_index in range(guide_images.count()):
                 guide_images.nth(image_index).scroll_into_view_if_needed()
-                expect(guide_images.nth(image_index)).to_have_js_property("naturalWidth", 1600)
+                expect(guide_images.nth(image_index)).to_have_js_property("naturalWidth", 1912)
+                expect(guide_images.nth(image_index)).to_have_js_property("naturalHeight", 1058)
 
             page.locator(".project-guide-image-button").first.click()
             image_modal = page.locator("#guide-image-modal")
@@ -1230,7 +1240,14 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(image_modal).not_to_have_class(re.compile(r"\bshow\b"))
             expect(guide).to_be_visible()
 
-            page.locator('[data-sidebar-settings-tab="visibility"]').click()
+            guide.locator(".project-guide-image-button").nth(3).click()
+            expect(page.locator("#guide-image-preview")).to_have_attribute("src", re.compile(r"/report-management\.png\?"))
+            page.keyboard.press("Escape")
+
+            visibility_tab.click()
+            expect(visibility_tab).to_have_attribute("aria-selected", "true")
+            expect(guide_tab).to_have_attribute("aria-selected", "false")
+            self.assertEqual(tabs.evaluate_all(backgrounds), [selected, unselected])
             expect(page.locator("#sidebar-settings-panel-visibility")).to_be_visible()
             expect(guide).to_be_hidden()
             self.assert_no_page_errors(page_errors)

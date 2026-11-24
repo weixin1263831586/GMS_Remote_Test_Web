@@ -518,6 +518,8 @@ def is_pending_review(raw: dict[str, Any]) -> bool:
         return False
     if raw.get("work_in_progress") or raw.get("wip"):
         return False
+    if raw.get("submittable") is True:
+        return False
     for record in raw.get("submitRecords") or raw.get("submit_records") or []:
         if str(record.get("status") or "").upper() == "OK":
             return False

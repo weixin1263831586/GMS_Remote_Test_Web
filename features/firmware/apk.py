@@ -326,6 +326,22 @@ def _count_jadx_errors(stderr_text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+async def _stop_jadx_process(process: asyncio.subprocess.Process) -> None:
+    """SIGTERM, then SIGKILL if the child ignores it.
+
+    An unbounded ``wait()`` after terminate left the task ``analyzing``
+    when jadx did not exit, and delete stayed 409.
+    """
+    if process.returncode is not None:
+        return
+    process.terminate()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.wait()
+
+
 async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
     """后台运行 jadx 反编译（写入独立临时目录，产物检查通过后原子切换）。"""
     tmp_output = _jadx_tmp_output_dir(output_dir)
@@ -367,15 +383,13 @@ async def run_jadx_analysis(task_id: str, apk_path: str, output_dir: str):
                 process.communicate(), timeout=runtime.jadx_timeout
             )
         except asyncio.TimeoutError as exc:
-            process.terminate()
-            await process.wait()
+            await _stop_jadx_process(process)
             raise subprocess.TimeoutExpired(
                 cmd,
                 runtime.jadx_timeout,
             ) from exc
         except asyncio.CancelledError:
-            process.terminate()
-            await process.wait()
+            await _stop_jadx_process(process)
             shutil.rmtree(tmp_output, ignore_errors=True)
             with runtime.global_state.apk_analysis_tasks_lock:
                 if task_id in runtime.global_state.apk_analysis_tasks:

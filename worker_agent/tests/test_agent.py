@@ -5,6 +5,7 @@ import math
 import os
 import signal
 import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +25,18 @@ def worker_config(tmp_path):
         data_root=tmp_path / "data",
         suite_roots=[tmp_path / "suites"],
     )
+
+
+def test_worker_entrypoint_imports_without_web_dependencies():
+    project_root = Path(__file__).resolve().parents[2]
+    result = subprocess.run(
+        [sys.executable, "-E", "-S", "-c", "import worker_agent.entrypoint"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_registration_only_advertises_novnc_when_both_ports_are_ready(tmp_path):
@@ -995,6 +1008,69 @@ def test_stop_process_escalates_and_persists_cancellation_after_exit(tmp_path):
     assert row["status"] == "cancelled"
     assert row["exit_code"] == -signal.SIGKILL
     assert "wj-1" not in runtime._processes
+
+
+def test_stop_process_does_not_overwrite_a_finalized_job(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    work_dir = runtime.config.data_root / "jobs" / "job-1" / "attempt-1"
+    work_dir.mkdir(parents=True)
+    with runtime.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                work_dir,exit_code,error,command_id)
+               VALUES('wj-1','job-1','attempt-1',1234,1234,'running','[]',?,NULL,'','cmd-1')""",
+            (str(work_dir),),
+        )
+    process = MagicMock(pid=1234)
+
+    def finalize(*_args, **_kwargs):
+        with runtime.connect() as conn:
+            conn.execute(
+                "UPDATE jobs SET status='completed', exit_code=0 WHERE worker_job_id='wj-1'"
+            )
+        return 0
+
+    process.wait.side_effect = finalize
+    runtime._processes["wj-1"] = process
+
+    with patch("worker_agent.runtime.os.killpg"):
+        result = runtime.stop_process("wj-1")
+
+    assert result["status"] == "completed"
+    assert "wj-1" in runtime._processes
+    with runtime.connect() as conn:
+        row = conn.execute(
+            "SELECT status,exit_code FROM jobs WHERE worker_job_id='wj-1'"
+        ).fetchone()
+    assert row["status"] == "completed"
+    assert row["exit_code"] == 0
+
+
+def test_missing_process_reports_stored_terminal_status(tmp_path):
+    runtime = WorkerRuntime(worker_config(tmp_path))
+    work_dir = runtime.config.data_root / "jobs" / "job-1" / "attempt-1"
+    work_dir.mkdir(parents=True)
+    with runtime.connect() as conn:
+        conn.execute(
+            """INSERT INTO jobs
+               (worker_job_id,job_id,attempt_id,pid,pgid,status,devices_json,
+                work_dir,exit_code,error,command_id)
+               VALUES('wj-1','job-1','attempt-1',1234,1234,'cancelled','[]',?,-9,'','cmd-1')""",
+            (str(work_dir),),
+        )
+
+    assert runtime.process_poll("wj-1") == -9
+    waited = runtime.wait_process("wj-1")
+    assert waited["status"] == "cancelled"
+    assert waited["exit_code"] == -9
+
+    with runtime.connect() as conn:
+        conn.execute("UPDATE jobs SET status='running', exit_code=NULL WHERE worker_job_id='wj-1'")
+    with pytest.raises(ValueError, match="not attached"):
+        runtime.process_poll("wj-1")
+    with pytest.raises(ValueError, match="not attached"):
+        runtime.wait_process("wj-1")
 
 
 def test_recoverable_jobs_finalizes_missing_stopping_process(tmp_path):

@@ -152,13 +152,10 @@ def _parse_number_unit(value: str, allowed_units: tuple[str, ...], type_label: s
     for unit in allowed_units:
         if v.endswith(unit):
             num = v[: -len(unit)].strip()
-            if not num:
-                raise ValueError(f"{type_label} 值缺少数字: {value!r}")
-            try:
-                float(num)
-            except ValueError:
-                raise ValueError(f"{type_label} 值的数字部分无效: {num!r}") from None
-            return v
+            # aapt2 只接受普通十进制。float() 会放行 inf、nan、1_0 和 10e2。
+            if not re.fullmatch(r"-?(?:\d+(?:\.\d+)?|\.\d+)", num):
+                raise ValueError(f"{type_label} 值的数字部分无效: {num!r}")
+            return f"{num}{unit}"
     raise ValueError(
         f"{type_label} 值必须以单位结尾({'/'.join(allowed_units)}): {value!r}"
     )
@@ -435,6 +432,10 @@ class OverrideStore:
         bad name or value."""
         if not entry.resource_name or not _RESOURCE_NAME_RE.match(entry.resource_name):
             raise ValueError(f"非法的资源名: {entry.resource_name!r}")
+        if entry.target_package != DEFAULT_TARGET_PACKAGE:
+            raise ValueError(
+                f"当前只支持覆盖 {DEFAULT_TARGET_PACKAGE}，收到 {entry.target_package!r}"
+            )
         entry.value = validate_override(entry.resource_type, entry.value)
         with self._transaction():
             data = self._load()
@@ -475,13 +476,19 @@ def _now_iso() -> str:
 
 # Device probing (read-only — never disable-verity / reboot / push)
 
-def _run_adb(device_id: str | None, args: str, timeout: int = 15) -> tuple[str, int]:
-    """Run an adb command on the host; return (combined output, return code)."""
-    adb = _adb_path()
+def _adb_shell_command(device_id: str | None, args: str) -> str:
+    adb = shlex.quote(_adb_path())
     serial = f"-s {shlex.quote(device_id)} " if device_id else ""
-    result = run_local_shell_command(
-        f"{adb} {serial}{args}", timeout=timeout
-    )
+    return f"{adb} {serial}{args}"
+
+
+def _run_adb(device_id: str | None, args: str, timeout: int = 15) -> tuple[str, int]:
+    """Run an adb command on the host; return (combined output, return code).
+
+    ``ls`` puts "No such file" on stderr, so callers that inspect text keep
+    both streams. Property reads use stdout alone.
+    """
+    result = run_local_shell_command(_adb_shell_command(device_id, args), timeout=timeout)
     return ((result.stdout or "") + (result.stderr or "")), result.code
 
 
@@ -490,8 +497,13 @@ def _run_adb_for_ops(device_id: str | None, args: str, timeout: int) -> tuple[st
 
 
 def _getprop(device_id: str | None, name: str) -> str:
-    out, _ = _run_adb(device_id, f"shell getprop {shlex.quote(name)}", timeout=10)
-    return out.strip()
+    result = run_local_shell_command(
+        _adb_shell_command(device_id, f"shell getprop {shlex.quote(name)}"),
+        timeout=10,
+    )
+    if result.code != 0:
+        return ""
+    return (result.stdout or "").strip()
 
 
 def probe_status(device_id: str | None, store: OverrideStore | None = None) -> OverrideStatus:

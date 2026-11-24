@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, Mock
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestServer
 
 from features.assistant import kkagent_bridge as bridge
 from features.kkagent import config as gateway_config
@@ -15,9 +17,7 @@ from foundation.command_result import CommandResult
 
 
 @pytest.fixture(autouse=True)
-def isolated_model_catalog(monkeypatch, tmp_path, request):
-    if request.node.name == "test_real_kkagent_cli_turn_returns_a_single_decision":
-        return
+def isolated_model_catalog(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("GMS_ASSISTANT_KKAGENT_CONFIG", raising=False)
     monkeypatch.delenv("KKAGENT_DEFAULT_MODEL", raising=False)
@@ -29,6 +29,7 @@ def isolated_model_catalog(monkeypatch, tmp_path, request):
         }},
     }
     monkeypatch.setattr(gateway_config._config_manager, "get_ai_config", lambda: config)
+    return config["providers"]["gateway"]
 
 
 def test_native_and_legacy_streams_extract_assistant_text_and_session():
@@ -215,12 +216,33 @@ def test_turn_failure_records_model_state(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.skipif(not shutil.which("kkagent"), reason="kkagent CLI not installed")
-async def test_real_kkagent_cli_turn_returns_a_single_decision():
-    # 真实 CLI 集成冒烟（仅在装有 kkagent 的环境执行）：协议要求单个
-    # JSON 决策，桥接层只保留最终文本后必须仍可解析。
-    result = await bridge.run_turn('{"type":"answer","text":"OK"}', timeout_seconds=60)
+async def test_real_kkagent_cli_turn_returns_a_single_decision(isolated_model_catalog):
+    decision = {"type": "answer", "text": "OK"}
+    requests = []
+
+    async def completion(request):
+        requests.append(await request.json())
+        chunks = [
+            ({"role": "assistant", "content": json.dumps(decision)}, None),
+            ({}, "stop"),
+        ]
+        events = [json.dumps({
+            "id": "loopback", "object": "chat.completion.chunk", "created": 0, "model": "test",
+            "choices": [{"index": 0, "delta": delta, "finish_reason": reason}],
+        }) for delta, reason in chunks]
+        return web.Response(
+            text="".join(f"data: {event}\n\n" for event in [*events, "[DONE]"]),
+            content_type="text/event-stream",
+        )
+
+    gateway = web.Application()
+    gateway.router.add_post("/v1/chat/completions", completion)
+    async with TestServer(gateway) as server:
+        isolated_model_catalog["base_url"] = str(server.make_url("/v1"))
+        result = await bridge.run_turn("Return one JSON decision", timeout_seconds=15)
     assert result.ok, result.error
-    assert result.text.strip()
+    assert json.loads(result.text) == decision
+    assert [request["model"] for request in requests] == ["test"]
 
 
 # ==================== 真实 CLI 子进程流（fake binary 走完整 spawn 路径） ====================

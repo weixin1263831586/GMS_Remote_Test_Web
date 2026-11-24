@@ -214,10 +214,24 @@ class BuildAccessTests(unittest.TestCase):
                 "/api/build/servers",
                 headers={"X-Test-User": "alice", "X-Test-Role": "user"},
             )
+            zero_jobs = client.get(
+                "/api/build/jobs",
+                headers={"X-Test-User": "kkagent", "X-Test-Role": "agent_service"},
+            )
+            scoped_jobs = client.get(
+                "/api/build/jobs",
+                headers={
+                    "X-Test-User": "kkagent",
+                    "X-Test-Role": "agent_service",
+                    "X-Test-Scopes": "build.read",
+                },
+            )
         self.assertEqual(zero_servers.status_code, 403)
         self.assertEqual(zero_templates.status_code, 403)
         self.assertEqual(scoped_servers.status_code, 200)
         self.assertEqual(human_servers.status_code, 200)
+        self.assertEqual(zero_jobs.status_code, 403)
+        self.assertEqual(scoped_jobs.status_code, 200)
 
     def test_human_roles_keep_build_access(self):
         response = self.client.post(
@@ -227,6 +241,39 @@ class BuildAccessTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 200)
+
+    def test_discover_maps_ssh_transport_separately_from_auth(self):
+        import paramiko
+
+        from features.build.service import BuildExecutionError
+
+        cases = (
+            (TimeoutError("timed out secret"), 504, "DEPENDENCY_TIMEOUT"),
+            (paramiko.SSHException("banner secret"), 502, "UPSTREAM_FAILURE"),
+            (ConnectionRefusedError("refused secret"), 502, "UPSTREAM_FAILURE"),
+            (paramiko.AuthenticationException("bad secret"), 400, None),
+            (paramiko.PasswordRequiredException("key secret"), 400, None),
+            (None, 400, None),
+        )
+        for cause, status, code in cases:
+            with self.subTest(status=status, cause=type(cause).__name__ if cause else "validation"):
+                def discover(*_args, _cause=cause, **_kwargs):
+                    if _cause is None:
+                        raise BuildExecutionError("workspace escapes")
+                    raise BuildExecutionError("连接构建服务器失败") from _cause
+
+                self.service.discover_workspaces = discover
+                response = self.client.post(
+                    "/api/build/discover/workspaces",
+                    json={"server_id": "server"},
+                )
+                body = response.json()
+                self.assertEqual(response.status_code, status)
+                self.assertNotIn("secret", body["error"])
+                if code:
+                    self.assertEqual(body["code"], code)
+                if code == "UPSTREAM_FAILURE":
+                    self.assertEqual(body["details"]["service"], "ssh")
 
 
 if __name__ == "__main__":

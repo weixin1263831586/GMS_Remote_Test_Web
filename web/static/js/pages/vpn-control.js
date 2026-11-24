@@ -277,7 +277,7 @@ async function checkRouting(targetHost) {
                                 sessionStorage.setItem('pending_terminal_command', command);
                                 sessionStorage.setItem('command_source', 'route_check');
 
-                                document.body.removeChild(dialog);
+                                closeDialog();
 
                                 if (typeof switchPage === 'function') {
                                     switchPage('terminal');
@@ -311,7 +311,7 @@ async function checkRouting(targetHost) {
 
     dialog.addEventListener('click', (e) => {
         if (e.target === dialog) {
-            document.body.removeChild(dialog);
+            closeDialog();
         }
     });
 }

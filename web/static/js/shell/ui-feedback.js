@@ -153,7 +153,6 @@ const _modalCloseHandlers = {
     'firmware-share-password-modal': () => closeFirmwareSharePasswordModal(),
     'file-browser-modal': () => closeFileBrowserModal(),
     'gsi-modal': () => closeGsiModal(),
-    'sn-modal': () => closeSnModal(),
     'ui-control-modal': () => closeUiControl()
 };
 

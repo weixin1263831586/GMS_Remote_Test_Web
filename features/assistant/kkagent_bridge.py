@@ -7,8 +7,6 @@ Redmine 模块已验证的 headless stream-json 子进程方式（不引入 ACP 
 
 - ``kkagent -p <prompt> --output-format stream-json [--resume <sid>]``；
 - 无 shell、无自动授权标志、继承宿主最小环境（剥离身份类 env）；
-- 桥接会话 ID 与 WorkflowDraft / Automation Run 的关联通过
-  ``link_payload`` 挂在 Agent 会话的 ``kkagent_bridge`` 字段上。
 
 桥接失败返回明确错误类型和已接收到的会话 ID，供调用方有界重试。
 运行时失败不得重放业务操作或改用另一套路由执行用户指令。
@@ -30,21 +28,6 @@ logger = logging.getLogger(__name__)
 
 KKAGENT_BINARY = "kkagent"
 TURN_TIMEOUT_SECONDS = 120
-STREAM_LINE_LIMIT_BYTES = 4 * 1024 * 1024
-
-# 与 features/redmine/kkagent/process.py 同一原则（该模块属 redmine 内部，
-# 此处按文档键位独立声明）：子进程不得继承宿主的 Agent 身份/凭据环境，
-# 否则 MCP 会以错误 owner 取证。
-_BRIDGE_STRIPPED_ENV_KEYS = frozenset({
-    "GMS_RT_PROFILE",
-    "GMS_AGENT_PROFILE",
-    "GMS_AGENT_CLIENT",
-    "GMS_REMOTE_TEST_SERVER",
-    "GMS_AUTH_TOKEN_FILE",
-    "GMS_AGENT_AUTH_MODE",
-    "GMS_MCP_TOOLSETS",
-})
-
 _BRIDGE_PROMPT_PREFIX = (
     "你是 GMS 远程测试平台的规划助手。只做意图澄清、规划建议与只读诊断，"
     "不得直接执行烧写、AOA 或测试启动；实际执行由平台状态机完成。"
@@ -98,44 +81,6 @@ def availability() -> dict[str, Any]:
     }
 
 
-def availability_snapshot() -> dict[str, Any]:
-    """可用性快照：探测异常时返回显式不可用，路由层无须再兜底。"""
-    try:
-        return availability()
-    except Exception:
-        return {"available": False, "binary": "", "mode": "headless_stream_json"}
-
-
-def child_env() -> dict[str, str]:
-    """宿主环境减去身份类变量，供子进程显式注入。
-
-    键位与引擎 :data:`features.kkagent.process.MCP_IDENTITY_ENV_KEYS`
-    一致；本桥接的 env 已剥离身份，可直接作为引擎 ``child_env({})`` 的
-    ``env_extra`` 空注入使用。
-    """
-    import os
-
-    return {
-        key: value
-        for key, value in os.environ.items()
-        if key not in _BRIDGE_STRIPPED_ENV_KEYS
-    }
-
-
-def link_payload(
-    *,
-    kkagent_session_id: str = "",
-    draft_id: str = "",
-    automation_run_id: str = "",
-) -> dict[str, str]:
-    """三向关联记录：挂到 Agent 会话 ``kkagent_bridge`` 字段。"""
-    return {
-        "kkagent_session_id": kkagent_session_id,
-        "draft_id": draft_id,
-        "automation_run_id": automation_run_id,
-    }
-
-
 def _signal_exit_detail(returncode: int) -> str:
     """把负退出码翻译成信号名与可行动提示（日志与用户消息共用）。"""
     if returncode >= 0:
@@ -172,7 +117,7 @@ async def run_turn(
 
     result = await run_headless_turn(
         prompt,
-        env=_engine_child_env(child_env()),
+        env=_engine_child_env({}),
         session_id=session_id,
         timeout_seconds=timeout_seconds,
     )

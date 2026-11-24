@@ -988,12 +988,10 @@ class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
                 document.getElementById('gsi-script').value = '/tmp/burn.sh';
                 document.getElementById('gsi-system').value = '/tmp/system.img';
                 document.getElementById('gsi-vendor').value = '';
-                document.getElementById('sn-code').value = 'SN001';
                 """
             )
 
             page.evaluate("submitGsiBurn()")
-            page.evaluate("submitSnBurn()")
             page.evaluate("startApkAnalysis()")
             page.evaluate(
                 """Promise.all([
@@ -1005,7 +1003,6 @@ class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
 
             for expected in (
                 ("POST", "/api/burn/gsi"),
-                ("POST", "/api/burn/serial"),
                 ("POST", "/api/apk/analyze/apk-task"),
                 ("POST", "/api/burn/firmware"),
                 ("GET", "/api/apk/download/apk-task"),

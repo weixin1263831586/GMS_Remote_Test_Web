@@ -1,9 +1,7 @@
-import ast
 import unittest
-from pathlib import Path
 
+from tests.architecture.test_dependency_rules import ROOT, imports
 
-ROOT = Path(__file__).resolve().parents[2]
 
 # Strongly connected feature groups that are temporarily accepted.  The list
 # is empty: cross-feature dependencies may form a DAG, but must not form a
@@ -25,19 +23,12 @@ def cross_feature_imports() -> set[tuple[str, str]]:
         if '/tests/' in relative or '__pycache__' in relative:
             continue
         feature = path.relative_to(ROOT / 'features').parts[0]
-        tree = ast.parse(path.read_text(encoding='utf-8'))
-        for node in ast.walk(tree):
-            modules: list[str] = []
-            if isinstance(node, ast.Import):
-                modules.extend(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                modules.append(node.module)
-            for module in modules:
-                if not module.startswith('features.'):
-                    continue
-                parts = module.split('.')
-                if len(parts) >= 2 and parts[1] != feature:
-                    edges.add((feature, parts[1]))
+        for module in imports(path):
+            if not module.startswith("features."):
+                continue
+            target = module.split(".")[1]
+            if target != feature:
+                edges.add((feature, target))
     return edges
 
 

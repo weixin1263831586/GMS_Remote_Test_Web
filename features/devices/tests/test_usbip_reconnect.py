@@ -950,13 +950,52 @@ BUSID  VID:PID    DEVICE                                                        
                 return CommandResult(stdout="", stderr="", code=0)
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-        manager.device_sources["USBIP001"] = {"source": "host"}
+        manager.device_sources["USBIP001"] = {"attach_host": "172.16.14.64", "busid": "1-1"}
         with patch("features.devices.usbip.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(
                 object(), "172.16.14.64", ["1-1"]
             )
         self.assertEqual(attached, ["1-1"])
         self.assertEqual(devices, ["USBIP001"])
+
+    def test_successful_attach_does_not_reuse_another_online_serial(self):
+        class FakeSshManager:
+            def execute_command(self, ssh, cmd, timeout=None, get_pty=False):
+                if cmd == "adb devices":
+                    return CommandResult(
+                        stdout="List of devices attached\nOLD001\tdevice\n",
+                        stderr="",
+                        code=0,
+                    )
+                if cmd.startswith("sudo usbip attach"):
+                    return CommandResult(stdout="attached", stderr="", code=0)
+                if cmd == "sudo -n /usr/bin/usbip port":
+                    return CommandResult(
+                        stdout=(
+                            "Port 00: <Port in Use>\n"
+                            "  1-1 -> usbip://172.16.14.64:3240/1-1\n"
+                        ),
+                        stderr="",
+                        code=0,
+                    )
+                return CommandResult(stdout="", stderr="", code=0)
+
+        manager = USBIPManager()
+        manager.ssh_manager = FakeSshManager()
+        manager.device_sources["OLD001"] = {"attach_host": "172.16.14.65", "busid": "1-1"}
+        clock = {"now": 1_000_000.0}
+
+        def advance():
+            clock["now"] += 10
+            return clock["now"]
+
+        with patch("features.devices.usbip.time.sleep", return_value=None), \
+                patch("features.devices.usbip.time.time", side_effect=advance):
+            attached, devices = manager._attach_devices(
+                object(), "172.16.14.64", ["1-1"]
+            )
+        self.assertEqual(attached, ["1-1"])
+        self.assertEqual(devices, [])
 
     def test_attach_devices_waits_until_adb_serial_appears(self):
         class FakeSshManager:

@@ -1035,7 +1035,10 @@ function expandApkTreeToPath(filePath) {
     for (let i = 0; i < parts.length - 1; i++) {
         currentPath = (currentPath ? `${currentPath}/` : '') + parts[i];
         const container = document.querySelector(`[data-apk-path="${CSS.escape(currentPath)}"]`);
-        const childContainer = container?.querySelector('.apk-tree-children');
+        const sibling = container?.nextElementSibling;
+        const childContainer = sibling?.classList?.contains('apk-tree-children')
+            ? sibling
+            : container?.querySelector('.apk-tree-children');
         if (childContainer?.classList.contains('apk-tree-children')) {
             childContainer.classList.add('expanded');
         }

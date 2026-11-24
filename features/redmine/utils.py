@@ -140,3 +140,17 @@ def strip_redmine_report_prefix(filename: str) -> str:
     """Remove an existing Redmine-{issue}- prefix before applying the current issue prefix."""
     match = COMPILED_REPORT_NAME_PATTERN.match(filename or '')
     return match.group(2) if match else (filename or 'downloaded_file.zip')
+
+
+def bounded_stale_days(value: Any, fallback: Any = 3) -> int:
+    """Bound dashboard defaults and direct-call thresholds to the supported range."""
+    for candidate in (value, fallback, 3):
+        if candidate in (None, "", 0, "0"):
+            continue
+        try:
+            parsed = int(candidate)
+        except (TypeError, ValueError, OverflowError):
+            continue
+        if parsed >= 1:
+            return min(parsed, 30)
+    return 3

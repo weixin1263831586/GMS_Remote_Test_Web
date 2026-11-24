@@ -53,6 +53,9 @@ from .source_flash import (
     SourceFlashError,
     run_source_flash,
 )
+from .upload_transport import (
+    controller_firmware_for_source_flash as _controller_firmware_for_source_flash,
+)
 from .upload_transport import scp_put_with_deadline as _scp_put_with_deadline
 from .upload_transport import (
     upload_firmware_to_test_host as _upload_firmware_to_test_host,
@@ -157,13 +160,29 @@ def _parse_remote_sha256(stdout: str) -> str:
 
 
 async def _remote_sha256(ssh, remote_path: str) -> str:
+    """SHA-256 of a file on the test host.
+
+    Transport failure raises ``ApiError`` instead of returning an empty
+    digest. An empty digest used to become 404 or a false SHA mismatch.
+    """
     output = await asyncio.to_thread(
         runtime.ssh_manager.execute_command,
         ssh,
         f"sha256sum {shlex.quote(remote_path)}",
         timeout=120,
     )
-    return _parse_remote_sha256(output.stdout)
+    if getattr(output, "timed_out", False):
+        raise ApiError.dependency_timeout("读取固件摘要超时")
+    text = f"{output.stderr or ''}\n{output.stdout or ''}"
+    if output.code != 0 and "No such file" in text:
+        raise ApiError.not_found(
+            f"无法读取固件摘要，固件不存在或不可读: {remote_path}"
+        )
+    digest = _parse_remote_sha256(output.stdout if output.code == 0 else "")
+    if output.code != 0 or not digest:
+        logger.warning("remote firmware digest failed code=%s", output.code)
+        raise ApiError.upstream_failure("读取固件摘要失败", service="ssh")
+    return digest
 
 
 async def _agent_approval_preflight_failure(
@@ -263,7 +282,14 @@ async def _reject_invalid_firmware(
             "firmware",
             {"devices": devices, "firmware": firmware_name, "stage": "preflight"},
         )
-    return error_response(validation.message, status_code=422)
+    failure = validation.failure or "invalid"
+    if failure == "timeout":
+        return ApiError.dependency_timeout(validation.message).to_response()
+    if failure == "unavailable":
+        return ApiError.upstream_failure(
+            validation.message, service="firmware",
+        ).to_response()
+    return ApiError.invalid_semantics(validation.message).to_response()
 
 
 @router.get("/api/burn/upload-progress")
@@ -363,6 +389,7 @@ async def burn_firmware(
     client_id = ""
     merged_firmware = None
     burn_lock_path = None
+    downloaded_firmware = None
     burn_succeeded = False
     aoa_recovery = None
     locked_devices: list[str] = []
@@ -496,6 +523,7 @@ async def burn_firmware(
 
             try:
                 gms_suite_dir = get_default_suites_path(config)
+                local_firmware_path = None
                 if firmware_file:
                     firmware_name = os.path.basename(firmware_file.filename or "").strip()
                     if not firmware_name:
@@ -538,7 +566,6 @@ async def burn_firmware(
                         else os.path.basename(firmware_path.rstrip("/"))
                     )
                     remote_firmware = os.path.join(gms_suite_dir, firmware_name)
-                    local_firmware_path = None
 
                     if firmware_path.startswith("/") or firmware_path.startswith("./"):
                         if await asyncio.to_thread(_remote_file_exists, ssh, firmware_path):
@@ -633,10 +660,6 @@ async def burn_firmware(
                     # 测试主机上执行 sha256sum 取真实摘要。
                     # See docs/architecture/adr/0005-usbip-firmware-ownership.md.
                     _remote_digest = await _remote_sha256(ssh, remote_firmware)
-                    if not _remote_digest:
-                        return ApiError.not_found(
-                            f"无法读取固件摘要，固件不存在或不可读: {remote_firmware}"
-                        ).to_response()
                     firmware_sha256 = _remote_digest
                     _canonical_devices = ",".join(sorted(devices))
                     # Agent token device ACL + 不消费的审批复检：远端路径
@@ -822,6 +845,19 @@ async def burn_firmware(
                         "Starting source-side firmware burn "
                         "(Windows Source Agent + RKDevTool)..."
                     )
+                    # remote_firmware 在测试主机上。Source Agent 的 SFTP put
+                    # 只接受 Controller 本地文件；同名路径不能拿去上传。
+                    controller_firmware, downloaded_firmware = (
+                        await _controller_firmware_for_source_flash(
+                            ssh, remote_firmware, local_firmware_path,
+                        )
+                    )
+                    if agent_burn:
+                        source_digest = await asyncio.to_thread(
+                            _sha256_of_source, controller_firmware,
+                        )
+                        if source_digest != firmware_sha256:
+                            raise ApiError.conflict("源端待烧写固件与已审批的固件摘要不一致")
                     # ---- ownership handoff：烧写前显式
                     # 释放设备——暂停通用重连 watchdog + target 侧 vhci
                     # detach + fail-closed 复核，保证源主机物理持有设备。
@@ -832,11 +868,11 @@ async def burn_firmware(
                     )
                     if _approval_failure is not None:
                         return _approval_failure
+                    usbip_reconnect_after_finish = True
                     released, release_error = await _release_usbip_devices_to_source(
                         ssh, usbip_flash_routes,
                     )
                     if not released:
-                        usbip_reconnect_after_finish = True
                         return error_response(
                             f"USB/IP 所有权交还源主机失败: {release_error}",
                             status_code=409,
@@ -856,7 +892,7 @@ async def burn_firmware(
                         return await run_source_flash(
                             device=device,
                             device_host=device_host,
-                            firmware_path=remote_firmware,
+                            firmware_path=controller_firmware,
                             on_log=_source_log,
                             keepalive=lambda: chunk_uploads.refresh_burn_lock(
                                 burn_lock_path
@@ -901,7 +937,6 @@ async def burn_firmware(
                             {"devices": devices, "firmware": firmware_name,
                              "results": results},
                         )
-                        usbip_reconnect_after_finish = True
                         return error_response(
                             f"源端烧写失败（{getattr(first_error, 'stage', 'FLASHING')}）: {detail}",
                             status_code=getattr(first_error, "status_code", 502),
@@ -929,7 +964,6 @@ async def burn_firmware(
                             })
                     burn_succeeded = True
                     # 成功后按原物理路由重新导出 USB/IP。
-                    usbip_reconnect_after_finish = True
                     return success_response(
                         data={
                             "results": results,
@@ -1096,6 +1130,9 @@ async def burn_firmware(
         if usbip_reconnect_after_finish:
             for device in devices:
                 _schedule_usbip_mode_reconnect(device, "adb")
+        if downloaded_firmware:
+            with contextlib.suppress(OSError):
+                os.remove(downloaded_firmware)
         if merged_firmware and client_id:
             chunk_uploads.clear_upload_progress(
                 runtime.global_state,

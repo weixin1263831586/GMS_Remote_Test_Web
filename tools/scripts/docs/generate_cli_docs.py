@@ -41,16 +41,24 @@ OUTPUT_PATH = PROJECT_ROOT / "docs/cli/command-reference.md"
 # case entries binding one or more names to a literal text. Text is normally
 # single-quoted; double quotes appear when the text itself contains an
 # apostrophe (e.g. the triage/history-search summaries with "today's …").
-# Double-quoted "$1…" forms stay unmatched — they are grouped printf
-# lines handled by _CASE_GROUP_PRINTF, not literal text.
+# Double-quoted "$1…" forms are usage templates, matched by _CASE_DOLLAR
+# and _CASE_GROUP_PRINTF. The literal alternative rejects a leading "$"
+# so those templates are not stored as the characters dollar-one.
 _CASE_LITERAL = re.compile(
     r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*printf '%s' "
     r"(?:(?P<text_sq>'(?P<text>[^']*)')|\"(?P<text_dq>[^\$\"][^\"]*)\") ;;\s*$"
 )
+# one-line "$1" template: names) printf '%s' "$1 <session_id>" ;;
+_CASE_DOLLAR = re.compile(
+    r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*printf '%s' \"\$1(?P<suffix>[^\"]*)\" ;;\s*$"
+)
 # grouped pattern line (names only, printf follows on the next line)
 _CASE_GROUP = re.compile(r"^\s+(?P<names>[A-Za-z0-9|*-]+)\)\s*$")
-# grouped printf line: "$1" or "$1 <devices>"
-_CASE_GROUP_PRINTF = re.compile(r"^\s*printf '%s' \"\$1(?P<suffix>[^\"]*)\" ;;\s*$")
+# grouped printf line: "$1" or "$1 <devices>". The closing ";;" may be
+# on this line or alone on the next line.
+_CASE_GROUP_PRINTF = re.compile(
+    r"^\s*printf '%s' \"\$1(?P<suffix>[^\"]*)\"(?: ;;)?\s*$"
+)
 _FUNCTION_DEF = re.compile(r"^(?P<name>gms-rt-[a-z0-9-]+)\(\)\s*\{", re.MULTILINE)
 
 HEADER = """# gms-rt 命令参考
@@ -78,38 +86,63 @@ def _function_body(script: str, function_name: str) -> str:
     raise SystemExit(f"function {function_name}() is not terminated in {CLI_SCRIPT}")
 
 
+def _remember(
+    exact: dict[str, str], wildcard: dict[str, str], names: str, text: str,
+) -> None:
+    for name in names.split("|"):
+        if name.endswith("*"):
+            wildcard[name[:-1]] = text
+        else:
+            exact[name] = text
+
+
 def _parse_case_table(body: str) -> tuple[dict[str, str], dict[str, str]]:
     """Parse a case table into (exact -> text, wildcard-prefix -> text)."""
     exact: dict[str, str] = {}
     wildcard: dict[str, str] = {}
-    pending_names: list[str] | None = None
+    pending_names: str | None = None
+    expect_case_end = False
     for line in body.splitlines():
+        if expect_case_end:
+            expect_case_end = False
+            if line.strip() == ";;":
+                continue
         group = _CASE_GROUP.match(line)
         if group:
-            pending_names = group.group("names").split("|")
+            pending_names = group.group("names")
             continue
         if pending_names is not None:
             printf = _CASE_GROUP_PRINTF.match(line)
             if printf:
-                for name in pending_names:
-                    if name.endswith("*"):
-                        wildcard[name[:-1]] = "$1" + printf.group("suffix")
-                    else:
-                        exact[name] = "$1" + printf.group("suffix")
+                _remember(exact, wildcard, pending_names, "$1" + printf.group("suffix"))
                 pending_names = None
+                if ";;" not in line:
+                    expect_case_end = True
                 continue
+        dollar = _CASE_DOLLAR.match(line)
+        if dollar:
+            _remember(exact, wildcard, dollar.group("names"), "$1" + dollar.group("suffix"))
+            pending_names = None
+            continue
         literal = _CASE_LITERAL.match(line)
         if literal:
             text = literal.group("text")
             if text is None:
                 text = literal.group("text_dq")
-            for name in literal.group("names").split("|"):
-                if name.endswith("*"):
-                    wildcard[name[:-1]] = text
-                else:
-                    exact[name] = text
+            _remember(exact, wildcard, literal.group("names"), text)
             pending_names = None
     return exact, wildcard
+
+
+def _expand_command_text(command: str, text: str) -> str:
+    """Substitute the catalog ``$1`` placeholder with the command name.
+
+    The shell table prints ``$1`` because the case subject is the command.
+    Docs must show the command, not the characters ``$1``.
+    """
+    if text.startswith("$1"):
+        return command + text[2:]
+    return text
 
 
 def _resolve(table: dict[str, str], wildcards: dict[str, str], command: str) -> str:
@@ -150,8 +183,8 @@ def build_document() -> str:
     rows = []
     missing_summary = []
     for command in commands:
-        usage = _resolve(usage_exact, usage_wild, command)
-        summary = _resolve(summary_exact, summary_wild, command)
+        usage = _expand_command_text(command, _resolve(usage_exact, usage_wild, command))
+        summary = _expand_command_text(command, _resolve(summary_exact, summary_wild, command))
         if not summary:
             missing_summary.append(command)
         rows.append(f"| `{command}` | {_escape(summary)} | {_escape(usage)} |")

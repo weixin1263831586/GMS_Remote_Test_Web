@@ -387,10 +387,6 @@ def text_to_key_reports(text: str) -> list[bytes]:
     return reports
 
 
-def command_runtime_seconds(commands: list[AoaCommand]) -> int:
-    return max(30, sum(_estimate_runtime_ms(item) for item in commands) // 1000 + 30)
-
-
 # ---- 录制（userdebug 固件上经 ADB 录制，回放到 user 固件）----
 
 RECORD_ACTIONS = frozenset({

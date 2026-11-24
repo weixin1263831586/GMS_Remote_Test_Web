@@ -23,15 +23,16 @@
                             <code id="cmd-1-5" class="usage-cmd">gms-rt-system-selfcheck &amp;&amp; gms-rt-devices-list</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-1-5">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 默认使用系统信任链；自签名 Controller 请先带外取得 CA，并执行 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt。命令保留已有 CA 设置，下载失败会返回非零状态。仅在可信实验网络采用 TOFU 时才显式改用 -kfsSL 首次取脚本，安装器随后固定 CA 并严格校验下载。管理员在 Web 生成配对码完成安装，升级用 gms-agent update。</div>
+                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 默认使用系统信任链；自签名 Controller 请先带外取得 CA，并执行 export GMS_INSTALL_CA_CERT=/path/to/controller-ca.crt。命令保留已有 CA 设置，下载失败会返回非零状态。仅在可信实验网络采用 TOFU 时才显式改用 -kfsSL 首次取脚本，安装器随后固定 CA 并严格校验下载。管理员在 Web 生成配对码完成安装，升级用 gms-agent update。环境验收用 gms-agent doctor --json 与 gms-rt-system-selfcheck --json。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color);  margin-bottom: 8px;" data-ui-type-weight="bold" data-ui-type-size="small">🏥 步骤2: 测试主机网络连通性检查</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-2" class="usage-cmd">gms-rt-ssh-ping</code>
+                            <code id="cmd-2" class="usage-cmd">gms-rt-ssh-ping 192.0.2.20 192.0.2.30</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-2">📋 复制</span>
                         </div>
+                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 两个参数依次是测试主机 IP 和客户端 IP，缺一不可。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
@@ -53,19 +54,19 @@
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-usbip" class="usage-cmd">gms-rt-usbip-connect</code>
+                            <code id="cmd-usbip" class="usage-cmd">gms-rt-usbip-connect user@192.0.2.10</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-usbip">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="small">💡 可连接本地 Windows 电脑的ADB设备用于测试</div>
+                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="small">💡 把指定设备主机上的 USB 设备接入测试机。主机 user@ip 必填；不要把密码写进可复制命令。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color);  margin-bottom: 8px;" data-ui-type-weight="bold" data-ui-type-size="small">📶 步骤4: WiFi连接配置 (可选)</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-5" class="usage-cmd">gms-rt-devices-wifi RK3572GMS4 SSID password</code>
+                            <code id="cmd-5" class="usage-cmd">GMS_REMOTE_WIFI_PASSWORD='wifi-password' gms-rt-devices-wifi RK3572GMS4 MySSID</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-5">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 如果设备需要WiFi连接执行测试时使用</div>
+                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 密码放在 GMS_REMOTE_WIFI_PASSWORD，避免进入进程参数。位置参数密码只适合本机可信场景。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
@@ -88,10 +89,10 @@
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">
                         <div style="color: var(--primary-color);  margin-bottom: 8px;" data-ui-type-weight="bold" data-ui-type-size="small">▶️  步骤6: 启动测试</div>
                         <div style="background: var(--darker-bg); padding: 2px 3px; border-radius: 3px; position: relative; border: 1px solid var(--border-color);">
-                            <code id="cmd-8" class="usage-cmd" style="white-space: pre-wrap;">gms-rt-test-start RK3572GMS4 CTS ~/GMS-Suite/android-cts/tools</code>
+                            <code id="cmd-8" class="usage-cmd" style="white-space: pre-wrap;">gms-rt-test-start RK3572GMS4 CTS android-cts-17_r1</code>
                             <span class="copy-chip usage-chip" data-click="copyCommand" data-a0="cmd-8">📋 复制</span>
                         </div>
-                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 启动CTS测试，会自动锁定设备</div>
+                        <div style="margin-top: 4px;  color: var(--text-muted);" data-ui-type-size="compact">💡 android- 开头的短套件名会解析成 tools 路径；带 / 的参数也会当作套件路径。启动后会锁定设备。</div>
                     </div>
 
                     <div style="margin-bottom: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--border-color);">

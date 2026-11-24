@@ -25,6 +25,7 @@ MCP_IDENTITY_ENV_KEYS = frozenset({
     "GMS_AUTH_TOKEN_FILE",
     "GMS_AGENT_AUTH_MODE",
     "GMS_MCP_TOOLSETS",
+    "GMS_MCP_REPAIR_POLICY",
 })
 
 PROCESS_STOP_GRACE_SECONDS = 5.0
@@ -89,6 +90,7 @@ class CappedCapture:
         self._tail = tail
         self._head_buf = bytearray()
         self._tail_buf = bytearray()
+        self._truncated = False
 
     def feed(self, chunk: bytes | str) -> None:
         data = chunk.encode("utf-8", errors="replace") if isinstance(chunk, str) else chunk
@@ -98,11 +100,15 @@ class CappedCapture:
             data = data[take:]
         if data:
             self._tail_buf.extend(data)
-            if len(self._tail_buf) > self._tail:
-                del self._tail_buf[: len(self._tail_buf) - self._tail]
+            overflow = len(self._tail_buf) - self._tail
+            if overflow > 0:
+                del self._tail_buf[:overflow]
+                self._truncated = True
 
     def text(self) -> str:
-        truncated = len(self._tail_buf) >= self._tail
+        # 恰好填满 tail 不是截断。丢字节时才打标记；用长度比较会把
+        # 刚好等于 tail 的完整输出也标成 truncated。
+        truncated = self._truncated
         parts = [bytes(self._head_buf)]
         if truncated and self._tail_buf:
             parts.append(b"\n...[truncated]...\n")

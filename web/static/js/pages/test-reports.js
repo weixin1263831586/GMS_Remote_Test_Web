@@ -431,10 +431,10 @@ function handleReportAction(event) {
         artifact_id: tr.dataset.artifactId || '',
         source_timestamp: tr.dataset.sourceTimestamp || '',
         report_name: tr.dataset.reportName || '',
-        suite_path: suitePath || '',
         origin_page: 'reports'
     };
-    window.GmsWorkspace?.update(reportContext, {source: 'reports'});
+    const {worker_id: _workerId, ...provenance} = reportContext;
+    window.GmsWorkspace?.update(provenance, {source: 'reports'});
 
     event.stopPropagation();
 
@@ -467,7 +467,6 @@ async function openReportSuiteDirectory(timestamp, suitePath, testType, kind, re
     }
 
     const workerId = reportContext.worker_id || workspaceLocalWorkerId();
-    window.GmsWorkspace?.update({...reportContext, worker_id: workerId}, {source: 'reports'});
     const suiteWorker = document.getElementById('suite-worker-select');
     if (suiteWorker) {
         await loadSuiteWorkerSelector();
@@ -695,19 +694,16 @@ async function downloadReportAsZip(timestamp, reportId = '', reportName = '') {
 
 async function analyzeReport(timestamp, reportId = '') {
     try {
-        // 从报告列表行中提前回写 Worker 上下文，确保分析结果跳转和后续操作
-        // 能正确继承来源 Worker / Cluster Job 信息。
+        // 回写报告来源（Job / 报告 id），不改当前测试执行主机。
         const reportRow = document.querySelector(`tr[data-timestamp="${timestamp}"]`);
         if (reportRow) {
             const reportContext = {
-                worker_id: reportRow.dataset.workerId || workspaceWorkerId(),
                 cluster_job_id: reportRow.dataset.clusterJobId || '',
                 attempt_id: reportRow.dataset.attemptId || '',
                 automation_run_id: reportRow.dataset.automationRunId || '',
                 report_id: reportRow.dataset.reportId || timestamp,
                 report_timestamp: timestamp,
                 artifact_id: reportRow.dataset.artifactId || '',
-                suite_path: reportRow.dataset.suitePath || '',
                 origin_page: 'report-analysis'
             };
             window.GmsWorkspace?.update(reportContext, {source: 'report-analysis'});

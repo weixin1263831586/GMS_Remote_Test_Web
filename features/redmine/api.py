@@ -544,8 +544,11 @@ async def list_issues(
     order: str = Query("desc"),
 ):
     service = get_redmine_service_for_request(request)
-    # 个人工单列表仅返回当前登录用户的数据。
+    # 个人工单列表仅返回当前登录用户的数据。身份一个都解析不出来时
+    # 必须空页：空 assignee 列表在查询里等于不加过滤，会返回全部快照。
     owner_names = await resolve_owner_names(request)
+    if not owner_names:
+        return {"success": True, "data": {"items": [], "total": 0, "limit": limit, "offset": offset}}
     raw_issues = service.repository.list_all_issues(limit=limit, offset=offset, status=status, priority=priority, category=category, search=search, sort=sort, order=order, assignee_names=owner_names)
     # 批量读取案例事实用于界面补充。
     facts_by_id = service.knowledge.get_case_facts_for_issue_ids(
@@ -705,7 +708,7 @@ async def create_dashboard_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save dashboard profile"})
+        return JSONResponse(status_code=503, content={"success": False, "error": "failed to save dashboard profile"})
     _clear_stats_caches()
     return {"success": True, "data": {
         "dashboard": _public_dashboard_config(dashboard_cfg),
@@ -725,7 +728,7 @@ async def create_project_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_redmine_dashboard_config(denormalize_redmine_dashboard_config(dashboard_cfg)):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save project profile"})
+        return JSONResponse(status_code=503, content={"success": False, "error": "failed to save project profile"})
     _clear_stats_caches()
     return {"success": True, "data": {
         "dashboard": _public_dashboard_config(dashboard_cfg),
@@ -765,7 +768,11 @@ async def send_department_reminder_email(request: Request):
     if not to_addr:
         return JSONResponse(status_code=400, content={"success": False, "error": "user email is not configured"})
 
-    stale_days = int(body.get("stale_days") or _effective_stale_days(request) or 3)
+    try:
+        stale_days = int(body.get("stale_days") or _effective_stale_days(request) or 3)
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"success": False, "error": "stale_days 必须是整数"})
+    stale_days = max(1, min(30, stale_days))
     base_url = _get_redmine_base_url(request)
     issues = [{"issue_id": issue_id} for issue_id in issue_ids]
     url_text = issue_url_text(issues, base_url)
@@ -852,23 +859,22 @@ async def update_stats_config(request: Request):
     """Update redmine_stats config from the settings UI."""
     body = await request.json()
     manager = get_redmine_config_for_request(request)
-    if "base_url" in body:
-        try:
-            if not manager.save_redmine_base_url(str(body.get("base_url") or "")):
-                return JSONResponse(status_code=500, content={"success": False, "error": "保存 Redmine 地址失败"})
-        except ValueError as exc:
-            return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     config = manager.load_config()
     stats = config.get("redmine_stats") or {}
-    if "stale_days" in body:
-        stats["stale_days"] = max(1, min(30, int(body["stale_days"])))
-    if "window_days" in body:
-        stats["window_days"] = max(0, min(365, int(body["window_days"])))
-    if "cache_ttl" in body:
-        stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
     freshness_changed = False
-    if "freshness_days" in body:
-        new_freshness = max(1, min(3650, int(body["freshness_days"])))
+    new_freshness = None
+    try:
+        if "stale_days" in body:
+            stats["stale_days"] = max(1, min(30, int(body["stale_days"])))
+        if "window_days" in body:
+            stats["window_days"] = max(0, min(365, int(body["window_days"])))
+        if "cache_ttl" in body:
+            stats["cache_ttl"] = max(0, min(3600, int(body["cache_ttl"])))
+        if "freshness_days" in body:
+            new_freshness = max(1, min(3650, int(body["freshness_days"])))
+    except (TypeError, ValueError, OverflowError):
+        return JSONResponse(status_code=400, content={"success": False, "error": "统计配置包含非法数字"})
+    if new_freshness is not None:
         if stats.get("freshness_days") != new_freshness:
             freshness_changed = True
         stats["freshness_days"] = new_freshness
@@ -889,8 +895,14 @@ async def update_stats_config(request: Request):
                     continue
             current_ranges.pop(clean_key, None)
         stats["chart_date_ranges"] = current_ranges
+    if "base_url" in body:
+        try:
+            if not manager.save_redmine_base_url(str(body.get("base_url") or "")):
+                return JSONResponse(status_code=503, content={"success": False, "error": "保存 Redmine 地址失败"})
+        except ValueError as exc:
+            return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_redmine_stats_config(stats):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save stats config"})
+        return JSONResponse(status_code=503, content={"success": False, "error": "failed to save stats config"})
     _clear_stats_caches()
     if freshness_changed:
         # 数据新鲜度边界变化后重建缓存分桶。
@@ -909,7 +921,10 @@ async def update_email_config(request: Request):
     if "smtp_host" in body:
         email["smtp_host"] = str(body["smtp_host"] or "").strip()
     if "smtp_port" in body:
-        email["smtp_port"] = int(body["smtp_port"] or 465)
+        try:
+            email["smtp_port"] = int(body["smtp_port"] or 465)
+        except (TypeError, ValueError):
+            return JSONResponse(status_code=400, content={"success": False, "error": "smtp_port 必须是整数"})
     if "from_addr" in body:
         email["from_addr"] = str(body["from_addr"] or "").strip()
     if "username" in body:
@@ -932,7 +947,7 @@ async def update_email_config(request: Request):
         email.pop("use_ssl", None)
     dashboard["email"] = email
     if not manager.save_redmine_dashboard_config(dashboard):
-        return JSONResponse(status_code=500, content={"success": False, "error": "failed to save email config"})
+        return JSONResponse(status_code=503, content={"success": False, "error": "failed to save email config"})
     public_email = {
         key: value
         for key, value in email.items()

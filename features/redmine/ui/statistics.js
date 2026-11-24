@@ -742,7 +742,7 @@ async function confirmReset() {
   try {
     await api('/api/redmine-agent/reset', {method:'POST'});
     notifyUser('重置完成', 'Redmine 数据已清空', 'success');
-    refreshCurrentTab();
+    reloadCurrentTabView();
   } catch (e) { notifyUser('重置失败', e.message, 'error'); }
 }
 
@@ -759,12 +759,12 @@ async function waitForRun(runId, label, options) {
           notifyUser('RedmineAgent ' + label + '失败', last.error || ('任务 ' + runId + ' 执行失败'), 'error');
           return;
         }
-        if (reload) refreshCurrentTab();
+        if (reload) reloadCurrentTabView();
         notifyUser('RedmineAgent ' + label + '完成', '任务 ' + runId + ' 已完成', 'success');
         return;
       }
     } catch (_) {}
   }
-  if (reload) refreshCurrentTab();
+  if (reload) reloadCurrentTabView();
   notifyUser('RedmineAgent ' + label + '超时', '任务 ' + runId + ' 等待超时，请检查状态', 'warning');
 }

@@ -8,9 +8,7 @@ pytest==9.1.1
 # asyncio_mode=auto 固定在 pyproject.toml [tool.pytest.ini_options]。
 pytest-asyncio==1.4.0
 httpx==0.28.1
-# Playwright 供浏览器冒烟/E2E（tests/e2e、test_runtime_ui_smoke.py），
-# 由独立 E2E job 安装并在 unit job 中 --ignore=tests/e2e 隔离。
+# Playwright 供独立 browser-e2e job 运行 tests/e2e 和 tests/runtime_ui。
 playwright==1.58.0
-# vulture 死代码扫描（审核 §22 僵尸代码检测）。FastAPI router/dependency
-# 回调产生大量误报，白名单见 tools/scripts/maintenance/vulture_allowlist.py；仅 dev 使用。
+# CI 以 90% 最低置信度运行 Vulture，检查应用、Worker 和维护脚本。
 vulture==2.16

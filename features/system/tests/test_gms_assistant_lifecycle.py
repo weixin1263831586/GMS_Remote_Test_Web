@@ -246,6 +246,7 @@ class GmsAssistantProxySecurityTests(_IsolatedEnvTestCase):
                 return False
 
             def request(self, method, url, headers=None, data=None, allow_redirects=False):
+                assert not allow_redirects
                 return _FakeContext(method, url, headers)
 
         patches = [

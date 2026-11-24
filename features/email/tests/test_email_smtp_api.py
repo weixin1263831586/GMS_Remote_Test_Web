@@ -126,6 +126,20 @@ class SmtpApiTests(unittest.TestCase):
         ), self.assertRaises(PermissionError):
             get_smtp_config(mock.MagicMock())
 
+    def test_save_failure_is_unavailable(self):
+        with mock.patch(
+            "foundation.config.config_manager.load_config", return_value={}
+        ), mock.patch(
+            "foundation.config.config_manager.update_runtime_config",
+            return_value=False,
+        ):
+            response = save_smtp_config(
+                SmtpConfigRequest(smtp_host="smtp.x.com", username="ops@x.com"),
+                admin=ADMIN,
+            )
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(self._masked(response)["success"])
+
     def test_invalid_username_rejected(self):
         with mock.patch(
             "foundation.config.config_manager.load_config", return_value={}

@@ -3,11 +3,24 @@ from __future__ import annotations
 import io
 import logging
 import os
+import shutil
 import zipfile
+from math import ceil
 from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+def disk_metrics(path: os.PathLike[str]) -> dict[str, float | None]:
+    usage = shutil.disk_usage(path)
+    # Match df: filesystem blocks reserved from ordinary users are neither used nor available.
+    capacity = usage.used + usage.free
+    return {
+        "disk_total_gb": round(usage.total / 1024 ** 3, 2),
+        "disk_free_gb": round(usage.free / 1024 ** 3, 2),
+        "disk_percent": ceil(100 * usage.used / capacity) if capacity > 0 else None,
+    }
 
 
 def _safe_zip_arcname(path: str, arcname_base: str, path_prefix: str = '') -> str:

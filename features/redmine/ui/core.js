@@ -337,6 +337,16 @@ async function withRefreshButtonBusy(task) {
   }
 }
 
+async function reloadCurrentTabView() {
+  if (currentTab === 'issues') await loadIssues();
+  else if (currentTab === 'runs') await loadRuns();
+  else if (currentTab === 'cases') await loadCases();
+  else if (currentTab === 'department') await loadDepartmentOverdue(true);
+  else if (currentTab === 'project') await loadProjectDashboard(true);
+  else if (currentTab === 'daily-brief') await loadDailyBrief();
+  else await loadStatistics(true);
+}
+
 async function refreshCurrentTab() {
   await withRefreshButtonBusy(async function() {
     if (currentTab === 'issues') {

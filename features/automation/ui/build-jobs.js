@@ -63,8 +63,10 @@ async function compileAndJump() {
 async function loadBuildLog(jobId, {silent = false} = {}) {
     try {
         selectedBuildJobId = jobId;
-        let job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}`);
-        if (job.server_id && !buildPasswordCache[job.server_id] && ['queued', 'running'].includes(job.status)) {
+        const job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}`);
+        if (selectedBuildJobId !== jobId) return;
+        if (!silent && job.can_execute && job.server_id && !buildPasswordCache[job.server_id]
+            && ['queued', 'running'].includes(job.status)) {
             const password = await getBuildPassword(job.server_id);
             if (password) {
                 await api(`/api/build/jobs/${encodeURIComponent(jobId)}/password`, {
@@ -74,14 +76,14 @@ async function loadBuildLog(jobId, {silent = false} = {}) {
                 });
             }
         }
-        job = await api(`/api/build/jobs/${encodeURIComponent(jobId)}?poll=true`);
         const log = await api(`/api/build/jobs/${encodeURIComponent(jobId)}/log?lines=5000`);
+        if (selectedBuildJobId !== jobId) return;
         buildLogRaw = log.text || '';
         renderBuildLog();
         qs('build-log-title').textContent = `${job.id} / ${statusLabel(job.status)}`;
         if (!silent) toast(`构建任务 ${job.id}：${statusLabel(job.status)}`);
         await loadBuildJobs();
-    } catch (err) { toast(err.message); }
+    } catch (err) { if (!silent) toast(err.message); }
 }
 
 function filteredBuildLog() {

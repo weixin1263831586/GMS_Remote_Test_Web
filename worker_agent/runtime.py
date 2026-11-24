@@ -426,7 +426,7 @@ class WorkerRuntime:
 
     def running_jobs(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            rows = conn.execute("SELECT * FROM jobs WHERE status='running'").fetchall()
+            rows = conn.execute("SELECT * FROM jobs WHERE status IN ('running','stopping')").fetchall()
         result = []
         now = time.time()
         for row in rows:
@@ -657,87 +657,125 @@ class WorkerRuntime:
             0.1, float(os.getenv("GMS_WORKER_KILL_WAIT_SECONDS", "5"))
         )
         with self.connect() as conn:
-            conn.execute(
-                "UPDATE jobs SET status='stopping' WHERE worker_job_id=?",
+            claimed = conn.execute(
+                "UPDATE jobs SET status='stopping' WHERE worker_job_id=? AND status='running'",
                 (worker_job_id,),
-            )
+            ).rowcount
+        if claimed == 0:
+            return self._job_status_payload(worker_job_id)
         try:
-            os.killpg(pgid, signal.SIGINT)
-        except ProcessLookupError:
-            pass
-        if process is not None:
             try:
-                exit_code = process.wait(timeout=grace_seconds)
-            except subprocess.TimeoutExpired:
+                os.killpg(pgid, signal.SIGINT)
+            except ProcessLookupError:
+                pass
+            if process is not None:
                 try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                try:
-                    exit_code = process.wait(timeout=kill_wait_seconds)
-                except subprocess.TimeoutExpired as exc:
-                    with self.connect() as conn:
-                        conn.execute(
-                            "UPDATE jobs SET status='running' WHERE worker_job_id=?",
-                            (worker_job_id,),
-                        )
-                    raise RuntimeError("worker process did not stop after SIGKILL") from exc
-        else:
-            deadline = time.monotonic() + grace_seconds
-            while self.pid_alive(pid) and time.monotonic() < deadline:
-                time.sleep(0.1)
-            if self.pid_alive(pid):
-                try:
-                    os.killpg(pgid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                deadline = time.monotonic() + kill_wait_seconds
+                    exit_code = process.wait(timeout=grace_seconds)
+                except subprocess.TimeoutExpired:
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        exit_code = process.wait(timeout=kill_wait_seconds)
+                    except subprocess.TimeoutExpired as exc:
+                        raise RuntimeError("worker process did not stop after SIGKILL") from exc
+            else:
+                deadline = time.monotonic() + grace_seconds
                 while self.pid_alive(pid) and time.monotonic() < deadline:
                     time.sleep(0.1)
                 if self.pid_alive(pid):
-                    with self.connect() as conn:
-                        conn.execute(
-                            "UPDATE jobs SET status='running' WHERE worker_job_id=?",
-                            (worker_job_id,),
-                        )
-                    raise RuntimeError("worker process did not stop after SIGKILL")
-            exit_code = None
+                    try:
+                        os.killpg(pgid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    deadline = time.monotonic() + kill_wait_seconds
+                    while self.pid_alive(pid) and time.monotonic() < deadline:
+                        time.sleep(0.1)
+                    if self.pid_alive(pid):
+                        raise RuntimeError("worker process did not stop after SIGKILL")
+                exit_code = None
+        except (OSError, RuntimeError):
+            if not self._restore_running_after_failed_kill(worker_job_id):
+                return self._job_status_payload(worker_job_id)
+            raise
+        with self.connect() as conn:
+            cancelled = conn.execute(
+                "UPDATE jobs SET status='cancelled',exit_code=? "
+                "WHERE worker_job_id=? AND status='stopping'",
+                (exit_code, worker_job_id),
+            ).rowcount
+        if cancelled == 0:
+            return self._job_status_payload(worker_job_id)
         with self._lock:
             self._processes.pop(worker_job_id, None)
-        with self.connect() as conn:
-            conn.execute(
-                "UPDATE jobs SET status='cancelled',exit_code=? WHERE worker_job_id=?",
-                (exit_code, worker_job_id),
-            )
         return {"worker_job_id": worker_job_id, "status": "cancelled"}
+
+    def _job_status_payload(self, worker_job_id: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            current = conn.execute(
+                "SELECT status FROM jobs WHERE worker_job_id=?",
+                (worker_job_id,),
+            ).fetchone()
+        status = current["status"] if current else "unknown"
+        return {"worker_job_id": worker_job_id, "status": status}
+
+    def _restore_running_after_failed_kill(self, worker_job_id: str) -> bool:
+        """Put a still-owned stopping row back to running. False if another path finalized it."""
+        with self.connect() as conn:
+            restored = conn.execute(
+                "UPDATE jobs SET status='running' WHERE worker_job_id=? AND status='stopping'",
+                (worker_job_id,),
+            ).rowcount
+        return restored != 0
+
+    def _terminal_job_row(self, worker_job_id: str):
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT status, exit_code, work_dir FROM jobs WHERE worker_job_id=?",
+                (worker_job_id,),
+            ).fetchone()
 
     def wait_process(self, worker_job_id: str) -> dict[str, Any]:
         with self._lock:
             process = self._processes.get(worker_job_id)
         if process is None:
+            row = self._terminal_job_row(worker_job_id)
+            if row is not None and row["status"] in {"cancelled", "completed", "failed"}:
+                return {
+                    "worker_job_id": worker_job_id,
+                    "status": row["status"],
+                    "exit_code": row["exit_code"],
+                    "work_dir": row["work_dir"] or "",
+                }
             raise ValueError("worker process is not attached to this agent instance")
         exit_code = process.wait()
         with self.connect() as conn:
-            row = conn.execute("SELECT work_dir FROM jobs WHERE worker_job_id=?", (worker_job_id,)).fetchone()
-            existing = conn.execute("SELECT status FROM jobs WHERE worker_job_id=?", (worker_job_id,)).fetchone()
-            status = "cancelled" if existing and existing["status"] in {
-                "stopping", "cancelled"
-            } else (
-                "completed" if exit_code == 0 else "failed"
+            conn.execute(
+                """UPDATE jobs SET status=CASE WHEN status='stopping' THEN 'cancelled' ELSE ? END,
+                   exit_code=? WHERE worker_job_id=? AND status IN ('running','stopping')""",
+                ("completed" if exit_code == 0 else "failed", exit_code, worker_job_id),
             )
-            conn.execute("UPDATE jobs SET status=?,exit_code=? WHERE worker_job_id=?",
-                         (status, exit_code, worker_job_id))
         with self._lock:
             self._processes.pop(worker_job_id, None)
-        return {"worker_job_id": worker_job_id, "status": status,
-                "exit_code": exit_code, "work_dir": row["work_dir"] if row else ""}
+        row = self._terminal_job_row(worker_job_id)
+        if row is None:
+            raise ValueError("worker job not found")
+        return {
+            "worker_job_id": worker_job_id, "status": row["status"],
+            "exit_code": row["exit_code"], "work_dir": row["work_dir"] or "",
+        }
 
     def process_poll(self, worker_job_id: str) -> int | None:
         with self._lock:
             process = self._processes.get(worker_job_id)
-        if process is None:
-            raise ValueError("worker process is not attached to this agent instance")
-        return process.poll()
+        if process is not None:
+            return process.poll()
+        row = self._terminal_job_row(worker_job_id)
+        if row is not None and row["status"] in {"cancelled", "completed", "failed"}:
+            code = row["exit_code"]
+            return 0 if code is None else int(code)
+        raise ValueError("worker process is not attached to this agent instance")
 
     @staticmethod
     def pid_alive(pid: int) -> bool:

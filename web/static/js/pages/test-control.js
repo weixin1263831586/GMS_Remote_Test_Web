@@ -578,7 +578,12 @@ async function loadEmailOutbox() {
 }
 
 // 邮件发送方（系统级 SMTP）：读全局配置回填；密码永不回显，留空表示保持不变。
+// 配置弹框打开后这几个请求是并行的。保存发生在回填完成之前时，
+// 空主机和默认未勾选会被当成用户修改，把系统发信关掉。
+let emailSenderConfigLoaded = false;
+
 async function loadEmailSenderConfig() {
+    emailSenderConfigLoaded = false;
     const status = document.getElementById('config-email-status');
     try {
         const result = await apiCall('/api/email/smtp', 'GET');
@@ -599,12 +604,17 @@ async function loadEmailSenderConfig() {
                 ? `${state}当前已配置授权码（不回显；留空保持不变）。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。`
                 : `${state}尚未配置授权码。接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to）。`;
         }
+        emailSenderConfigLoaded = true;
     } catch (error) {
         if (status) status.textContent = '读取邮件发送方配置失败: ' + error.message;
     }
 }
 
 async function saveEmailSenderConfig() {
+    if (!emailSenderConfigLoaded) {
+        showToast('邮件发送方尚未读取成功，本次未修改邮件配置', 'warning');
+        return;
+    }
     const host = document.getElementById('config-email-smtp-host').value.trim();
     const password = document.getElementById('config-email-password').value;
     const enabledInput = document.getElementById('config-email-enabled');

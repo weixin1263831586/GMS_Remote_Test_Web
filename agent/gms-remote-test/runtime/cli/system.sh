@@ -30,7 +30,7 @@ gms-rt-system-doctor() {
     check_jq || return "$GMS_RT_EXIT_OPERATION"
 
     local binaries blockers health auth devices suites
-    local authenticated auth_required elevated device_count suite_count
+    local authenticated auth_required elevated credential_mode device_count suite_count
     local firmware_upload_mode="${GMS_BURN_UPLOAD_MODE:-auto}"
     local direct_firmware_transfer=false ssh_found=false transfer_found=false
     local ready=true result_status=0 binary found
@@ -79,12 +79,16 @@ gms-rt-system-doctor() {
     authenticated=$(echo "$auth" | jq -r '.authenticated == true')
     auth_required=$(echo "$auth" | jq -r '.auth_required == true')
     elevated=$(echo "$auth" | jq -r '.elevated == true')
+    credential_mode=$(echo "$auth" | jq -r '.credential_mode // empty')
     if [ "$auth_required" = "true" ] && [ "$authenticated" != "true" ]; then
         blockers=$(echo "$blockers" | jq -c '. + ["authentication_required"]')
         ready=false
         result_status="$GMS_RT_EXIT_AUTH"
-    elif { [ "$scope" = "firmware" ] || [ "$scope" = "gsi" ]; } \
-            && [ "$elevated" != "true" ]; then
+    elif [ "$elevated" != "true" ] && {
+            [ "$scope" = "gsi" ] || {
+                [ "$scope" = "firmware" ] && [ "$credential_mode" != "agent_token" ]
+            }
+         }; then
         blockers=$(echo "$blockers" | jq -c '. + ["administrator_elevation_required"]')
         ready=false
         result_status="$GMS_RT_EXIT_PERMISSION"
@@ -551,6 +555,7 @@ gms-rt-ssh-sshd() {
     local device_host="$1"
     check_jq
 
+    local response="" status=0
     if [ -n "$device_host" ]; then
         # 验证格式：必须包含 @ 符号
         if [[ "$device_host" != *@* ]]; then
@@ -560,10 +565,15 @@ gms-rt-ssh-sshd() {
         fi
         echo "🔍 Checking SSHD status for $device_host..."
         # Use GET with query parameter (like USB/IP status)
-        local response=$(api_call "/ssh/sshd?device_host=$(_urlencode "$device_host")")
+        response=$(api_call "/ssh/sshd?device_host=$(_urlencode "$device_host")")
     else
         echo "🔍 Checking SSHD status for current client..."
-        local response=$(api_call "/ssh/sshd")
+        response=$(api_call "/ssh/sshd")
+    fi
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        error "无法读取 SSHD 状态"
+        return "$status"
     fi
 
     # 解析响应

@@ -81,6 +81,11 @@ gms-rt-apk-analyze() {
                 echo "  analysis task, and start jadx decompilation. --wait polls until completed."
                 return 0
                 ;;
+            --suite-path)
+                shift
+                [ $# -gt 0 ] || { error "--suite-path requires a value"; return "$GMS_RT_EXIT_USAGE"; }
+                suite_path="$1"
+                ;;
             --types)
                 shift
                 [ $# -gt 0 ] || { error "--types requires a value"; return "$GMS_RT_EXIT_USAGE"; }

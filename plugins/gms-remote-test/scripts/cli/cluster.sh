@@ -25,11 +25,15 @@ gms-rt-cluster-devices() {
         shift
     done
     check_jq || return 1
-    local response
+    local response status=0
     if [ -n "$worker_id" ]; then
-        response=$(api_call "/cluster/devices?worker_id=$(_urlencode "$worker_id")")
+        response=$(api_call "/cluster/devices?worker_id=$(_urlencode "$worker_id")") || status=$?
     else
-        response=$(api_call "/cluster/devices")
+        response=$(api_call "/cluster/devices") || status=$?
+    fi
+    if [ "$status" -ne 0 ]; then
+        [ -z "$response" ] || printf '%s\n' "$response"
+        return "$status"
     fi
     if [ -n "$query" ]; then
         echo "$response" | jq --arg q "$query" '[.devices[]? | select((.serial // .device_id // "") | test($q; "i"))]'

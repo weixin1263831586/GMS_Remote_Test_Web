@@ -119,7 +119,21 @@ class SendEmailTests(unittest.TestCase):
     def test_empty_recipients_rejected(self):
         result = send_email("", "s", "b", manager=_fake_manager(QIYE_CFG))
         self.assertFalse(result["sent"])
+        self.assertEqual(result["mode"], "invalid")
         self.assertIn("收件人", result["error"])
+
+    def test_invalid_from_address_is_invalid_mode(self):
+        cfg = {
+            "smtp_host": "smtp.company.com",
+            "smtp_port": 587,
+            "username": "me@company.com",
+            "password": "pwd",
+            "from_addr": "not-an-email",
+        }
+        result = send_email("a@x.com", "s", "b", manager=_fake_manager(cfg))
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["mode"], "invalid")
+        self.assertIn("发件人", result["error"])
 
     @patch("features.email.transport.smtplib.SMTP_SSL")
     def test_header_injection_is_rejected_or_collapsed_for_all_callers(self, smtp_cls):
@@ -267,6 +281,8 @@ class SendEmailTests(unittest.TestCase):
         self.assertFalse(result["sent"])
         self.assertEqual(result["mode"], "smtp")
         self.assertIn("SMTP认证失败", result["error"])
+        self.assertNotIn("auth failed", result["error"])
+        self.assertNotIn("535", result["error"])
 
     @patch("features.email.transport.smtplib.SMTP")
     def test_non_ssl_uses_starttls(self, smtp_cls):

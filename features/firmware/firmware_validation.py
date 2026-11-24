@@ -17,6 +17,9 @@ class FirmwareValidationResult:
     valid: bool
     message: str = ""
     output: str = ""
+    # "" when valid; otherwise "invalid" (422), "timeout" (504),
+    # or "unavailable" (502). Tool and SSH failures are not bad images.
+    failure: str = ""
 
 
 def _clean_output(value: str) -> str:
@@ -54,7 +57,9 @@ def _result(return_code: int, output: str) -> FirmwareValidationResult:
     )
     if diagnostic:
         message += f"\n诊断输出：{diagnostic}"
-    return FirmwareValidationResult(valid=False, message=message, output=diagnostic)
+    return FirmwareValidationResult(
+        valid=False, message=message, output=diagnostic, failure="invalid",
+    )
 
 
 def validate_local_update_image(
@@ -76,12 +81,14 @@ def validate_local_update_image(
     except subprocess.TimeoutExpired:
         return FirmwareValidationResult(
             valid=False,
+            failure="timeout",
             message=f"固件预检超时（{timeout} 秒），设备尚未重启。",
         )
-    except OSError as exc:
+    except OSError:
         return FirmwareValidationResult(
             valid=False,
-            message=f"无法执行固件预检工具，设备尚未重启：{exc}",
+            failure="unavailable",
+            message="无法执行固件预检工具，设备尚未重启。",
         )
     return _result(completed.returncode, completed.stdout or "")
 
@@ -101,10 +108,23 @@ def validate_remote_update_image(
             command,
             timeout=timeout,
         )
-    except Exception as exc:
+    except Exception:
         return FirmwareValidationResult(
             valid=False,
-            message=f"远端固件预检执行失败，设备尚未重启：{exc}",
+            failure="unavailable",
+            message="远端固件预检执行失败，设备尚未重启。",
+        )
+    if getattr(result, "timed_out", False):
+        return FirmwareValidationResult(
+            valid=False,
+            failure="timeout",
+            message="远端固件预检超时，设备尚未重启。",
+        )
+    if result.code == -1:
+        return FirmwareValidationResult(
+            valid=False,
+            failure="unavailable",
+            message="远端固件预检执行失败，设备尚未重启。",
         )
     return _result(result.code, "\n".join(
         part for part in (result.stdout, result.stderr) if part

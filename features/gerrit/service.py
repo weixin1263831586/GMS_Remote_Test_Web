@@ -12,7 +12,8 @@ from urllib.parse import quote, urlencode
 import aiohttp
 
 from features.gerrit.config import MAX_QUERY_PAGE_SIZE
-from foundation.outbound import PinnedOutboundResolver, UnsafeOutboundURL
+from foundation.outbound import UnsafeOutboundURL
+from foundation.outbound_aiohttp import PinnedOutboundResolver
 
 from .outbound import resolve_gerrit_target
 
@@ -121,19 +122,11 @@ async def _post_gerrit_review_ssh(
     message: str,
     verified: int | None,
 ) -> dict[str, Any]:
-    target = str(cfg.get("ssh_host") or "")
-    if cfg.get("ssh_user"):
-        target = f"{cfg['ssh_user']}@{target}"
-    command = [
-        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
-        "-p", str(cfg.get("ssh_port") or 29418),
-    ]
-    identity_file = str(cfg.get("ssh_identity_file") or "").strip()
-    if identity_file:
-        command.extend([
-            "-o", "IdentitiesOnly=yes", "-i", os.path.expanduser(identity_file)
-        ])
-    command.extend([target, "gerrit", "review"])
+    try:
+        command = await asyncio.to_thread(_gerrit_ssh_prefix, cfg)
+    except UnsafeOutboundURL as exc:
+        return {"sent": False, "source": "ssh", "error": str(exc)}
+    command.extend(["gerrit", "review"])
     if message:
         command.extend(["--message", message])
     if verified is not None:
@@ -151,8 +144,8 @@ async def _post_gerrit_review_ssh(
         process.kill()
         await process.communicate()
         return {"sent": False, "source": "ssh", "error": "Gerrit review timed out"}
-    except Exception as exc:
-        return {"sent": False, "source": "ssh", "error": str(exc)}
+    except OSError:
+        return {"sent": False, "source": "ssh", "error": "Gerrit SSH 无法启动"}
     if process.returncode != 0:
         return {
             "sent": False,
@@ -195,7 +188,9 @@ async def _query_gerrit_via_ssh(cfg: dict[str, Any], query: str, max_changes: in
         remaining = page_size if max_total is None else min(page_size, max_total - len(all_items))
         if remaining <= 0:
             break
-        result = await _query_gerrit_via_ssh_once(cfg, _query_for_ssh(query, remaining, start=start))
+        result = await _query_gerrit_via_ssh_once(
+            cfg, _query_for_ssh(query, remaining), start=start
+        )
         if result.get("error"):
             return {**result, "items": all_items, "stats": result.get("stats") or last_stats}
         items = result.get("items") or []
@@ -208,35 +203,48 @@ async def _query_gerrit_via_ssh(cfg: dict[str, Any], query: str, max_changes: in
     return {"items": all_items, "stats": {**last_stats, "rowCount": len(all_items)}, "error": "", "source": "ssh"}
 
 
-async def _query_gerrit_via_ssh_once(cfg: dict[str, Any], query: str) -> dict[str, Any]:
-    target = cfg["ssh_host"]
-    if cfg.get("ssh_user"):
-        target = f"{cfg['ssh_user']}@{target}"
+def _gerrit_ssh_prefix(cfg: dict[str, Any]) -> list[str]:
+    host = str(cfg.get("ssh_host") or "").strip()
+    port = int(cfg.get("ssh_port") or 29418)
+    if not host or any(char in host for char in "/@?#[]") or any(char.isspace() for char in host):
+        raise UnsafeOutboundURL("Gerrit SSH 主机无效")
+    literal = f"[{host}]" if ":" in host else host
+    try:
+        target = resolve_gerrit_target(f"https://{literal}:{port}/")
+    except UnsafeOutboundURL as exc:
+        raise UnsafeOutboundURL("Gerrit SSH 目标未获出站授权，请配置 GMS_GERRIT_ALLOWED_HOSTS") from exc
+    host_key_alias = target.hostname if port == 22 else f"[{target.hostname}]:{port}"
     cmd = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-        "-o",
-        "ConnectTimeout=10",
-        "-p",
-        str(cfg["ssh_port"]),
+        "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
+        "-o", f"HostName={target.addresses[0]}", "-o", f"HostKeyAlias={host_key_alias}",
+        "-o", "ProxyCommand=none", "-o", "ProxyJump=none", "-o", "ControlPath=none",
+        "-p", str(port),
     ]
+    if cfg.get("ssh_user"):
+        cmd.extend(["-l", str(cfg["ssh_user"])])
     identity_file = str(cfg.get("ssh_identity_file") or "").strip()
     if identity_file:
         cmd.extend(["-o", "IdentitiesOnly=yes", "-i", os.path.expanduser(identity_file)])
-    cmd.extend([
-        target,
-        "gerrit",
-        "query",
-        "--format=JSON",
-        "--submit-records",
-        query,
-    ])
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    cmd.extend(["--", target.hostname])
+    return cmd
+
+
+async def _query_gerrit_via_ssh_once(
+    cfg: dict[str, Any], query: str, *, start: int = 0
+) -> dict[str, Any]:
+    try:
+        cmd = await asyncio.to_thread(_gerrit_ssh_prefix, cfg)
+    except UnsafeOutboundURL as exc:
+        return {"items": [], "stats": {}, "error": str(exc), "source": "ssh"}
+    cmd.extend(_ssh_gerrit_query_args(query, start=start))
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except OSError:
+        return {"items": [], "stats": {}, "error": "Gerrit SSH 无法启动", "source": "ssh"}
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     except asyncio.TimeoutError:
@@ -312,6 +320,7 @@ async def _query_gerrit_via_rest(
     headers = {"Accept": "application/json"}
     items: list[dict[str, Any]] = []
     start = 0
+    more_changes = False
     try:
         async with aiohttp.ClientSession(timeout=timeout, connector=connector, auth=auth, headers=headers) as session:
             while max_total is None or len(items) < max_total:
@@ -335,12 +344,16 @@ async def _query_gerrit_via_rest(
                 if not isinstance(rows, list):
                     return {"items": [], "stats": {}, "error": "REST response is not a list", "source": "rest"}
                 items.extend(rows)
-                if not rows or not rows[-1].get("_more_changes"):
+                more_changes = bool(rows and rows[-1].get("_more_changes"))
+                if not more_changes:
                     break
                 start += len(rows)
     except Exception as exc:
         return {"items": [], "stats": {}, "error": str(exc), "source": "rest"}
-    return {"items": items, "stats": {"rowCount": len(items)}, "error": "", "source": "rest"}
+    return {
+        "items": items, "stats": {"rowCount": len(items), "moreChanges": more_changes},
+        "error": "", "source": "rest",
+    }
 
 
 def _decode_gerrit_rest_json(text: str) -> Any:
@@ -359,15 +372,25 @@ def _query_with_limit(query: str, limit: int) -> str:
     return f"{clean} limit:{max(1, min(int(limit or 100), 5000))}".strip()
 
 
-def _query_for_ssh(query: str, limit: int, start: int = 0) -> str:
+def _query_for_ssh(query: str, limit: int) -> str:
     parts = [
         part for part in str(query or "").split()
         if part.lower() != "status:any"
     ]
-    clean = _query_with_limit(" ".join(parts), limit)
+    return _query_with_limit(" ".join(parts), limit)
+
+
+def _ssh_gerrit_query_args(query: str, *, start: int = 0) -> list[str]:
+    """Build the remote argv after the SSH target.
+
+    ``--start`` is a gerrit flag. Putting it inside the query string makes
+    later pages search for the literal text instead of paginating.
+    """
+    args = ["gerrit", "query", "--format=JSON", "--submit-records"]
     if start > 0:
-        clean = f"{clean} --start {int(start)}"
-    return clean
+        args.extend(["--start", str(int(start))])
+    args.extend(["--", query])
+    return args
 
 
 def _effective_history_limit(profile: dict[str, Any], defaults: dict[str, Any]) -> int | None:

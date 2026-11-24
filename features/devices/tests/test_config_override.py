@@ -62,6 +62,10 @@ class TestValidate(unittest.TestCase):
             validate_override("dimen", "16")          # missing unit
         with self.assertRaises(ValueError):
             validate_override("dimen", "16em")        # bad unit
+        self.assertEqual(validate_override("dimen", "10 dp"), "10dp")
+        for bad in ("infdp", "nandp", "1_0px", "10e2dp"):
+            with self.assertRaises(ValueError):
+                validate_override("dimen", bad)
 
     def test_fraction(self):
         self.assertEqual(validate_override("fraction", "50%"), "50%")
@@ -241,6 +245,14 @@ class TestStore(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.upsert("d", OverrideEntry("config/foo", "bool", "true"))
 
+    def test_upsert_rejects_non_framework_package(self):
+        with self.assertRaises(ValueError):
+            self.store.upsert(
+                "d",
+                OverrideEntry("config_foo", "bool", "true", target_package="com.android.settings"),
+            )
+        self.assertEqual(self.store.list_entries("d"), [])
+
     def test_concurrent_upserts_no_lost_update(self):
         """Two concurrent writers must both survive (flock serialization)."""
         import threading
@@ -344,6 +356,40 @@ class TestProbeStatus(unittest.TestCase):
         self.assertTrue(status.overlay_installed)
         self.assertFalse(any(" root" in cmd or cmd.strip().endswith("root") for cmd in seen_cmds))
         self.assertFalse(any("remount" in cmd for cmd in seen_cmds))
+
+    def test_offline_stderr_is_not_a_build_type(self):
+        with patch.object(co, "run_local_shell_command") as run:
+            run.return_value = CommandResult(
+                stdout="", stderr="error: device offline\n", code=1,
+            )
+            status = co.probe_status("offline")
+        self.assertFalse(status.reachable)
+        self.assertIsNone(status.build_type)
+
+    def test_getprop_ignores_daemon_banner_on_stderr(self):
+        def matcher(cmd, timeout=15):
+            if "ro.build.type" in cmd:
+                return CommandResult(
+                    stdout="userdebug\n",
+                    stderr="* daemon not running; starting now at tcp:5037\n",
+                    code=0,
+                )
+            if "veritymode" in cmd:
+                return CommandResult(stdout="disabled\n", stderr="", code=0)
+            return CommandResult(stdout="", stderr="", code=0)
+
+        with patch.object(co, "run_local_shell_command", side_effect=matcher):
+            status = co.probe_status("dev")
+        self.assertEqual(status.build_type, "userdebug")
+        self.assertTrue(status.is_userdebug)
+        self.assertTrue(status.verity_disabled)
+
+    def test_adb_path_with_spaces_is_quoted(self):
+        with patch.object(co, "_adb_path", return_value="/opt/android sdk/adb"), \
+                patch.object(co, "run_local_shell_command") as run:
+            run.return_value = CommandResult(stdout="", stderr="", code=1)
+            co.probe_status("dev")
+        self.assertIn("'/opt/android sdk/adb'", run.call_args.args[0])
 
 
 OVERLAY_APK = co.OVERLAY_APK_NAME

@@ -413,7 +413,8 @@ function startCreateInternal(issueId) { pendingInternalSource = {type:'issue', i
 function startCreateInternalCase(caseId) { pendingInternalSource = {type:'case', id: caseId}; showModal('internalCreateModal'); }
 
 async function confirmInternalCreate() {
-  if (!pendingInternalSource) return;
+  if (!pendingInternalSource || confirmInternalCreate._busy) return;
+  confirmInternalCreate._busy = true;
   const payload = {
     project_id: document.getElementById('internalProjectId').value,
     tracker_id: parseInt(document.getElementById('internalTrackerId').value)||1,
@@ -421,14 +422,16 @@ async function confirmInternalCreate() {
     assigned_to_id: document.getElementById('internalAssignedId').value || null,
     confirmed: true,
   };
-  const src = pendingInternalSource; pendingInternalSource = null;
+  const src = pendingInternalSource;
   try {
     const url = src.type==='case' ? `/api/redmine-agent/mature-cases/${src.id}/create-internal` : `/api/redmine-agent/issues/${src.id}/create-internal`;
     const data = await api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+    pendingInternalSource = null;
     hideModal('internalCreateModal');
     if (data.success) notifyUser('已创建', '内部工单 #'+data.internal_issue_id);
     else notifyUser('创建未完成', data.error||'请检查 Redmine 凭据/配置', 'warning');
   } catch(e){ notifyUser('创建失败', e.message, 'error'); }
+  finally { confirmInternalCreate._busy = false; }
 }
 
 // ---- Knowledge modal helpers ----

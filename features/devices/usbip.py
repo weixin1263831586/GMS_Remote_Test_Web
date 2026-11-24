@@ -125,6 +125,19 @@ __all__ = [
 ]
 
 
+def _recorded_online_serial(
+    online: set[str], sources: dict[str, dict[str, Any]], host: str, busids: list[str],
+) -> str:
+    if len(busids) != 1:
+        return ""
+    matches = [
+        serial for serial in online
+        if (route := sources.get(serial))
+        and route.get("attach_host") == host and route.get("busid") == busids[0]
+    ]
+    return matches[0] if len(matches) == 1 else ""
+
+
 def detach_ubuntu_usbip_ports(
     ssh,
     remote_host: str | None = '127.0.0.1',
@@ -520,6 +533,8 @@ class USBIPManager:
                         self.device_sources[device_id] = {
                             'source': device_host,
                             'source_os': self._source_os_public(source_os),
+                            'attach_host': usbip_attach_host,
+                            'busid': attached[0] if len(attached) == len(device_list) == 1 else '',
                             'timestamp': time.time()
                         }
 
@@ -690,9 +705,15 @@ class USBIPManager:
             expected_busids = set(busids)
             stable_busids: set[str] = set()
             retryable_busids: set[str] = set()
+            # 只有「端口已稳定、但本轮 attach 命令失败」（重复请求得到
+            # already attached）才允许回退到已记录的序列号。命令成功的
+            # 新接入必须等 devices_after - devices_before，不能把另一台
+            # 仍在线的旧 USB/IP 设备当成这次的结果。
+            attach_failed_but_stable = False
             for stabilization_attempt in range(
                 1, USBIP_ATTACH_STABILIZATION_ATTEMPTS + 1,
             ):
+                attempt_attach_failed = False
                 for busid in busids:
                     if busid in stable_busids:
                         continue
@@ -708,6 +729,7 @@ class USBIPManager:
                         ssh, cmd, timeout=15,
                     )
                     if not attach_result.ok:
+                        attempt_attach_failed = True
                         logger.warning(
                             "Attach %s failed (code=%s): %s",
                             busid,
@@ -767,6 +789,7 @@ class USBIPManager:
                 stable_busids = first_snapshot & second_snapshot
                 missing = expected_busids - stable_busids
                 if not missing:
+                    attach_failed_but_stable = attempt_attach_failed
                     break
                 if (
                     stabilization_attempt
@@ -839,25 +862,17 @@ class USBIPManager:
                     logger.info(f"USB/IP fastboot devices visible: {new_fastboot_devices}")
                     return attached, []
 
-                for device_id in devices_after:
-                    if device_id in self.device_sources:
-                        logger.info(f"Found existing USB/IP device still online: {device_id}")
-                        return attached, [device_id]
+                if attach_failed_but_stable:
+                    recorded = _recorded_online_serial(
+                        devices_after, self.device_sources, device_ip, attached,
+                    )
+                    if recorded:
+                        logger.info("Found existing USB/IP device still online: %s", recorded)
+                        return attached, [recorded]
 
                 time.sleep(1)
 
-            new_devices = list(devices_after - devices_before)
-            logger.info(f"New devices via USB/IP: {new_devices}")
-
-            # 没有新设备时返回仍在线的已记录 USB/IP 设备。
-            if not new_devices:
-                for device_id in devices_after:
-                    if device_id in self.device_sources:
-                        new_devices = [device_id]
-                        logger.info(f"Found existing USB/IP device still online: {device_id}")
-                        break
-
-            return attached, new_devices
+            return attached, []
 
         except Exception as e:
             logger.error(f"Error attaching devices: {e}")

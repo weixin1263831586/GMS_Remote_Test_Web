@@ -6,16 +6,17 @@ import asyncio
 import contextlib
 import json
 import logging
-import math
 import os
 import re
 import shutil
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from fastapi.responses import JSONResponse
 
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 from foundation.responses import error_response
 from foundation.uploads import (
     merge_files_to_path,
@@ -42,13 +43,12 @@ def cleanup_expired_upload_sessions(root: str, client_id: str, max_age: int) -> 
     if not os.path.isdir(client_dir):
         return
     cutoff = time.time() - max_age
-    with contextlib.suppress(OSError):
-        for entry in os.scandir(client_dir):
+    with contextlib.suppress(OSError), os.scandir(client_dir) as entries:
+        for entry in entries:
             if not entry.is_dir(follow_symlinks=False):
                 continue
             try:
-                if entry.stat(follow_symlinks=False).st_mtime < cutoff:
-                    shutil.rmtree(entry.path)
+                _remove_expired_session(entry, cutoff)
             except OSError:
                 logger.debug("Failed to clean expired firmware upload %s", entry.path)
 
@@ -70,6 +70,21 @@ def _burn_lock_holds_live_process(session_dir: str) -> bool:
     if holder is None:
         return False
     return _pid_alive(holder)
+
+
+def _remove_expired_session(entry: os.DirEntry, cutoff: float) -> bool:
+    if entry.stat(follow_symlinks=False).st_mtime >= cutoff:
+        return False
+    lock = try_acquire_sync_lock(Path(entry.path) / ".merge.lock")
+    if lock is None:
+        return False
+    try:
+        if _burn_lock_holds_live_process(entry.path):
+            return False
+        shutil.rmtree(entry.path)
+        return True
+    finally:
+        release_sync_lock(lock)
 
 
 def cleanup_orphan_upload_sessions(root: str, max_age: int) -> int:
@@ -101,12 +116,7 @@ def cleanup_orphan_upload_sessions(root: str, max_age: int) -> int:
             try:
                 if not entry.is_dir(follow_symlinks=False):
                     continue
-                if entry.stat(follow_symlinks=False).st_mtime >= cutoff:
-                    continue
-                if _burn_lock_holds_live_process(entry.path):
-                    continue
-                shutil.rmtree(entry.path)
-                removed += 1
+                removed += _remove_expired_session(entry, cutoff)
             except OSError:
                 logger.debug("Failed to clean orphan firmware upload %s", entry.path)
     return removed
@@ -169,6 +179,7 @@ def _validate_metadata(
     file_name: str,
     total_chunks: int,
     file_size: int,
+    chunk_size: int,
     content_fingerprint: str = "",
 ) -> str | None:
     if total_chunks <= 0 or total_chunks > MAX_FIRMWARE_CHUNKS:
@@ -179,14 +190,18 @@ def _validate_metadata(
         "file_name": os.path.basename(file_name),
         "total_chunks": total_chunks,
         "file_size": file_size,
+        "chunk_size": chunk_size,
     }
     if content_fingerprint:
         metadata["content_fingerprint"] = content_fingerprint
+    def matches(existing: dict | None) -> bool:
+        return existing is not None and {"chunk_size": chunk_size, **existing} == metadata
+
     path = _metadata_path(session_dir)
     try:
         existing = _read_metadata(session_dir) if os.path.exists(path) else None
         if existing is not None:
-            return None if existing == metadata else "Chunk metadata does not match the existing upload session"
+            return None if matches(existing) else "Chunk metadata does not match the existing upload session"
         if os.path.exists(path):
             return "Upload session metadata is invalid"
         temporary = f"{path}.{uuid.uuid4().hex}.tmp"
@@ -195,7 +210,7 @@ def _validate_metadata(
         try:
             os.link(temporary, path)
         except FileExistsError:
-            if _read_metadata(session_dir) != metadata:
+            if not matches(_read_metadata(session_dir)):
                 return "Chunk metadata does not match the existing upload session"
         finally:
             with contextlib.suppress(FileNotFoundError):
@@ -322,6 +337,18 @@ def release_burn_lock(lock_path: str | None) -> None:
             os.remove(lock_path)
 
 
+def _merging_response(upload_id: str, total_chunks: int) -> JSONResponse:
+    return JSONResponse(content={
+        "success": True,
+        "upload_complete": False,
+        "merging": True,
+        "chunks_uploaded": total_chunks,
+        "total_chunks": total_chunks,
+        "progress": 100,
+        "upload_id": upload_id,
+    })
+
+
 def _parse_chunk_shape(form) -> tuple[int, int, int, str | None]:
     try:
         total_chunks = int(form.get("total_chunks") or 0)
@@ -331,7 +358,7 @@ def _parse_chunk_shape(form) -> tuple[int, int, int, str | None]:
         return 0, 0, 0, "Invalid chunk metadata"
     if chunk_size <= 0 or chunk_size > MAX_FIRMWARE_CHUNK_BYTES:
         return total_chunks, file_size, chunk_size, "Invalid chunk_size"
-    if math.ceil(file_size / chunk_size) != total_chunks:
+    if (file_size + chunk_size - 1) // chunk_size != total_chunks:
         return total_chunks, file_size, chunk_size, "Chunk size does not match total_chunks"
     return total_chunks, file_size, chunk_size, None
 
@@ -375,6 +402,7 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
         file_name=file_name,
         total_chunks=total_chunks,
         file_size=file_size,
+        chunk_size=chunk_size,
         content_fingerprint=content_fingerprint,
     )
     if metadata_error:
@@ -386,8 +414,19 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
 
     if str(form.get("check_chunks") or "").strip().lower() in {"1", "true", "yes"}:
         paths = _chunk_paths(session_dir, total_chunks)
-        uploaded_chunks = {idx for idx, path in enumerate(paths) if os.path.isfile(path)}
-        uploaded_size = sum(os.path.getsize(paths[idx]) for idx in uploaded_chunks)
+        uploaded_chunks: set[int] = set()
+        uploaded_size = 0
+        for index, path in enumerate(paths):
+            try:
+                size = os.path.getsize(path)
+            except FileNotFoundError:
+                continue
+            if size == min(chunk_size, file_size - index * chunk_size):
+                uploaded_size += size
+                uploaded_chunks.add(index)
+        staged, _ = load_staged_upload(root, client_id, upload_id)
+        if staged:
+            return _staged_response(staged, total_chunks), None
         return JSONResponse(content={
             "success": True,
             "uploaded_chunks": sorted(uploaded_chunks),
@@ -412,82 +451,88 @@ async def handle_chunk_upload(form, client_id: str, root: str, global_state, max
     chunk_path = os.path.join(session_dir, f"chunk_{chunk_index:05d}")
     temporary = f"{chunk_path}.{uuid.uuid4().hex}.upload"
     expected_size = min(chunk_size, file_size - chunk_index * chunk_size)
+    merge_lock_path = Path(session_dir) / ".merge.lock"
+    chunk_paths = _chunk_paths(session_dir, total_chunks)
+    stage_only = str(form.get("stage_only") or "").strip().lower() in {"1", "true", "yes"}
+
+    def publish_chunk():
+        lock = try_acquire_sync_lock(merge_lock_path)
+        if lock is None:
+            if all(os.path.isfile(path) for path in chunk_paths):
+                return _merging_response(upload_id, total_chunks), None
+            return None
+        try:
+            # The image may have been published while this request uploaded a part.
+            staged, _ = load_staged_upload(root, client_id, upload_id)
+            if staged:
+                return _staged_response(staged, total_chunks), None
+
+            os.replace(temporary, chunk_path)
+            present = {idx for idx, path in enumerate(chunk_paths) if os.path.isfile(path)}
+            uploaded_size = sum(os.path.getsize(chunk_paths[idx]) for idx in present)
+            progress = round(len(present) * 100 / total_chunks, 2)
+            with global_state.firmware_upload_progress_lock:
+                global_state.firmware_upload_progress[client_id] = {
+                    "progress": progress,
+                    "filename": file_name,
+                    "uploaded_size": uploaded_size,
+                    "total_size": file_size,
+                    "timestamp": time.time(),
+                    "stage": "uploading_to_server",
+                    "upload_id": upload_id,
+                }
+            if len(present) < total_chunks:
+                _write_uploaded_chunks(session_dir, present)
+                return JSONResponse(content={
+                    "success": True,
+                    "upload_complete": False,
+                    "chunk_index": chunk_index,
+                    "chunks_uploaded": len(present),
+                    "total_chunks": total_chunks,
+                    "progress": progress,
+                    "upload_id": upload_id,
+                }), None
+
+            if any(
+                os.path.getsize(path) != min(chunk_size, file_size - index * chunk_size)
+                for index, path in enumerate(chunk_paths)
+            ):
+                return error_response("Firmware chunk size mismatch", 400), None
+            merged_path = _staged_path(session_dir, file_name)
+            merge_temp = f"{merged_path}.{uuid.uuid4().hex}.merge"
+            try:
+                merge_files_to_path(chunk_paths, merge_temp)
+                if os.path.getsize(merge_temp) != file_size:
+                    return error_response("Merged firmware size mismatch", 400), None
+                os.replace(merge_temp, merged_path)
+                for path in [*chunk_paths, os.path.join(session_dir, "uploaded_chunks.json")]:
+                    with contextlib.suppress(FileNotFoundError):
+                        os.remove(path)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.remove(merge_temp)
+            staged, staged_error = load_staged_upload(root, client_id, upload_id)
+            if not staged:
+                return error_response(staged_error or "Firmware staging failed", 500), None
+            if stage_only:
+                clear_upload_progress(global_state, client_id, upload_id)
+                return _staged_response(staged, total_chunks), None
+            return None, staged
+        finally:
+            release_sync_lock(lock)
+
     try:
-        written = await save_upload_to_path(
-            upload_file,
-            temporary,
-            expected_size,
-        )
+        try:
+            written = await save_upload_to_path(upload_file, temporary, expected_size)
+        except ValueError as exc:
+            return error_response(str(exc), 413), None
         if expected_size and written != expected_size:
             return error_response("Firmware chunk size mismatch", 400), None
-        os.replace(temporary, chunk_path)
-    except ValueError as exc:
-        return error_response(str(exc), 413), None
+        while True:
+            result = await asyncio.to_thread(publish_chunk)
+            if result is not None:
+                return result
+            await asyncio.sleep(0.05)
     finally:
         with contextlib.suppress(FileNotFoundError):
             os.remove(temporary)
-
-    chunk_paths = _chunk_paths(session_dir, total_chunks)
-    present = {idx: path for idx, path in enumerate(chunk_paths) if os.path.isfile(path)}
-    _write_uploaded_chunks(session_dir, set(present))
-    uploaded_size = sum(os.path.getsize(path) for path in present.values())
-    with global_state.firmware_upload_progress_lock:
-        global_state.firmware_upload_progress[client_id] = {
-            "progress": round((len(present) / total_chunks) * 100, 2),
-            "filename": file_name,
-            "uploaded_size": uploaded_size,
-            "total_size": file_size,
-            "timestamp": time.time(),
-            "stage": "uploading_to_server",
-            "upload_id": upload_id,
-        }
-    if len(present) < total_chunks:
-        return JSONResponse(content={
-            "success": True,
-            "upload_complete": False,
-            "chunk_index": chunk_index,
-            "chunks_uploaded": len(present),
-            "total_chunks": total_chunks,
-            "progress": round((len(present) / total_chunks) * 100, 2),
-            "upload_id": upload_id,
-        }), None
-
-    merge_lock_path = os.path.join(session_dir, ".merge.lock")
-    with contextlib.suppress(OSError):
-        if time.time() - os.path.getmtime(merge_lock_path) > MERGE_LOCK_STALE_SECONDS:
-            os.remove(merge_lock_path)
-    try:
-        descriptor = os.open(merge_lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.close(descriptor)
-    except FileExistsError:
-        return JSONResponse(content={
-            "success": True, "upload_complete": False, "merging": True,
-            "chunks_uploaded": total_chunks, "total_chunks": total_chunks,
-            "progress": 100, "upload_id": upload_id,
-        }), None
-
-    merged_path = _staged_path(session_dir, file_name)
-    merge_temp = f"{merged_path}.{threading.get_ident()}.merge"
-    try:
-        await asyncio.to_thread(merge_files_to_path, chunk_paths, merge_temp)
-        if os.path.getsize(merge_temp) != file_size:
-            return error_response("Merged firmware size mismatch", 400), None
-        os.replace(merge_temp, merged_path)
-        for path in chunk_paths:
-            with contextlib.suppress(FileNotFoundError):
-                os.remove(path)
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(os.path.join(session_dir, "uploaded_chunks.json"))
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(merge_temp)
-        with contextlib.suppress(FileNotFoundError):
-            os.remove(merge_lock_path)
-
-    staged, staged_error = load_staged_upload(root, client_id, upload_id)
-    if not staged:
-        return error_response(staged_error or "Firmware staging failed", 500), None
-    if str(form.get("stage_only") or "").strip().lower() in {"1", "true", "yes"}:
-        clear_upload_progress(global_state, client_id, upload_id)
-        return _staged_response(staged, total_chunks), None
-    return None, staged

@@ -113,11 +113,7 @@ jobs:
       - name: Ruff lint
         run: ruff check .
       - name: Vulture dead-code scan
-        # 僵尸代码检测: min-confidence 90 只报 100% 置信度的
-        # 未用局部变量; FastAPI/mock 误报在 tools/scripts/maintenance/vulture_allowlist.py。
-        run: |
-          python -m vulture features foundation worker_agent tools \
-            tools/scripts/maintenance/vulture_allowlist.py --min-confidence 90
+        run: python -m vulture bootstrap features foundation worker_agent workflows tools/scripts --min-confidence 90
 
   # Semgrep 静态安全扫描（SAST 门禁）：
   # - ERROR 级发现直接阻断（shell 注入、taint 传播等高危模式）；审计过的

@@ -249,6 +249,17 @@ class SdkApiTests(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 502)
 
+    def test_exact_search_checks_scope_and_rejects_a_provider_without_repo_scoping(self):
+        params = {
+            "source": "android-test", "revision": "main", "query": "x",
+            "path": "frameworks/base/Test.java", "repo_scope": "frameworks/base",
+        }
+        url = "/api/sdk/search/exact"
+        self.assertEqual(self.client.get(url, params=params, headers={"x-test-scopes": "devices.read"}).status_code, 403)
+        response = self.client.get(url, params=params)
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(response.json()["code"], "INVALID_SEMANTICS")
+
 
 
 

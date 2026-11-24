@@ -77,6 +77,34 @@ class ClusterJobLifecycleTests(unittest.TestCase):
             finished["leases"][0]["generation"] + 1,
         )
 
+    def test_failed_stop_keeps_lease_when_process_survives_sigkill(self):
+        self.register()
+        self.repo.heartbeat("worker-246", {
+            "agent_version": "1", "running_jobs": [], "suites": [],
+            "devices": [{"serial": "ABC", "state": "available"}],
+        })
+        job = self.repo.create_job_with_leases({
+            "worker_id": "worker-246", "owner_id": "tester",
+            "devices": ["worker-246:ABC"], "suite_key": "CTS:17_r1",
+        })
+        self.repo.transition_job(
+            job["id"], "stopping", source="api", message="cancel",
+            worker_id="worker-246",
+        )
+        self.repo.sync_job_from_command({
+            "job_id": job["id"],
+            "attempt_id": job["current_attempt_id"],
+            "worker_id": "worker-246",
+            "command_type": "stop_test",
+            "status": "failed",
+            "error": "Worker could not confirm the process stopped",
+            "result": {},
+        })
+        kept = self.repo.get_job(job["id"])
+        self.assertEqual(kept["status"], "stopping")
+        self.assertEqual(kept["leases"][0]["status"], "active")
+        self.assertEqual(self.repo.list_devices()[0]["state"], "allocated")
+
     def test_automation_reservation_survives_heartbeat_and_converts_to_job_lease(self):
         self.register()
         heartbeat = {

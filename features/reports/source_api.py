@@ -2,12 +2,12 @@ import asyncio
 
 from features.auth import require_authenticated_user
 from foundation.outbound import (
-    PinnedOutboundResolver,
     UnsafeOutboundURL,
     resolve_outbound_target,
     same_http_origin,
     url_hostname,
 )
+from foundation.outbound_aiohttp import PinnedOutboundResolver
 from foundation.redaction import redact_sensitive_text
 
 from .analysis_agent import ReportScanIncompleteError

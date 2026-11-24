@@ -91,6 +91,36 @@ def test_local_preflight_explains_unparseable_update_object():
     assert "afptool/rkImageMaker" in result.message
 
 
+def test_remote_preflight_timeout_is_not_an_invalid_image():
+    class TimeoutSsh:
+        def execute_command(self, _ssh, _command, timeout=None):
+            return CommandResult(
+                stdout="", stderr="secret slow probe", code=-1, timed_out=True,
+            )
+
+    result = validate_remote_update_image(
+        TimeoutSsh(), object(), "/tools/upgrade_tool", "/tmp/update.img",
+    )
+
+    assert result.valid is False
+    assert result.failure == "timeout"
+    assert "secret" not in result.message
+    assert "设备尚未重启" in result.message
+
+
+def test_remote_preflight_transport_failure_is_unavailable():
+    class BrokenSsh:
+        def execute_command(self, _ssh, _command, timeout=None):
+            return CommandResult(stdout="", stderr="connection reset", code=-1)
+
+    result = validate_remote_update_image(
+        BrokenSsh(), object(), "upgrade_tool", "update.img",
+    )
+
+    assert result.failure == "unavailable"
+    assert "connection reset" not in result.message
+
+
 def test_local_preflight_timeout_is_actionable():
     with patch(
         "subprocess.run",
@@ -99,5 +129,6 @@ def test_local_preflight_timeout_is_actionable():
         result = validate_local_update_image("upgrade_tool", "update.img")
 
     assert result.valid is False
+    assert result.failure == "timeout"
     assert "预检超时" in result.message
     assert "设备尚未重启" in result.message

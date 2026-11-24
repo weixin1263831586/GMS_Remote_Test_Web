@@ -160,15 +160,6 @@ class ReportFileHandler:
             raise RuntimeError('7z command not found, cannot extract RAR archive')
         _enforce_post_extraction_safety(self.temp_dir)
 
-    def find_xml_file(self) -> str | None:
-        """查找test_result.xml文件"""
-        for root, _dirs, files in os.walk(self.temp_dir):
-            for file in files:
-                if file == 'test_result.xml':
-                    return os.path.join(root, file)
-        return None
-
-
 class ReportAnalyzer:
     """报告分析器主类 - 对外统一接口"""
 

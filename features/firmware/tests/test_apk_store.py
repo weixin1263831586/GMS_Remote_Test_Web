@@ -7,7 +7,7 @@ import threading
 import time
 import uuid
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from features.firmware import apk, runtime
 from features.firmware.apk_store import ORPHAN_UPLOAD_COOLDOWN_SECONDS, ApkTaskStore
@@ -372,3 +372,26 @@ def test_jadx_failure_without_sources_marks_error(tmp_path, monkeypatch):
     assert task["partial"] is False
     assert task["jadx_exit_code"] == 1
     assert "failed to load input" in task["error"]
+
+
+def test_stop_jadx_kills_a_process_that_ignores_terminate():
+    process = MagicMock()
+    process.returncode = None
+
+    async def wait():
+        if not process.kill.called:
+            raise AssertionError("terminate wait must be bounded")
+        process.returncode = -9
+        return -9
+
+    async def wait_for(awaitable, timeout):
+        awaitable.close()
+        raise asyncio.TimeoutError
+
+    process.wait = wait
+    with patch.object(apk.asyncio, "wait_for", wait_for):
+        asyncio.run(apk._stop_jadx_process(process))
+
+    process.terminate.assert_called_once()
+    process.kill.assert_called_once()
+    assert process.returncode == -9

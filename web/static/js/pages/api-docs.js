@@ -137,9 +137,13 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
     modal.className = 'modal';
     modal.style.cssText = 'z-index: 10001;';
 
-    // 从隐藏的原始数据元素中获取完整的错误信息（保留换行和格式）
-    const failureReasonElement = document.getElementById(`failure-reason-raw-${failureIndex}`);
-    const failureReason = failureReasonElement ? failureReasonElement.textContent.trim() : '';
+    // 失败原因在报告数据里。页面没有 failure-reason-raw-* 节点，
+    // 从 currentReportAnalysisData 取，和失败详情同一套字段。
+    const failures = window.currentReportAnalysisData?.failures;
+    const failure = Array.isArray(failures) ? failures[failureIndex] : null;
+    const failureReason = failure
+        ? String(failure.raw_log || failure.reason || failure.stack_trace || '').trim()
+        : '';
 
     const defaultReply = '**测试模块**: ' + moduleName + '\n\n' +
         '**测试用例**: ' + testCaseName + '\n\n' +
@@ -535,10 +539,10 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
 
             const apisWithCategory = filteredApis.map(api => ({
                 ...api,
-                category: api.category || getApiCategory(api.path || '')
+                category: api.category || 'other'
             }));
 
-            const sortedApis = sortApisByCategory(apisWithCategory);
+            const sortedApis = apisWithCategory.sort((a, b) => a.path.localeCompare(b.path));
 
             apiDocsCache = sortedApis;
             allApiDocs = sortedApis;
@@ -610,31 +614,38 @@ function formatJsonResponse(response) {
     }
 }
 
-function normalizeApiPath(apiPath) {
-    const matched = PATH_PATTERNS.find(p => p.pattern.test(apiPath));
-    return matched ? matched.template : apiPath;
+function getCategoryName(category) {
+    const names = {
+        'test': '🧪 测试管理',
+        'config': '⚙️ 配置管理',
+        'device': '📱 设备管理',
+        'users': '👥 用户管理',
+        'client': '👤 用户管理',
+        'report': '📊 报告管理',
+        'vpn': '🔐 VPN管理',
+        'ssh': '🔑 SSH管理',
+        'desktop': '🖥️ 主机桌面',
+        'terminal': '🐧 主机终端',
+        'usbip': '📡 USB/IP',
+        'apk': '📦 APK分析',
+        'burn': '🔥 固件烧写',
+        'file': '📁 文件管理',
+        'system': '💚 系统管理',
+        'other': '📋 其他'
+    };
+    return names[category] || '📋 其他';
 }
 
-/**
- * OpenAPI fields own the detail view; static metadata (API_DETAILS_MAP) fills gaps such as usage.
- */
-function getApiDetails(api, method = 'GET') {
-    if (typeof api === 'string') {
-        api = allApiDocs.find(item => item.path === api && item.method === method)
-            || {path: api, method};
-    }
-    const supplemental = API_DETAILS_MAP[normalizeApiPath(api.path || '')] || {};
+
+function getApiDetails(api) {
     const response = Object.entries(api.responses || {}).find(([status]) => /^2\d\d$/.test(status))?.[1];
     const media = Object.values(response?.content || {})[0];
     return {
-        ...DEFAULT_API_DETAILS,
-        ...supplemental,
         ...api,
-        title: api.title || api.description || supplemental.title || api.path,
-        description: api.description || supplemental.description || '',
-        params: api.params || supplemental.params || [],
-        response: media ? JSON.stringify(media.example, null, 2) : (supplemental.response || response?.description || ''),
-        usage: supplemental.usage || ''
+        title: api.title || api.description || api.path,
+        description: api.description || '',
+        params: api.params || [],
+        response: media?.example !== undefined ? JSON.stringify(media.example, null, 2) : (response?.description || '')
     };
 }
 

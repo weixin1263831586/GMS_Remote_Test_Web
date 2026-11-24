@@ -4,9 +4,9 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-        <link rel="stylesheet" href="/static/css/common.css?v=20261120-all-shell-header-edge-1px" data-shell-styles>
+        <link rel="stylesheet" href="/static/css/common.css?v=20261123-sidebar-labels" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261118-notice-focus" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261123-toast-visibility" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-layout.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-page.css?v=20261120-type-size-dedup-v1" data-shell-styles>
@@ -77,8 +77,6 @@
     <script src="/static/js/shell/aoa-live-screen.js?v=20261106-auto-reconnect" defer></script>
     <script src="/static/js/shell/aoa-screen-grid.js?v=20261106-calibrate-mark" defer></script>
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
-    <!-- 加载API常量定义 - 页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/api-constants.js?v=20260727-skill-install-action" defer></script>
     <!-- 加载共享工具函数 - 页面脚本依赖，须先于其执行 -->
     <script src="/static/js/utils.js?v=20261113-shared-clipboard" defer></script>
     <!-- 加载全局状态 - 通知中心与页面脚本依赖，须先于其执行 -->
@@ -90,7 +88,7 @@
     <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
     <script src="/static/js/shell/logging.js?v=20261109-oplog-disable-guard" defer></script>
     <script src="/static/js/shell/status-polling.js?v=20260826-shell-split" defer></script>
-    <script src="/static/js/shell/ui-feedback.js?v=20260826-shell-split" defer></script>
+    <script src="/static/js/shell/ui-feedback.js?v=20261123-gsi-controls" defer></script>
     <!-- 加载通用弹框管理 - 页面脚本依赖，须先于其执行 -->
     <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs" defer></script>
     <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path" defer></script>
@@ -124,7 +122,7 @@
     <script src="/static/js/pages/test-suite-browser-files.js?v=20261119-analysis-status" defer></script>
     <script src="/static/js/pages/test-suite-browser-devices.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/pages/firmware-aoa-preflight.js?v=20261105-preflight-v1" defer></script>
-    <script src="/static/js/pages/firmware-burn.js?v=20261123-remove-file-meta" defer></script>
+    <script src="/static/js/pages/firmware-burn.js?v=20261123-gsi-controls" defer></script>
     <script src="/static/js/pages/firmware-burn-share.js?v=20261117-table-scroll" defer></script>
     <script src="/static/js/pages/firmware-burn-gsi.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-vnc.js?v=20260930-pages-split" defer></script>
@@ -143,12 +141,12 @@
     <script src="/static/js/pages/conversational-agent.js?v=20261112-agent-sessions" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261119-users-single-row" defer></script>
     <script src="/static/js/pages/sdk-config.js?v=20261119-sdk-reload-write-outcomes" defer></script>
-    <script src="/static/js/pages/api-docs.js?v=20261119-report-cancel" defer></script>
+    <script src="/static/js/pages/api-docs.js?v=20261123-openapi-catalog" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20261119-disk-inventory" defer></script>
     <script src="/static/js/pages/audit-disk.js?v=20261119-disk-interactions" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20261112-primary-gradient" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20261123-openapi-catalog" defer crossorigin="anonymous"></script>
 
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
 <script src="/static/js/shell/shell-early-boot.js" fetchpriority="high"></script>
@@ -169,7 +167,12 @@
         .sidebar-settings-tabs { display: flex; gap: 6px; padding: 4px; border-radius: 8px; background: var(--darker-bg); flex-shrink: 0; }
         .sidebar-settings-tab { flex: 1; padding: 9px 14px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-secondary);  cursor: pointer; }
         .sidebar-settings-tab:hover { color: var(--text-primary); border-color: var(--border-color); }
-        .sidebar-settings-tab.active { color: white; background: var(--primary-gradient); }
+        #sidebar-visibility-modal .sidebar-settings-tab[aria-selected="true"] {
+            background: var(--primary-strong);
+            color: var(--text-on-accent);
+            border-color: var(--primary-light);
+            box-shadow: inset 0 -2px var(--primary-light);
+        }
         .sidebar-settings-panel { min-height: 0; flex: 1; }
         .sidebar-settings-panel[hidden] { display: none !important; }
         #sidebar-settings-panel-visibility { display: flex; flex-direction: column; min-height: 0; }
@@ -313,7 +316,7 @@
         .project-guide-example p { margin: 0; color: var(--text-secondary);  line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
         .project-guide-example .project-guide-image-button { order: 2; }        .project-guide-image-button { position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--border-color); border-radius: 6px; background: #050508; cursor: zoom-in; }
         .project-guide-image-button:hover { border-color: var(--primary-color); }
-        .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; object-position: top center; }
+        .project-guide-image-button img { display: block; width: 100%; aspect-ratio: 1912 / 1058; object-fit: contain; object-position: top center; }
         .project-guide-zoom-hint { position: absolute; right: 7px; bottom: 7px; padding: 4px 7px; border-radius: 4px; color: #fff; background: rgba(0,0,0,0.78);  pointer-events: none; }
         #guide-image-modal { z-index: 10050; }
         #guide-image-modal .modal-header { gap: 12px; }

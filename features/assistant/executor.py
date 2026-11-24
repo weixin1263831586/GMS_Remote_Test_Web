@@ -18,6 +18,7 @@ from features.assistant.tools import AgentTool, registry
 from features.auth import require_authenticated_user
 from features.devices import device_lock_manager, device_manager, get_or_create_user_state
 from features.redmine import (
+    bounded_stale_days,
     display_names_from_mapping,
     find_user_mapping,
     name_keys,
@@ -39,6 +40,7 @@ from .route_invocation import (
 
 
 logger = logging.getLogger(__name__)
+
 
 _CATEGORY_LABELS = {
     "device": "设备",
@@ -263,7 +265,10 @@ class ActionExecutor:
 
     async def _query_devices(self, session, request, params) -> ToolResult:
         query = str(params.get("query") or "").strip().lower()
-        details = await self._load_device_summaries(request)
+        loaded = await self._load_device_summaries(request)
+        if isinstance(loaded, ToolResult):
+            return loaded
+        details = loaded
         for device in details:
             # Missing/unknown transport state is not evidence of a usable DUT.
             # Do not turn a stale inventory row into "available" by assumption.
@@ -318,8 +323,12 @@ class ActionExecutor:
             ],
         )
 
-    async def _load_device_summaries(self, request: Any) -> list[dict[str, Any]]:
-        """Load the same owner-sanitized device view exposed by the HTTP API."""
+    async def _load_device_summaries(self, request: Any) -> list[dict[str, Any]] | ToolResult:
+        """Load the same owner-sanitized device view exposed by the HTTP API.
+
+        A router denial is returned as that ToolResult. Raising would be
+        rewritten by guarded_tool_call into a generic internal error.
+        """
 
         result, payload = await self._fetch_router_json(
             "features.devices.management_api",
@@ -328,7 +337,7 @@ class ActionExecutor:
             request=request,
         )
         if result is not None:
-            raise PermissionError(result.error or "Unable to load devices")
+            return result
         # A management response can intentionally expose cached devices after
         # an SSH / ADB outage. Carry the response-level stale flag onto each
         # row before calculating availability in _query_devices.
@@ -375,15 +384,21 @@ class ActionExecutor:
         summary = payload.get("summary") or {}
         success_count = summary.get("success", 0)
         total = summary.get("total", len(devices))
-        text = f"WiFi 连接完成：成功 {success_count}/{total}，设备：{', '.join(devices)}"
+        ok = payload.get("success") is True and success_count == total and total > 0
+        detail = payload.get("error") or payload.get("message")
+        if payload.get("success") is True:
+            outcome = "完成" if ok else "部分成功" if success_count else "失败"
+            text = f"WiFi 连接{outcome}：成功 {success_count}/{total}，设备：{', '.join(devices)}"
+        else:
+            text = f"WiFi 连接失败：{detail}" if detail else "WiFi 连接失败"
         return ToolResult(
-            success=payload.get("success", True),
+            success=ok,
             tool_name="devices_wifi",
             data=payload,
             formatted_text=text,
             page="devices",
             entities={"devices": devices},
-            error=payload.get("error", ""),
+            error="" if ok else str(payload.get("error") or text),
         )
 
     async def _query_devices_management(self, session, request, params) -> ToolResult:
@@ -394,7 +409,11 @@ class ActionExecutor:
     async def _query_locked_devices(self, session, request, params) -> ToolResult:
         # Reuse the management API's owner-aware redaction instead of exposing
         # raw lock records (which contain other users' lease capabilities).
-        devices = await self._load_device_summaries(request)
+        loaded = await self._load_device_summaries(request)
+        if isinstance(loaded, ToolResult):
+            loaded.tool_name = "devices_user_locked"
+            return loaded
+        devices = loaded
         locks = {
             str(device["device_id"]): {
                 "locked_by": device.get("locked_by") or "occupied",
@@ -568,12 +587,13 @@ class ActionExecutor:
         response = await health_check()
         payload = _json_body(response)
         modules = payload.get("modules", {})
-        text = (
-            f"系统状态：{payload.get('status', 'unknown')}\n"
-            f"服务：{payload.get('service', '-')}\n"
-            f"WebSocket 连接：{payload.get('websocket_connections', 0)}\n"
-            f"模块：{', '.join(f'{k}={v}' for k, v in modules.items())}"
-        )
+        lines = [
+            f"系统状态：{payload.get('status', 'unknown')}",
+            f"服务：{payload.get('service', '-')}",
+        ]
+        if modules:
+            lines.append("模块：" + ", ".join(f"{k}={v}" for k, v in modules.items()))
+        text = "\n".join(lines)
         return ToolResult(
             success=True, tool_name="system_health",
             data=payload, formatted_text=text, kind="status", page="security-audit",
@@ -925,9 +945,9 @@ class ActionExecutor:
         if isinstance(raw_names, str):
             raw_names = [raw_names]
         names = [str(name).strip() for name in raw_names if str(name).strip()]
-        stale_days = int(
-            params.get("stale_days")
-            or owner_config.get_redmine_stats_config()["stale_days"]
+        stale_days = bounded_stale_days(
+            params.get("stale_days"),
+            owner_config.get_redmine_stats_config().get("stale_days"),
         )
 
         if not names:

@@ -15,6 +15,7 @@ import shlex
 from pathlib import Path
 from urllib.parse import urlsplit
 
+
 KEYS = (
     "GMS_SOAK_BASE_URL",
     "GMS_SOAK_USERNAME",

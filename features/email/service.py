@@ -79,7 +79,7 @@ def send_email(
       ``ops_event`` + 事件 id），从台账可跳回触发业务。
 
     失败也记录：mode 为 ``disabled``（全局关闭）、``unconfigured``（缺
-    SMTP 配置）、``invalid``（收件人/主题非法）、``smtp``（发送错误）。
+    SMTP 配置）、``invalid``（收件人/发件人/主题非法）、``smtp``（发送错误）。
     成功时附带 ``to/cc/recipients/from_addr`` 与附件缺失/拦截清单。
     """
     result = _send_pipeline(
@@ -172,10 +172,10 @@ def _send_pipeline(
     if final_to_list is None or final_cc_list is None:
         return {"sent": False, "mode": "invalid", "error": "收件人邮箱地址无效"}
     if not final_to_list:
-        return {"sent": False, "mode": "unconfigured", "error": "收件人列表为空"}
+        return {"sent": False, "mode": "invalid", "error": "收件人列表为空"}
     safe_from = normalize_email_addresses(from_addr)
     if not safe_from or len(safe_from) != 1:
-        return {"sent": False, "mode": "unconfigured", "error": "发件人邮箱地址无效"}
+        return {"sent": False, "mode": "invalid", "error": "发件人邮箱地址无效"}
     from_addr = safe_from[0]
     subject = safe_header_text(subject)
     if not subject:

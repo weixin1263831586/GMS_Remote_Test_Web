@@ -5,14 +5,15 @@ endpoints because other GET routes may synchronize or export data.
 """
 
 import argparse
-from datetime import datetime, timezone
 import json
 import os
-from pathlib import Path
 import subprocess
 import time
+from datetime import datetime, timezone
+from pathlib import Path
 
 import requests
+
 
 # Each record: domain, stable GET path, must-pass.
 PROBES = [

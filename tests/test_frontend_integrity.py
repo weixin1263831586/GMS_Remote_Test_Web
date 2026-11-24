@@ -261,7 +261,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("const clusterModeReady = initializeClusterMode()", navigation)
         self.assertIn("await Promise.all([clusterModeReady, configReady])", navigation)
         self.assertRegex(shell, r'/static/js/pages/test-reports\.js\?v=[A-Za-z0-9_-]+')
-        self.assertIn("navigation.js?v=20261112-primary-gradient", shell)
+        self.assertRegex(shell, r'/static/js/navigation\.js\?v=[A-Za-z0-9_-]+')
         self.assertIn("testTypeLower === 'apts'", navigation)
         self.assertIn("APTS使用GTS测试套件", navigation)
 
@@ -635,7 +635,6 @@ class FrontendIntegrityTests(unittest.TestCase):
     def test_skill_toolbar_prefers_installer_and_labels_zip_as_offline_only(self):
         shell = read_shell_bundle()
         navigation = read_all_frontend_js()
-        api_constants = read_text("web/static/js/api-constants.js")
 
         self.assertIn('data-click="copySkillInstallCommand"', shell)
         self.assertIn("安装/更新命令", shell)
@@ -650,19 +649,11 @@ class FrontendIntegrityTests(unittest.TestCase):
             '"${window.location.origin}/api/agent/install.sh" | bash -s -- --paircode-prompt)',
             navigation,
         )
-        self.assertIn(
-            transport + '"https://server:5001/api/agent/install.sh" | bash -s -- --paircode-prompt)',
-            api_constants,
-        )
         self.assertIn(transport + '"{{ request.url.scheme }}://', shell)
         self.assertIn('bash -s -- --paircode-prompt', shell)
         self.assertIn('安装器随后固定 CA 并严格校验下载', shell)
         self.assertIn("path === '/api/agent/install.sh'", navigation)
         self.assertIn("path === '/api/system/skills'", navigation)
-        self.assertIn("全部独立gms-rt-*命令", api_constants)
-        self.assertIn("仅已提权管理员可读取系统配置", api_constants)
-        self.assertIn("/api/config/client", api_constants)
-        self.assertNotIn("包含所有字段和敏感信息", api_constants)
 
     def test_architecture_page_matches_controller_worker_control_plane(self):
         architecture = read_text("web/templates/architecture.html")

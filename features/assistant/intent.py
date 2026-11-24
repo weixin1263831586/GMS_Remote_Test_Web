@@ -562,7 +562,7 @@ def _extract_params_for_tool(text: str, tool: AgentTool) -> dict[str, Any]:
             tid = _extract_task_id(text)
             if tid:
                 params["task_id"] = tid
-        elif pname in ("ssid", "vpn_name", "username", "ip", "device_host", "url", "path", "archive_path", "suite_path", "sn_code", "serial_no", "worker_id", "space_id"):
+        elif pname in ("ssid", "vpn_name", "username", "ip", "device_host", "url", "path", "archive_path", "suite_path", "serial_no", "worker_id", "space_id"):
             value = _extract_quoted_value(text, [pname, pdef.get("desc", ""), "名称", "地址", "路径", "序列号"])
             if value:
                 params[pname] = value

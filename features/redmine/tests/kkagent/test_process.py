@@ -48,6 +48,17 @@ class StreamCaptureTests(unittest.TestCase):
         capture.feed("cd")
         self.assertTrue(capture.text())
 
+    def test_exact_tail_fill_is_not_marked_truncated(self):
+        capture = CappedCapture(head=4, tail=4)
+        capture.feed(b"abcdefgh")
+        self.assertEqual(capture.text(), "abcdefgh")
+        self.assertNotIn("truncated", capture.text())
+
+    def test_tail_overflow_inserts_marker(self):
+        capture = CappedCapture(head=4, tail=4)
+        capture.feed(b"abcdefghi")
+        self.assertIn("...[truncated]...", capture.text())
+
 
 class ChildEnvTests(unittest.TestCase):
     def test_child_env_strips_inherited_mcp_identity(self):

@@ -20,7 +20,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.firmware import api, gsi_sn_burn, runtime
+from features.firmware import api, gsi_burn, runtime
 from foundation.command_result import CommandResult
 from foundation.error_model import ApiError
 
@@ -120,26 +120,26 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
 
     def _patch_common(self, stack, *, usbip_routes=None, partition=None):
         stack.enter_context(patch.object(
-            gsi_sn_burn, "_partition_devices_by_flash_state",
+            gsi_burn, "_partition_devices_by_flash_state",
             new=partition or _ok_partition,
         ))
         stack.enter_context(patch.object(
-            gsi_sn_burn, "_notify_skip", new=_noop_async,
+            gsi_burn, "_notify_skip", new=_noop_async,
         ))
         stack.enter_context(patch.object(
-            gsi_sn_burn, "_prepare_usbip_firmware_routes",
+            gsi_burn, "_prepare_usbip_firmware_routes",
             new=usbip_routes or _ok_usbip_routes,
         ))
         stack.enter_context(patch.object(
-            gsi_sn_burn, "get_default_suites_path",
+            gsi_burn, "get_default_suites_path",
             new=lambda _config: "/suites",
         ))
         stack.enter_context(patch.object(
-            gsi_sn_burn, "upload_gsi_assets",
+            gsi_burn, "upload_gsi_assets",
             new=lambda **_kwargs: ("/remote/run.sh", "/remote/misc.img"),
         ))
         stack.enter_context(patch.object(
-            gsi_sn_burn, "_resolve_gsi_remote_image",
+            gsi_burn, "_resolve_gsi_remote_image",
             new=lambda *_args: ("/remote/system.img", None),
         ))
 
@@ -185,11 +185,11 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
         with contextlib.ExitStack() as stack:
             self._patch_common(stack)
             stack.enter_context(patch.object(
-                gsi_sn_burn, "prepare_gsi_command",
+                gsi_burn, "prepare_gsi_command",
                 new=lambda **_kwargs: "/remote/run.sh --device D1",
             ))
             stack.enter_context(patch.object(
-                gsi_sn_burn, "ssh_executor",
+                gsi_burn, "ssh_executor",
                 new=SimpleNamespace(run_stream=timed_out_run_stream),
             ))
             response = self._post_burn()
@@ -208,8 +208,8 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
 
         with contextlib.ExitStack() as stack:
             self._patch_common(stack)
-            stack.enter_context(patch.object(gsi_sn_burn, 'prepare_gsi_command', return_value='/remote/run.sh'))
-            stack.enter_context(patch.object(gsi_sn_burn, 'ssh_executor',
+            stack.enter_context(patch.object(gsi_burn, 'prepare_gsi_command', return_value='/remote/run.sh'))
+            stack.enter_context(patch.object(gsi_burn, 'ssh_executor',
                                             new=SimpleNamespace(run_stream=failed_run_stream)))
             response = self._post_burn()
         self.assertEqual(response.status_code, 502)
@@ -220,7 +220,7 @@ class BurnGsiLockAndDeadlineTests(unittest.TestCase):
         """设备序列号先过 sanitize_device_ids：注入串直接 400，不触远端。"""
         with contextlib.ExitStack() as stack:
             partition = stack.enter_context(patch.object(
-                gsi_sn_burn, "_partition_devices_by_flash_state",
+                gsi_burn, "_partition_devices_by_flash_state",
                 return_value=(["D1"], []),
             ))
             response = self.client.post(

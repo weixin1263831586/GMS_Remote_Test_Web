@@ -163,6 +163,18 @@ class SSHGitProviderTests(unittest.TestCase):
             provider.revision_metadata("main")
         self.assertEqual(ctx.exception.status_code, 502)
 
+    def test_executor_failure_is_502_not_caller_status(self):
+        from foundation.command_result import CommandResult
+
+        gateway = _FakeSSHGateway(
+            lambda command, timeout: CommandResult(code=-1, stderr="secret channel", timed_out=False)
+        )
+        provider = _make_provider(gateway)
+        with self.assertRaises(SourceProviderError) as ctx:
+            provider.resolve_commit("main")
+        self.assertEqual(ctx.exception.status_code, 502)
+        self.assertNotIn("secret", str(ctx.exception))
+
     def test_remote_timeout_maps_504(self):
         from foundation.command_result import CommandResult
 
@@ -457,6 +469,45 @@ class SSHGitMultiRepoTests(unittest.TestCase):
                 self.provider.search("", "needle", repo_scope=scope)
             self.assertEqual(caught.exception.status_code, 422)
 
+    def test_exact_search_uses_literal_blob_path_and_rejects_other_matches(self):
+        provider = self._provider(self._handler(grep_stdout=self._scoped_grep_stdout()))
+        target = "frameworks/base/core/java/A.java"
+        result = provider.search("HEAD", "run", repo_scope="frameworks/base", path_filter=target, exact_path=True)
+        self.assertEqual(result["searched_scope"], target)
+        self.assertEqual(result["coverage_scope"], "selected_file")
+        self.assertEqual([match["path"] for match in result["matches"]], [target])
+        self.assertFalse(result["global_coverage_complete"])
+        with self.assertRaises(SourceProviderError) as wrong_path:
+            provider.search("HEAD", "run", repo_scope="frameworks/base", path_filter=target + ".bak", exact_path=True)
+        self.assertEqual(wrong_path.exception.status_code, 502)
+        with self.assertRaises(SourceProviderError) as wrong_repo:
+            provider.search("HEAD", "run", repo_scope="kernel-6.1", path_filter=target, exact_path=True)
+        self.assertEqual(wrong_repo.exception.status_code, 422)
+
+    def test_exact_grep_in_a_real_git_tree_excludes_nearby_paths_and_directories(self):
+        import subprocess
+
+        with tempfile.TemporaryDirectory() as repo:
+            root = Path(repo)
+            for name in ("dir/A[1].java", "dir/A[1].java.bak", "dir/A1.java", "dir/only/Other.java"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("testSymbol\n", encoding="utf-8")
+            git = ["git", "-C", repo, "-c", "user.name=test", "-c", "user.email=test@example.invalid"]
+            for args in (["init", "-q"], ["add", "."], ["-c", "commit.gpgsign=false", "commit", "-qm", "fixture"]):
+                subprocess.run([*git, *args], check=True, timeout=10)
+
+            for target, expected in (("dir/A[1].java", True), ("dir/only", False), ("dir/missing.java", False)):
+                with self.subTest(target=target):
+                    command = self.provider._shard_grep_command("testSymbol", target, (repo,))
+                    output = subprocess.run(
+                        ["sh", "-c", command], capture_output=True, text=True, check=True, timeout=10,
+                    ).stdout
+                    records = [line for line in output.splitlines() if "\0" in line]
+                    self.assertEqual(len(records), int(expected))
+                    if expected:
+                        self.assertIn(f":{target}\0", records[0])
+
     def test_scoped_commit_is_pinned_in_grep_command(self):
         self.provider = self._provider(self._handler(
             grep_stdout=self._grep_stdout(),
@@ -724,91 +775,54 @@ class SSHGitMultiRepoTests(unittest.TestCase):
         small = tuple(f"/remote/sdk/r{i}" for i in range(10))
         self.assertEqual(len(self.provider._shards(small)), 1)
 
-    # ---- wave-budget regression tests --------------------------------
-    # 2026-11-13 #661066：全量检索实际墙钟超预算后，旧逻辑「有部分结果
-    # 就一直等完全部波」导致请求远超客户端 HTTP 预算（curl 30s 先断，
-    # 服务端仍在跑 4 分钟+）。预算语义改为：deadline 只阻止**新波**，
-    # 在飞的分片总是等完。
-
-    def test_deadline_stops_new_waves_and_returns_partial(self):
-        """deadline 过期后不再发起新波；已有部分结果 + limited=True 返回。"""
-        import time as _t
+    def test_deadline_preserves_finished_results_without_waiting_for_shards(self):
+        from concurrent.futures import Future
 
         from features.system import source_ssh_git as mod
         from foundation.command_result import CommandResult
 
-        executed: list[str] = []
         repos = tuple(f"/remote/sdk/r{i:02d}" for i in range(3))
-        grep_stdout = (
-            f"{_REPO_SEP}/remote/sdk/r00\t{self.COMMIT_R0}\n"
-            + _grep_record(self.COMMIT_R0, "A.java", 1, "x"))
-
-        def handler(command: str, timeout: int):
-            executed.append(command)
-            if " grep " in command:
-                _t.sleep(0.1)
-                if "r00" in command:
-                    return CommandResult(stdout=grep_stdout, code=0)
-                return CommandResult(stdout="", code=1)
-            if "rev-parse" in command:
-                return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/r00\t{self.COMMIT_R0}\n",
-                    code=0)
-            return CommandResult(stdout="", stderr="unexpected", code=3)
-
-        provider = self._provider(handler, repos=repos)
-        with unittest.mock.patch.object(mod, "SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS", 0.05), \
-             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
-             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 1), \
-             unittest.mock.patch.object(
-                 provider, "_repo_rel", lambda repo: repo.split("/")[-1]):
-            # 三个分片三个波：波 1 耗尽预算后，波 2/3 不再发起。
+        finished, pending = Future(), Future()
+        finished.set_result(CommandResult(
+            stdout=(f"{_REPO_SEP}{repos[0]}\t{self.COMMIT_R0}\n"
+                    + _grep_record(self.COMMIT_R0, "A.java", 1, "x")),
+            code=0,
+        ))
+        provider = self._provider(self._handler(), repos=repos)
+        with (
+            unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1),
+            unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 2),
+            unittest.mock.patch.object(mod, "ThreadPoolExecutor") as pool,
+            unittest.mock.patch("concurrent.futures.wait", side_effect=[
+                ({finished}, {pending}), (set(), {pending}),
+            ]) as wait,
+            unittest.mock.patch("features.system.source_repo_rank.codesearch_hints_for_query", return_value=[]),
+        ):
+            pool.return_value.submit.side_effect = [finished, pending]
             result = provider.search("", "x")
-        grep_count = sum(1 for c in executed if " grep " in c)
-        self.assertLess(grep_count, 3, "deadline 过期后不应发起全部波")
+        self.assertEqual(pool.return_value.submit.call_count, 2)
+        self.assertEqual(wait.call_count, 2)
+        self.assertGreater(wait.call_args.kwargs["timeout"], 0)
+        pool.return_value.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
+        self.assertEqual([match["path"] for match in result["matches"]], ["r00/A.java"])
+        self.assertEqual(result["repos_pending"], 2)
         self.assertTrue(result["limited"])
-        self.assertEqual(result["total"], 0)
+        self.assertFalse(result["coverage_complete"])
 
-    def test_first_wave_completes_even_after_deadline(self):
-        """首个波总是执行完（deadline 只阻止后续波），结果完整覆盖。"""
-        import time as _t
-
+    def test_expired_discovery_budget_does_not_submit_first_shards(self):
         from features.system import source_ssh_git as mod
-        from foundation.command_result import CommandResult
 
-        executed: list[str] = []
-        repos = ("/remote/sdk/frameworks/base", "/remote/sdk/kernel-6.1")
-
-        def handler(command: str, timeout: int):
-            executed.append(command)
-            if " grep " in command:
-                _t.sleep(0.1)
-                if "frameworks/base" in command:
-                    return CommandResult(
-                        stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{self.COMMIT_FB}\n"
-                               + _grep_record(self.COMMIT_FB, "A.java", 1, "x"),
-                        code=0)
-                return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{self.COMMIT_KERN}\n"
-                           + _grep_record(self.COMMIT_KERN, "gpio.c", 2, "y"),
-                    code=0)
-            if "rev-parse" in command:
-                return CommandResult(
-                    stdout=f"{_REPO_SEP}/remote/sdk/frameworks/base\t{self.COMMIT_FB}\n"
-                           f"{_REPO_SEP}/remote/sdk/kernel-6.1\t{self.COMMIT_KERN}\n",
-                    code=0)
-            return CommandResult(stdout="", stderr="unexpected", code=3)
-
-        provider = self._provider(handler, repos=repos)
-        with unittest.mock.patch.object(mod, "SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS", 0.02), \
-             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_REPOS", 1), \
-             unittest.mock.patch.object(mod, "SSH_GIT_SHARD_WAVE_SIZE", 2):
-            result = provider.search("", "x")
-        grep_count = sum(1 for c in executed if " grep " in c)
-        self.assertEqual(grep_count, 2, "两个分片同一波：超预算仍等完整波")
-        # The search budget is a hard cap, even while a wave is in flight.
-        self.assertEqual(result["total"], 0)
-        self.assertTrue(result["limited"])
+        token = mod._SEARCH_DEADLINE.set(0.01)
+        try:
+            with (
+                unittest.mock.patch.object(mod, "ThreadPoolExecutor") as pool,
+                unittest.mock.patch("features.system.source_repo_rank.codesearch_hints_for_query", return_value=[]),
+            ):
+                result = self.provider._search_multi("HEAD", "x", "", 50)
+        finally:
+            mod._SEARCH_DEADLINE.reset(token)
+        pool.return_value.submit.assert_not_called()
+        self.assertEqual(result["repos_pending"], result["repos_total"])
         self.assertFalse(result["coverage_complete"])
 
 

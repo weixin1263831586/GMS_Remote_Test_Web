@@ -246,7 +246,9 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             page.close()
 
     def test_embedded_dashboard_stat_geometry_matches_across_modules(self):
-        """Cluster, Redmine and Gerrit keep the same KPI inset, height and chart gap."""
+        """Keep KPI height consistent and verify each workspace's panel spacing."""
+        regular_spacing = {"inset": 8, "chartGap": 16, "cardGap": 12}
+        cluster_spacing = {"inset": 12, "chartGap": 8, "cardGap": 8}
         page = self.new_page()
         evidence = {}
         try:
@@ -309,7 +311,8 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     )
                     measured[module] = geometry
                     with self.subTest(viewport=width, module=module):
-                        for name, expected in (("inset", 8), ("chartGap", 16), ("cardGap", 12)):
+                        spacing = cluster_spacing if module == "cluster" else regular_spacing
+                        for name, expected in spacing.items():
                             self.assertAlmostEqual(
                                 geometry[name], expected, delta=1, msg=str(geometry),
                             )

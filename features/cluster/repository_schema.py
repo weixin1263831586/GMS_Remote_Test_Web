@@ -133,6 +133,7 @@ def apply_schema(conn: sqlite3.Connection) -> None:
             load_1m REAL NOT NULL DEFAULT 0,
             disk_free_gb REAL NOT NULL DEFAULT 0,
             disk_total_gb REAL NOT NULL DEFAULT 0,
+            disk_percent INTEGER,
             max_jobs INTEGER NOT NULL DEFAULT __MAX_JOBS__,
             running_jobs INTEGER NOT NULL DEFAULT 0,
             external_jobs INTEGER NOT NULL DEFAULT 0,

@@ -299,6 +299,26 @@ class HttpAutomationExecutorTests(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("cancelled", result["error"])
 
+    def test_ssh_poll_build_treats_cancelled_job_as_failure(self):
+        from features.automation.executors import HttpAutomationExecutor
+
+        class CancelledJobs:
+            @staticmethod
+            def poll_job(job_id):
+                return {"id": job_id, "status": "cancelled", "artifacts": []}
+
+        run = {
+            "id": "run_cancelled_build",
+            "jenkins_build_number": "job-1",
+            "test_plan_json": json.dumps({"build": {"provider": "ssh", "server_id": "builder"}}),
+        }
+        with patch("features.build.get_build_service", return_value=CancelledJobs()):
+            result = HttpAutomationExecutor().poll_build(run)
+
+        self.assertFalse(result["success"])
+        self.assertFalse(result["building"])
+        self.assertIn("cancelled", result["error"].lower())
+
     def test_http_executor_cancels_jenkins_queue_item(self):
         from features.automation.executors import HttpAutomationExecutor
 

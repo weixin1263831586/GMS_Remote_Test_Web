@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
+import paramiko
 from fastapi import APIRouter, Depends, Query, Request
+from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from features.auth import (
     CurrentUser,
     get_authenticated_user,
+    is_elevated,
     principal_owner_id,
     require_authenticated_user_when_auth_required,
     require_permission,
@@ -19,10 +23,17 @@ from features.build.service import BuildExecutionError, BuildNotFoundError, Buil
 from features.users import owner_id_from_request
 from foundation.config import settings
 from foundation.config_paths import build_servers_path
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/build")
+
+_SSH_AUTH_ERRORS = (
+    paramiko.AuthenticationException,
+    paramiko.PasswordRequiredException,
+)
 
 
 def _default_config_path() -> Path:
@@ -38,6 +49,24 @@ build_service = BuildService(
 def configure_build_service(service: BuildService) -> None:
     global build_service
     build_service = service
+
+
+def _build_error_response(
+    exc: Exception, *, action: str, discovery: bool = False,
+) -> JSONResponse:
+    cause = exc.__cause__ if isinstance(exc, BuildExecutionError) else None
+    if isinstance(cause, TimeoutError):
+        return ApiError.dependency_timeout(
+            record_internal_error(logger, action, "build command timed out")
+        ).to_response()
+    if isinstance(cause, _SSH_AUTH_ERRORS):
+        return ApiError.malformed_request(str(exc)).to_response()
+    if isinstance(cause, (paramiko.SSHException, OSError)):
+        return ApiError.upstream_failure(
+            record_internal_error(logger, action, "build command failed"), service="ssh",
+        ).to_response()
+    error = ApiError.malformed_request if discovery else ApiError.dependency_unavailable
+    return error(str(exc)).to_response()
 
 
 def _request_owner(request: Request) -> tuple[str, bool]:
@@ -101,7 +130,7 @@ async def discover_build_workspaces(
             base_dir=str(req.get("base_dir") or ""),
         )
     except (BuildExecutionError, BuildNotFoundError, ValueError) as exc:
-        return error_response(str(exc), 400)
+        return _build_error_response(exc, action="发现构建目标", discovery=True)
     return {"success": True, "data": {"items": items}}
 
 
@@ -121,7 +150,7 @@ async def discover_lunch_options(
             force_refresh=bool(req.get("force_refresh", False)),
         )
     except (BuildExecutionError, BuildNotFoundError, ValueError) as exc:
-        return error_response(str(exc), 400)
+        return _build_error_response(exc, action="发现构建目标", discovery=True)
     return {"success": True, "data": {"items": items}}
 
 
@@ -149,6 +178,9 @@ async def list_build_jobs(
     request: Request,
     status: str = Query(""),
     limit: int = Query(50, ge=1, le=500),
+    _user: CurrentUser | None = Depends(
+        require_permission_when_auth_required("build.read")
+    ),
 ):
     owner, see_all = _request_owner(request)
     # Filter owner in SQL before LIMIT. A post-limit Python filter can
@@ -167,16 +199,20 @@ async def list_build_jobs(
 async def get_build_job(
     job_id: str,
     request: Request,
-    poll: bool = Query(False),
+    _user: CurrentUser | None = Depends(
+        require_permission_when_auth_required("build.read")
+    ),
 ):
     try:
         _owned_build_job(job_id, request)
-        job = await run_in_threadpool(build_service.poll_job, job_id) if poll else build_service.get_job(job_id)
+        job = build_service.get_job(job_id)
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
         return error_response(str(exc), 503)
-    return {"success": True, "data": job}
+    user = get_authenticated_user(request)
+    can_execute = bool(user and (user.has_permission("build.execute") or is_elevated(request)))
+    return {"success": True, "data": {**job, "can_execute": can_execute}}
 
 
 @router.post("/jobs/{job_id}/poll")
@@ -191,7 +227,7 @@ async def poll_build_job(
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
-        return error_response(str(exc), 503)
+        return _build_error_response(exc, action="轮询构建任务")
     return {"success": True, "data": job}
 
 
@@ -218,6 +254,9 @@ async def tail_build_log(
     job_id: str,
     request: Request,
     lines: int = Query(200, ge=1, le=5000),
+    _user: CurrentUser | None = Depends(
+        require_permission_when_auth_required("build.read")
+    ),
 ):
     try:
         _owned_build_job(job_id, request)
@@ -225,7 +264,7 @@ async def tail_build_log(
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
-        return error_response(str(exc), 503)
+        return _build_error_response(exc, action="读取构建日志")
     return {"success": True, "data": {"text": text}}
 
 
@@ -241,7 +280,7 @@ async def cancel_build_job(
     except BuildNotFoundError as exc:
         return error_response(str(exc), 404)
     except BuildExecutionError as exc:
-        return error_response(str(exc), 503)
+        return _build_error_response(exc, action="取消构建任务")
     return {"success": True, "data": job}
 
 

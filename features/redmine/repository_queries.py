@@ -303,11 +303,15 @@ class RepositoryQueryMixin:
 
         issues = [self._decode_row(row) for row in rows]
         if not owner_keys:
-            owner_keys = {
-                key
-                for item in issues
-                for key in name_keys(item.get("assigned_to_name"))
-            }
+            if owner_names is None:
+                owner_keys = {
+                    key
+                    for item in issues
+                    for key in name_keys(item.get("assigned_to_name"))
+                }
+            else:
+                # 调用方指定了负责人但一个名字都没有：不能把全库当成该人的工单。
+                issues = []
 
         owned_issues = [
             issue for issue in issues

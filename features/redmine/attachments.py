@@ -8,7 +8,7 @@ from urllib.parse import urljoin, urlparse
 
 import aiohttp
 
-from .evidence import MAX_REDIRECTS, _attachment_path_ok, _same_origin
+from .evidence import MAX_ATTACHMENT_BYTES, MAX_REDIRECTS, _attachment_path_ok, _same_origin
 from .models import RedmineAttachment
 from .utils import (
     COMPILED_ISSUE_LINK_PATTERN,
@@ -23,6 +23,12 @@ logger = logging.getLogger(__name__)
 
 class RedmineAttachmentMixin:
     def auth_headers(self) -> dict[str, str]:
+        # python-redmine 在有 API Key 时忽略密码。aiohttp 上传/下载/回复
+        # 必须走同一优先级，否则仅配置 Key 的账号会匿名失败，或在两者
+        # 同时存在时用密码用户发出写请求。
+        api_key = str(getattr(self, "api_key", "") or "")
+        if api_key:
+            return {"X-Redmine-API-Key": api_key}
         if not (self.username and self.password):
             return {}
         return create_basic_auth_header(self.username, self.password)
@@ -117,6 +123,10 @@ class RedmineAttachmentMixin:
                     async for chunk in response.content.iter_chunked(1024 * 1024):
                         if not chunk:
                             continue
+                        if total + len(chunk) > MAX_ATTACHMENT_BYTES:
+                            raise RuntimeError(
+                                f"Redmine attachment download exceeded {MAX_ATTACHMENT_BYTES} bytes"
+                            )
                         total += len(chunk)
                         target.write(chunk)
                 break

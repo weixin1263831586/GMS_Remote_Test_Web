@@ -37,10 +37,8 @@ bash scripts/install_cluster_worker.sh \
 
 Controller 的集群部署流程（`features/cluster/deployment_api.py`）会通过 SSH 完成整个安装：
 
-- 打包 `worker_agent`、`foundation`、安装脚本与 Host Tools 上传到远端 `/tmp/gms-worker-setup.tar.gz`。
-- Worker Token 以 0600 权限上传为 `/tmp/gms-worker-token-<worker_id>`，并以**文件路径**传给安装脚本——Token 字符串不能出现在远端命令 argv 中。
-- GTS 凭证同样以 0600 文件上传为 `/tmp/gms-worker-gts-<worker_id>.json`。
-- 安装结束后清理远端临时文件；若部署失败会回滚已持久化的 Worker Token。
+- 打包 `worker_agent`、`foundation`、安装脚本与 Host Tools，连同 Worker Token、GTS 凭证一起上传到随机化的 `/tmp` 暂存名（`_staged_credential_path`）。Token 与 GTS 文件权限为 0600，并以**文件路径**传给安装脚本——内容不能出现在远端命令 argv 中。
+- 安装结束后按这些路径清理远端临时文件；若部署失败会回滚已持久化的 Worker Token。
 - 需要远程 sudo 时，sudo 密码经 stdin 传入，不写入命令行。
 
 前提：Controller 侧需先构建 adbproxy 与原生工具分发包（`scripts/build_adbproxy_rs.sh`、`scripts/build_gms_worker_native.sh`），否则部署命令会提前报错退出。
@@ -76,6 +74,8 @@ export GMS_WORKER_ADDRESS=192.0.2.20
 export GMS_WORKER_SSH_USER=operator
 export GMS_CONTROLLER_CA=/path/to/controller-ca.crt   # 使用经可信渠道确认的 Controller CA；叶子自签部署信任其自签证书
 ```
+
+集群页面的 CPU 百分比按相邻两次 Linux 采样之间的忙碌时间计算，首个心跳填 `0`。一分钟平均负载通过 `load_1m` 单独上报。磁盘容量和使用率取 `data_root` 所在的文件系统。
 
 ### Worker Token 的 0600 要求
 

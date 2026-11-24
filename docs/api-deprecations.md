@@ -17,9 +17,9 @@
 - **移除原因**：仓库内无调用方；环境健康属于部署时一次性检查，常驻
   API 暴露内部环境细节的收益为负。
 - **迁移**：
-  - 环境问题现在在**创建反编译任务时**以任务错误形式暴露：先
-    `POST /api/apk/upload`，JADX/Java 缺失或损坏时任务状态与错误信息
-    会明确给出原因。
+  - 环境问题现在在**创建反编译任务时**以任务错误形式暴露：先上传 APK 或 JAR，再用
+    `POST /api/apk/analyze/{task_id}` 启动反编译。JADX 或 Java 不可用时，
+    通过任务状态查看原因。
   - 部署期环境自检使用 Agent 包的验收路径：
     `gms-agent doctor --json`（见 [Agent 安装](agent/installation.md)），
     其中包含 kkagent/kkagent 运行时依赖检查。
@@ -36,10 +36,10 @@
 
   ```bash
   # 旧（已 404）：
-  curl -k "https://<controller>/api/cluster/suite-library/android-cts.zip"
+  curl --cacert "$GMS_CURL_CA_CERT" "https://<controller>/api/cluster/suite-library/android-cts.zip"
 
   # 新：
-  curl -k -O "https://<controller>/api/cluster/suite-library-download/android-cts.zip/android-cts.zip"
+  curl --cacert "$GMS_CURL_CA_CERT" -O "https://<controller>/api/cluster/suite-library-download/android-cts.zip/android-cts.zip"
   ```
 
   列出可用压缩包仍用 `GET /api/cluster/suite-library`；完整性校验用
@@ -57,6 +57,12 @@
   - 程序化查询 Agent 状态用 `GET /api/agent/sessions`（会话列表）与
     `GET /api/agent/sessions/{session_id}`（单会话含消息与步骤）。
   - Agent 部署验收沿用 `gms-agent doctor --json`。
+
+## SN 烧写占位接口
+
+`POST /api/burn/serial` 已移除。该入口没有对应的设备烧写实现，旧版只返回占位结果。
+Web 页面和对话 Agent 已移除对应的控件和工具。查询当前设备序列号可使用设备列表
+或 `gms-rt-devices-list --json`。
 
 ## 维护
 

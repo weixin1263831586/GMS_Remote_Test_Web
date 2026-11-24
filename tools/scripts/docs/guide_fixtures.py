@@ -85,6 +85,10 @@ def install_guide_fixtures(page) -> None:
     def handle(route):
         url = urlsplit(route.request.url)
         path = url.path
+        if path == '/api/sidebar-order' and route.request.method == 'GET':
+            # Use the fresh account's actual navigation defaults from the temporary instance.
+            route.continue_()
+            return
         if path in {'/api/auth/status', '/api/auth/me', '/api/auth/agent-scopes',
                     '/api/users/current', '/api/users/detect'}:
             # These read/write only the temporary instance's authenticated identity.

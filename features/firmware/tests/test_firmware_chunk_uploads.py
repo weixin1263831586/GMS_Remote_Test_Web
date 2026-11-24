@@ -307,6 +307,47 @@ def test_expired_upload_sessions_are_removed():
         assert not expired.exists()
 
 
+def test_expired_cleanup_keeps_live_burn_lock():
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, 'client', 'burning'))
+        session.mkdir(parents=True)
+        (session / 'staged-update.img').write_bytes(b'firmware')
+        (session / '.burn.lock').write_text(str(os.getpid()), encoding='ascii')
+        old = time.time() - 7200
+        os.utime(session, (old, old))
+
+        chunk_uploads.cleanup_expired_upload_sessions(root, 'client', max_age=1)
+
+        assert session.exists()
+
+
+def test_active_merge_lock_does_not_replace_chunk():
+    state = _state()
+    with TemporaryDirectory() as root:
+        session = Path(chunk_uploads.upload_session_dir(root, 'alice', 'upload-1'))
+        session.mkdir(parents=True)
+        chunk = session / 'chunk_00000'
+        chunk.write_bytes(b'old-bytes')
+        lock = chunk_uploads.try_acquire_sync_lock(session / '.merge.lock')
+        assert lock is not None
+        try:
+            response, merged = asyncio.run(
+                chunk_uploads.handle_chunk_upload(
+                    _chunk_form(b'1234', total_chunks='1', file_size='4', chunk_size='4'),
+                    'alice',
+                    root,
+                    state,
+                    3600,
+                )
+            )
+        finally:
+            chunk_uploads.release_sync_lock(lock)
+
+        assert merged is None
+        assert _payload(response)['merging'] is True
+        assert chunk.read_bytes() == b'old-bytes'
+
+
 def test_orphan_cleanup_removes_stale_sessions_across_clients():
     """全租户兜底：其他 client 的过期暂存会话也要被回收。"""
     with TemporaryDirectory() as root:

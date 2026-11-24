@@ -48,7 +48,7 @@ class DeviceListIsolationTests(unittest.IsolatedAsyncioTestCase):
         device_lock_manager.force_unlock_device("CACHE-DEVICE")
         device_lock_manager.lock_device(
             "CACHE-DEVICE",
-            "alice",
+            "id-alice",
             "Alice",
             source_id="test:alice",
             source_type="test",

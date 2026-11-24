@@ -664,8 +664,13 @@ class ClusterCommandRepositoryMixin:
             return
         result = command.get("result", {})
         job_status = "running" if status == "running" else status
-        if command.get("command_type") == "stop_test" and status == "completed":
-            job_status = status = "cancelled"
+        if command.get("command_type") == "stop_test":
+            # A failed stop says nothing about whether the job has exited.
+            # Keep the lease until the Worker confirms a terminal job state.
+            job_status = result.get("status")
+            if status != "completed" or job_status not in {"cancelled", "completed", "failed"}:
+                return
+            status = job_status
         now = _utc_now()
         release_claim = False
         with self._lock, self.connect() as conn:

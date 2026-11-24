@@ -103,7 +103,7 @@ _gms_rt_command_usage() {
         gms-rt-apk-source-read) printf '%s' 'gms-rt-apk-source-read <task_id> <path> [--offset N] [--limit N]' ;;
         gms-rt-knowledge-search) printf '%s' 'gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]' ;;
         gms-rt-sdk-sources) printf '%s' 'gms-rt-sdk-sources' ;;
-        gms-rt-sdk-search) printf '%s' 'gms-rt-sdk-search --source ID --revision REV --query TEXT [--path FILTER] [--limit N]' ;;
+        gms-rt-sdk-search) printf '%s' 'gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--repo-scope SUBREPO] [--exact-path] [--budget-seconds N] [--limit N]' ;;
         gms-rt-sdk-read) printf '%s' 'gms-rt-sdk-read SDK_RESULT_ID [--offset N] [--limit N]' ;;
         *) printf '%s' "$1 [arguments]" ;;
     esac

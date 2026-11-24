@@ -201,6 +201,39 @@ def test_run_truncates_output_beyond_capture_limit():
     assert result.stderr.endswith("...[GMS: output truncated]")
 
 
+def test_run_keeps_prefix_when_a_later_chunk_would_fill_the_hole():
+    channel = _FakeChannel(stdout_chunks=(b"abcd", b"xy"), stderr_chunks=(b"ABCD", b"XY"))
+    executor = SSHExecutor(max_captured_stream_bytes=3)
+    result = executor.run(_FakeSSH(channel), "fake", timeout=1)
+
+    assert result.stdout.startswith("abc")
+    assert "xy" not in result.stdout
+    assert result.stdout.endswith("...[GMS: output truncated]")
+    assert result.stderr.startswith("ABC")
+    assert "XY" not in result.stderr
+
+
+def test_run_stream_does_not_store_bytes_after_the_capture_cap():
+    async def run_case():
+        channel = _FakeChannel(stdout_chunks=(b"abcd", b"xy\n"))
+        events = []
+
+        async def log_callback(line, level):
+            events.append((line, level))
+
+        result = await SSHExecutor(max_captured_stream_bytes=3).run_stream(
+            _FakeSSH(channel), "fake", log_callback, timeout=1,
+        )
+        return result, events
+
+    result, events = asyncio.run(run_case())
+    assert result.code == 0
+    assert result.stdout.startswith("abc")
+    assert "xy" not in result.stdout
+    assert result.stdout.endswith("...[GMS: output truncated]")
+    assert events == [("abcdxy", "info")]
+
+
 def test_run_gives_up_tailing_when_remote_child_keeps_channel_alive():
     channel = _NeverEndingTailChannel()
     executor = SSHExecutor(exit_tail_drain_seconds=0.0)

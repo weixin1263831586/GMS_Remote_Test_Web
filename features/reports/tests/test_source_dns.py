@@ -9,7 +9,8 @@ from unittest.mock import patch
 
 from features.auth import CurrentUser
 from features.reports import source_api
-from foundation.outbound import PinnedOutboundResolver, ResolvedOutboundTarget, UnsafeOutboundURL
+from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURL
+from foundation.outbound_aiohttp import PinnedOutboundResolver
 
 
 class ReportDownloadDnsTests(unittest.IsolatedAsyncioTestCase):

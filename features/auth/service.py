@@ -7,7 +7,7 @@ import os
 import secrets
 import sqlite3
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +25,7 @@ from .constants import (  # noqa: F401  (re-exported for back-compat)
 )
 from .rate_limit import AuthRateLimitMixin
 from .schema import initialize_auth_schema
+from .timestamps import from_utc_iso, seen_recently, to_utc_iso, utc_now
 
 
 AUTH_COOKIE_NAME = "gms_session"
@@ -68,31 +69,6 @@ SESSION_IDLE_HOURS = int(os.getenv("GMS_SESSION_IDLE_HOURS", "12"))
 # 会不断刷新 idle 超时，若提权跟随会话生命周期，会在整个工作日内保持。
 ELEVATION_MINUTES = int(os.getenv("GMS_ADMIN_ELEVATION_MINUTES", "30"))
 # 二次认证状态绑定当前会话，并随会话失效或重新登录清除。
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _to_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
-
-
-def _from_iso(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _last_seen_recent(last_seen_at: str | None, now: datetime) -> bool:
-    """会话 last_seen 距 now 是否不足 60s（用于 session touch 节流）。"""
-    if not last_seen_at:
-        return False
-    try:
-        return (now - _from_iso(last_seen_at)) < timedelta(seconds=60)
-    except ValueError:
-        return False
 
 
 class AuthService(
@@ -212,7 +188,7 @@ class AuthService(
         self._validate_password(password)
         if role not in {"admin", "device_operator", "user"}:
             raise ValueError("角色必须是 admin、device_operator 或 user")
-        now = _to_iso(_utcnow())
+        now = to_utc_iso(utc_now())
         # 账号内部 id 直接使用用户名本身：用户管理页把它反解为
         # username@ip 展示（不再出现随机 token 形式的"陌生用户"行）。
         user_id = username
@@ -244,7 +220,7 @@ class AuthService(
         username = self._validate_username(username)
         self._validate_password(password)
         cleaned_display_name = display_name.strip()
-        now = _to_iso(_utcnow())
+        now = to_utc_iso(utc_now())
         # 与 create_user 一致：初始管理员的内部 id 也使用用户名本身。
         user_id = username
         with self._lock, self._connect() as conn:
@@ -340,7 +316,7 @@ class AuthService(
     def create_session(self, user_id: str) -> str:
         token = secrets.token_urlsafe(32)
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         expires_at = now + timedelta(hours=SESSION_ABSOLUTE_HOURS)
         idle_expires_at = now + timedelta(hours=SESSION_IDLE_HOURS)
         with self._connect() as conn:
@@ -353,7 +329,7 @@ class AuthService(
                    OR expires_at <= ?
                    OR idle_expires_at <= ?
                 """,
-                (_to_iso(now), _to_iso(now)),
+                (to_utc_iso(now), to_utc_iso(now)),
             )
             conn.execute(
                 """
@@ -365,10 +341,10 @@ class AuthService(
                 (
                     token_hash,
                     user_id,
-                    _to_iso(now),
-                    _to_iso(now),
-                    _to_iso(expires_at),
-                    _to_iso(idle_expires_at),
+                    to_utc_iso(now),
+                    to_utc_iso(now),
+                    to_utc_iso(expires_at),
+                    to_utc_iso(idle_expires_at),
                 ),
             )
             conn.commit()
@@ -382,7 +358,7 @@ class AuthService(
         with self._connect() as conn:
             conn.execute(
                 "UPDATE platform_sessions SET revoked_at = ? WHERE token_hash = ?",
-                (_to_iso(_utcnow()), token_hash),
+                (to_utc_iso(utc_now()), token_hash),
             )
             conn.commit()
 
@@ -394,7 +370,7 @@ class AuthService(
                 SET revoked_at = ?
                 WHERE user_id = ? AND revoked_at IS NULL
                 """,
-                (_to_iso(_utcnow()), user_id),
+                (to_utc_iso(utc_now()), user_id),
             )
             conn.commit()
             return cursor.rowcount
@@ -452,7 +428,7 @@ class AuthService(
                     next_role,
                     next_display_name,
                     next_disabled,
-                    _to_iso(_utcnow()),
+                    to_utc_iso(utc_now()),
                     user_id,
                 ),
             )
@@ -485,7 +461,7 @@ class AuthService(
                 SET password_hash = ?, updated_at = ?
                 WHERE id = ?
                 """,
-                (self._hash_password(password), _to_iso(_utcnow()), user_id),
+                (self._hash_password(password), to_utc_iso(utc_now()), user_id),
             )
             if cursor.rowcount == 0:
                 raise ValueError("用户不存在")
@@ -505,7 +481,7 @@ class AuthService(
         if admin_user.role != "admin":
             return False
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -517,8 +493,8 @@ class AuthService(
                 """,
                 (
                     token_hash,
-                    _to_iso(now),
-                    _to_iso(now),
+                    to_utc_iso(now),
+                    to_utc_iso(now),
                 ),
             ).fetchone()
             if not row:
@@ -526,7 +502,7 @@ class AuthService(
             # 固定短 TTL，且不超过会话本身的绝对有效期。
             elevated_until = min(
                 now + timedelta(minutes=max(1, minutes or ELEVATION_MINUTES)),
-                _from_iso(str(row["expires_at"])),
+                from_utc_iso(str(row["expires_at"])),
             )
             cur = conn.execute(
                 """
@@ -536,7 +512,7 @@ class AuthService(
                   AND revoked_at IS NULL
                 """,
                 (
-                    _to_iso(elevated_until),
+                    to_utc_iso(elevated_until),
                     admin_user.id,
                     token_hash,
                 ),
@@ -553,7 +529,7 @@ class AuthService(
         if not token:
             return None
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._connect() as conn:
             row = conn.execute(
                 """
@@ -565,7 +541,7 @@ class AuthService(
         if not row or not row["elevated_until"]:
             return None
         try:
-            if _from_iso(row["elevated_until"]) <= now:
+            if from_utc_iso(row["elevated_until"]) <= now:
                 return None
         except Exception:
             return None
@@ -592,7 +568,7 @@ class AuthService(
         if not token:
             return None
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
@@ -606,8 +582,8 @@ class AuthService(
                   AND s.idle_expires_at > ?
                   AND s.created_at > ?
                 """,
-                (token_hash, _to_iso(now), _to_iso(now),
-                 _to_iso(now - timedelta(hours=SESSION_ABSOLUTE_HOURS))),
+                (token_hash, to_utc_iso(now), to_utc_iso(now),
+                 to_utc_iso(now - timedelta(hours=SESSION_ABSOLUTE_HOURS))),
             ).fetchone()
             if not row:
                 return None
@@ -615,8 +591,8 @@ class AuthService(
                 # 节流：last_seen 距上次刷新不足 60s 时跳过 UPDATE。
                 # 轮询类请求（/test/status、/notifications 等）每 1~2s 一次，
                 # 每次都写认证库会把读请求全变成 SQLite 写热点。
-                idle_deadline = _to_iso(now + timedelta(hours=SESSION_IDLE_HOURS))
-                if not _last_seen_recent(row["session_last_seen_at"], now):
+                idle_deadline = to_utc_iso(now + timedelta(hours=SESSION_IDLE_HOURS))
+                if not seen_recently(row["session_last_seen_at"], now):
                     conn.execute(
                         """
                         UPDATE platform_sessions
@@ -625,10 +601,10 @@ class AuthService(
                           AND last_seen_at < ?
                         """,
                         (
-                            _to_iso(now),
+                            to_utc_iso(now),
                             idle_deadline,
                             token_hash,
-                            _to_iso(now - timedelta(seconds=60)),
+                            to_utc_iso(now - timedelta(seconds=60)),
                         ),
                     )
                     conn.commit()
@@ -652,7 +628,7 @@ class AuthService(
                 GROUP BY u.id
                 ORDER BY username
                 """,
-                (_to_iso(_utcnow()), _to_iso(_utcnow())),
+                (to_utc_iso(utc_now()), to_utc_iso(utc_now())),
             ).fetchall()
         return [dict(row) for row in rows]
 

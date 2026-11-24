@@ -21,6 +21,7 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 
 from features.auth import principal_actor_id, require_agent_scope
+from foundation.error_model import API_ERROR_CODES, ApiError
 from foundation.errors import handle_api_errors
 
 from .source_provider import SourceProviderError, source_registry
@@ -32,9 +33,11 @@ router = APIRouter(prefix="/api/sdk")
 
 
 def _error(exc: SourceProviderError) -> JSONResponse:
-    return JSONResponse(
-        status_code=exc.status_code, content={"success": False, "error": str(exc)}
-    )
+    for code, status in API_ERROR_CODES.items():
+        if status == exc.status_code and status != 500:
+            return ApiError(code, str(exc)).to_response()
+    logger.error("Unexpected SDK provider error", exc_info=exc)
+    return ApiError.internal("SDK 源码服务发生内部错误").to_response()
 
 
 @router.get("/sources")
@@ -76,6 +79,26 @@ def sdk_search(
     budget_seconds: int = Query(100, ge=1, le=600),
     limit: int = Query(50, ge=1, le=200),
 ):
+    return _search(request, source, revision, query, path_filter, repo_scope, budget_seconds, limit)
+
+
+@router.get("/search/exact")
+@handle_api_errors
+def sdk_search_exact(
+    request: Request,
+    source: str = Query(..., min_length=1, max_length=128),
+    revision: str = Query(..., min_length=1, max_length=256),
+    query: str = Query(..., min_length=1, max_length=256),
+    path: str = Query(..., min_length=1, max_length=256),
+    repo_scope: str = Query(..., min_length=1, max_length=256),
+    budget_seconds: int = Query(100, ge=1, le=600),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Search one literal file in an explicitly selected SDK Git repository."""
+    return _search(request, source, revision, query, path, repo_scope, budget_seconds, limit, exact=True)
+
+
+def _search(request, source, revision, query, path_filter, repo_scope, budget_seconds, limit, *, exact=False):
     require_agent_scope("sdk.read")(request)
     try:
         provider = source_registry().get(source)
@@ -89,6 +112,8 @@ def sdk_search(
         if provider.kind == "ssh_git":
             kwargs["permission_scope"] = principal_actor_id(request)
             kwargs["budget_seconds"] = budget_seconds
+            if exact:
+                kwargs["exact_path"] = True
         result = provider.search(revision, query, **kwargs)
     except SourceProviderError as exc:
         return _error(exc)

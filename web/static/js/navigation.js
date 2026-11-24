@@ -58,16 +58,6 @@ const CURL_PLACEHOLDERS = Object.freeze({
     [PARAM_TYPES.OBJECT]: {}
 });
 
-const PATH_PATTERNS = [];
-
-const DEFAULT_API_DETAILS = Object.freeze({
-    title: 'API接口',
-    description: '执行API操作',
-    params: Object.freeze([]),
-    response: '{ "success": true }',
-    usage: '使用该接口完成相关操作'
-});
-
 // 页面生命周期内不变的服务端信息。
 const BASE_URL = window.location.origin;
 const WS_BASE_URL = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}`;
@@ -398,6 +388,7 @@ function checkPendingFirmwareUpload() {
                 progressInfo.textContent = `⚠️ ${fileName} 上传中断于 ${progress.toFixed(1)}%`;
 
                 setTimeout(() => {
+                    if (sessionStorage.getItem('firmwareUploadInterrupted') !== 'true') return;
                     progressFill.style.width = '0%';
                     progressFill.style.background = '';
                     progressInfo.textContent = '';
@@ -446,10 +437,9 @@ function initEventListeners() {
         window.GmsWorkspace?.update({suite_path: suitePath, suite_key: suitePath}, {source: 'test'});
     });
 
-    const debouncedInputChange = debounce(onInputChange, 300);
-    $('test-module').addEventListener('input', debouncedInputChange);
-    $('test-case').addEventListener('input', debouncedInputChange);
-    $('retry-result').addEventListener('input', debouncedInputChange);
+    $('test-module').addEventListener('input', onInputChange);
+    $('test-case').addEventListener('input', onInputChange);
+    $('retry-result').addEventListener('input', onInputChange);
 
     // Device host 输入框为 readonly（配置在 config.json），无需确认处理；
     // local server 仍支持 Enter 确认更新。
@@ -494,16 +484,17 @@ function enforceFieldExclusion(mode) {
     }
 }
 
-function onInputChange() {
-    // 测试模块、用例和重试报告互斥。
+function onInputChange(event) {
+    // 测试模块、用例和重试报告互斥。用触发控件判断，避免焦点已经离开后两边都留下。
+    const targetId = event?.target?.id || '';
     const testModule = $('test-module').value.trim();
     const testCase = $('test-case').value.trim();
     const retryResult = $('retry-result').value.trim();
 
-    if (document.activeElement.id === 'retry-result' && retryResult) {
+    if (targetId === 'retry-result' && retryResult) {
         enforceFieldExclusion('retry');
     }
-    else if ((document.activeElement.id === 'test-module' || document.activeElement.id === 'test-case') && (testModule || testCase)) {
+    else if ((targetId === 'test-module' || targetId === 'test-case') && (testModule || testCase)) {
         enforceFieldExclusion('module_case');
     }
 }
@@ -638,7 +629,7 @@ function autoSelectTestSuite(testType) {
         });
 
         const latestSuite = matchingSuites[0];
-        $('test-suite').value = latestSuite.tools_path;
+        publishSelectedSuite(latestSuite.tools_path);
 
         debugLog(`[autoSelectTestSuite] 已选择套件:`, {
             version: latestSuite.version,
@@ -647,8 +638,15 @@ function autoSelectTestSuite(testType) {
         });
     } else {
         addLogEntry(`未找到 ${testType} 类型的测试套件`, 'warning');
-        document.getElementById('test-suite').value = '';
+        publishSelectedSuite('');
     }
+}
+
+function publishSelectedSuite(suitePath) {
+    const selectElement = document.getElementById('test-suite');
+    if (!selectElement) return;
+    selectElement.value = suitePath;
+    selectElement.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
 async function onLocalServerConfirm() {
@@ -657,6 +655,8 @@ async function onLocalServerConfirm() {
         await apiCall('/api/config/update', 'POST', {
             local_server: localServer
         });
+        if (!state.config || typeof state.config !== 'object') state.config = {};
+        state.config.local_server = localServer;
         addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
         showToast('本地主机地址已更新', 'success');
     } catch (error) {

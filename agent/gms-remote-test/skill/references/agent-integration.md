@@ -244,7 +244,7 @@ the user under their own session:
 #    On a host with agent profiles enter the human session first:
 #    gms-rt-approval-create prompts in a human terminal (see agent-workflows 5.3)
 gms-rt-approval-create --tool gms_rt_burn_firmware --device RK3572GMS1 \
-  --command "burn_firmware:RK3572GMS1" --json --non-interactive
+  --firmware-sha256 <sha256> --json --non-interactive
 # 2. Agent executes the burn with that approval token; without it the
 #    server rejects any agent burn with 403:
 gms-rt-burn-firmware /path/to/update.img RK3572GMS1 true \

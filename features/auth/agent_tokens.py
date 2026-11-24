@@ -8,8 +8,7 @@ and reuses its _connect/_lock/hash_token helpers.
 from __future__ import annotations
 
 import secrets
-import sqlite3  # noqa: F401  (kept for parity with service.py helpers)
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from .constants import (
@@ -18,14 +17,7 @@ from .constants import (
     DEFAULT_AGENT_TOKEN_DAYS,
     CurrentUser,
 )
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _to_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
+from .timestamps import from_utc_iso, seen_recently, to_utc_iso, utc_now
 
 
 MAX_AGENT_TOKEN_DAYS = 3650
@@ -50,22 +42,6 @@ def coerce_expires_days(value: Any) -> int | None:
     if not 1 <= days <= MAX_AGENT_TOKEN_DAYS:
         raise ValueError("expires_days 必须介于 1 和 3650 之间")
     return days
-
-
-def _from_iso(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
-
-
-def _last_seen_recent(last_seen_at: str | None, now: datetime) -> bool:
-    if not last_seen_at:
-        return False
-    try:
-        return (now - _from_iso(last_seen_at)) < timedelta(seconds=60)
-    except ValueError:
-        return False
 
 
 class AgentTokenServiceMixin:
@@ -127,10 +103,10 @@ class AgentTokenServiceMixin:
         devices = self._normalize_acl(allowed_devices)
         token = secrets.token_urlsafe(32)
         token_id = f"agt_{secrets.token_hex(8)}"
-        now = _utcnow()
+        now = utc_now()
         days = coerce_expires_days(expires_days)
         expires_at = (
-            _to_iso(now + timedelta(days=days)) if days is not None else None
+            to_utc_iso(now + timedelta(days=days)) if days is not None else None
         )
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -149,7 +125,7 @@ class AgentTokenServiceMixin:
                     scope_str,
                     workers,
                     devices,
-                    _to_iso(now),
+                    to_utc_iso(now),
                     expires_at,
                 ),
             )
@@ -187,7 +163,7 @@ class AgentTokenServiceMixin:
             cursor = conn.execute(
                 "UPDATE platform_agent_tokens SET revoked_at = ? "
                 "WHERE id = ? AND revoked_at IS NULL",
-                (_to_iso(_utcnow()), token_id),
+                (to_utc_iso(utc_now()), token_id),
             )
             conn.commit()
             return cursor.rowcount > 0
@@ -209,7 +185,7 @@ class AgentTokenServiceMixin:
             ).fetchone()
         if row is None or row["disabled"] or row["revoked_at"]:
             return None
-        if row["expires_at"] and _from_iso(row["expires_at"]) <= _utcnow():
+        if row["expires_at"] and from_utc_iso(row["expires_at"]) <= utc_now():
             return None
         return dict(row)
 
@@ -224,7 +200,7 @@ class AgentTokenServiceMixin:
         if not token:
             return None, None
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
@@ -242,16 +218,16 @@ class AgentTokenServiceMixin:
                 return None, None
             if row["expires_at"]:
                 try:
-                    if _from_iso(row["expires_at"]) <= now:
+                    if from_utc_iso(row["expires_at"]) <= now:
                         return None, None
                 except ValueError:
                     return None, None
             # Throttle last_used_at writes like session last_seen (60s).
-            if not _last_seen_recent(row["last_used_at"], now):
+            if not seen_recently(row["last_used_at"], now):
                 conn.execute(
                     "UPDATE platform_agent_tokens SET last_used_at = ? "
                     "WHERE token_hash = ? AND (last_used_at IS NULL OR last_used_at < ?)",
-                    (_to_iso(now), token_hash, _to_iso(now - timedelta(seconds=60))),
+                    (to_utc_iso(now), token_hash, to_utc_iso(now - timedelta(seconds=60))),
                 )
                 conn.commit()
         record = dict(row)

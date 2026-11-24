@@ -612,7 +612,6 @@ function displayReportAnalysis(data) {
     const provenance = data.provenance || {};
     if (Object.keys(provenance).length) {
         window.GmsWorkspace?.update({
-            worker_id: provenance.worker_id || workspaceWorkerId(),
             cluster_job_id: provenance.cluster_job_id || '',
             attempt_id: provenance.attempt_id || '',
             automation_run_id: provenance.automation_run_id || '',
@@ -622,7 +621,6 @@ function displayReportAnalysis(data) {
             gerrit_change_id: provenance.gerrit_change_id || '',
             gerrit_patchset: provenance.gerrit_patchset || '',
             redmine_issue_id: provenance.redmine_issue_id || '',
-            suite_path: provenance.suite_path || '',
             origin_page: 'report-analysis'
         }, {source: 'report-analysis'});
     }

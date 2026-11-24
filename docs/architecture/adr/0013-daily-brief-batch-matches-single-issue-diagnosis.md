@@ -65,3 +65,11 @@ After the first nightly runs on this ADR, the report contract advanced to
 `redmine_daily_triage_v12` remains the independent skill-workflow contract
 axis pinned by the packaging test; v19 only advances the prompt/report
 contract axis.
+
+## Current contract
+
+The sentences above record the contract at the time of this ADR and its
+2026-09-28 addendum. The live prompt, skill reference, and packaging pin
+are `redmine_daily_triage_v32` (`PROMPT_VERSION` in
+`features/redmine/kkagent/analyzer.py`). Do not roll the pin back to v12
+or v19.

@@ -194,11 +194,9 @@ async function firmwareShareApiWithAuth(path, body, host) {
     const response = initial.response;
     const data = initial.data;
 
-    // 401（认证失败），或 400（连接超时/网络不通）且本次未带缓存密码时，
-    // 弹框让用户输入密码重试（重试请求会带上新输入的密码）。
-    // 因为 "timed out" 等网络错误可能源于认证环节，给用户输入密码的机会更合理。
-    const isAuthOrConnectionError = response.status === 401
-        || (response.status === 400 && !cached);
+    // 401 才是认证失败，弹框让用户输入密码重试。
+    // 路径错误仍是 400；连接、超时和权限失败分别是 502/504/403，不再当成缺密码。
+    const isAuthOrConnectionError = response.status === 401;
     if (isAuthOrConnectionError) {
         const message = data.error || '连接远端固件主机失败，请输入 SSH 登录密码重试';
         const password = await promptFirmwareSharePassword(host, message);

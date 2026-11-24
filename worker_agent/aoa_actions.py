@@ -177,9 +177,19 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
     deadline = time.monotonic() + max(0, int(timeout_seconds))
     last_state = "absent"
     while True:
-        completed = subprocess.run(
-            ["adb", "devices", "-l"], capture_output=True, text=True, timeout=15, check=False)
+        try:
+            completed = subprocess.run(
+                ["adb", "devices", "-l"], capture_output=True, text=True, timeout=15, check=False)
+        except (OSError, subprocess.TimeoutExpired):
+            completed = None
         last_state = "absent"
+        if completed is None:
+            last_state = "probe_failed"
+            validate_binding()
+            if time.monotonic() >= deadline:
+                return _adb_wait_timeout(last_state)
+            time.sleep(2)
+            continue
         matches = 0
         for line in (completed.stdout or "").splitlines()[1:]:
             parts = line.split()
@@ -207,17 +217,22 @@ def _wait_adb_state(serial: str, timeout_seconds: int) -> dict[str, Any]:
             return {"adb_state": "device", "adb_recovered": True,
                     "usb_port_path": bound_port()}
         if time.monotonic() >= deadline:
-            return {
-                "adb_state": last_state,
-                "adb_recovered": False,
-                "adb_hint": {
-                    "unauthorized": "请在设备上确认 USB 调试授权弹窗",
-                    "offline": "ADB 处于 offline，尝试重新插拔或重启 adbd",
-                    "absent": "设备未出现，确认已开启 USB 调试并连接",
-                    "io_dead": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证",
-                }.get(last_state, "ADB 未进入 device 状态"),
-            }
+            return _adb_wait_timeout(last_state)
         time.sleep(2)
+
+
+def _adb_wait_timeout(last_state: str) -> dict[str, Any]:
+    return {
+        "adb_state": last_state,
+        "adb_recovered": False,
+        "adb_hint": {
+            "unauthorized": "请在设备上确认 USB 调试授权弹窗",
+            "offline": "ADB 处于 offline，尝试重新插拔或重启 adbd",
+            "absent": "设备未出现，确认已开启 USB 调试并连接",
+            "io_dead": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证",
+            "probe_failed": "adb devices 探测失败或超时",
+        }.get(last_state, "ADB 未进入 device 状态"),
+    }
 
 
 def _transfer(device, request: int, value: int, index: int, data: bytes = b"") -> int:

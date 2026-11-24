@@ -158,3 +158,42 @@ def is_local_host(host: str) -> bool:
         host = host.rsplit('@', 1)[1]
     normalized = host.strip().strip('[]')
     return normalized in _collect_local_ips()
+
+
+def _split_nmcli_terse(line: str) -> list[str]:
+    """Split one ``nmcli -t`` row on unescaped colons.
+
+    Terse mode writes ``\\:`` for a colon and ``\\\\`` for a backslash.
+    Splitting on every raw colon turns a profile named ``a:b`` into two
+    fields, and a later ``nmcli connection up`` targets the wrong name.
+    """
+    fields: list[str] = []
+    current: list[str] = []
+    escaped = False
+    for char in line:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == ":":
+            fields.append("".join(current))
+            current = []
+            continue
+        current.append(char)
+    if escaped:
+        current.append("\\")
+    fields.append("".join(current))
+    return fields
+
+
+def parse_vpn_connection_names(output: str) -> list[str]:
+    """Read NetworkManager VPN profiles from terse NAME,TYPE[,STATE] output."""
+    names = []
+    for line in output.splitlines():
+        parts = _split_nmcli_terse(line)
+        if len(parts) >= 2 and parts[1].strip().lower() == "vpn" and (name := parts[0].strip()):
+            names.append(name)
+    return names

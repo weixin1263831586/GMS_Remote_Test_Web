@@ -106,10 +106,13 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #tab-management .section-head .ui-icon{width:14px;height:14px;flex:none}
 #cluster-toolbar [hidden],.cluster-main [hidden],#worker-config-modal [hidden]{display:none!important}
 #tab-dashboard,#tab-management{flex:1;min-height:0;margin:0}
+/* One spacing template for both cluster tabs: 12px page edge (keep) and
+   8px (--ui-spacing-sm) between all internal blocks, both pages alike. */
+#tab-dashboard,#tab-management{padding:var(--ui-spacing-md)}
 #tab-dashboard{overflow-y:auto;overscroll-behavior:contain}
-#tab-management{overflow:hidden;overscroll-behavior:contain;display:flex;flex-direction:column;gap:10px}
-#dashboard{display:flex;flex-direction:column;height:100%;min-height:650px;min-width:0;gap:var(--ui-spacing-lg);background:none;border:0;border-radius:0;padding:0;overflow:visible}
-#dashboard .dash-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--ui-spacing-md);flex:none;margin:0}
+#tab-management{overflow:hidden;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--ui-spacing-sm)}
+#dashboard{display:flex;flex-direction:column;height:100%;min-height:650px;min-width:0;gap:var(--ui-spacing-sm);background:none;border:0;border-radius:0;padding:0;overflow:visible}
+#dashboard .dash-cards{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--ui-spacing-sm);flex:none;margin:0}
 .cluster-main .dash-stat-card{height:var(--ui-stat-height);min-height:var(--ui-stat-height);display:flex;align-items:center;flex-direction:row;gap:12px;padding:10px 14px;background:#1d1d26;border:1px solid #373642;border-radius:9px}
 .cluster-main .stat-icon{width:42px;height:42px;display:flex;align-items:center;justify-content:center;border-radius:9px;flex:none;color:#b69bfb;background:#2b2939}
 .cluster-main .stat-icon .ui-icon{width:22px;height:22px}
@@ -117,31 +120,35 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 .cluster-main .dash-stat-card .label{color:#c4bfd6;}
 .cluster-main .dash-stat-card .num{line-height:1.05;font-variant-numeric:tabular-nums;color:#f1f1f6}
 .cluster-main .dash-stat-card .sub{color:#aaa6ba;white-space:nowrap}
-#dashboard .dash-charts-row{min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,.95fr);gap:12px;flex:1;margin:0}
-#dashboard .dash-row-top{flex:.9 1 0;min-height:255px}
+#dashboard .dash-charts-row{min-height:0;display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,.95fr);gap:var(--ui-spacing-sm);flex:1;margin:0}
+#dashboard .dash-row-top{flex:1.05 1 0;min-height:255px}
 #dashboard .dash-row-bottom{flex:1.16 1 0;min-height:285px}
 #dashboard .dash-panel,#tab-management .cluster-pnl{min-width:0;min-height:0;display:flex;flex-direction:column;padding:0;overflow:hidden;border:1px solid #393743;border-radius:9px;background:#1c1c24}
-#dashboard .dash-panel-title{margin:0;flex:none;padding:10px 13px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #363440}
+/* Shared panel-header template: Dashboard titles and Management section
+   heads are the same --ui-card-heading-height bar with one control height. */
+#dashboard .dash-panel-title{margin:0;flex:none;display:flex;align-items:center;gap:8px;height:var(--ui-card-heading-height);min-height:var(--ui-card-heading-height);padding:0 13px;border-bottom:1px solid #363440;white-space:nowrap;overflow:hidden}
 #dashboard .dash-panel-title .ui-icon{width:15px;height:15px;color:#ad96f6}
 #dashboard .dash-panel .dash-empty{margin:10px 13px;color:var(--muted)}
 #dashboard .dash-panel-sub{margin-left:auto;color:var(--muted)}
 #dashboard .dash-gauges-host-tabs,#dashboard .dash-trend-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:9px 13px 6px;margin:0}
 #dashboard .dash-trend-tabs{box-sizing:border-box;min-height:41px}
+/* 主机资源概览 3 台主机需无滚动放下：筛选条与汇总脚注比趋势页签更紧凑。 */
+#dashboard .dash-gauges-host-tabs{padding:6px 13px 3px}
 #dashboard .dash-trend-btn{padding:4px 10px;border-radius:5px;min-height:var(--ui-control-height-small);background:#252430;border:1px solid #3a3848;color:#c4c0d0}
 #dashboard .dash-trend-btn.active{background:#795ac6;color:#fff;border-color:#997ee9}
 #dashboard .dash-trend-btn:hover:not(.active){color:#fff;background:#323040}
-#dashboard .dash-resource-list{padding:0 13px 12px;overflow:auto;flex:1;min-height:0;width:100%}
+#dashboard .dash-resource-list{padding:0 13px 8px;overflow:auto;flex:1;min-height:0;width:100%}
 #dashboard .dash-resource-table{width:100%;min-width:575px;border-collapse:collapse;table-layout:fixed}
-#dashboard .dash-resource-table th{background:#24232e;height:var(--ui-table-header-height);color:#bdb8ca;border:0;padding:5px 9px;text-align:left;position:sticky;top:0}
-#dashboard .dash-resource-table td{padding:7px 9px;border-bottom:1px solid #35333f;height:var(--ui-table-row-height);color:#d9d7e2}
+#dashboard .dash-resource-table th{background:#24232e;height:var(--ui-table-header-height-dense);color:#bdb8ca;border:0;padding:5px 9px;text-align:left;position:sticky;top:0}
+#dashboard .dash-resource-table td{padding:4px 9px;border-bottom:1px solid #35333f;color:#d9d7e2}
 #dashboard .dash-resource-table tr:last-child td{border-bottom:0}
 #dashboard .resource-host-name{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-#dashboard .resource-host-sub{display:block;color:#9390a6;margin-top:3px}
+#dashboard .resource-host-sub{display:block;color:#9390a6;margin-top:2px}
 #dashboard .resource-progress{display:flex;align-items:center;gap:7px;min-width:0;font-variant-numeric:tabular-nums}
 #dashboard .resource-track{display:block;flex:1;min-width:28px;max-width:135px;height:7px;border-radius:6px;background:#373642;overflow:hidden}
 #dashboard .resource-fill{display:block;width:var(--progress);max-width:100%;height:100%;background:var(--bar-color);border-radius:6px}
 #dashboard .resource-progress strong{width:39px;flex:none}
-#dashboard .resource-summary{padding:5px 13px 8px;border-top:1px solid #35333f;color:#9f9caf;}
+#dashboard .resource-summary{padding:4px 13px 5px;border-top:1px solid #35333f;color:#9f9caf;}
 #dashboard .dash-device-legend{display:flex;flex-wrap:wrap;gap:10px;margin-left:auto;color:var(--muted);}
 #dashboard .device-legend-item{display:inline-flex;align-items:center;gap:4px}
 #dashboard .legend-dot{width:8px;height:8px;border-radius:2px;display:inline-block;background:var(--dot)}
@@ -166,11 +173,20 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #dashboard .dash-test-row .badge-mini{grid-row:1/3;padding:4px 5px;border-radius:4px;text-align:center}
 #dashboard .dash-test-row .dev{grid-column:2;color:#9895a8;}
 #dashboard .dash-test-row .dur{grid-column:3;grid-row:1/3;color:#a5a0b5}
-#tab-management .cluster-pnl .section-head{flex:none;height:auto;min-height:43px;padding:8px 13px;margin:0;border-bottom:1px solid #383541;gap:10px}
-#tab-management .section-head h2{display:flex;align-items:center;gap:8px;white-space:nowrap}
+/* One panel header template: every management panel head is
+   --ui-card-heading-height tall, one text line, and its trailing control
+   (filter / refresh / detail actions) uses --ui-control-height. */
+#tab-management .cluster-pnl .section-head{flex:none;display:flex;flex-wrap:nowrap;align-items:center;height:var(--ui-card-heading-height);min-height:var(--ui-card-heading-height);padding:0 13px;margin:0;border-bottom:1px solid #383541;gap:10px;overflow:hidden}
+#tab-management .section-head h2{display:flex;align-items:center;gap:8px;white-space:nowrap;flex:0 0 auto}
 #tab-management .section-head h2 .ui-icon{color:#b4a1f4}
 #tab-management .heading-count{color:#9d91c8;}
-#tab-management .cluster-section-note{color:#9895aa}
+#tab-management .section-head :is(button,.compact-filter){flex:0 0 auto;height:var(--ui-control-height);margin:0}
+#tab-management .section-head :is(.section-head-copy + button,.section-head-copy + .compact-filter){margin-left:auto}
+/* Narrow viewports keep the same one-row template: the head grows just
+   enough for the 40px touch control instead of wrapping onto a second row. */
+@media(max-width:700px){
+  #tab-management .cluster-pnl .section-head{height:calc(var(--ui-touch-target-height) + 4px);min-height:calc(var(--ui-touch-target-height) + 4px);padding:0 9px;gap:7px}
+}
 #tab-management .cluster-workers-panel{flex:0 1 auto;min-height:0;max-height:min(31%,240px);overflow:hidden}
 #tab-management .cluster-workers-list{flex:1 1 auto;min-height:0;padding:0 11px 7px;overflow:auto;overscroll-behavior:contain}
 #tab-management .worker-main-name{color:#ededf3;display:block;white-space:nowrap}
@@ -186,7 +202,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #tab-management .worker-service-list .cap{padding:3px 5px;border-radius:4px}
 #tab-management .worker-actions{display:flex;align-items:center;gap:4px;white-space:nowrap}
 #tab-management .worker-actions button{height:var(--ui-control-height-small);padding:3px 8px;margin:0;}
-#tab-management .cluster-management-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);align-items:stretch;gap:10px;flex:1 1 0;min-height:0;overflow:hidden}
+#tab-management .cluster-management-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);align-items:stretch;gap:var(--ui-spacing-sm);flex:1 1 0;min-height:0;overflow:hidden}
 #tab-management .cluster-management-operations{min-height:0}
 #tab-management .cluster-management-grid .cluster-pnl{min-height:0}
 #tab-management .cluster-pnl > .table-wrap{min-height:0;flex:1 1 0;border:0;border-radius:0;overflow:auto;overscroll-behavior:contain;max-height:none}
@@ -196,7 +212,8 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 #tab-management #cluster-device-table{min-width:680px}
 #tab-management #suites-table{min-width:620px}
 #tab-management #suites-table td:last-child{max-width:320px;overflow:hidden;text-overflow:ellipsis}
-#tab-management .section-head-copy{white-space:normal;flex-wrap:wrap;gap:2px 7px}
+#tab-management .section-head-copy{display:flex;align-items:center;gap:8px;min-width:0;white-space:nowrap;flex-wrap:nowrap;flex:1 1 auto}
+#tab-management .section-head-copy > p{margin:0;min-width:0;overflow:hidden;text-overflow:ellipsis;color:#9895aa}
 #tab-management #detail{padding:0 12px 14px;overflow:visible;flex:none}
 #tab-management #detail .section-head{margin:0 -12px 10px}
 #tab-management #detail .meta{display:flex;flex-wrap:wrap;gap:10px}
@@ -204,7 +221,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 .cluster-main button:focus-visible,.cluster-main input:focus-visible,.cluster-main select:focus-visible{outline:2px solid #a892ff;outline-offset:2px}
 @media(max-width:1380px){#dashboard .dash-charts-row{grid-template-columns:minmax(0,1.15fr) minmax(0,1fr)}.cluster-main .dash-stat-card{padding:10px;gap:8px}.cluster-main .stat-icon{width:34px;height:34px}}
 @media(max-width:1150px){#dashboard,#tab-dashboard{height:auto}#dashboard .dash-charts-row{grid-template-columns:1fr;flex:none}#dashboard .dash-panel{min-height:260px}#dashboard .dash-row-bottom>.dash-panel:first-child{min-height:330px}#dashboard .dash-cards{grid-template-columns:repeat(3,minmax(0,1fr))}}
-@media(max-width:700px){#dashboard .dash-cards{grid-template-columns:repeat(2,minmax(0,1fr))}#tab-dashboard,#tab-management{padding:9px}#cluster-toolbar{padding:0}#cluster-toolbar .compact-filter{width:115px}#tab-management .cluster-section-note,#tab-management .section-head-copy p{display:none}}
+@media(max-width:700px){#dashboard .dash-cards{grid-template-columns:repeat(2,minmax(0,1fr))}#tab-dashboard,#tab-management{padding:var(--ui-spacing-sm)}#cluster-toolbar{padding:0}#cluster-toolbar .compact-filter{width:115px}#tab-management .section-head-copy > p{display:none}}
 @media(max-width:470px){#dashboard .dash-cards{grid-template-columns:1fr}#cluster-toolbar .stable-action{min-width:48px;padding:3px 5px}}
 
 
@@ -239,12 +256,12 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 
 /* Viewport-fitted management: the four inventory tables own their scrolling.
    This panel must not introduce a second, outer page scrollbar. */
-#tab-management{position:relative;min-height:0;min-width:0;flex:1 1 0;padding:var(--ui-spacing-lg) 12px 12px}
+#tab-management{position:relative;min-height:0;min-width:0;flex:1 1 0}
 #tab-management .cluster-management-grid>.cluster-pnl{min-width:0;min-height:0;height:100%}
-#tab-management #detail:not([hidden]){position:absolute;inset:10px 12px 12px;z-index:35;max-height:none;min-height:0;flex:none;padding:0 12px 14px;overflow:auto;overscroll-behavior:contain;box-shadow:0 14px 34px #000b}
+#tab-management #detail:not([hidden]){position:absolute;inset:var(--ui-spacing-md);z-index:35;max-height:none;min-height:0;flex:none;padding:0 var(--ui-spacing-md) var(--ui-spacing-md);overflow:auto;overscroll-behavior:contain;box-shadow:0 14px 34px #000b}
 #tab-management #detail .section-head{position:sticky;top:0;z-index:2;background:#24232e}
 #tab-management #close-job-detail{margin-left:8px;flex:none;padding:3px 8px;}
-@media(max-width:700px){#tab-management{gap:7px;padding:7px}#tab-management .cluster-management-grid{gap:7px}#tab-management .cluster-workers-panel{max-height:30%}#tab-management .cluster-pnl .section-head{min-height:37px;padding:6px 9px}#tab-management #detail:not([hidden]){inset:7px}}
+@media(max-width:700px){#tab-management .cluster-management-grid{gap:var(--ui-spacing-sm)}#tab-management .cluster-workers-panel{max-height:30%}#tab-management #detail:not([hidden]){inset:var(--ui-spacing-sm)}}
 
 
 /* Cluster first paint: local, lightweight placeholders instead of a viewport-wide
@@ -323,7 +340,7 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
   width:max-content;
   min-width:0;
   max-width:100%;
-  height:30px;
+  height:var(--ui-control-height);
   padding:4px 12px;
   white-space:nowrap;
   box-sizing:border-box;
@@ -337,8 +354,8 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
 @media(max-width:560px){
   #cluster-toolbar #refresh,
   #tab-management #reload-library{
-    height:40px;
-    min-height:40px;
+    height:var(--ui-touch-target-height);
+    min-height:var(--ui-touch-target-height);
     padding-inline:12px;
   }
 }
@@ -348,9 +365,9 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
 /* Worker host cards: organized layers, quiet accents and readable telemetry. */
 #tab-management .cluster-workers-panel{flex:0 0 auto;max-height:none;min-height:0;padding:0;border:0;border-radius:0;background:transparent;overflow:visible}
 #tab-management .cluster-workers-list{padding:0;min-height:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-inline:contain;scrollbar-width:thin}
-#tab-management .worker-card-grid{display:grid;grid-auto-flow:column;grid-template-rows:minmax(0,1fr);grid-auto-columns:max(500px,calc((100% - 16px)/3));gap:8px;align-items:stretch;width:100%}
-#tab-management .worker-card-grid[data-columns="2"]{grid-auto-columns:max(500px,calc((100% - 8px)/2))}
-#tab-management .worker-card-grid[data-columns="1"]{grid-auto-columns:max(500px,100%)}
+#tab-management .worker-card-grid{--worker-card-min-width:572px;--worker-grid-gap:var(--ui-spacing-sm);display:grid;grid-auto-flow:column;grid-template-rows:minmax(0,1fr);grid-auto-columns:max(var(--worker-card-min-width),calc((100% - (2 * var(--worker-grid-gap)))/3));gap:var(--worker-grid-gap);align-items:stretch;width:100%}
+#tab-management .worker-card-grid[data-columns="2"]{grid-auto-columns:max(var(--worker-card-min-width),calc((100% - var(--worker-grid-gap))/2))}
+#tab-management .worker-card-grid[data-columns="1"]{grid-auto-columns:max(var(--worker-card-min-width),100%)}
 #tab-management .worker-card{
  --worker-accent:#827c9f;
  display:grid;grid-template-rows:36px 22px minmax(0,1fr);row-gap:5px;
@@ -384,16 +401,11 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
 #tab-management .worker-card .worker-summary-state .assessment{padding:2px 6px;flex:0 0 auto;border-radius:4px}
 #tab-management .worker-card .worker-service-list{display:flex;align-items:center;gap:4px;flex:0 0 auto;white-space:nowrap;min-width:0}
 #tab-management .worker-card .worker-service-list .cap{padding:2px 6px;border-radius:4px}
-/* Dedicate real space to the two utilization tracks rather than leaving blank
-   metric-column tails. Keep adequate width for the full RAM capacity text. */
-#tab-management .worker-card-metrics{display:grid;grid-template-columns:minmax(185px,1.2fr) minmax(180px,1.28fr) minmax(28px,.27fr) minmax(28px,.27fr) minmax(40px,.37fr);column-gap:4px;align-items:center;min-width:0;min-height:0;padding:6px 1px 0;border-top:1px solid rgba(155,145,179,.16)}
+/* Keep the three utilization tracks and both capacity labels in one row. */
+#tab-management .worker-card-metrics{display:grid;grid-template-columns:minmax(126px,1fr) repeat(2,minmax(150px,1.22fr)) minmax(28px,.27fr) minmax(28px,.27fr) minmax(40px,.37fr);column-gap:4px;align-items:center;min-width:0;min-height:0;padding:6px 1px 0;border-top:1px solid rgba(155,145,179,.16)}
 #tab-management .worker-card-metric{display:flex;flex-direction:column;align-items:flex-start;justify-content:flex-start;gap:4px;min-width:0;min-height:0;white-space:nowrap}
-/* CPU and memory use the same baseline: label / percentage / short bar.
-   The second row is reserved for memory capacity so bars never shift. */
-/* Prevent implicit auto column shrink: CPU/memory meter rows need
-   the full metric-cell width, not only their text's intrinsic width. */
-#tab-management .worker-card .worker-cpu,
-#tab-management .worker-card .worker-memory{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:18px 12px;align-content:center;row-gap:2px}
+/* Reserve a second row for capacity labels and align all three tracks. */
+#tab-management .worker-card :is(.worker-cpu,.worker-memory,.worker-disk){display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:18px 12px;align-content:center;row-gap:2px}
 #tab-management .worker-card .worker-cpu::after{content:"";height:12px}
 /* Fill the metric track while keeping a measured 10px right-side
    breathing gap, plus the existing grid column gap. This avoids both
@@ -409,15 +421,16 @@ html[data-cluster-initial-tab="management"] #cluster-toolbar #show-onboarding[hi
 #tab-management .worker-meter{width:100%;height:4px;flex:0 0 4px;background:#393642;border-radius:4px;overflow:hidden}
 #tab-management .worker-meter-fill{display:block;width:var(--meter-width,0%);height:100%;max-width:100%;background:#9089b3;border-radius:4px}
 #tab-management .worker-cpu .worker-meter-fill{background:#8b9cc6}
+#tab-management .worker-disk .worker-meter-fill{background:#6fa994}
 #tab-management .worker-card[data-health="warning"] .worker-cpu .worker-meter-fill{background:#c2a66f}
 #tab-management .worker-card[data-health="danger"] .worker-cpu .worker-meter-fill{background:#c47e89}
 #tab-management .worker-meter-unknown .worker-meter-fill{opacity:0}
-#tab-management .worker-card .worker-memory-detail{display:block;grid-row:2;margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:12px;color:#9790a8}
+#tab-management .worker-card :is(.worker-memory-detail,.worker-disk-detail){display:block;grid-row:2;margin:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:12px;color:#9790a8}
 #tab-management .worker-card .worker-counts{align-items:center;text-align:center;gap:5px}
 #tab-management .worker-card .worker-counts strong{line-height:17px}
 #tab-management .worker-card-loading{display:flex;flex-direction:column;justify-content:center;gap:13px}
 #tab-management .worker-card-loading .cluster-skeleton-line{height:9px;margin:0}
-@media(max-width:560px){#tab-management .worker-card{height:144px}#tab-management .worker-card-grid{grid-auto-columns:max(500px,calc((100% - 16px)/3))}#tab-management .worker-card .worker-actions button{height:30px;min-height:30px}}
+@media(max-width:560px){#tab-management .worker-card{height:144px}#tab-management .worker-card .worker-actions button{height:30px;min-height:30px}}
 @media(prefers-reduced-motion:reduce){#tab-management .worker-card{transition:none}}
 /* 任务监控表（#jobs）固定布局：七列收进 .table-wrap，长单元格省略，
    不横向撑宽面板（表格固定布局后不再出现水平滚动条）。 */

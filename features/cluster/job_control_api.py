@@ -26,7 +26,8 @@ def _require_job_access(request: Request, job: dict) -> None:
 
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(job_id: str, request: Request):
-    job = service().repository.get_job(job_id)
+    repository = service().repository
+    job = repository.get_job(job_id)
     if not job:
         raise HTTPException(404, "job not found")
     _require_job_access(request, job)
@@ -47,12 +48,17 @@ def cancel_job(job_id: str, request: Request):
     worker_job_id = (
         (job.get("attempt") or {}).get("worker_job_id", "") or f"wj-{job_id}"
     )
-    command = service().repository.create_command({
+    operation_id = f"{job['current_attempt_id']}:stop_test"
+    while previous := repository.get_command_by_operation(job["assigned_worker_id"], operation_id):
+        if previous["status"] not in {"failed", "cancelled"}:
+            break
+        operation_id = f"{job['current_attempt_id']}:stop_test:{previous['id']}"
+    command = repository.create_command({
         "worker_id": job["assigned_worker_id"],
         "command_type": "stop_test",
         "job_id": job_id,
         "attempt_id": job["current_attempt_id"],
-        "operation_id": f"{job['current_attempt_id']}:stop_test",
+        "operation_id": operation_id,
         "payload": {
             "worker_job_id": worker_job_id,
             "trace_id": job.get("trace_id", ""),
@@ -72,7 +78,7 @@ def cancel_job(job_id: str, request: Request):
     # 此间隙把任务转入 completed/failed。transition_job 会按状态机拒绝
     # 该过渡；此时返回刷新后的终态任务（幂等取消语义）而不是 500。
     try:
-        service().repository.transition_job(
+        repository.transition_job(
             job_id,
             "stopping",
             source="api",
@@ -82,13 +88,13 @@ def cancel_job(job_id: str, request: Request):
             payload={"command_id": command["id"]},
         )
     except InvalidJobTransitionError:
-        refreshed = service().repository.get_job(job_id)
+        refreshed = repository.get_job(job_id)
         terminal = {"completed", "failed", "cancelled"}
         if refreshed is None or refreshed["status"] not in terminal:
             raise
         return {"success": True, "job": refreshed, "already_terminal": True}
     return {
         "success": True,
-        "job": service().repository.get_job(job_id),
+        "job": repository.get_job(job_id),
         "command": command,
     }

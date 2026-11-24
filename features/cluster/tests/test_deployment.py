@@ -389,6 +389,10 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertIn("/tmp/source.token", command)
         self.assertNotIn("worker-secret", command)
         self.assertIn("rm -f /tmp/source.tar.gz /tmp/source.token", command)
+        self.assertIn("sudo -S -p '' -v;", command)
+        self.assertLess(command.index("set -e"), command.index("sudo -S"))
+        self.assertLess(command.index("trap cleanup EXIT"), command.index("sudo -S"))
+        self.assertLess(command.index("sudo -S"), command.index("tar -xzf"))
 
     def test_source_only_installer_is_minimal_and_offline(self):
         script = (
@@ -404,6 +408,62 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertNotIn("GTS_CREDENTIAL", script)
         self.assertNotIn("x11vnc", script)
         self.assertNotIn("curl ", script)
+
+
+class DeploymentFailureMappingTests(unittest.TestCase):
+    def test_connect_timeout_is_504_without_exception_text(self):
+        from features.cluster.deployment_api import _ssh_connect_error
+
+        raised = _ssh_connect_error(
+            TimeoutError("secret-banner"),
+            username="user",
+            hostname="192.0.2.10",
+            ssh_port=22,
+        )
+
+        self.assertEqual(raised.status_code, 504)
+        self.assertNotIn("secret-banner", raised.detail)
+        self.assertIn("192.0.2.10", raised.detail)
+
+    def test_connect_refused_is_502_without_exception_text(self):
+        from features.cluster.deployment_api import _ssh_connect_error
+
+        raised = _ssh_connect_error(
+            ConnectionRefusedError(111, "connection refused"),
+            username="user",
+            hostname="192.0.2.10",
+            ssh_port=22,
+        )
+
+        self.assertEqual(raised.status_code, 502)
+        self.assertNotIn("connection refused", str(raised.detail).lower())
+
+    def test_installer_timeout_and_failure_hide_output(self):
+        from features.cluster.deployment_api import _installer_failure
+        from foundation.command_result import CommandResult
+
+        timed_out = _installer_failure(CommandResult(
+            stdout="token=sekret", stderr="", code=-1, timed_out=True,
+        ))
+        failed = _installer_failure(CommandResult(
+            stdout="token=sekret", stderr="boom", code=1,
+        ))
+
+        self.assertEqual(timed_out.status_code, 504)
+        self.assertNotIn("sekret", timed_out.message)
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(failed.message, "installer failed")
+        self.assertNotIn("sekret", failed.message)
+
+    def test_archive_path_is_not_predictable(self):
+        from features.cluster.deployment_api import _staged_credential_path
+
+        first = _staged_credential_path("gms-worker-setup.tar.gz")
+        second = _staged_credential_path("gms-worker-setup.tar.gz")
+
+        self.assertNotEqual(first, second)
+        self.assertTrue(first.startswith("/tmp/gms-worker-setup.tar.gz-"))
+        self.assertNotEqual(first, "/tmp/gms-worker-setup.tar.gz")
 
 
 class LocalSoftwareReconfigurationTests(unittest.TestCase):

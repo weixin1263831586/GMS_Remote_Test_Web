@@ -95,6 +95,7 @@ class RedmineServiceTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(agent.client.closed)
         self.assertEqual(service.status()["last_result"]["status"], "failed")
+        self.assertNotIn("analysis failed", service.status()["last_result"]["error"])
 
 
 if __name__ == "__main__":

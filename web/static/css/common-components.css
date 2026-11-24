@@ -1347,6 +1347,7 @@ select option {
     opacity: 0;
     visibility: hidden;
     transition: var(--transition-normal);
+    transition-property: opacity, transform;
     z-index: 13000;
 
 

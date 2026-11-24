@@ -279,7 +279,7 @@ async function setAnalysisTimelineView(view) {
         + encodeURIComponent(state.runId)) || {};
       if (!document.getElementById(modalId)) return;
       var run = payload.run || {};
-      var issue = (payload.issues || [])[0] || {};
+      var issue = analysisTimelineIssue(payload, state.issueId);
       state.runStatus = String(run.status || state.runStatus || '');
       box.innerHTML = '<div class="analysis-timeline-final">'
         + analysisTimelineFinalBody(issue, run) + '</div>';
@@ -436,11 +436,23 @@ function analysisTimelineFinalBody(issue, run) {
   } else if (status === 'cancelled' || run.status === 'cancelled') {
     banner = '<div class="daily-brief-warning">分析已停止。已完成的结果会保留，可稍后重新分析。</div>';
   }
-  var body = '';
-  if (String(((issue || {}).result || {}).detailed_report || '').trim()) {
-    body = singleIssueAnalysisReportBody({ run: run, issues: [issue] });
+  var body = singleIssueAnalysisReportBody({ run: run, issues: [issue || {}] });
+  var hasReport = String((((issue || {}).result || {}).detailed_report) || '').trim()
+    || String(((((issue || {}).previous_analysis || {}).result || {}).detailed_report) || '').trim();
+  if (!banner && !hasReport) {
+    return body;
   }
-  return (banner || '<div class="muted">本次分析未生成报告。</div>') + body;
+  return banner + body;
+}
+
+function analysisTimelineIssue(payload, issueId) {
+  var issues = (payload && payload.issues) || [];
+  var wanted = String(issueId || '');
+  if (!wanted) return issues[0] || {};
+  for (var i = 0; i < issues.length; i++) {
+    if (String((issues[i] || {}).issue_id) === wanted) return issues[i];
+  }
+  return {};
 }
 
 async function finishAnalysisTimeline(expectedModalId, expectedRunId, expectedIssueId) {
@@ -455,7 +467,7 @@ async function finishAnalysisTimeline(expectedModalId, expectedRunId, expectedIs
         || state.issueId !== expectedIssueId) return;
     if (!document.getElementById(modalId)) { stopAnalysisTimelinePolling(); return; }
     var run = payload.run || {};
-    var issue = (payload.issues || [])[0] || {};
+    var issue = analysisTimelineIssue(payload, state.issueId);
     // 独立单号分析：把终态写回列表缓存；晨报 run 交给整卡刷新。
     if (String(run.mode || '').indexOf('issue:') === 0) {
       upsertSingleIssueAnalysis(payload);

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import logging
 import os
 import re
 import stat as stat_module
@@ -21,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 
 from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
+from foundation.error_model import ApiError
 from foundation.responses import error_response, success_response
 from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.ssh_security import configure_strict_host_keys
@@ -29,10 +31,52 @@ from . import runtime
 
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class _AuthError(ValueError):
     """远端认证失败：前端可据此弹框让用户输入密码后重试（HTTP 401）。"""
+
+
+class _RemoteAccessError(Exception):
+    """远端读写失败。消息是固定中文，不含异常原文。"""
+
+
+class _RemoteMissingError(_RemoteAccessError):
+    pass
+
+
+class _RemoteForbiddenError(_RemoteAccessError):
+    pass
+
+
+class _RemoteTimeoutError(_RemoteAccessError):
+    pass
+
+
+class _RemoteUpstreamError(_RemoteAccessError):
+    pass
+
+
+def _raise_remote_transport(exc: Exception) -> None:
+    logger.warning("firmware share transport failed: %s", type(exc).__name__)
+    if isinstance(exc, TimeoutError):
+        raise _RemoteTimeoutError("读取远端固件超时") from exc
+    if isinstance(exc, PermissionError):
+        raise _RemoteForbiddenError("远端路径没有访问权限") from exc
+    if isinstance(exc, paramiko.SSHException):
+        raise _RemoteUpstreamError("SSH连接错误") from exc
+    raise _RemoteUpstreamError("无法连接到主机（网络不通或端口未开放）") from exc
+
+
+def _remote_access_response(exc: _RemoteAccessError):
+    if isinstance(exc, _RemoteMissingError):
+        return ApiError.not_found(str(exc)).to_response()
+    if isinstance(exc, _RemoteForbiddenError):
+        return ApiError.forbidden(str(exc)).to_response()
+    if isinstance(exc, _RemoteTimeoutError):
+        return ApiError.dependency_timeout(str(exc)).to_response()
+    return ApiError.upstream_failure(str(exc), service="ssh").to_response()
 
 
 _DEFAULT_STORE = Path(__file__).resolve().parents[2] / "data" / "firmware_shares.json"
@@ -266,13 +310,12 @@ def _stat_remote(host: str, user: str | None, path: str, config: dict[str, Any],
                 "mtime": int(remote_stat.st_mtime or 0),
             }
     except FileNotFoundError as exc:
-        raise ValueError(f"远端固件不存在: {path}") from exc
+        raise _RemoteMissingError(f"远端固件不存在: {path}") from exc
     except paramiko.AuthenticationException as exc:
-        raise _AuthError(f"远端认证失败（用户名/密码/密钥不匹配）: {exc}") from exc
-    except (TimeoutError, ConnectionRefusedError, OSError) as exc:
-        raise ValueError(f"无法连接到主机（网络不通或端口未开放）: {exc}") from exc
-    except paramiko.SSHException as exc:
-        raise ValueError(f"SSH连接错误: {exc}") from exc
+        logger.warning("firmware share authentication failed")
+        raise _AuthError("远端认证失败（用户名/密码/密钥不匹配）") from exc
+    except (OSError, paramiko.SSHException) as exc:
+        _raise_remote_transport(exc)
 
 
 def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, Any], password: str | None = None) -> dict[str, Any]:
@@ -313,15 +356,14 @@ def _list_remote_dir(host: str, user: str | None, path: str, config: dict[str, A
                 "files": entries,
             }
     except FileNotFoundError as exc:
-        raise ValueError(
+        raise _RemoteMissingError(
             f"远端目录不存在: {normalized_path or 'HOME'}"
         ) from exc
     except paramiko.AuthenticationException as exc:
-        raise _AuthError(f"远端认证失败（用户名/密码/密钥不匹配）: {exc}") from exc
-    except (TimeoutError, ConnectionRefusedError, OSError) as exc:
-        raise ValueError(f"无法连接到主机（网络不通或端口未开放）: {exc}") from exc
-    except paramiko.SSHException as exc:
-        raise ValueError(f"SSH连接错误: {exc}") from exc
+        logger.warning("firmware share authentication failed")
+        raise _AuthError("远端认证失败（用户名/密码/密钥不匹配）") from exc
+    except (OSError, paramiko.SSHException) as exc:
+        _raise_remote_transport(exc)
 
 
 def _find_record(share_id: str) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
@@ -446,6 +488,8 @@ async def create_firmware_share(
         return success_response(data={"record": _public_record(record)}, message="固件分享已创建")
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -464,6 +508,8 @@ async def validate_firmware_share(
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -527,6 +573,8 @@ async def browse_firmware_share_remote(
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -571,6 +619,8 @@ async def update_firmware_share_credentials(
         return success_response(message="远端凭据已更新")
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -588,6 +638,8 @@ async def check_firmware_share_download(share_id: str):
         return success_response(data=info)
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -605,6 +657,8 @@ async def download_firmware_share(share_id: str, request: Request):
         info = await run_in_threadpool(_stat_remote, record["host"], record.get("user"), record["path"], config, password=_record_password(record))
     except _AuthError as exc:
         return error_response(str(exc), 401)
+    except _RemoteAccessError as exc:
+        return _remote_access_response(exc)
     except ValueError as exc:
         return error_response(str(exc), 400)
 
@@ -733,8 +787,10 @@ def resolve_firmware_share_record(
             snapshot["host"], snapshot.get("user"), snapshot["path"], config,
             password=password,
         )
-    except _AuthError as exc:
-        return {"ok": False, "reason": f"固件分享认证失败: {exc}"}
+    except _AuthError:
+        return {"ok": False, "reason": "固件分享认证失败"}
+    except _RemoteAccessError as exc:
+        return {"ok": False, "reason": str(exc)}
     except ValueError as exc:
         return {"ok": False, "reason": f"固件分享不可用: {exc}"}
     if info.get("size", 0) <= 0:

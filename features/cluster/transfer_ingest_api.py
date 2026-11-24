@@ -16,6 +16,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 
 from features.auth import principal_display_name, principal_owner_id, require_agent_scope
+from foundation.error_model import ApiError
 
 from .api import _authenticate, _require_cluster_enabled, service
 from .config import configured_max_bytes
@@ -320,7 +321,9 @@ def import_transfer_for_apk_analysis(transfer_id: str, request: Request):
         test_runtime.cleanup_files,
     )
     if not all(required) or not test_runtime.apk_upload_dir:
-        raise HTTPException(500, "APK analysis dependencies are not initialized")
+        return ApiError.dependency_unavailable(
+            "APK analysis dependencies are not initialized"
+        ).to_response()
     transfer_root = helpers._transfer_root()
     source = (transfer_root / transfer["relative_path"]).resolve()
     if not source.is_relative_to(transfer_root.resolve()) or not source.is_file():

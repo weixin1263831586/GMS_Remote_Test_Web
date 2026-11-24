@@ -149,9 +149,13 @@ class SSHExecutor:
                 while channel.recv_ready():
                     data = channel.recv(_READ_CHUNK)
                     if data:
-                        if stdout_bytes + len(data) <= max_captured:
-                            stdout_chunks.append(data)
-                            stdout_bytes += len(data)
+                        room = max_captured - stdout_bytes
+                        if room > 0:
+                            piece = data[:room]
+                            stdout_chunks.append(piece)
+                            stdout_bytes += len(piece)
+                            if len(piece) < len(data):
+                                stdout_truncated = True
                         else:
                             stdout_truncated = True
                     made_progress = True
@@ -164,9 +168,13 @@ class SSHExecutor:
                 while channel.recv_stderr_ready():
                     data = channel.recv_stderr(_READ_CHUNK)
                     if data:
-                        if stderr_bytes + len(data) <= max_captured:
-                            stderr_chunks.append(data)
-                            stderr_bytes += len(data)
+                        room = max_captured - stderr_bytes
+                        if room > 0:
+                            piece = data[:room]
+                            stderr_chunks.append(piece)
+                            stderr_bytes += len(piece)
+                            if len(piece) < len(data):
+                                stderr_truncated = True
                         else:
                             stderr_truncated = True
                     made_progress = True
@@ -274,15 +282,10 @@ class SSHExecutor:
                 timeout=timeout,
             )
             channel = stdout.channel
-            stdout_lines: list[str] = []
-            stderr_lines: list[str] = []
-            # 行缓冲以字节为单位、解码放在整行完成后：逐 chunk 直接
-            # decode 会把跨 chunk 的多字节中文字符截断成替换符（与
-            # run() 的整流解码约束一致，见其注释）。
+            stdout_capture = bytearray()
+            stderr_capture = bytearray()
             stdout_pending = b""
             stderr_pending = b""
-            stdout_bytes = 0
-            stderr_bytes = 0
             stdout_truncated = False
             stderr_truncated = False
             loop = asyncio.get_running_loop()
@@ -304,26 +307,34 @@ class SSHExecutor:
             max_captured = self._max_captured_stream_bytes
 
             async def consume_chunk(
-                data: bytes,
-                pending: bytes,
-                captured: list[str],
-                log_type: str,
-                capture: bool = True,
-            ) -> bytes:
+                data: bytes, pending: bytes, captured: bytearray, log_type: str,
+            ) -> tuple[bytes, bool]:
+                room = max_captured - len(captured)
+                captured.extend(data[:room])
                 pending += data
-                while True:
+                while pending:
                     newline = pending.find(b"\n")
-                    if newline < 0:
+                    if newline >= 0:
+                        raw, pending = pending[:newline], pending[newline + 1:]
+                    elif len(pending) > _READ_CHUNK:
+                        # Bound buffering even if the remote emits no newline.
+                        # Split before the next complete UTF-8 character.
+                        split = _READ_CHUNK
+                        while split > 0 and pending[split] & 0xC0 == 0x80:
+                            split -= 1
+                        split = split or _READ_CHUNK
+                        raw, pending = pending[:split], pending[split:]
+                    else:
                         break
-                    raw, pending = pending[:newline], pending[newline + 1:]
-                    line = raw.decode("utf-8", errors="replace")
-                    if line.strip():
-                        # 超过捕获上限后仍逐行回调（实时日志不中断），
-                        # 但不再把行留在内存里。
-                        if capture:
-                            captured.append(line)
-                        await log_callback(line.strip(), log_type)
-                return pending
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if line:
+                        await log_callback(line, log_type)
+                return pending, len(data) > room
+
+            def captured_text(captured: bytearray, truncated: bool) -> str:
+                text = captured.decode("utf-8", errors="replace")
+                text = "\n".join(line for line in text.split("\n") if line.strip())
+                return text + _TRUNCATION_MARKER if truncated else text
 
             # One loop owns the shared channel and drains both streams. This
             # avoids two relay tasks racing on exit_status_ready() and prevents
@@ -333,14 +344,10 @@ class SSHExecutor:
                 while channel.recv_ready():
                     data = await asyncio.to_thread(channel.recv, _READ_CHUNK)
                     if data:
-                        if stdout_bytes + len(data) <= max_captured:
-                            stdout_bytes += len(data)
-                        else:
-                            stdout_truncated = True
-                        stdout_pending = await consume_chunk(
-                            data, stdout_pending, stdout_lines, "info",
-                            capture=not stdout_truncated,
+                        stdout_pending, truncated = await consume_chunk(
+                            data, stdout_pending, stdout_capture, "info",
                         )
+                        stdout_truncated |= truncated
                     made_progress = True
                     if _over_deadline():
                         raise TimeoutError(
@@ -351,14 +358,10 @@ class SSHExecutor:
                 while channel.recv_stderr_ready():
                     data = await asyncio.to_thread(channel.recv_stderr, _READ_CHUNK)
                     if data:
-                        if stderr_bytes + len(data) <= max_captured:
-                            stderr_bytes += len(data)
-                        else:
-                            stderr_truncated = True
-                        stderr_pending = await consume_chunk(
-                            data, stderr_pending, stderr_lines, "error",
-                            capture=not stderr_truncated,
+                        stderr_pending, truncated = await consume_chunk(
+                            data, stderr_pending, stderr_capture, "error",
                         )
+                        stderr_truncated |= truncated
                     made_progress = True
                     if _over_deadline():
                         raise TimeoutError(
@@ -398,21 +401,13 @@ class SSHExecutor:
                 if not made_progress:
                     await asyncio.sleep(_POLL_INTERVAL)
 
-            if stdout_pending.strip():
-                line = stdout_pending.decode("utf-8", errors="replace")
-                stdout_lines.append(line)
-                await log_callback(line.strip(), "info")
-            if stderr_pending.strip():
-                line = stderr_pending.decode("utf-8", errors="replace")
-                stderr_lines.append(line)
-                await log_callback(line.strip(), "error")
+            for pending, log_type in ((stdout_pending, "info"), (stderr_pending, "error")):
+                line = pending.decode("utf-8", errors="replace").strip()
+                if line:
+                    await log_callback(line, log_type)
 
-            stdout_text = "\n".join(stdout_lines)
-            stderr_text = "\n".join(stderr_lines)
-            if stdout_truncated:
-                stdout_text += _TRUNCATION_MARKER
-            if stderr_truncated:
-                stderr_text += _TRUNCATION_MARKER
+            stdout_text = captured_text(stdout_capture, stdout_truncated)
+            stderr_text = captured_text(stderr_capture, stderr_truncated)
 
             # drain 完成后再取退出码，并移入线程避免阻塞事件循环。
             exit_code = await asyncio.to_thread(channel.recv_exit_status)

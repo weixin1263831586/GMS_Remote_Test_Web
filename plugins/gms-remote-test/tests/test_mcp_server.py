@@ -1328,6 +1328,9 @@ class ShellToolGateTests(unittest.TestCase):
             "logcat -d --clear",                     # long option form of -c
             "logcat -d -f/data/local/tmp/audit.log", # attached -f value
             "logcat -d --file=/data/local/tmp/a.log",
+            "logcat -d -G 64K",                      # sets the log ring buffer
+            "logcat -d -P '~1000'",                  # rewrites the prune list
+            "logcat -d -s --file=/data/local/tmp/x.log",
             "dmesg -c",                              # clears kernel ring buffer
             "dmesg -C",
             "dumpsys battery plug",                  # 'plug' simulates charging
@@ -1338,6 +1341,7 @@ class ShellToolGateTests(unittest.TestCase):
     def test_gate_still_allows_readonly_logcat_and_dmesg(self):
         for cmd in (
             "logcat -d -v time",
+            "logcat -d -s MyTag",
             "logcat -T 10 -d",
             "dmesg",
             "dmesg -T",
@@ -1509,10 +1513,18 @@ class LogcatToolTests(unittest.TestCase):
         )
 
     def test_logcat_denies_file_flag(self):
-        for bad in ("-f", "--file=x"):
-            out, is_err = mcp_server.logcat_tool({"device": "D1", "args": [bad]})
-            self.assertTrue(is_err, bad)
+        captured = self._capture_run()
+        for args in (["-f"], ["--file=x"], ["-s", "--file=x"], ["-D", "--file=x"]):
+            out, is_err = mcp_server.logcat_tool({"device": "D1", "args": args})
+            self.assertTrue(is_err, args)
             self.assertIn("denied", out)
+        self.assertEqual(captured, {})
+
+    def test_logcat_since_count_cannot_switch_to_streaming(self):
+        captured = self._capture_run()
+        _, is_err = mcp_server.logcat_tool({"device": "D1", "args": ["-T", "20"]})
+        self.assertFalse(is_err)
+        self.assertEqual(captured["args"], ["D1", "-d", "-T", "20"])
 
     def test_logcat_clear_true_is_denied(self):
         # Clearing the log buffer destroys CTS/GTS diagnostic
@@ -2325,6 +2337,21 @@ class RedmineEvidenceToolTests(unittest.TestCase):
         self.assertEqual(
             captured["args"][-4:], ["--offset", "10", "--limit", "100"],
         )
+
+    def test_targeted_sdk_repair_forces_exact_cli_search(self):
+        captured = self._capture_run()
+        target = "frameworks/base/Test.java"
+        arguments = {"source": "sdk", "revision": "HEAD", "query": "Test",
+                     "path": target, "repo_scope": "frameworks/base"}
+        with (
+            patch.dict(os.environ, {"GMS_MCP_REPAIR_POLICY": json.dumps({"mode": "targeted_exact", "targets": [target]})}),
+            patch.object(mcp_server, "_REPAIR_ISSUED_SEARCHES", set()),
+            patch.object(mcp_server, "response"),
+        ):
+            mcp_server.handle({"id": 42, "method": "tools/call",
+                               "params": {"name": "gms_rt_sdk_search", "arguments": arguments}})
+        self.assertEqual(captured["command"], "gms-rt-sdk-search")
+        self.assertEqual(captured["args"][-5:], ["--path", target, "--repo-scope", "frameworks/base", "--exact-path"])
 
     def test_sdk_search_accepts_keywords_alias(self):
         # codesearch 风格的 keywords 等价于 query；两者都缺时报错点名别名。

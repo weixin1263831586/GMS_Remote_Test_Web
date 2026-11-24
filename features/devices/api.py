@@ -44,7 +44,7 @@ from .operations_api import (
     router as operations_router,
 )
 from .screens_api import show_device_screens as show_device_screens
-from .support import AsyncSSHConnection, get_or_create_user_state
+from .support import AsyncSSHConnection, device_fencing_owner_id, get_or_create_user_state
 from .ui_control_api import router as ui_control_router
 
 
@@ -281,7 +281,9 @@ async def get_connected_devices(
             device_info["locked_by"] = lock_status["locked_by"]
             device_info["locked_username"] = lock_status.get("username", "")
             device_info["locked_client_id"] = lock_status.get("client_id", "")
-            device_info["locked_by_self"] = lock_status.get("client_id") == client_id
+            device_info["locked_by_self"] = (
+                lock_status.get("client_id") == device_fencing_owner_id(request)
+            )
             device_info["locked_at"] = lock_status["locked_at"]
         else:
             device_info["locked_by"] = ""

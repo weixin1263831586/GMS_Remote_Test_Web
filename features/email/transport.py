@@ -40,8 +40,8 @@ def smtp_deliver(
 ) -> dict[str, Any]:
     """Send one assembled message; never raises.
 
-    SMTPAuthenticationError / SMTPServerDisconnected 的文案沿用了历史
-    send_email 的中文提示（163 授权码等高频故障），保持对外契约不变。
+    SMTPAuthenticationError / SMTPServerDisconnected 的中文提示沿用历史
+    send_email 文案（163 授权码等高频故障）。服务器原文只进日志。
     """
     try:
         if settings.use_ssl:
@@ -61,16 +61,18 @@ def smtp_deliver(
                     smtp.login(settings.username, settings.password)
                 smtp.sendmail(settings.from_addr, recipients, message.as_string())
     except smtplib.SMTPAuthenticationError as exc:
+        logger.warning("smtp authentication failed: %s", exc)
         return {
             "sent": False,
             "mode": "smtp",
-            "error": f"SMTP认证失败，请在设置中填写企业邮箱SMTP授权码/密码，发件人需与账号一致: {exc}",
+            "error": "SMTP认证失败，请在设置中填写企业邮箱SMTP授权码/密码，发件人需与账号一致",
         }
     except smtplib.SMTPServerDisconnected as exc:
+        logger.warning("smtp server disconnected: %s", exc)
         return {
             "sent": False,
             "mode": "smtp",
-            "error": f"SMTP连接被服务器关闭，请检查企业邮箱SMTP授权码/密码、账号是否开启SMTP服务，发件人需与账号一致: {exc}",
+            "error": "SMTP连接被服务器关闭，请检查企业邮箱SMTP授权码/密码、账号是否开启SMTP服务，发件人需与账号一致",
         }
     except (smtplib.SMTPException, OSError) as exc:
         logger.error("smtp deliver failed: %s", exc, exc_info=True)

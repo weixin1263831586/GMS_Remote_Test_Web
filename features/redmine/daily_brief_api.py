@@ -20,9 +20,11 @@ import sqlite3
 from datetime import datetime
 from typing import Any, Literal
 
+import requests
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from redminelib.exceptions import BaseRedmineError
 
 from features.auth import (
     get_authenticated_user,
@@ -47,12 +49,43 @@ from .daily_brief_service import (
     normalize_daily_brief_config,
 )
 from .daily_brief_session import session_raw_messages, session_transcript
-from .daily_brief_snapshot import DEFAULT_LIST_LIMIT, DEFAULT_STALE_DAYS
+from .daily_brief_snapshot import (
+    DEFAULT_LIST_LIMIT,
+    DEFAULT_STALE_DAYS,
+    DailyBriefIdentityError,
+)
 from .statistics_api import _has_redmine_credentials, _missing_credentials_payload
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/redmine-agent")
+
+
+def _daily_triage_failure(exc: BaseException) -> JSONResponse:
+    """Map triage failures onto the shared status table.
+
+    Identity is a missing local dependency (503). Transport timeouts are
+    504. Other Redmine client/protocol failures are 502. Programming
+    errors stay 500. The public message never includes ``str(exc)`` —
+    identity errors embed the owner id.
+    """
+    if isinstance(exc, DailyBriefIdentityError):
+        message = record_internal_error(
+            logger, "每日待办身份", "daily triage identity unavailable",
+        )
+        return ApiError.dependency_unavailable(message).to_response()
+    if isinstance(exc, (requests.exceptions.Timeout, TimeoutError)):
+        message = record_internal_error(
+            logger, "每日待办构建", "daily triage timed out",
+        )
+        return ApiError.dependency_timeout(message).to_response()
+    if isinstance(exc, (requests.exceptions.RequestException, BaseRedmineError)):
+        message = record_internal_error(
+            logger, "每日待办构建", "daily triage upstream failed",
+        )
+        return ApiError.upstream_failure(message, service="redmine").to_response()
+    message = record_internal_error(logger, "每日待办构建", "daily triage failed")
+    return ApiError.internal(message).to_response()
 
 
 def enqueue_run(
@@ -380,9 +413,8 @@ async def get_daily_triage(
         snapshot = await service.build_triage(
             stale_days=stale_days, list_limit=list_limit, refresh=refresh,
         )
-    except Exception:
-        message = record_internal_error(logger, "每日待办构建", "daily triage failed")
-        return ApiError.internal(message).to_response()
+    except Exception as exc:
+        return _daily_triage_failure(exc)
     return {"success": True, "data": snapshot}
 
 

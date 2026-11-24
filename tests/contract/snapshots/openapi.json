@@ -2149,6 +2149,38 @@
         "title": "FirmwareRecoveryPreflight",
         "type": "object"
       },
+      "GSIBurnRequest": {
+        "properties": {
+          "devices": {
+            "description": "设备序列号列表",
+            "items": {
+              "type": "string"
+            },
+            "title": "Devices",
+            "type": "array"
+          },
+          "script_path": {
+            "default": "",
+            "description": "测试主机上的 GSI 烧写脚本路径",
+            "title": "Script Path",
+            "type": "string"
+          },
+          "system_img": {
+            "default": "",
+            "description": "System 镜像路径",
+            "title": "System Img",
+            "type": "string"
+          },
+          "vendor_img": {
+            "default": "",
+            "description": "Vendor Boot 镜像路径",
+            "title": "Vendor Img",
+            "type": "string"
+          }
+        },
+        "title": "GSIBurnRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2870,27 +2902,6 @@
           "status"
         ],
         "title": "RunningWorkerJob",
-        "type": "object"
-      },
-      "SNBurnRequest": {
-        "properties": {
-          "devices": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Devices",
-            "type": "array"
-          },
-          "sn_code": {
-            "title": "Sn Code",
-            "type": "string"
-          }
-        },
-        "required": [
-          "devices",
-          "sn_code"
-        ],
-        "title": "SNBurnRequest",
         "type": "object"
       },
       "SecurityPageViewRequest": {
@@ -3826,6 +3837,19 @@
             "default": 0,
             "title": "Disk Free Gb",
             "type": "number"
+          },
+          "disk_percent": {
+            "anyOf": [
+              {
+                "maximum": 100,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disk Percent"
           },
           "disk_total_gb": {
             "default": 0,
@@ -7287,16 +7311,6 @@
               "title": "Job Id",
               "type": "string"
             }
-          },
-          {
-            "in": "query",
-            "name": "poll",
-            "required": false,
-            "schema": {
-              "default": false,
-              "title": "Poll",
-              "type": "boolean"
-            }
           }
         ],
         "responses": {
@@ -7603,27 +7617,11 @@
     "/api/burn/gsi": {
       "post": {
         "description": "GSI burning using run_GSI_Burn.sh script.",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Burn Gsi"
-      }
-    },
-    "/api/burn/serial": {
-      "post": {
-        "description": "SN burning - burn serial number to selected devices.",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SNBurnRequest"
+                "$ref": "#/components/schemas/GSIBurnRequest"
               }
             }
           },
@@ -7649,7 +7647,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Burn Sn"
+        "summary": "Burn Gsi"
       }
     },
     "/api/burn/upload-progress": {
@@ -24030,6 +24028,113 @@
           }
         },
         "summary": "Sdk Search"
+      }
+    },
+    "/api/sdk/search/exact": {
+      "get": {
+        "description": "Search one literal file in an explicitly selected SDK Git repository.",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Source",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "revision",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Revision",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Query",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Path",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "repo_scope",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Repo Scope",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "budget_seconds",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 600,
+              "minimum": 1,
+              "title": "Budget Seconds",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Sdk Search Exact"
       }
     },
     "/api/sdk/sources": {

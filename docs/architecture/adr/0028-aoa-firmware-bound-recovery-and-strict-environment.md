@@ -15,6 +15,8 @@
 1. 人工工作台的估算调试语义保留。无人值守触摸恢复及烧写后自动触摸恢复必须有
    已验证源/目标映射，禁止 `estimated`、`direct_unverified` 和 `unsupported`。
    纯键盘、系统键、等待命令不因没有触摸标定而被禁止。
+   Revision 1 覆盖本条：Profile 没有 `firmware_compatibility` 声明时，
+   这条强制要求暂停，估算映射可以进入无人值守回放。声明存在时本条仍然有效。
 2. `/recover` 的目标环境只读取指定 Worker、指定设备的清单。请求中的
    `device_context` 不参与兼容性选择，源 Profile 不能充当目标环境证据。
 3. 型号、版本、指纹、密度、分辨率、旋转、输入模式、内核和显示路由必须明确。

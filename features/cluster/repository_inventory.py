@@ -32,6 +32,7 @@ class ClusterInventoryRepositoryMixin:
             "external_jobs": "INTEGER NOT NULL DEFAULT 0",
             "unknown_external_jobs": "INTEGER NOT NULL DEFAULT 0",
             "disk_total_gb": "REAL NOT NULL DEFAULT 0",
+            "disk_percent": "INTEGER",
         }
         for name, definition in additions.items():
             if name not in columns:
@@ -181,7 +182,7 @@ class ClusterInventoryRepositoryMixin:
             cursor = conn.execute("""
                 UPDATE cluster_workers SET status=?,agent_version=?,cpu_percent=?,
                     memory_percent=?,memory_total_gb=?,memory_available_gb=?,load_1m=?,
-                    disk_free_gb=?,disk_total_gb=?,running_jobs=?,external_jobs=?,
+                    disk_free_gb=?,disk_total_gb=?,disk_percent=?,running_jobs=?,external_jobs=?,
                     unknown_external_jobs=?,last_heartbeat_at=?,updated_at=? WHERE id=?
             """, (
                 status,
@@ -189,6 +190,7 @@ class ClusterInventoryRepositoryMixin:
                 data.get("memory_percent", 0), data.get("memory_total_gb", 0),
                 data.get("memory_available_gb", 0), data.get("load_1m", 0),
                 data.get("disk_free_gb", 0), data.get("disk_total_gb", 0),
+                data.get("disk_percent"),
                 len(running_jobs), len(external_jobs),
                 len(unknown_external_jobs), now, now, worker_id,
             ))

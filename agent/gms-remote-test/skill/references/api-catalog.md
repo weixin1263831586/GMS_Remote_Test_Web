@@ -200,7 +200,9 @@ gms-rt-sdk-sources --json --non-interactive
 #    Omitting --revision resolves the source's default_revision automatically:
 gms-rt-sdk-search --source SRC --query SYMBOL --json --non-interactive
 gms-rt-sdk-search --source SRC --revision REV --query SYMBOL --json --non-interactive
-gms-rt-sdk-read --result-id RID --source SRC --path P --commit SHA --json --non-interactive
+gms-rt-sdk-search --source SRC --revision REV --query SYMBOL \
+  --repo-scope frameworks/base --path frameworks/base/core/java/Example.java --exact-path --json --non-interactive
+gms-rt-sdk-read --result-id RID --json --non-interactive
 
 # 9. Search ALL historical issues (local archive + Redmine site search) for
 #    same/similar problems and reusable fixes before writing a new analysis
@@ -251,7 +253,7 @@ gms-rt-reports-list
 gms-rt-reports-analyze REPORT_TIMESTAMP
 gms-rt-apk-resolve CtsCamera
 gms-rt-apk-analyze CtsCamera --wait --max-wait 600 --json --non-interactive
-gms-rt-apk-source TASK_ID com/example/Foo.java --view
+gms-rt-apk-source-read TASK_ID com/example/Foo.java
 gms-rt-apk-search TASK_ID Permission --limit 20
 ```
 

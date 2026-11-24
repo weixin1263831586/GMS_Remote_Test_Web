@@ -123,56 +123,46 @@ async def upload_apk(
                         status_code=400,
                     )
             else:
+                if os.path.exists(apk_path):
+                    return ApiResponse.error("Upload session ownership could not be verified", status_code=409)
                 with open(metadata_path, 'w', encoding='utf-8') as handle:
                     json.dump(metadata, handle)
-
-            try:
-                await save_upload_to_path(
-                    file,
-                    chunk_path,
-                    runtime.apk_max_file_size,
-                )
-            except ValueError as e:
-                cleanup_files([chunk_path])
-                return ApiResponse.error(str(e), status_code=413)
 
             chunk_paths = [
                 safe_join(task_dir, f"{filename}.part{i}")
                 for i in range(total_chunks)
             ]
-            present = [path for path in chunk_paths if os.path.exists(path)]
-            total_size = sum(os.path.getsize(path) for path in present)
-            if total_size > runtime.apk_max_file_size:
-                cleanup_files([*chunk_paths, apk_path, metadata_path])
-                return ApiResponse.error(
-                    f"File too large, max {runtime.apk_max_file_size // (1024 * 1024)}MB",
-                    status_code=413,
-                )
-
-            if os.path.exists(apk_path):
-                file_size = os.path.getsize(apk_path)
-                return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
-
-            all_chunks_ready = all(os.path.exists(path) for path in chunk_paths)
-            if not all_chunks_ready:
-                return ApiResponse.success({
-                    "task_id": task_id, "filename": filename,
-                    "chunk_received": chunk_index + 1, "total_chunks": total_chunks, "uploaded": False,
-                })
-
-            await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
-            cleanup_files([*chunk_paths, metadata_path])
-
-            file_size = os.path.getsize(apk_path)
-            if file_size > runtime.apk_max_file_size:
+            file_size = os.path.getsize(apk_path) if os.path.isfile(apk_path) else 0
+            if not 0 < file_size <= runtime.apk_max_file_size:
                 cleanup_files([apk_path])
-                return ApiResponse.error(f"File too large, max {runtime.apk_max_file_size // (1024*1024)}MB", status_code=400)
+                try:
+                    await save_upload_to_path(file, chunk_path, runtime.apk_max_file_size)
+                except ValueError as exc:
+                    cleanup_files([chunk_path])
+                    return ApiResponse.error(str(exc), status_code=413)
+
+                present = [path for path in chunk_paths if os.path.isfile(path)]
+                file_size = sum(os.path.getsize(path) for path in present)
+                if file_size > runtime.apk_max_file_size:
+                    cleanup_files([*chunk_paths, metadata_path])
+                    return ApiResponse.error(
+                        f"File too large, max {runtime.apk_max_file_size // (1024 * 1024)}MB",
+                        status_code=413,
+                    )
+                if len(present) < total_chunks:
+                    return ApiResponse.success({
+                        "task_id": task_id, "filename": filename,
+                        "chunk_received": chunk_index + 1, "total_chunks": total_chunks, "uploaded": False,
+                    })
+                if file_size == 0:
+                    return ApiResponse.error("APK file is empty", status_code=400)
+                await asyncio.to_thread(merge_files_to_path, chunk_paths, apk_path)
 
             try:
                 create_apk_task(task_id, apk_path, filename, owner_id)
             except ValueError as exc:
-                cleanup_files([apk_path])
                 return ApiResponse.error(str(exc), status_code=429)
+            cleanup_files([*chunk_paths, metadata_path])
             return ApiResponse.success({"task_id": task_id, "filename": filename, "size": file_size, "uploaded": True})
     else:
         upload_lock = _get_apk_upload_lock(task_id)
@@ -213,25 +203,43 @@ async def analyze_apk(task_id: str, request: Request):
     )
     if err:
         return err
-
-    if task["status"] == "analyzing":
-        return ApiResponse.error("Analysis in progress", status_code=400)
-
-    if task["status"] == "completed":
-        return ApiResponse.success({"task_id": task_id, "status": "completed", "progress": task.get("progress", 100), "already_completed": True})
-
-    if task["status"] not in ("uploaded", "error"):
-        return ApiResponse.error(f"Current status {task['status']} does not allow starting analysis", status_code=400)
+    task_id = normalize_apk_task_id(task_id)
 
     apk_path = task["apk_path"]
     if not os.path.exists(apk_path):
         return ApiResponse.error("APK file not found, please re-upload", status_code=404)
 
-    output_dir = safe_join(runtime.apk_upload_dir, normalize_apk_task_id(task_id), "jadx_output")
+    output_dir = safe_join(runtime.apk_upload_dir, task_id, "jadx_output")
 
     with runtime.global_state.apk_analysis_tasks_lock:
-        t = runtime.global_state.apk_analysis_tasks[task_id]
-        t.update({"status": "analyzing", "progress": 5, "output_dir": output_dir, "error": None})
+        current = runtime.global_state.apk_analysis_tasks.get(task_id)
+        if (
+            current is None
+            or current.get("owner_id") != task.get("owner_id")
+            or current.get("apk_path") != apk_path
+        ):
+            return ApiResponse.error("任务不存在", status_code=404)
+        status = current.get("status")
+        if status == "analyzing":
+            return ApiResponse.error("Analysis in progress", status_code=400)
+        if status == "completed":
+            return ApiResponse.success({
+                "task_id": task_id,
+                "status": "completed",
+                "progress": current.get("progress", 100),
+                "already_completed": True,
+            })
+        if status not in ("uploaded", "error"):
+            return ApiResponse.error(
+                f"Current status {status} does not allow starting analysis",
+                status_code=400,
+            )
+        current.update({
+            "status": "analyzing",
+            "progress": 5,
+            "output_dir": output_dir,
+            "error": None,
+        })
         persist_apk_task_locked(task_id)
 
     task = asyncio.create_task(run_jadx_analysis(task_id, apk_path, output_dir))

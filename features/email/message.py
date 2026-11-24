@@ -8,6 +8,7 @@ SMTP 连接策略在 transport。附件遵循白名单（``allowed_attachment_ro
 
 from __future__ import annotations
 
+import logging
 import os
 from email.encoders import encode_base64
 from email.mime.base import MIMEBase
@@ -17,6 +18,9 @@ from email.utils import formataddr
 from pathlib import Path
 
 from features.email.parsing import safe_header_text
+
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_allowed_attachment(
@@ -91,8 +95,9 @@ def build_mime_message(
             encode_base64(part)
             part.add_header("Content-Disposition", f'attachment; filename="{filename}"')
             message.attach(part)
-        except Exception as exc:  # 单个附件失败不阻断整体发送
-            missing_attachments.append(f"{resolved} ({exc})")
+        except OSError as exc:  # 单个附件失败不阻断整体发送
+            logger.warning("email attachment unreadable: %s (%s)", resolved.name, type(exc).__name__)
+            missing_attachments.append(str(resolved))
 
     envelope = dict(
         from_addr=from_addr,

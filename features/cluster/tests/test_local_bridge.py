@@ -6,6 +6,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.cluster.config import ClusterConfig
@@ -90,17 +91,23 @@ class LocalBridgeTests(unittest.TestCase):
         config = ClusterConfig(enabled=False, local_worker_id="ats-worker-controller")
         bridge = LocalWorkerBridge(self.repo, config)
         bridge._register()
+        gib = 1024 ** 3
         with patch(
             "worker_agent.adb_proxy.recover_managed_state",
             return_value={"recovered": ["target"], "errors": []},
         ) as recover, patch(
             "features.devices.local_proxy_secret",
             return_value=b"x" * 32,
+        ), patch(
+            "foundation.files.shutil.disk_usage",
+            return_value=SimpleNamespace(total=100 * gib, used=69 * gib, free=20 * gib),
         ):
             bridge._heartbeat()
         worker = self.repo.get_worker("ats-worker-controller")
         self.assertIsNotNone(worker)
-        self.assertGreaterEqual(worker["disk_free_gb"], 0)
+        self.assertEqual(worker["disk_total_gb"], 100)
+        self.assertEqual(worker["disk_free_gb"], 20)
+        self.assertEqual(worker["disk_percent"], 78)
         recover.assert_called_once_with(secret=b"x" * 32)
 
     def test_bridge_takes_over_stale_worker_session_before_heartbeat(self):

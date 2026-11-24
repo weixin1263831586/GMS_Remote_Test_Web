@@ -171,7 +171,7 @@ async def update_gerrit_dashboard_config(request: Request):
         updates["chart_date_ranges"] = body["chart_date_ranges"]
     merged = {**current, **updates}
     if not manager.save_gerrit_dashboard_config(merged):
-        return ApiError.internal("failed to save Gerrit dashboard config").to_response()
+        return ApiError.dependency_unavailable("failed to save Gerrit dashboard config").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
@@ -199,7 +199,7 @@ async def create_gerrit_personal_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return ApiError.internal("failed to save Gerrit personal profile").to_response()
+        return ApiError.dependency_unavailable("failed to save Gerrit personal profile").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["personal_profiles"][-1]}}
 
@@ -223,7 +223,7 @@ async def create_gerrit_department_profile(request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return ApiError.internal("failed to save Gerrit department profile").to_response()
+        return ApiError.dependency_unavailable("failed to save Gerrit department profile").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": dashboard_cfg["department_profiles"][-1]}}
 
@@ -238,7 +238,7 @@ async def add_gerrit_department_owner(profile_id: str, request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return ApiError.internal("failed to save Gerrit department owner").to_response()
+        return ApiError.dependency_unavailable("failed to save Gerrit department owner").to_response()
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
@@ -254,7 +254,7 @@ async def delete_gerrit_department_owner(profile_id: str, request: Request):
     except ValueError as exc:
         return JSONResponse(status_code=400, content={"success": False, "error": str(exc)})
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return ApiError.internal("failed to remove Gerrit department owner").to_response()
+        return ApiError.dependency_unavailable("failed to remove Gerrit department owner").to_response()
     _STATS_CACHE.clear()
     profile = select_gerrit_department_profile(dashboard_cfg, profile_id)
     return {"success": True, "data": {"dashboard": _public_config(dashboard_cfg, manager=manager), "profile": profile}}
@@ -268,7 +268,7 @@ async def sync_gerrit_redmine_members(request: Request):
         _redmine_users_for_request(request),
     )
     if not manager.save_gerrit_dashboard_config(dashboard_cfg):
-        return ApiError.internal("failed to sync Redmine members to Gerrit dashboard").to_response()
+        return ApiError.dependency_unavailable("failed to sync Redmine members to Gerrit dashboard").to_response()
     _STATS_CACHE.clear()
     return {"success": True, "data": _public_config(_dashboard_config_for_request(request), manager=manager)}
 
@@ -360,11 +360,14 @@ async def check_gerrit_connectivity(request: Request):
 
     async def _run(cmd: list[str], timeout: float = 8.0) -> tuple[int, str]:
         """Run a command on the web host, returning (exit_code, combined_output)."""
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except OSError:
+            return 127, "probe command unavailable"
         try:
             stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         except asyncio.TimeoutError:
@@ -427,8 +430,10 @@ async def check_gerrit_connectivity(request: Request):
         "ssh_port_error": "" if ssh_port_ok else "连接失败或超时",
     }
 
-    if ping_ok and (ssh_port_ok or https_ok):
+    if ssh_port_ok or https_ok:
         verdict, level = "Gerrit 服务器可达——全 0 可能是查询条件/账号权限问题", "ok"
+    elif ping_ok:
+        verdict, level = f"主机 {host} 可达，Gerrit SSH 和 HTTPS 均未响应", "bad"
     else:
         verdict = f"Gerrit 服务器 {host} 不可达（ICMP/SSH端口{ssh_port}/HTTPS 均不通），请检查本机到 {host} 的网络路由"
         level = "bad"
@@ -456,6 +461,13 @@ async def list_gerrit_changes(request: Request, profile_id: str = Query(""), que
         }
     result = await query_gerrit_dual_mode(cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"])
     return {"success": True, "data": {**result, "configured": True, "config": _public_config(cfg, manager=_config_for_request(request)), "profile": profile, "query": effective_query}}
+
+
+_GERRIT_HISTORY_STATUS = "(status:open OR status:merged OR status:abandoned)"
+
+
+def _gerrit_history_query(owner_text: str) -> str:
+    return f"owner:{owner_text} {_GERRIT_HISTORY_STATUS}"
 
 
 @router.get("/changes-by-date")
@@ -496,7 +508,7 @@ async def list_gerrit_changes_by_date(
     errors: list[str] = []
     rest_errors: list[str] = []
     for owner_text in owner_list:
-        query = f"owner:{owner_text} status:any"
+        query = _gerrit_history_query(owner_text)
         result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
         raw_items.extend(result.get("items") or [])
         if result.get("source"):
@@ -542,7 +554,7 @@ async def get_gerrit_personal_statistics(
     if cached is not None:
         return {"success": True, "data": {**cached, "cache_hit": True}}
 
-    query = f"owner:{owner_text} status:any"
+    query = _gerrit_history_query(owner_text)
     result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
     stats = summarize_gerrit_changes(result.get("items") or [], list_limit=list_limit)
     data = {
@@ -596,13 +608,16 @@ async def get_gerrit_department_statistics(
 
     async def _owner_stats(owner_text: str) -> dict[str, Any]:
         async with semaphore:
-            query = f"owner:{owner_text} status:any"
+            query = _gerrit_history_query(owner_text)
             result = await query_gerrit_dual_mode(cfg, query, max_changes=query_limit, page_size=page_size)
             stats = summarize_gerrit_changes(result.get("items") or [], list_limit=list_limit)
             # 「待成员评审」：该成员作为 reviewer 仍待处理的开放变更计数。
             review_query = f"reviewer:{owner_text} status:open"
             review_result = await query_gerrit_dual_mode(cfg, review_query, max_changes=cfg["query_limit"])
-            pending_review_of_me = len(review_result.get("items") or [])
+            review_error = str(review_result.get("error") or "")
+            if not review_error and (review_result.get("stats") or {}).get("moreChanges"):
+                review_error = "reviewer query truncated"
+            pending_review_of_me = None if review_error else len(review_result.get("items") or [])
             return {
                 "owner": owner_text,
                 "name": _display_name(owner_text, name_by_email),
@@ -612,7 +627,7 @@ async def get_gerrit_department_statistics(
                 "lists": stats["lists"],
                 "query": query,
                 "source": result.get("source") or "",
-                "error": result.get("error") or "",
+                "error": result.get("error") or review_error,
                 "rest_error": result.get("rest_error") or "",
             }
 

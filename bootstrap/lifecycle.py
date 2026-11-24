@@ -272,13 +272,10 @@ def create_lifespan(services: AppServices):
             start_local_bridge(cluster.repository, cluster.config)
             event_loop = bind_event_bus_loop()
             cleanup_task = asyncio.create_task(_periodic_cleanup())
-            app.state.cleanup_task = cleanup_task
             # 事件循环卡死观测：卡死 >30s 时由 C 级定时器 dump 全部线程栈
             # （见 foundation/loop_watchdog.py 的模块注释）。
             loop_watchdog_task = await start_loop_watchdog()
-            app.state.loop_watchdog_task = loop_watchdog_task
             redmine_task = start_redmine_agent_scheduler(services.redmine)
-            app.state.redmine_scheduler_task = redmine_task
             from features.system.desktop import create_novnc_client_session
 
             novnc_session = create_novnc_client_session()
@@ -310,7 +307,6 @@ def create_lifespan(services: AppServices):
                 automation_task = start_automation_worker()
             except Exception:
                 logger.exception('Failed to start automation worker')
-            app.state.automation_task = automation_task
             radar_task = None
             try:
                 from features.system.update_radar import start_radar
@@ -318,13 +314,12 @@ def create_lifespan(services: AppServices):
                 radar_task = start_radar()
             except Exception:
                 logger.exception('Failed to start update radar')
-            app.state.update_radar_task = radar_task
             from features.firmware.apk import recover_apk_analysis_tasks
 
-            app.state.apk_recovery_tasks = recover_apk_analysis_tasks()
+            recover_apk_analysis_tasks()
             from features.test_execution.transfers_api import recover_suite_tasks
 
-            app.state.suite_recovery_tasks = recover_suite_tasks()
+            recover_suite_tasks()
             try:
                 yield
             finally:

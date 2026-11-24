@@ -45,27 +45,6 @@ def _calculate_window_positions(
     }
 
 
-def _calculate_device_window_position(
-    device_index: int,
-    window_width: int,
-    window_height: int,
-    start_x: int,
-    start_y: int,
-    horizontal_gap: int,
-    screen_width: int = 1920,
-    screen_height: int = 1080,
-    vertical_margin: int = 50,
-) -> dict[str, int]:
-    """Return one window position with screen-boundary checks."""
-    x = start_x + device_index * (window_width + horizontal_gap)
-    y = start_y
-    if x + window_width > screen_width:
-        x = max(0, screen_width - window_width - horizontal_gap)
-    if y + window_height > screen_height:
-        y = max(0, screen_height - window_height - vertical_margin)
-    return {'x_offset': x, 'y_offset': y}
-
-
 def _require_safe_device(device_id: str) -> str:
     """Validate a single device id and return the sanitized serial."""
     safe_devices = sanitize_device_ids([device_id])
@@ -120,31 +99,6 @@ class DeviceUtils:
             screen_width=screen_width,
             screen_height=screen_height,
             max_window_width=max_window_width,
-        )
-
-    @staticmethod
-    def calculate_device_window_position(
-        device_index: int,
-        window_width: int,
-        window_height: int,
-        start_x: int,
-        start_y: int,
-        horizontal_gap: int,
-        screen_width: int = 1920,
-        screen_height: int = 1080,
-        vertical_margin: int = 50,
-    ) -> dict[str, int]:
-        """计算单个设备的窗口位置，含边界检查。返回 {'x_offset', 'y_offset'}。"""
-        return _calculate_device_window_position(
-            device_index,
-            window_width,
-            window_height,
-            start_x,
-            start_y,
-            horizontal_gap,
-            screen_width=screen_width,
-            screen_height=screen_height,
-            vertical_margin=vertical_margin,
         )
 
     @staticmethod

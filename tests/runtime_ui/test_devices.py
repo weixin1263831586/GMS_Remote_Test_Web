@@ -508,7 +508,7 @@ class RuntimeDevicesTests(RuntimeUiHarness):
                     window.requestElevatedAccess = async () => true;
                     try {
                         await executeBurnOperation(
-                            '/api/burn/serial', {sn_code: 'SN001'}, '烧写SN码'
+                            '/api/burn/gsi', {script_path: '/tmp/burn.sh', system_img: '/tmp/system.img'}, '烧写 GSI'
                         );
                         return {
                             requestDevices,

@@ -125,10 +125,6 @@ DeviceAction = Enum(  # type: ignore[misc]
 )
 
 
-def device_action_spec(action: str) -> DeviceActionSpec | None:
-    return DEVICE_ACTION_SPECS.get(action)
-
-
 def read_only_device_actions() -> frozenset[str]:
     return frozenset(
         action for action, spec in DEVICE_ACTION_SPECS.items() if spec.read_only)

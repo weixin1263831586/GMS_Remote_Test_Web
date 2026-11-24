@@ -326,6 +326,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
                 return {
                     shown: true,
                     z: getComputedStyle(toast).zIndex,
+                    hit: hit && (hit.id || hit.className || hit.tagName),
+                    visibility: getComputedStyle(toast).visibility,
                     covered: !(hit && (hit === toast || toast.contains(hit))),
                 };
             }""")
@@ -333,7 +335,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             expect(self._poll_toast(page)).to_be_visible()
             self.assertTrue(hit_check["shown"], "点击后 toast 未进入 show 状态")
             self.assertGreater(int(hit_check["z"]), 12000, "toast 层级低于 modal 栈（12000）会被遮住")
-            self.assertFalse(hit_check["covered"], "toast 显示中却未命中点击测试：被 modal 或其他层级遮住")
+            self.assertFalse(hit_check["covered"], hit_check)
 
             # 2. clipboard API 拒绝 → execCommand 降级仍成功
             page.evaluate("""async () => {
@@ -912,7 +914,6 @@ class RuntimeAgentTests(RuntimeUiHarness):
                         installApi,
                         archiveApi,
                         guideInstall: document.getElementById('cmd-1').textContent.trim(),
-                        sampleInstall: API_DETAILS_MAP['/api/agent/install.sh'].curl_example,
                         primaryLabel: Array.from(document.querySelectorAll('button'))
                             .find(button => button.textContent.includes('安装/更新命令'))
                             ?.textContent.trim(),
@@ -949,7 +950,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                     encoding="utf-8",
                 )
                 curl.chmod(0o755)
-                for source in ("install", "guideInstall", "sampleInstall"):
+                for source in ("install", "guideInstall"):
                     for scenario in ("fresh", "custom_ca", "download_failure"):
                         with self.subTest(source=source, scenario=scenario):
                             env = os.environ.copy()

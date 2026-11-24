@@ -26,13 +26,23 @@ from features.system.models import VNCStartRequest
 from features.system.novnc_access import novnc_access_service
 from features.system.vnc import NOVNC_WEB_PORT, vnc_manager
 from foundation.config import config_manager
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response, success_response
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+_VNC_SSH_FAILURE = "SSH连接失败"
+
+
+def _vnc_action_response(result: dict) -> JSONResponse:
+    """SSH 建连失败是上游故障。其余 success=false 仍按原样 200 返回。"""
+    if result.get("success") is False and result.get("error") == _VNC_SSH_FAILURE:
+        return ApiError.upstream_failure(
+            _VNC_SSH_FAILURE, service="ssh",
+        ).to_response()
+    return JSONResponse(content=result)
 
 # 短暂缓存 VNC 状态；启动和停止操作会立即使缓存失效。
 _VNC_STATUS_TTL = 10.0
@@ -482,7 +492,7 @@ async def start_desktop_vnc(
     # VNC 启动包含阻塞式 SSH 调用，在线程中执行。
     result = await asyncio.to_thread(vnc_manager.start_vnc, host, password, vnc_password, force_restart=force_restart)
     _invalidate_vnc_status_cache()
-    return JSONResponse(content=result)
+    return _vnc_action_response(result)
 
 
 @router.post("/api/desktop/vnc/stop")
@@ -492,7 +502,7 @@ async def stop_desktop_vnc(
     """停止Ubuntu主机桌面VNC"""
     result = await asyncio.to_thread(vnc_manager.stop_vnc)
     _invalidate_vnc_status_cache()
-    return JSONResponse(content=result)
+    return _vnc_action_response(result)
 
 
 # ==================== noVNC WebSocket Proxy ====================

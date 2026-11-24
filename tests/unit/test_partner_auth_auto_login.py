@@ -81,7 +81,10 @@ class LaunchLoginBrowserTests(unittest.TestCase):
 
     def test_debounces_recent_launch(self):
         Path(self.marker).write_text(f"{int(time.time())}\tbefore\n", encoding="utf-8")
-        with patch("foundation.partner_android.shutil.which", return_value="/usr/bin/firefox"), \
+        with patch.dict(os.environ, {"GMS_PARTNER_ANDROID_AUTO_LOGIN": "1"}), \
+                patch("foundation.partner_android._auto_login_display_environment",
+                      return_value={"DISPLAY": ":0"}), \
+                patch("foundation.partner_android.shutil.which", return_value="/usr/bin/firefox"), \
                 patch("foundation.partner_android.subprocess.Popen") as popen:
             launched = partner_android.launch_login_browser("https://docs.partner.android.com/x")
 
@@ -111,8 +114,11 @@ class LaunchLoginBrowserTests(unittest.TestCase):
 
     def test_skips_when_display_socket_missing(self):
         # :99 没有 X socket（本机只有 gdm 的 :0），必须拒绝弹窗。
-        with patch.dict(os.environ, {"GMS_PARTNER_AUTO_LOGIN_DISPLAY": ":99"}), \
-                patch("foundation.partner_android.shutil.which", return_value="/usr/bin/firefox"), \
+        # 显示探测不能被 mock：它必须读到 :99 并看到 socket 不存在。
+        with patch.dict(os.environ, {
+            "GMS_PARTNER_ANDROID_AUTO_LOGIN": "1",
+            "GMS_PARTNER_AUTO_LOGIN_DISPLAY": ":99",
+        }), patch("foundation.partner_android.shutil.which", return_value="/usr/bin/firefox"), \
                 patch("foundation.partner_android.subprocess.Popen") as popen:
             launched = partner_android.launch_login_browser("https://docs.partner.android.com/x")
 
@@ -120,7 +126,10 @@ class LaunchLoginBrowserTests(unittest.TestCase):
         popen.assert_not_called()
 
     def test_skips_when_firefox_missing(self):
-        with patch("foundation.partner_android.shutil.which", return_value=None), \
+        with patch.dict(os.environ, {"GMS_PARTNER_ANDROID_AUTO_LOGIN": "1"}), \
+                patch("foundation.partner_android._auto_login_display_environment",
+                      return_value={"DISPLAY": ":0"}), \
+                patch("foundation.partner_android.shutil.which", return_value=None), \
                 patch("foundation.partner_android.subprocess.Popen") as popen:
             launched = partner_android.launch_login_browser("https://docs.partner.android.com/x")
 

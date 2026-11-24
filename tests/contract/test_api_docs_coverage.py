@@ -11,7 +11,7 @@ from features.assistant.tools import registry
 from features.system.api import get_api_docs, get_api_help
 from features.system.api import router as system_router
 from features.system.api_catalog import build_api_catalog, curl_example, resolve_schema
-from features.system.api_docs_list import API_DOCS_LIST, build_openapi_api_docs
+from features.system.api_docs_list import API_DOCS_LIST
 
 
 HTTP_METHODS = {"get", "post", "put", "patch", "delete", "options", "head"}
@@ -28,7 +28,7 @@ def _http_routes(schema: dict) -> set[tuple[str, str]]:
 
 def test_openapi_inventory_covers_every_api_operation():
     schema = create_app().openapi()
-    generated = build_openapi_api_docs(schema)
+    generated = build_api_catalog(schema)
     actual = {(item["method"], item["path"]) for item in generated}
     expected = {
         key for key in _http_routes(schema) if key[1].startswith("/api/")

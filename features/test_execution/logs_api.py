@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
 
 from features.auth import require_authenticated_user_when_auth_required
 from features.devices import get_or_create_user_state, update_user_state_field
@@ -90,10 +93,11 @@ async def download_test_logs(req: dict, request: Request):
     owner_id, is_admin = _request_log_scope(request)
     try:
         log_ids = req.get("log_ids", req.get("files", []))
-        if not log_ids:
+        if not isinstance(log_ids, list) or not log_ids or not all(isinstance(item, str) for item in log_ids):
             return error_response("No files selected", status_code=400)
 
-        result = test_logs_manager.download_logs(
+        result = await asyncio.to_thread(
+            test_logs_manager.download_logs,
             log_ids,
             owner_id=owner_id,
             is_admin=is_admin,
@@ -103,6 +107,7 @@ async def download_test_logs(req: dict, request: Request):
                 result["zip_path"],
                 media_type="application/zip",
                 filename=f"logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip",
+                background=BackgroundTask(Path(result["zip_path"]).unlink, missing_ok=True),
             )
         else:
             status_code = 404 if "不属于当前用户" in result.get("error", "") else 400

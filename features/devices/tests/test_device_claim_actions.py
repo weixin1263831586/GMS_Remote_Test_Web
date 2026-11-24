@@ -85,7 +85,8 @@ def test_ui_tap_rejects_even_the_active_claim_owner():
 def test_config_explorer_allows_owner_but_rejects_other_user():
     with patch.object(
         config_explorer_api,
-        "get_client_id_from_request",
+        # fencing 身份接缝改为 device_fencing_owner_id（ADR 0010）。
+        "device_fencing_owner_id",
         side_effect=lambda request: request.state.current_user.username,
     ), patch.object(
         config_explorer_api, "list_packages", return_value=["android"]

@@ -69,21 +69,15 @@ class RuntimeClusterTests(RuntimeUiHarness):
             page.goto(f"{self.base_url}/cluster?tab=management",
                       wait_until="domcontentloaded")
             page.wait_for_function("typeof render === 'function'")
-            page.evaluate("""() => {
-                const row = '<tr><td>worker</td><td>test</td><td>online</td>'
-                    + '<td>available</td><td>model</td><td>source</td></tr>';
-                window.__manyWorkerRows = row.repeat(60);
-            }""")
             for width, height in ((1792, 856), (1440, 768), (1100, 700)):
                 with self.subTest(width=width, height=height):
                     page.set_viewport_size({"width": width, "height": height})
                     page.locator('[data-dash-tab="management"]').click()
-                    page.evaluate("""() => {
-                        // Simulate a dense resource pool without backend dependencies.
-                        document.querySelector('#devices').innerHTML =
-                            window.__manyWorkerRows;
-                    }""")
                     dimensions = page.evaluate("""() => {
+                        // Sample the dense fixture before polling can replace it.
+                        const row = '<tr><td>worker</td><td>test</td><td>online</td>'
+                            + '<td>available</td><td>model</td><td>source</td></tr>';
+                        document.querySelector('#devices').innerHTML = row.repeat(60);
                         const pane = document.querySelector('#tab-management');
                         const panels = [...pane.querySelectorAll(
                             '.cluster-management-grid > .cluster-pnl')];
@@ -421,7 +415,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
                 "status": "online", "cpu_percent": 58.3,
                 "memory_percent": 32.5, "memory_total_gb": 64,
                 "memory_available_gb": 43.2, "disk_total_gb": 100,
-                "disk_free_gb": 10, "running_jobs": 0,
+                "disk_free_gb": 20, "disk_percent": 78, "running_jobs": 0,
                 "external_jobs": 0, "max_jobs": 6,
                 "capabilities": {"ssh_user": "hcq"},
             },
@@ -469,6 +463,9 @@ class RuntimeClusterTests(RuntimeUiHarness):
             page.locator("#dash-gauges-host-tabs button[data-a0='ats-worker-244']").click()
             expect(page.locator("#dash-gauges-chart .dash-resource-table tbody tr")).to_have_count(1)
             expect(page.locator("#dash-gauges-chart")).to_contain_text("4.1%")
+            page.locator("#dash-gauges-host-tabs button[data-a0='ats-worker-controller']").click()
+            expect(page.locator("#dash-gauges-detail")).to_contain_text("可用内存 43.2 GiB")
+            expect(page.locator("#dash-gauges-chart tbody tr td").last).to_have_text("78%")
             page.locator('[data-dash-tab="management"]').click()
             expect(page.locator("#management-stats")).to_have_count(0)
             expect(page.locator("#workers .worker-card")).to_have_count(2)
@@ -483,7 +480,10 @@ class RuntimeClusterTests(RuntimeUiHarness):
             expect(controller.locator(".worker-cpu")).to_contain_text("58.3%")
             expect(controller.locator(".worker-memory-percent")).to_have_text("32.5%")
             expect(controller.locator(".worker-card-icon")).to_be_visible()
-            expect(controller.locator(".worker-meter")).to_have_count(2)
+            expect(controller.locator(".worker-meter")).to_have_count(3)
+            expect(controller.locator(".worker-card-metrics .worker-card-label")).to_have_text(
+                ["CPU", "内存", "磁盘", "设备", "套件", "任务"]
+            )
             expect(controller.locator(".worker-cpu [role='progressbar']")).to_have_attribute(
                 "aria-valuenow", "58.3"
             )
@@ -491,15 +491,22 @@ class RuntimeClusterTests(RuntimeUiHarness):
                 "aria-valuenow", "32.5"
             )
             expect(controller.locator(".worker-memory-detail")).to_have_text(
-                "总 64.0 GB · 剩余 43.2 GB"
+                "总 64.0 GiB · 可用 43.2 GiB"
             )
+            expect(controller.locator(".worker-disk-percent")).to_have_text("78%")
+            expect(controller.locator(".worker-disk-detail")).to_have_text("总 100.0 · 可用 20.0 GiB")
             expect(controller.locator(".worker-devices strong")).to_have_text("1")
             expect(controller.locator(".worker-suites strong")).to_have_text("0")
             expect(controller.locator(".worker-jobs strong")).to_have_text("0/6")
             expect(controller.locator('[data-action="restart-vnc"]')).to_be_visible()
             expect(controller.locator('[data-action="local-software"]')).to_be_visible()
             expect(remote.locator(".worker-memory-percent")).to_have_text("—")
-            expect(remote.locator(".worker-meter-unknown")).to_have_count(1)
+            expect(remote.locator(".worker-memory .worker-meter-unknown")).to_have_count(1)
+            expect(remote.locator(".worker-disk-percent")).to_have_text("—")
+            expect(remote.locator(".worker-disk-detail")).to_have_text("总 200.0 · 可用 100.0 GiB")
+            expect(remote.locator(".worker-disk [role='progressbar']")).to_have_attribute(
+                "aria-valuetext", "未上报"
+            )
             expect(remote.locator(".worker-memory [role='progressbar']")).to_have_attribute(
                 "aria-valuetext", "未知"
             )
@@ -523,11 +530,12 @@ class RuntimeClusterTests(RuntimeUiHarness):
                                     const rect = card.getBoundingClientRect();
                                     return [...card.querySelectorAll(
                                         '.worker-card-header, .worker-card-state, '
-                                        + '.worker-card-metrics, .worker-actions button'
+                                        + '.worker-card-metric, .worker-actions button'
                                     )].every(el => {
                                         const item = el.getBoundingClientRect();
                                         return item.top >= rect.top - 1
-                                            && item.bottom <= rect.bottom + 1;
+                                            && item.bottom <= rect.bottom + 1
+                                            && item.right <= rect.right + 1;
                                     });
                                 }),
                             };
@@ -583,6 +591,7 @@ class RuntimeClusterTests(RuntimeUiHarness):
                                 const actions = card.querySelector('.worker-actions');
                                 const cpu = card.querySelector('.worker-cpu');
                                 const memory = card.querySelector('.worker-memory');
+                                const diskDetail = card.querySelector('.worker-disk-detail');
                                 const cpuLine = cpu.querySelector('.worker-metric-inline');
                                 const memoryLine = memory.querySelector('.worker-metric-inline');
                                 const lineCenters = line => [
@@ -606,8 +615,10 @@ class RuntimeClusterTests(RuntimeUiHarness):
                                         rect(memoryLine.querySelector('.worker-meter')).right,
                                     cpuToMemoryGap: rect(memory).left -
                                         rect(cpuLine.querySelector('.worker-meter')).right,
-                                    memoryToDevicesGap: rect(card.querySelector('.worker-devices')).left -
+                                    memoryToDiskGap: rect(card.querySelector('.worker-disk')).left -
                                         rect(memoryLine.querySelector('.worker-meter')).right,
+                                    diskBarWidth: rect(card.querySelector('.worker-disk .worker-meter')).width,
+                                    diskDetailWidth: [diskDetail.clientWidth, diskDetail.scrollWidth],
                                     cpuTrackDisplay: getComputedStyle(
                                         cpuLine.querySelector('.worker-meter')
                                     ).display,
@@ -650,8 +661,8 @@ class RuntimeClusterTests(RuntimeUiHarness):
                         self.assertLessEqual(item["memoryLineRightGap"], 11, aligned)
                         self.assertGreaterEqual(item["cpuToMemoryGap"], 14, aligned)
                         self.assertLessEqual(item["cpuToMemoryGap"], 24, aligned)
-                        self.assertGreaterEqual(item["memoryToDevicesGap"], 14, aligned)
-                        self.assertLessEqual(item["memoryToDevicesGap"], 24, aligned)
+                        self.assertGreaterEqual(item["memoryToDiskGap"], 14, aligned)
+                        self.assertLessEqual(item["memoryToDiskGap"], 24, aligned)
                         self.assertEqual(item["cpuTrackDisplay"], "block", aligned)
                         self.assertEqual(item["memoryTrackDisplay"], "block", aligned)
                         # An implicit grid auto-column can shrink the
@@ -666,9 +677,10 @@ class RuntimeClusterTests(RuntimeUiHarness):
                             abs(item["memoryCellWidth"] - item["memoryLineWidth"]),
                             2, aligned
                         )
-                        self.assertGreaterEqual(item["cpuBarWidth"], 90, aligned)
-                        self.assertGreaterEqual(item["memoryBarWidth"], 90, aligned)
+                        for track in ("cpuBarWidth", "memoryBarWidth", "diskBarWidth"):
+                            self.assertGreaterEqual(item[track], 35, aligned)
                         self.assertTrue(item["memoryDetailVisible"], aligned)
+                        self.assertGreaterEqual(*item["diskDetailWidth"], aligned)
                         self.assertLessEqual(
                             item["metricsRight"], item["cardRight"] + 1, aligned
                         )
@@ -787,10 +799,11 @@ class RuntimeClusterTests(RuntimeUiHarness):
             expect(row.locator(".status.external_busy")).to_have_text("外部占用")
             expect(row.locator(".worker-summary-state")).to_contain_text("外部测试中")
             expect(row.locator(".worker-memory-detail")).to_contain_text(
-                "总 64.0 GB · 剩余 56.4 GB"
+                "总 64.0 GiB · 可用 56.4 GiB"
             )
             expect(row.locator('[data-action="delete-worker"]')).to_be_disabled()
             row.locator(".worker-meta-details summary").click()
+            expect(row.locator(".worker-extra")).to_contain_text("可用内存 56.4 GiB")
             expect(row.locator(".host-warning")).to_contain_text(
                 "Tradefed 已 4小时43分钟 未产生输出"
             )

@@ -496,7 +496,7 @@ class SSHConnection:
             )
         return self.ssh
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *_exc):
         if self.ssh:
             try:
                 self._ssh_manager.return_connection(self.ssh)
@@ -534,7 +534,7 @@ class AsyncSSHConnection:
             )
         return self.ssh
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, *_exc):
         if self.ssh:
             try:
                 await asyncio.to_thread(
@@ -554,14 +554,7 @@ class DeviceSSHConnection:
 
     def _get_pool_key(self):
         """生成连接池的键值，基于设备主机地址"""
-        device_host = self.config.get('device_host', '')
-        if not device_host:
-            return None
-
-        if '@' in device_host:
-            # 格式: username@hostname
-            return device_host
-        return device_host
+        return self.config.get('device_host') or None
 
     def __enter__(self):
         self._pool_key = self._get_pool_key()
@@ -586,7 +579,7 @@ class DeviceSSHConnection:
             )
         return self.ssh
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(self, *_exc):
         if self.ssh and self._pool_key:
             try:
                 runtime.global_state.device_ssh_pool_return(self._pool_key, self.ssh)

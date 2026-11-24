@@ -37,6 +37,13 @@
             return requestElevatedAccess(actionLabel, {allowAnonymousDev: true});
         }
 
+        // 本机接口用 success 信封；远端巡检结果是 {rows}/{resources}，没有 success 字段。
+        function dcfgPayloadFailed(payload, remote) {
+            if (!payload || typeof payload !== 'object') return true;
+            if (payload.success === false) return true;
+            return !remote && payload.success !== true;
+        }
+
         function dcfgDebounce(fn, delay = 120) {
             let timer = null;
             return function(...args) {
@@ -357,8 +364,9 @@
             if (r.data && r.data.needs_reboot) {
                 // 链式调用专用 reboot（同 adb 路径，device_id 一致）
                 showToast(r.data.message + ' 正在重启…', 'info');
-                await dcfgOvrApi('/api/config-override/reboot', { method: 'POST' }, context);
+                const reboot = await dcfgOvrApi('/api/config-override/reboot', { method: 'POST' }, context);
                 if (!dcfgContextIsCurrent(context)) return;
+                if (!reboot.success) { showToast('重启失败：' + (reboot.error || ''), 'error'); return; }
                 dcfgOvrSetBusy(45);
                 showToast('设备重启中，设备恢复后状态将自动更新', 'success');
                 dcfgOvrPollUntilReachable(context);
@@ -390,7 +398,7 @@
                     ? await dcfgInspect('packages_with_path', {}, context)
                     : await fetch('/api/config-explorer/packages-with-path?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) {
+                if (dcfgPayloadFailed(j, context.remote)) {
                     if (hadRenderedRows) showToast('应用列表刷新失败: ' + (j.error || '加载失败'), 'error');
                     else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
                     return;
@@ -547,7 +555,7 @@
                     ? await dcfgInspect('features', {}, context)
                     : await fetch('/api/config-explorer/features?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) {
+                if (dcfgPayloadFailed(j, context.remote)) {
                     if (hadRenderedRows) showToast('特性列表刷新失败: ' + (j.error || '加载失败'), 'error');
                     else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
                     return;
@@ -609,7 +617,7 @@
                     ? await dcfgInspect('props', {}, context)
                     : await fetch('/api/config-explorer/props?device_id=' + encodeURIComponent(context.serial)).then(r => r.json());
                 if (!dcfgContextIsCurrent(context)) return;
-                if (!j.success) {
+                if (dcfgPayloadFailed(j, context.remote)) {
                     if (hadRenderedRows) showToast('属性列表刷新失败: ' + (j.error || '加载失败'), 'error');
                     else { box.classList.add('dcfg-empty'); box.innerHTML = '❌ ' + dcfgEscapeHtml(j.error || '加载失败'); }
                     return;
@@ -714,7 +722,7 @@
                     }, context)
                     : await fetch('/api/config-explorer?' + params).then(r => r.json());
                 if (!dcfgContextIsCurrent(context) || queryId !== dcfgQueryRequestId) return;
-                if (!j.success) {
+                if (dcfgPayloadFailed(j, context.remote)) {
                     if (hadRenderedResults) {
                         showToast('配置查询失败: ' + (j.error || j.message || '查询失败'), 'error');
                     } else {

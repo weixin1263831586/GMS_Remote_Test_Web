@@ -16,9 +16,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from features.users import get_client_id_from_request
+from features.users import owner_id_from_request
 from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -34,6 +34,7 @@ from .config_explorer import (
     pull_device_file,
 )
 from .locks import device_lock_manager
+from .support import device_fencing_owner_id
 
 
 logger = logging.getLogger(__name__)
@@ -100,8 +101,10 @@ def _readable_device(request: Request, device_id: str) -> str:
             )
         selected = online[0]
     claim = device_lock_manager.get_lock_status(selected)
-    client_id = get_client_id_from_request(request)
-    if claim and claim.get("client_id") != client_id:
+    # 锁记的是资源所有者（ADR 0010）。Agent 的 actor id 与登记账号不同，
+    # 用 actor id 比较会把自己持有的设备判成他人占用。
+    owner_id = device_fencing_owner_id(request)
+    if claim and claim.get("client_id") != owner_id:
         raise HTTPException(409, "device is reserved by another active operation")
     return selected
 
@@ -291,22 +294,8 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
     if not on_device_path.lower().endswith((".apk", ".jar")):
         return error_response("仅支持拉取 .apk / .jar 后缀的文件", status_code=400)
 
-    # 从包名或路径末段生成下载文件名。
-    base = os.path.basename(on_device_path.rstrip("/")) or "app.apk"
-    if "." not in base:
-        base += ".apk"
-    # _decompile_dependencies_ready() 已确保依赖非 None；断言用于类型收窄。
-    assert _normalize_apk_filename_fn is not None
-    assert _safe_join_fn is not None
-    assert _cleanup_files_fn is not None
-    assert _create_apk_task_fn is not None
-    filename = _normalize_apk_filename_fn(base)
-    task_id = str(uuid.uuid4())
-    task_dir = _safe_join_fn(APK_UPLOAD_DIR, task_id)
-    os.makedirs(task_dir, exist_ok=True)
-    apk_path = _safe_join_fn(task_dir, filename)
-
     device_id = _readable_device(request, req.device_id)
+    owner_id = owner_id_from_request(request)
     # 传输前用设备端大小封顶，超限文件不产生任何传输流量；拉取后仍复查。
     try:
         remote_size = await asyncio.to_thread(device_file_size, device_id, on_device_path)
@@ -314,46 +303,49 @@ async def decompile_device_apk(req: DecompileRequest, request: Request):
         logger.error("decompile size probe failed for %s", on_device_path)
         return error_response("无法读取设备端文件大小，请确认路径有效", status_code=400)
     if remote_size > APK_MAX_FILE_SIZE:
-        _cleanup_files_fn([apk_path])
         return error_response(
             f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
         )
 
+    assert _normalize_apk_filename_fn is not None
+    assert _safe_join_fn is not None
+    assert _cleanup_files_fn is not None
+    assert _create_apk_task_fn is not None
+    filename = _normalize_apk_filename_fn(os.path.basename(on_device_path))
+    task_id = str(uuid.uuid4())
+    task_dir = _safe_join_fn(APK_UPLOAD_DIR, task_id)
+    apk_path = _safe_join_fn(task_dir, filename)
+    os.makedirs(task_dir)
+    registered = False
     try:
-        # Pull on a worker thread (blocking adb transfer).
-        await asyncio.to_thread(
-            lambda: pull_device_file(
-                device_id,
-                on_device_path,
-                apk_path,
-            )
-        )
-    except Exception:
-        _cleanup_files_fn([apk_path])
-        message = record_internal_error(logger, "拉取 APK", "decompile pull failed")
-        return error_response(f"拉取 APK 失败：{message}", status_code=500)
+        try:
+            await asyncio.to_thread(pull_device_file, device_id, on_device_path, apk_path)
+            size = os.path.getsize(apk_path)
+        except (RuntimeError, FileNotFoundError) as exc:
+            record_internal_error(logger, "拉取 APK", "decompile pull failed")
+            if "timed out" in str(exc).lower():
+                return ApiError.dependency_timeout("拉取 APK 超时").to_response()
+            return ApiError.upstream_failure("拉取 APK 失败", service="adb").to_response()
+        if size > APK_MAX_FILE_SIZE:
+            return error_response(f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400)
 
-    if os.path.getsize(apk_path) > APK_MAX_FILE_SIZE:
-        _cleanup_files_fn([apk_path])
-        return error_response(
-            f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
-        )
-
-    try:
-        _create_apk_task_fn(
-            task_id,
-            apk_path,
-            filename,
-            get_client_id_from_request(request),
-        )
-    except ValueError as exc:
-        _cleanup_files_fn([apk_path])
-        return error_response(str(exc), status_code=429)
+        try:
+            _create_apk_task_fn(task_id, apk_path, filename, owner_id)
+        except ValueError as exc:
+            return error_response(str(exc), status_code=429)
+        registered = True
+    finally:
+        if not registered:
+            _cleanup_files_fn([apk_path])
+            try:
+                os.rmdir(task_dir)
+            except OSError:
+                logger.warning("Could not remove failed APK staging directory", exc_info=True)
     return success_response(
         data={
             "task_id": task_id,
             "filename": filename,
-            "size": os.path.getsize(apk_path),
+            "size": size,
             "source_path": on_device_path,
         },
         message="Success",

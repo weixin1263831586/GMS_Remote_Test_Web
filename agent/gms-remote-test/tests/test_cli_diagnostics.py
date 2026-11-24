@@ -111,6 +111,22 @@ printf 'global=%s\\n' "$CURL_TIMEOUT" >&2
             "timeout=615", "timeout=615", "global=23",
         ])
 
+    def test_sdk_exact_search_uses_only_the_exact_controller_endpoint(self):
+        result = self.run_snippet('''
+set -e
+GMS_RT_OUTPUT=json
+api_call() {
+    printf '%s\\n' "$1" >&2
+    printf '{"data":{}}\\n'
+}
+gms-rt-sdk-search --source sdk --revision HEAD --query needle \\
+  --path frameworks/base/A.java --repo-scope frameworks/base --exact-path
+''')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("/sdk/search/exact?", result.stderr)
+        self.assertIn("&path=frameworks%2Fbase%2FA.java", result.stderr)
+        self.assertNotIn("path_filter=", result.stderr)
+
     # ------------------------------------------------------------------
     # Global --help / -h interception
     # ------------------------------------------------------------------

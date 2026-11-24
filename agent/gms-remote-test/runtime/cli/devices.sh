@@ -786,9 +786,15 @@ gms-rt-devices-shell() {
                         error "dumpsys 参数可能改变设备状态，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
                 esac ;;
             logcat)
-                case "$_ro_check" in
-                    *-c*|*" -f"*) error "logcat -c/-f 属破坏性参数，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
-                esac ;;
+                local -a _ro_logcat=()
+                local _ro_logcat_arg
+                read -r -a _ro_logcat <<< "$_ro_check"
+                for _ro_logcat_arg in "${_ro_logcat[@]:1}"; do
+                    if _gms_rt_logcat_forbidden_option "$_ro_logcat_arg" 1; then
+                        error "只读路径拒绝 logcat 参数: $_ro_logcat_arg"
+                        return "$GMS_RT_EXIT_PERMISSION"
+                    fi
+                done ;;
             dmesg)
                 case "$_ro_check" in
                     *-c*|*-C*) error "dmesg -c/-C 清空内核环形缓冲，需一次性审批令牌"; return "$GMS_RT_EXIT_PERMISSION" ;;
@@ -940,6 +946,43 @@ gms-rt-devices-diag() {
     return "$status"
 }
 
+# Match logcat options only, including clustered short flags and attached values.
+_gms_rt_logcat_forbidden_option() {
+    local arg="$1" read_only="$2" name cluster flag
+    case "$arg" in
+        --?*)
+            name="${arg%%=*}"
+            name="${name#--}"
+            if [[ file == "$name"* || "$name" == file* ]]; then
+                return 0
+            fi
+            if [ "$read_only" = 1 ]; then
+                case "$name" in
+                    dividers|buffer|format|tag|uid|pid|last|print|statistics|help) ;;
+                    *) return 0 ;;
+                esac
+            fi
+            ;;
+        -?*)
+            cluster="${arg#-}"
+            while [ -n "$cluster" ]; do
+                flag="${cluster:0:1}"
+                cluster="${cluster:1}"
+                if [ "$flag" = f ]; then
+                    return 0
+                fi
+                if [[ "$read_only" == 1 && "$flag" != [dvtTgbsemnrQpLDBS] ]]; then
+                    return 0
+                fi
+                case "$flag" in
+                    v|b|t|T|e|m|n|r|G|P) break ;;
+                esac
+            done
+            ;;
+    esac
+    return 1
+}
+
 # Capture device logcat via `adb shell logcat -v time` (local adb or SSH fallback).
 # Optional -c/--clear runs `logcat -c` first, then captures with `-v time`.
 # Interactive use streams live; --non-interactive (agents/CI) forces one-shot
@@ -950,18 +993,23 @@ gms-rt-devices-logcat() {
     [ -z "$device_id" ] && { error "设备ID必填. 用法: gms-rt-devices-logcat DEVICE_ID [-c] [logcat参数...]"; return "$GMS_RT_EXIT_USAGE"; }
     shift
 
-    local clear_first=0 has_dump_flag=0
+    local clear_first=0 has_dump_flag=0 read_only=0
+    if _gms_is_service_token_mode; then read_only=1; fi
     local logcat_args=() arg
     for arg in "$@"; do
         case "$arg" in
             -c|--clear)
+                if [ "$read_only" = 1 ]; then
+                    error "Service-token 模式禁止清空 logcat"
+                    return "$GMS_RT_EXIT_PERMISSION"
+                fi
                 clear_first=1
                 ;;
-            -f|--file=*)
-                error "logcat 参数 -f 会写设备文件, 不允许: $arg"
-                return "$GMS_RT_EXIT_USAGE"
-                ;;
             *)
+                if _gms_rt_logcat_forbidden_option "$arg" "$read_only"; then
+                    error "当前模式不允许 logcat 参数: $arg"
+                    return "$GMS_RT_EXIT_USAGE"
+                fi
                 case "$arg" in
                     -d|-t|-T|-g|-L|-p|-print) has_dump_flag=1 ;;
                 esac
@@ -970,7 +1018,7 @@ gms-rt-devices-logcat() {
         esac
     done
 
-    if [ "$GMS_RT_NON_INTERACTIVE" = "1" ]; then
+    if [ "$GMS_RT_NON_INTERACTIVE" = "1" ] || [ "$read_only" = 1 ]; then
         # 设备端由远端 sh 解释拼接命令, 非交互参数禁止 shell 元字符。
         local unsafe_pattern='[;&|><$`'"'"'()\\]'
         for arg in "${logcat_args[@]}"; do
@@ -981,12 +1029,11 @@ gms-rt-devices-logcat() {
         done
         # '-T <time>' does NOT imply dump mode in logcat — it keeps
         # following output and would hang a non-interactive call until the
-        # timeout.  Only -d/-t/-g/-L/-p/-print terminate on their own, so
-        # append -d unless one of those (excluding -T) is present.
+        # timeout. Add -d unless a terminating option is present.
         local has_terminating_flag=0
         for arg in "${logcat_args[@]}"; do
             case "$arg" in
-                -d|-t|-g|-L|-p|-print) has_terminating_flag=1 ;;
+                -d|-t|-g|-L|-p|-S|--last|--statistics) has_terminating_flag=1 ;;
             esac
         done
         if [ "$has_terminating_flag" -eq 0 ]; then

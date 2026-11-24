@@ -10,6 +10,7 @@ import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 
@@ -227,15 +228,23 @@ class TestLogsManager:
 
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             label = self._safe_log_token(test_type) if test_type else 'MANUAL'
-            filename = f'test_log_{label}_{timestamp}.log'
-            file_path = save_dir / filename
+            stem = f'test_log_{label}_{timestamp}'
             suffix = 0
-            while file_path.exists():
-                suffix += 1
-                filename = f'test_log_{label}_{timestamp}_{suffix}.log'
+            while True:
+                filename = f'{stem}_{suffix}.log' if suffix else f'{stem}.log'
                 file_path = save_dir / filename
-
-            file_path.write_text(log_content, encoding='utf-8')
+                try:
+                    file = file_path.open('x', encoding='utf-8')
+                except FileExistsError:
+                    suffix += 1
+                    continue
+                try:
+                    with file:
+                        file.write(log_content)
+                except (OSError, UnicodeError):
+                    file_path.unlink(missing_ok=True)
+                    raise
+                break
 
             return {
                 'success': True,
@@ -264,8 +273,16 @@ class TestLogsManager:
                 'error': '未选择任何文件'
             }
 
+        temporary_path: Path | None = None
         try:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            files = {}
+            for log_id in log_ids:
+                path = self._resolve_log_id(log_id, owner_id=owner_id, is_admin=is_admin)
+                if path.is_file():
+                    files[path] = self.log_id_for_path(path) if is_admin else path.name
+            if not files:
+                return {'success': False, 'error': '没有可下载的日志文件'}
+
             if output_path is None:
                 zip_dir = (
                     self.downloads_dir / self._safe_log_token(owner_id)
@@ -273,30 +290,36 @@ class TestLogsManager:
                     else self.downloads_dir
                 )
                 zip_dir.mkdir(parents=True, exist_ok=True)
-                output_path = str(zip_dir / f'logs_{timestamp}.zip')
+            else:
+                zip_dir = Path(output_path).parent
 
-            archived = 0
-            with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for log_id in log_ids:
-                    file_path = self._resolve_log_id(
-                        log_id,
-                        owner_id=owner_id,
-                        is_admin=is_admin,
-                    )
-                    if file_path.exists() and file_path.is_file():
-                        zipf.write(file_path, file_path.name)
-                        archived += 1
+            with NamedTemporaryFile(dir=zip_dir, prefix='logs_', suffix='.zip', delete=False) as tmp:
+                temporary_path = Path(tmp.name)
+            with zipfile.ZipFile(temporary_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                for file_path, name in files.items():
+                    zipf.write(file_path, name)
+            if output_path is not None:
+                temporary_path.replace(output_path)
+            else:
+                output_path = str(temporary_path)
+            temporary_path = None
 
             return {
                 'success': True,
                 'zip_path': output_path,
-                'file_count': archived
+                'file_count': len(files)
             }
         except Exception as e:
             return {
                 'success': False,
                 'error': str(e)
             }
+        finally:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning('Unable to remove incomplete logs archive', exc_info=True)
 
 
 test_logs_manager = TestLogsManager()

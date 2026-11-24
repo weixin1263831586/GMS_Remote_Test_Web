@@ -46,7 +46,7 @@ def get_model_by_tool() -> dict[str, type]:
             USBIPStartRequest,
             WifiConnectRequest,
         )
-        from features.firmware import SNBurnRequest
+        from features.firmware import GSIBurnRequest
 
         # features.knowledge 公共面经 __getattr__ 惰性导出请求模型，
         # 不再深引其路由模块内部。
@@ -85,7 +85,7 @@ def get_model_by_tool() -> dict[str, type]:
             "adb_forward_start": ADBForwardStartRequest,
             "usbip_connect": USBIPStartRequest,
             "usbip_disconnect": USBIPDisconnectRequest,
-            "burn_serial": SNBurnRequest,
+            "burn_gsi": GSIBurnRequest,
             # knowledge external search: 请求体经 ExternalSearchRequest 建模,
             # android_api_level 的范围校验(1-1000)在此生效。
             "android_internals_search": _ExternalSearchRequest,
@@ -176,8 +176,6 @@ def body_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, A
         devices = body.get("devices") or []
         if devices:
             body["serial_no"] = devices[0]
-    if tool.name == "burn_serial" and "sn_code" not in body:
-        body["sn_code"] = body.get("serial") or body.get("sn") or ""
     if tool.name == "desktop_validate" and "host" not in body:
         body["host"] = body.get("ubuntu_host") or body.get("device_host")
     return body

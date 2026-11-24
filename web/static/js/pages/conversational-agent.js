@@ -488,7 +488,7 @@ function renderAgentSession(session) {
     }
     applyAgentSessionWorkspace(session);
 
-    if (['running', 'monitoring', 'thinking'].includes(session.status)) {
+    if (['running', 'monitoring', 'thinking', 'analyzing'].includes(session.status)) {
         startAgentPolling();
     } else if (agentPollTimer) {
         stopAgentPolling();
@@ -628,7 +628,9 @@ async function fetchAgentSession() {
     try {
         const response = await fetch(`/api/agent/sessions/${encodeURIComponent(agentSessionId)}`);
         if (!response.ok) {
-            newAgentSession();
+            // 会话真的不存在才丢掉本地 id。502/503/504 是轮询抖动，
+            // 清掉会话会把仍在服务端运行的分析变成空白对话。
+            if (response.status === 404) newAgentSession();
             return;
         }
         const result = await response.json();

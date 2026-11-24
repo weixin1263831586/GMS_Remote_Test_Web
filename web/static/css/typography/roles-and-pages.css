@@ -197,13 +197,12 @@ html[data-ui-type-root="cluster"] #dashboard .dash-test-row .badge-mini { font-s
 html[data-ui-type-root="cluster"] #dashboard .dash-test-row strong { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .section-head h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="cluster"] #tab-management .heading-count { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="cluster"] #tab-management .cluster-section-note { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="cluster"] #tab-management .section-head-copy > p { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] #tab-management .worker-main-name { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="cluster"] #tab-management .worker-subline { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-meta-details { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-service-list .cap { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-memory-percent { font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="cluster"] #tab-management .worker-memory-detail { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .cluster-loading-message { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="cluster"] #tab-management .cluster-load-failed { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] #cluster-toolbar #refresh,
@@ -216,7 +215,7 @@ html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-summary-s
 html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-service-list .cap { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .worker-card-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="cluster"] #tab-management .worker-card-metric strong { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-memory-detail { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="cluster"] #tab-management .worker-card :is(.worker-memory-detail,.worker-disk-detail) { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-counts strong { font-size: var(--ui-type-size-card); }
 
 /* features/devices/ui/page.css */

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from datetime import datetime
 from typing import Any
@@ -11,6 +12,9 @@ from .agent import RedmineAgent
 from .knowledge_repository import RedmineKnowledgeDB
 from .knowledge_service import RedmineKnowledgeService
 from .repository import RedmineAgentDB
+
+
+logger = logging.getLogger(__name__)
 
 
 class RedmineService:
@@ -172,9 +176,13 @@ class RedmineService:
     def status(self) -> dict:
         last_result = self.task.last_result
         if self.task.last_error is not None:
+            logger.error(
+                "redmine background task failed",
+                exc_info=self.task.last_error,
+            )
             last_result = {
                 "status": "failed",
-                "error": str(self.task.last_error),
+                "error": "Redmine 任务失败",
             }
         return {
             "running": self.task.running,

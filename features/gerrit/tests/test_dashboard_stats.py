@@ -53,12 +53,27 @@ class GerritDashboardStatsTests(unittest.TestCase):
         self.assertEqual(data["summary"]["pending_review_count"], 1)
         self.assertEqual(data["trends"]["daily"], [{"date": "2026-06-01", "count": 3}])
 
-    def test_ssh_query_removes_status_any_and_adds_start(self):
-        query_for_ssh = import_module("features.gerrit.service")._query_for_ssh
+    def test_history_query_uses_real_statuses(self):
+        api = import_module("features.gerrit.api")
+        query = api._gerrit_history_query("a@example.com")
+        self.assertIn("status:open", query)
+        self.assertIn("status:merged", query)
+        self.assertIn("status:abandoned", query)
+        self.assertNotIn("status:any", query)
+
+    def test_ssh_query_removes_status_any_and_pages_with_start_flag(self):
+        service = import_module("features.gerrit.service")
 
         self.assertEqual(
-            query_for_ssh("owner:a@example.com status:any limit:500", limit=200, start=400),
-            "owner:a@example.com limit:200 --start 400",
+            service._query_for_ssh("owner:a@example.com status:any limit:500", limit=200),
+            "owner:a@example.com limit:200",
+        )
+        self.assertEqual(
+            service._ssh_gerrit_query_args("owner:a@example.com limit:200", start=400),
+            [
+                "gerrit", "query", "--format=JSON", "--submit-records",
+                "--start", "400", "--", "owner:a@example.com limit:200",
+            ],
         )
 
     def test_effective_limits_support_unbounded_history(self):

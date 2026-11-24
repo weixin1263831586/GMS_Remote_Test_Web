@@ -732,13 +732,13 @@ gms-rt-sdk-sources() {
 
 gms-rt-sdk-search() {
     local source="" revision="" query=""
-    local limit=50 path_filter="" repo_scope="" budget_seconds=""
-    local argument
+    local limit=50 path_filter="" repo_scope="" budget_seconds="" exact_path=0
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--repo-scope SUBREPO] [--budget-seconds N] [--limit N]"
+                echo "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT [--path FILTER] [--repo-scope SUBREPO] [--exact-path] [--budget-seconds N] [--limit N]"
                 echo "  Omitting --revision resolves the source's default_revision automatically."
+                echo "  --exact-path requires the full SDK-relative file path and its child repository."
                 return 0
                 ;;
             --source) shift; [ $# -gt 0 ] || { error "--source requires a value"; return "$GMS_RT_EXIT_USAGE"; }; source="$1" ;;
@@ -746,6 +746,7 @@ gms-rt-sdk-search() {
             --query) shift; [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }; query="$1" ;;
             --path) shift; [ $# -gt 0 ] || { error "--path requires a value"; return "$GMS_RT_EXIT_USAGE"; }; path_filter="$1" ;;
             --repo-scope) shift; [ $# -gt 0 ] || { error "--repo-scope requires a value"; return "$GMS_RT_EXIT_USAGE"; }; repo_scope="$1" ;;
+            --exact-path) exact_path=1 ;;
             --budget-seconds) shift; [ $# -gt 0 ] || { error "--budget-seconds requires a value"; return "$GMS_RT_EXIT_USAGE"; }; budget_seconds="$1" ;;
             --limit) shift; [ $# -gt 0 ] || { error "--limit requires a value"; return "$GMS_RT_EXIT_USAGE"; }; limit="$1" ;;
             *) error "Unexpected argument: $1"; return "$GMS_RT_EXIT_USAGE" ;;
@@ -753,6 +754,15 @@ gms-rt-sdk-search() {
         shift
     done
     [ -z "$source" ] || [ -z "$query" ] && { error "Usage: gms-rt-sdk-search --source ID [--revision REV] --query TEXT"; return "$GMS_RT_EXIT_USAGE"; }
+    local endpoint="/sdk/search" path_key="path_filter"
+    if [ "$exact_path" -eq 1 ]; then
+        if [ -z "$path_filter" ] || [ -z "$repo_scope" ]; then
+            error "--exact-path requires --path and --repo-scope"
+            return "$GMS_RT_EXIT_USAGE"
+        fi
+        endpoint="/sdk/search/exact"
+        path_key="path"
+    fi
     # SDK 全仓检索走远端编译服务器 SSH grep（千仓级），服务端墙钟最坏
     # ~260s（冷缓存首查 +180s 子仓发现）。通用 30s CURL_TIMEOUT 会把仍在
     # 执行的服务端请求掐断（exit 28），模型侧表现为 sdk_search 恒失败。
@@ -777,8 +787,8 @@ gms-rt-sdk-search() {
         fi
         revision="$resolved_revision"
     fi
-    local url="/sdk/search?source=$(_urlencode "$source")&revision=$(_urlencode "$revision")&query=$(_urlencode "$query")&limit=$limit"
-    [ -n "$path_filter" ] && url="$url&path_filter=$(_urlencode "$path_filter")"
+    local url="$endpoint?source=$(_urlencode "$source")&revision=$(_urlencode "$revision")&query=$(_urlencode "$query")&limit=$limit"
+    [ -n "$path_filter" ] && url="$url&$path_key=$(_urlencode "$path_filter")"
     [ -n "$repo_scope" ] && url="$url&repo_scope=$(_urlencode "$repo_scope")"
     if [ -n "$budget_seconds" ]; then
         [[ "$budget_seconds" =~ ^[0-9]+$ ]] && [ "$budget_seconds" -ge 1 ] && [ "$budget_seconds" -le 600 ] || {

@@ -57,13 +57,13 @@ function updateDashGauges(){
  const row=worker=>{
   const offline=worker.status==='offline';
   const total=Number(worker.disk_total_gb||0),free=Number(worker.disk_free_gb||0);
-  const disk=total>0?Math.max(0,Math.min(100,100*(1-free/total))):null;
+  const disk=worker.disk_percent??(total>0?100*(1-free/total):null);
   return `<tr><td><span class="resource-host-name" title="${esc(worker.name||worker.id)}">${esc(worker.name||worker.id)}</span><span class="resource-host-sub">${esc(worker.address||worker.hostname||'')} · ${worker.id===localId?'Controller':'Worker'}</span></td><td>${workerBadge(worker)}</td><td>${bar(offline?null:worker.cpu_percent,'cpu')}</td><td>${bar(offline?null:worker.memory_percent,'memory')}</td><td>${bar(offline?null:disk,'disk')}</td></tr>`;
  };
  metrics.innerHTML=selected.length?`<table class="dash-resource-table"><thead><tr><th style="width:24%">Worker / 主机</th><th style="width:12%">状态</th><th>CPU</th><th>内存</th><th>磁盘</th></tr></thead><tbody>${selected.map(row).join('')}</tbody></table>`:'<div class="dash-empty">暂无已注册主机</div>';
  const footer=document.querySelector('#dash-gauges-detail');
  if(footer)footer.textContent=dashGaugesWorker&&selected.length?
- `主机 ${selected[0].id} · 可用内存 ${oneDecimal(selected[0].memory_available_gb)} GB · 剩余磁盘 ${oneDecimal(selected[0].disk_free_gb)} GB · 负载 ${oneDecimal(selected[0].load_1m)}`:
+ `主机 ${selected[0].id} · 可用内存 ${oneDecimal(selected[0].memory_available_gb)} GiB · 可用磁盘 ${oneDecimal(selected[0].disk_free_gb)} GiB · 负载 ${oneDecimal(selected[0].load_1m)}`:
  `共 ${workers.length} 台主机 · 实时数据分别来自各 Worker · 无数据时显示未上报`;
 }
 

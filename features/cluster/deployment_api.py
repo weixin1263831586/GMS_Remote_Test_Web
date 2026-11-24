@@ -25,9 +25,10 @@ from features.auth import (
     CurrentUser,
     require_elevated_admin_when_auth_required,
 )
+from foundation.command_result import CommandResult
 from foundation.config import config_manager
 from foundation.config_paths import certificates_path
-from foundation.error_model import record_internal_error
+from foundation.error_model import ApiError, record_internal_error
 from foundation.networking import split_host_port
 from foundation.ssh_security import (
     scan_ssh_host_keys,
@@ -289,6 +290,49 @@ def _deployment_host(connection: str) -> tuple[str, str, int]:
     return username, hostname, port
 
 
+def _ssh_connect_error(
+    exc: BaseException, *, username: str, hostname: str, ssh_port: int,
+) -> HTTPException:
+    logger.warning(
+        "SSH connect failed for %s@%s:%s (%s)",
+        username, hostname, ssh_port, type(exc).__name__,
+    )
+    if isinstance(exc, paramiko.AuthenticationException):
+        return HTTPException(
+            502,
+            f"SSH authentication failed for {username}@{hostname}; "
+            "please verify the SSH username and password",
+        )
+    if isinstance(exc, TimeoutError):
+        return HTTPException(504, f"cannot connect to {hostname}:{ssh_port}")
+    if isinstance(exc, OSError):
+        return HTTPException(502, f"cannot connect to {hostname}:{ssh_port}")
+    if isinstance(exc, paramiko.SSHException):
+        return HTTPException(
+            502, f"SSH negotiation failed for {username}@{hostname}",
+        )
+    return HTTPException(502, "SSH connection failed")
+
+
+def _host_key_scan_error(exc: BaseException) -> HTTPException:
+    if isinstance(exc, ValueError):
+        return HTTPException(400, str(exc))
+    timed_out = isinstance(exc.__cause__, subprocess.TimeoutExpired)
+    return HTTPException(
+        504 if timed_out else 502,
+        "SSH host-key scan timed out" if timed_out else "SSH host-key scan failed",
+    )
+
+
+def _installer_failure(result: CommandResult) -> ApiError | None:
+    if getattr(result, "timed_out", False):
+        return ApiError.dependency_timeout("安装脚本执行超时")
+    if result.code != 0:
+        logger.warning("worker installer failed code=%s", result.code)
+        return ApiError.upstream_failure("installer failed", service="ssh")
+    return None
+
+
 @router.post("/workers/ssh-host-key/scan")
 async def scan_worker_ssh_host_key(
     body: dict,
@@ -304,9 +348,10 @@ async def scan_worker_ssh_host_key(
     try:
         keys = await asyncio.to_thread(scan_ssh_host_keys, hostname, port)
     except (RuntimeError, ValueError) as exc:
-        logger.warning("SSH host-key scan failed for %s:%s — %s",
-                       hostname, port, exc)
-        raise HTTPException(502, str(exc)) from exc
+        logger.warning(
+            "SSH host-key scan failed for %s:%s", hostname, port, exc_info=True,
+        )
+        raise _host_key_scan_error(exc) from exc
     return {"success": True, "host": hostname, "port": port, "keys": keys}
 
 
@@ -334,7 +379,10 @@ async def trust_worker_ssh_host_key(
     except ValueError as exc:
         raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:
-        raise HTTPException(502, str(exc)) from exc
+        logger.warning(
+            "SSH host-key trust failed for %s:%s", hostname, port, exc_info=True,
+        )
+        raise _host_key_scan_error(exc) from exc
     return {"success": True, "host": hostname, "port": port, "keys": trusted}
 
 
@@ -354,13 +402,14 @@ def _adb_proxy_source_install_command(
     controller_ca_arg: str,
     require_sudo: bool,
 ) -> str:
-    install = (
+    return (
         "set -e; "
         "cleanup() { rm -f "
         f"{shlex.quote(remote_archive)} "
         f"{shlex.quote(remote_token)}; }}; "
         "trap cleanup EXIT; "
-        "rm -rf ~/gms-adb-proxy-source-setup && "
+        + ("sudo -S -p '' -v; " if require_sudo else "")
+        + "rm -rf ~/gms-adb-proxy-source-setup && "
         "mkdir -p ~/gms-adb-proxy-source-setup && "
         f"tar -xzf {shlex.quote(remote_archive)} "
         "-C ~/gms-adb-proxy-source-setup && "
@@ -373,7 +422,6 @@ def _adb_proxy_source_install_command(
         f"{shlex.quote(controller_ca_arg)} "
         f"{shlex.quote(hostname)}"
     )
-    return "sudo -S -p '' -v && " + install if require_sudo else install
 
 
 @router.post("/workers/deploy-adb-proxy-source")
@@ -406,21 +454,17 @@ async def deploy_adb_proxy_source(
                 },
                 raise_on_error=True,
             )
-        except paramiko.AuthenticationException as exc:
-            raise HTTPException(
-                502,
-                f"SSH authentication failed for {username}@{hostname}; "
-                "please verify the SSH username and password",
+        except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
+            raise _ssh_connect_error(
+                exc, username=username, hostname=hostname, ssh_port=ssh_port,
             ) from exc
-        except (TimeoutError, OSError) as exc:
-            raise HTTPException(502, f"cannot connect to {hostname}:{ssh_port}: {exc}") from exc
-        except paramiko.SSHException as exc:
-            raise HTTPException(502, f"SSH negotiation failed for {username}@{hostname}: {exc}") from exc
         if ssh is None:
             raise HTTPException(502, "SSH connection failed")
 
         archive_path: Path | None = None
-        remote_archive = f"/tmp/gms-adb-source-{worker_id}.tar.gz"
+        remote_archive = _staged_credential_path(
+            f"gms-adb-source-{worker_id}.tar.gz"
+        )
         # Token 暂存名随机化（同 _staged_credential_path 注释）。
         remote_token = _staged_credential_path(f"gms-adb-source-{worker_id}.token")
         try:
@@ -475,12 +519,14 @@ async def deploy_adb_proxy_source(
                     ssh, install, timeout=900, get_pty=True,
                     input_text=(password + "\n") if password else None,
                 )
-                exit_code = result.code
-                output = (result.stdout + result.stderr)[-12000:]
-                if exit_code != 0:
-                    raise RuntimeError(
-                        output or f"installer exited with {exit_code}"
-                    )
+                failure = _installer_failure(result)
+                if failure is not None:
+                    raise failure
+                output = result.stdout + result.stderr
+                for secret in (password, token):
+                    if secret:
+                        output = output.replace(secret, "[REDACTED]")
+                output = output[-12000:]
             except Exception:
                 restore_worker_token(worker_id, token, previous_token)
                 raise
@@ -519,10 +565,13 @@ async def deploy_adb_proxy_source(
             f"adbproxy-rs已安装，但来源 Agent 在 {timeout} 秒内未产生有效心跳。"
             "请在目标主机检查 systemctl --user status gms-worker-agent",
         )
-    except HTTPException:
+    except (HTTPException, ApiError):
         raise
+    except RuntimeError as exc:
+        logger.warning("ADB Proxy source dependency unavailable: %s", exc)
+        raise HTTPException(503, "部署依赖不可用") from exc
     except Exception as exc:
-        raise HTTPException(502, record_internal_error(logger, "ADB Proxy 来源部署", "deploy failed")) from exc
+        raise HTTPException(500, record_internal_error(logger, "ADB Proxy 来源部署", "deploy failed")) from exc
 
 
 @router.post("/workers/deploy")
@@ -569,16 +618,10 @@ async def deploy_worker(
                 },
                 raise_on_error=True,
             )
-        except paramiko.AuthenticationException as exc:
-            raise HTTPException(
-                502,
-                f"SSH authentication failed for {username}@{hostname}; "
-                "please verify the SSH username and password",
+        except (paramiko.AuthenticationException, paramiko.SSHException, OSError) as exc:
+            raise _ssh_connect_error(
+                exc, username=username, hostname=hostname, ssh_port=ssh_port,
             ) from exc
-        except (TimeoutError, OSError) as exc:
-            raise HTTPException(502, f"cannot connect to {hostname}:{ssh_port}: {exc}") from exc
-        except paramiko.SSHException as exc:
-            raise HTTPException(502, f"SSH negotiation failed for {username}@{hostname}: {exc}") from exc
         if ssh is None:
             raise HTTPException(502, "SSH connection failed")
         archive_path = None
@@ -676,7 +719,7 @@ async def deploy_worker(
                         arcname="controller-ca.crt",
                     )
             sftp = ssh.open_sftp()
-            remote_archive = "/tmp/gms-worker-setup.tar.gz"
+            remote_archive = _staged_credential_path("gms-worker-setup.tar.gz")
             # 凭据暂存名随机化：固定名允许同主机低权用户预置 symlink 或
             # 抢在 chmod 前读取；随机名使预置不可行（见 _staged_credential_path）。
             # Token/GTS 凭据上传为 0600 文件并按路径传给安装器，内容绝不
@@ -700,7 +743,8 @@ async def deploy_worker(
                 f"cleanup() {{ rm -f {shlex.quote(remote_archive)} "
                 f"{shlex.quote(remote_token)} "
                 f"{shlex.quote(remote_credential)}; }}; trap cleanup EXIT; "
-                "rm -rf ~/gms-worker-setup && mkdir -p ~/gms-worker-setup && "
+                + ("sudo -S -p '' -v; " if password else "")
+                + "rm -rf ~/gms-worker-setup && mkdir -p ~/gms-worker-setup && "
                 f"tar -xzf {shlex.quote(remote_archive)} -C ~/gms-worker-setup && "
                 "cd ~/gms-worker-setup && "
                 f"GMS_DEFAULT_MAX_JOBS={ClusterConfig.load().default_max_jobs} "
@@ -710,8 +754,6 @@ async def deploy_worker(
                 f"{shlex.quote(suite_root)} {shlex.quote(hostname)} "
                 f"{shlex.quote(remote_credential)}"
             )
-            if password:
-                install = "sudo -S -p '' -v && " + install
             previous_token = persist_worker_token(worker_id, token)
             try:
                 # 统一执行层：sudo -S 密码经 input_text 写入 stdin，
@@ -722,10 +764,14 @@ async def deploy_worker(
                     ssh, install, timeout=900, get_pty=True,
                     input_text=(password + "\n") if password else None,
                 )
-                exit_code = result.code
-                output = (result.stdout + result.stderr)[-12000:]
-                if exit_code != 0:
-                    raise RuntimeError(output or f"installer exited with {exit_code}")
+                failure = _installer_failure(result)
+                if failure is not None:
+                    raise failure
+                output = result.stdout + result.stderr
+                for secret in (password, token):
+                    if secret:
+                        output = output.replace(secret, "[REDACTED]")
+                output = output[-12000:]
             except Exception:
                 restore_worker_token(worker_id, token, previous_token)
                 raise
@@ -759,10 +805,13 @@ async def deploy_worker(
             "systemctl --user status gms-worker-agent 和 "
             "journalctl --user -u gms-worker-agent -n 50 --no-pager",
         )
-    except HTTPException:
+    except (HTTPException, ApiError):
         raise
+    except RuntimeError as exc:
+        logger.warning("worker deployment dependency unavailable: %s", exc)
+        raise HTTPException(503, "部署依赖不可用") from exc
     except Exception as exc:
-        raise HTTPException(502, record_internal_error(logger, "Worker 自动部署", "deploy failed")) from exc
+        raise HTTPException(500, record_internal_error(logger, "Worker 自动部署", "deploy failed")) from exc
 
 
 def write_remote_private_file(sftp, remote_path: str, payload: bytes) -> None:

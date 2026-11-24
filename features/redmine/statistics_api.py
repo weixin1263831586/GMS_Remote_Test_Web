@@ -40,6 +40,7 @@ from .repository import (
     owner_user_map_path,
     refresh_assignee_issue_snapshots,
 )
+from .utils import bounded_stale_days
 
 
 logger = logging.getLogger(__name__)
@@ -206,7 +207,7 @@ async def get_workload_statistics(
         return _missing_credentials_payload(request)
     service = _service_for_request(request)
     stats_cfg = _get_redmine_stats_config(request)
-    stale_days = int(stale_days or stats_cfg["stale_days"])
+    stale_days = bounded_stale_days(stale_days, stats_cfg["stale_days"])
     freshness_days = int(stats_cfg.get("freshness_days") or 180)
     cache_key = f"{_request_user_id(request)}:{stale_days}:{list_limit}:{name}"
     now_ts = time.monotonic()
@@ -490,7 +491,9 @@ async def get_department_overdue_statistics(
     stats_cfg = _get_redmine_stats_config(request)
     dashboard_cfg = _dashboard_config_for_request(request)
     profile = select_redmine_dashboard_profile(dashboard_cfg, profile_id)
-    effective_stale_days = int(stale_days or profile.get("stale_days") or stats_cfg["stale_days"])
+    effective_stale_days = bounded_stale_days(
+        stale_days, profile.get("stale_days") or stats_cfg["stale_days"]
+    )
     effective_list_limit = int(list_limit or profile.get("list_limit") or dashboard_cfg["defaults"]["list_limit"])
     effective_issue_limit = int(issue_limit or profile.get("issue_limit") or dashboard_cfg["defaults"]["issue_limit"])
     cache_key = (
@@ -604,8 +607,13 @@ async def get_project_statistics(
         })
         _update_ttl_cache(_PROJECT_STATS_CACHE, cache_key, time.monotonic(), data, ttl=stats_cfg["cache_ttl"])
         return {"success": True, "data": data}
-    except Exception as exc:
-        return {"success": False, "error": f"project statistics failed: {exc}"}
+    except Exception:
+        return ApiError.upstream_failure(
+            record_internal_error(
+                logger, "项目统计", "project statistics failed"
+            ),
+            service="redmine",
+        ).to_response()
     finally:
         if client is not None:
             await client.close()

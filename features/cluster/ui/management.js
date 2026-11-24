@@ -57,14 +57,19 @@ function render(){
   }
   const capability=(label,ok)=>`<span class="cap ${ok===true?'ok':''}">${label} ${ok===true?'✓':ok===false?'×':'…'}</span>`;
   const vpn=worker.id===localId?localVpnConnected:workerVpnCache[worker.id];
-  const detailed=`<div class="worker-extra"><div>Agent ${esc(worker.agent_version||'-')} · 最近心跳 ${relativeTime(worker.last_heartbeat_at)}</div><div>可用内存 ${oneDecimal(worker.memory_available_gb)} GB · 剩余磁盘 ${oneDecimal(worker.disk_free_gb)} GB · 系统负载 ${oneDecimal(worker.load_1m)}</div><div>并发 ${esc(worker.running_jobs)}/${esc(worker.max_jobs)} · 外部 ${esc(worker.external_jobs||0)} · noVNC ${worker.capabilities?.novnc_port?'可用':'不可用'} · Tradefed ${worker.capabilities?.tradefed?'可用':'不可用'}</div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
+  const detailed=`<div class="worker-extra"><div>Agent ${esc(worker.agent_version||'-')} · 最近心跳 ${relativeTime(worker.last_heartbeat_at)}</div><div>可用内存 ${oneDecimal(worker.memory_available_gb)} GiB · 可用磁盘 ${oneDecimal(worker.disk_free_gb)} GiB · 系统负载 ${oneDecimal(worker.load_1m)}</div><div>并发 ${esc(worker.running_jobs)}/${esc(worker.max_jobs)} · 外部 ${esc(worker.external_jobs||0)} · noVNC ${worker.capabilities?.novnc_port?'可用':'不可用'} · Tradefed ${worker.capabilities?.tradefed?'可用':'不可用'}</div><div class="host-tests">${workerTestsMarkup(worker,tests)}</div>${(worker.warnings||[]).map(value=>`<div class="host-warning">⚠ ${esc(workerWarning(value))}</div>`).join('')}</div>`;
   const suiteCount=state.suites.filter(s=>s.worker_id===worker.id&&s.available).length;
   // MemTotal and MemAvailable are measured by the Worker in GiB.
   const total=Number(worker.memory_total_gb),available=Number(worker.memory_available_gb);
   const hasTotal=Number.isFinite(total)&&total>0;
   const hasAvailable=Number.isFinite(available)&&available>=0&&(hasTotal||available>0);
   const usage=hasTotal||hasAvailable?`${oneDecimal(worker.memory_percent)}%`:'—';
-  const memoryDetail=`总 ${hasTotal?`${oneDecimal(total)} GB`:'—'} · 剩余 ${hasAvailable?`${oneDecimal(available)} GB`:'—'}`;
+  const memoryDetail=`总 ${hasTotal?`${oneDecimal(total)} GiB`:'—'} · 可用 ${hasAvailable?`${oneDecimal(available)} GiB`:'—'}`;
+  const diskTotal=Number(worker.disk_total_gb),diskFree=Number(worker.disk_free_gb??NaN);
+  const hasDiskTotal=Number.isFinite(diskTotal)&&diskTotal>0;
+  const hasDiskFree=Number.isFinite(diskFree)&&diskFree>=0&&(hasDiskTotal||diskFree>0);
+  const diskDetail=`总 ${hasDiskTotal?oneDecimal(diskTotal):'—'} · 可用 ${hasDiskFree?oneDecimal(diskFree):'—'}${hasDiskTotal||hasDiskFree?' GiB':''}`;
+  const hasDiskPercent=Number.isInteger(worker.disk_percent);
   // Bound remote readings before using them in CSS progress indicators.
   const boundedPercent=value=>{
    const numeric=Number(value);
@@ -72,6 +77,7 @@ function render(){
   };
   const cpuMeter=boundedPercent(worker.cpu_percent);
   const memoryMeter=hasTotal?boundedPercent(worker.memory_percent):0;
+  const diskMeter=hasDiskPercent?boundedPercent(worker.disk_percent):0;
   const tone=assessment.labels.some(label=>label.cls==='bad')?'danger'
    :assessment.labels.some(label=>label.cls==='warn')?'warning':'normal';
   return `<article class="worker-card" data-worker-id="${esc(worker.id)}" data-health="${tone}" aria-label="Worker ${esc(worker.name||worker.id)}">
@@ -100,13 +106,21 @@ function render(){
        <div class="worker-meter" role="progressbar" aria-label="CPU 使用率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${cpuMeter}" style="--meter-width:${cpuMeter}%"><span class="worker-meter-fill"></span></div>
       </div>
      </div>
-     <div class="worker-card-metric worker-memory" title="总内存：MemTotal；剩余可用内存：MemAvailable（含可回收缓存）">
+     <div class="worker-card-metric worker-memory" title="总内存：系统可使用的物理内存（MemTotal）。可用内存：系统估算值（MemAvailable，计入部分可回收缓存）。">
       <div class="worker-metric-inline">
        <span class="worker-card-label">内存</span>
        <strong class="worker-memory-percent">${usage}</strong>
        <div class="worker-meter ${hasTotal?'':'worker-meter-unknown'}" role="progressbar" aria-label="内存使用率" aria-valuemin="0" aria-valuemax="100" ${hasTotal?`aria-valuenow="${memoryMeter}"`:'aria-valuetext="未知"'} style="--meter-width:${memoryMeter}%"><span class="worker-meter-fill"></span></div>
       </div>
       <span class="worker-memory-detail">${memoryDetail}</span>
+     </div>
+     <div class="worker-card-metric worker-disk" title="采集路径所在分区的磁盘容量（GiB）。使用率按已用空间 ÷（已用空间 + 可用空间）计算。">
+      <div class="worker-metric-inline">
+       <span class="worker-card-label">磁盘</span>
+       <strong class="worker-disk-percent">${hasDiskPercent?`${diskMeter}%`:'—'}</strong>
+       <div class="worker-meter ${hasDiskPercent?'':'worker-meter-unknown'}" role="progressbar" aria-label="磁盘使用率" aria-valuemin="0" aria-valuemax="100" ${hasDiskPercent?`aria-valuenow="${diskMeter}"`:'aria-valuetext="未上报"'} style="--meter-width:${diskMeter}%"><span class="worker-meter-fill"></span></div>
+      </div>
+      <span class="worker-disk-detail" title="${diskDetail}">${diskDetail}</span>
      </div>
      <div class="worker-card-metric worker-counts worker-devices"><span class="worker-card-label">设备</span><strong>${assessment.devices.length}</strong></div>
      <div class="worker-card-metric worker-counts worker-suites"><span class="worker-card-label">套件</span><strong>${suiteCount}</strong></div>

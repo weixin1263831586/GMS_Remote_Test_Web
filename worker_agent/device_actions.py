@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.host_metrics import collect_host_metrics
 from foundation.native_tools import resolve_native_tool
 from foundation.security import has_control_chars, quote_device_shell_arg
 from foundation.transport_contract import execute_external_transport
@@ -503,6 +504,17 @@ FACTORY_RESET_FASTBOOTD_WAIT_SECONDS = 90
 FACTORY_RESET_FORMAT_TIMEOUT_SECONDS = 420
 
 
+def _fastboot_lists_serial(listing: subprocess.CompletedProcess[str], serial: str) -> bool:
+    """Match a fastboot devices row, not a substring of another serial or the word fastboot."""
+    if listing.returncode != 0:
+        return False
+    for line in (listing.stdout or "").splitlines():
+        tokens = line.split()
+        if tokens and tokens[0] == serial:
+            return True
+    return False
+
+
 def _wait_fastboot_serial(serial: str, wait_seconds: int) -> bool:
     """轮询 fastboot devices 直到目标序列号出现（bootloader/fastbootd 通用）。"""
     deadline = time.monotonic() + wait_seconds
@@ -511,7 +523,7 @@ def _wait_fastboot_serial(serial: str, wait_seconds: int) -> bool:
             listing = subprocess.run(
                 ["fastboot", "devices"], capture_output=True, text=True,
                 timeout=10, check=False)
-            if serial in (listing.stdout or ""):
+            if _fastboot_lists_serial(listing, serial):
                 return True
         except (OSError, subprocess.TimeoutExpired):
             pass
@@ -594,7 +606,8 @@ def _factory_reset_via_fastboot(serial: str) -> dict[str, Any]:
                 listing = subprocess.run(
                     ["fastboot", "devices"], capture_output=True, text=True,
                     timeout=10, check=False)
-                if serial not in (listing.stdout or ""):
+                # 命令失败或超时不能当成“设备已经离开 fastboot”。
+                if listing.returncode == 0 and not _fastboot_lists_serial(listing, serial):
                     return {"device": serial, "success": True,
                             "output": "\n".join(output)}
             except (OSError, subprocess.TimeoutExpired):
@@ -1114,36 +1127,8 @@ def flash_gsi(config: WorkerConfig, system_img: Path | None, vendor_img: Path | 
             "exit_code": completed["returncode"], "output": output[-20000:]}
 
 
-def host_metrics(config: WorkerConfig) -> dict[str, float]:
-    usage = shutil.disk_usage(config.data_root.parent if config.data_root.parent.exists() else Path.home())
-    memory_percent = 0.0
-    memory_total_gb = 0.0
-    memory_available_gb = 0.0
-    # load 先赋默认值：/proc/meminfo 解析异常跳过时局部变量仍存在，
-    # 不需要靠 'load' in locals() 这类脆弱判断。
-    load = 0.0
-    try:
-        values = {}
-        for line in Path("/proc/meminfo").read_text().splitlines():
-            key, value = line.split(":", 1)
-            values[key] = int(value.strip().split()[0])
-        memory_percent = 100 * (1 - values["MemAvailable"] / values["MemTotal"])
-        memory_total_gb = values["MemTotal"] / 1024 ** 2
-        memory_available_gb = values["MemAvailable"] / 1024 ** 2
-    except Exception:
-        pass
-    try:
-        load = os.getloadavg()[0]
-        cpu_percent = min(100.0, load * 100 / max(1, os.cpu_count() or 1))
-    except OSError:
-        cpu_percent = 0.0
-    return {"cpu_percent": round(cpu_percent, 2),
-            "memory_percent": round(memory_percent, 2),
-            "memory_total_gb": round(memory_total_gb, 2),
-            "memory_available_gb": round(memory_available_gb, 2),
-            "load_1m": round(load, 2),
-            "disk_free_gb": round(usage.free / 1024 ** 3, 2),
-            "disk_total_gb": round(usage.total / 1024 ** 3, 2)}
+def host_metrics(config: WorkerConfig) -> dict[str, float | int | None]:
+    return collect_host_metrics(config.data_root)
 
 
 def _resolved_within_roots(candidate: Path, allowed_roots: list[Path]) -> bool:

@@ -14,7 +14,7 @@ _ALLOWED_TRANSITIONS = {
     "assigned": {"dispatching", "stopping", "completed", "failed", "cancelled", "worker_lost"},
     "dispatching": {"running", "stopping", "completed", "failed", "cancelled", "worker_lost"},
     "running": {"stopping", "completed", "failed", "cancelled", "worker_lost"},
-    "stopping": {"cancelled", "failed", "worker_lost"},
+    "stopping": {"cancelled", "completed", "failed", "worker_lost"},
     # Worker 恢复时仅允许 worker_lost 转回 running，不创建新 Attempt。
     "worker_lost": {"running", "stopping", "completed", "failed", "cancelled"},
     "completed": set(),

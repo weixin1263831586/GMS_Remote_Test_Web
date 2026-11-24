@@ -391,30 +391,12 @@ class RuntimeTerminalTests(RuntimeUiHarness):
 
         def grant_elevation(route):
             elevation_requests.append(route.request.post_data_json)
-            route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps(
-                    {
-                        "success": True,
-                        "elevated": True,
-                        "elevated_until": "2099-01-01T00:00:00+00:00",
-                        "admin_verified": True,
-                        "user": {
-                            "id": "ui-admin",
-                            "username": "ui-admin",
-                            "role": "admin",
-                            "display_name": "UI Smoke Admin",
-                        },
-                        "client_id": "ui-admin",
-                    }
-                ),
-            )
+            route.continue_()
 
         page.route("**/api/auth/elevate", grant_elevation)
         try:
             self.goto_shell(page)
-            page.wait_for_function("typeof recoverTerminalElevation === 'function'")
+            page.wait_for_function("state.authReady && typeof recoverTerminalElevation === 'function'")
             page.evaluate(
                 """
                 () => {

@@ -359,7 +359,9 @@ body {
 /* 拖拽手柄 */
 .drag-handle {
     cursor: grab;
-    padding: 2px 4px;
+    /* Keep fallback glyph widths from taking space away from the label. */
+    width: 16px;
+    padding: 2px 0;
 
     line-height: 1;
     color: var(--text-muted);
@@ -370,7 +372,7 @@ body {
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    margin-right: -4px;
+    margin-right: -2px;
 }
 
 .sidebar-item:hover .drag-handle {

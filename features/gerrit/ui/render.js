@@ -167,7 +167,7 @@ function renderDepartmentUsers(users) {
       + '<td>' + esc(s.merged_count || 0) + '</td>'
       + '<td>' + esc(s.open_count || 0) + '</td>'
       + '<td>' + esc(s.pending_review_count || 0) + '</td>'
-      + '<td>' + esc(extra.pending_review_of_me_count || 0) + '</td>'
+      + '<td>' + esc(extra.pending_review_of_me_count ?? '—') + '</td>'
       + '<td>' + esc(user.error || '') + '</td>'
       + '<td data-click="_actStopPropagation2"><button class="secondary dept-action-btn" data-click="removeDepartmentOwner" data-a0="' + esc(owner) + '" data-r1="el">移出</button></td>'
       + '</tr>';

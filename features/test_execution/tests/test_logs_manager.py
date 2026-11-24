@@ -1,4 +1,6 @@
 import unittest
+import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -79,7 +81,8 @@ class TestLogsManagerTests(unittest.TestCase):
         self.assertEqual(second, "test_log_CTS_20260905_092030_1.log")
 
     def test_regular_user_cannot_list_or_download_another_owners_log(self):
-        with TemporaryDirectory() as tmp:
+        with TemporaryDirectory() as tmp, patch("features.test_execution.logs.datetime") as clock:
+            clock.now.return_value = datetime(2026, 9, 5, 9, 20, 30)
             manager = GmsTestLogsManager()
             manager.saved_logs_dir = Path(tmp) / "saved"
             manager.downloads_dir = Path(tmp) / "downloads"
@@ -95,15 +98,32 @@ class TestLogsManagerTests(unittest.TestCase):
                 owner_id="alice",
             )
             admin = manager.download_logs(
-                [alice_id, bob_id],
+                [alice_id, bob_id, alice_id],
                 owner_id="admin",
                 is_admin=True,
             )
+            second_archive = manager.download_logs([alice_id], owner_id="admin", is_admin=True)
+            self.assertNotEqual(admin["zip_path"], second_archive["zip_path"])
+            with zipfile.ZipFile(admin["zip_path"]) as archive:
+                self.assertEqual(archive.namelist(), [alice_id, bob_id])
+                self.assertEqual(archive.read(alice_id), b"alice")
+                self.assertEqual(archive.read(bob_id), b"bob")
 
         self.assertEqual([item["name"] for item in listed["files"]], [alice["filename"]])
         self.assertFalse(denied["success"])
         self.assertTrue(admin["success"])
         self.assertEqual(admin["file_count"], 2)
+
+    def test_concurrent_saves_keep_every_log(self):
+        with TemporaryDirectory() as tmp, patch("features.test_execution.logs.datetime") as clock:
+            clock.now.return_value = datetime(2026, 9, 5, 9, 20, 30)
+            manager = GmsTestLogsManager()
+            manager.saved_logs_dir = Path(tmp)
+            contents = [f"log-{index}" for index in range(8)]
+            with ThreadPoolExecutor() as threads:
+                results = list(threads.map(lambda content: manager.save_current_log(content, "alice"), contents))
+            self.assertEqual(len({result["filename"] for result in results}), len(contents))
+            self.assertEqual([Path(result["file_path"]).read_text() for result in results], contents)
 
 
 if __name__ == "__main__":

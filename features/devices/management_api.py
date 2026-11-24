@@ -18,7 +18,7 @@ from . import runtime
 from .locks import device_lock_manager
 from .management_inventory import local_management_inventory
 from .manager import device_manager, has_blocked_adb_process
-from .support import SSHConnection
+from .support import SSHConnection, device_fencing_owner_id
 from .usbip_transaction import USBIP_PORT_COMMAND
 from .utils import DeviceUtils
 
@@ -477,7 +477,8 @@ async def devices_management(request: Request):
 
     try:
         config = runtime.config_manager.load_config()
-        client_id = runtime.get_client_id_from_request(request)
+        # locked_by_self 比较资源所有者，不比较 Agent 的 actor id。
+        client_id = device_fencing_owner_id(request)
         if is_local_host(runtime.config_manager.get_ubuntu_host(config)):
             inventory = await asyncio.to_thread(local_management_inventory)
             if inventory is not None:

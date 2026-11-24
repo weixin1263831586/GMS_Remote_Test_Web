@@ -14,6 +14,7 @@ from .source_provider_contract import _COMMIT_RE, SourceProviderError
 
 def search_scoped(
     provider, revision: str, query: str, path_filter: str, limit: int, scope: str,
+    *, exact_path: bool,
 ) -> dict[str, Any]:
     """Search exactly one verified child repo; never imply global absence."""
     root = provider.config.repo_root.rstrip("/")
@@ -42,13 +43,13 @@ def search_scoped(
     pinned = bool(_COMMIT_RE.fullmatch(revision))
     if not pinned and not src._is_head_label(revision, provider.config.default_revision):
         raise SourceProviderError(
-            "多仓子仓范围仅支持 HEAD 或固定 40 位 commit", status_code=422
+            "多仓子仓范围仅支持 HEAD 或完整的 commit SHA", status_code=422
         )
     deadline = src._SEARCH_DEADLINE.get() or (
         time.monotonic() + src.SSH_GIT_MULTI_GREP_TIMEOUT_SECONDS
     )
     result = provider._run_shard(
-        (candidate,), query, "", deadline=deadline,
+        (candidate,), query, path_filter.removeprefix(scope + "/") if exact_path else "", deadline=deadline,
         revision=revision if pinned else "HEAD",
     )
     if result.timed_out:
@@ -59,7 +60,7 @@ def search_scoped(
         )
     else:
         matches, scanned, limited = src._parse_multi_output(
-            result.stdout, path_filter, limit, strip_root=provider.config.repo_root
+            result.stdout, path_filter, limit, strip_root=provider.config.repo_root, exact_path=exact_path,
         )
     # Even zero-hit searches must report the real SHA pinned by the SSH shard.
     headers = [
@@ -88,8 +89,10 @@ def search_scoped(
         searched_repos=[scope], commit=commit, revision_is_head=not pinned,
         global_coverage_complete=False, coverage_scope="selected_repository",
     )
+    if exact_path:
+        payload.update(scope="file", coverage_scope="selected_file", searched_scope=path_filter)
     if not kept:
-        payload["hint"] = (
+        payload["hint"] = "仅在指定文件检索，零命中不代表子仓或 SDK 不存在" if exact_path else (
             "仅在指定子仓检索，零命中不代表全 SDK 不存在；"
             "如需全库结论，请取消 repo_scope 并确认 coverage_complete"
         )

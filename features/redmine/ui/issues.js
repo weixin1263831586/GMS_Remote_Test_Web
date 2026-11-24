@@ -11,6 +11,7 @@ async function smartSearch() {
     try {
       var local = await api('/api/redmine-agent/issues/' + issueId);
       if (local && local.issue_id) {
+        document.getElementById('searchInput').value = String(issueId);
         return loadIssues();
       }
     } catch (_) {

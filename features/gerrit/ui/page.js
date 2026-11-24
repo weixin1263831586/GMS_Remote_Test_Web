@@ -461,7 +461,11 @@ async function refreshConnBanner(data) {
   const msg = document.getElementById('connMsg');
   const detail = document.getElementById('connDetail');
   if (!banner) return;
-  const errorText = [data && data.error, data && data.rest_error].filter(Boolean).join(' | ');
+  // REST 失败但 SSH fallback 成功时 data.error 为空、仅剩 rest_error，
+  // 查询本身已成功返回数据，不再按“查询失败”弹告警条。
+  const primaryError = String((data && data.error) || '').trim();
+  if (!primaryError) { banner.classList.remove('show', 'ok'); return; }
+  const errorText = [primaryError, data && data.rest_error].filter(Boolean).join(' | ');
   const routeLike = /(timed?\s*out|timeout|unreachable|no route|network|connection refused|connection reset|name or service not known|could not resolve|无法|不可达|路由)/i.test(errorText);
   const authLike = /(401|403|auth|permission|forbidden|unauthorized|not permitted|认证|权限)/i.test(errorText);
   if (!errorText) { banner.classList.remove('show', 'ok'); return; }

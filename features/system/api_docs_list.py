@@ -1,12 +1,12 @@
 """
 API_DOCS_LIST - 精选业务 API 说明
 
-此文件包含所有API端点的文档信息，用于：
+业务摘要、参数说明和 CLI 映射用于：
 1. 为 OpenAPI 自动生成的完整技术清单补充业务说明
 2. 提供精选 API 帮助文本
 3. 技能命令参考
 
-与前端 static/js/api-constants.js 中的 API_DETAILS_MAP 保持对应关系。
+API 文档页面读取 Controller 生成的 OpenAPI 目录。
 """
 
 SKILL_COMMAND_PREFIX = "gms-rt-"
@@ -33,10 +33,17 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/config/read",
-        "description": "获取已脱敏的系统配置；敏感字段会被过滤，Wi-Fi 密码按提权状态处理",
+        "description": "已提权管理员读取脱敏系统配置。普通会话使用 /api/config/client 获取页面所需默认值。",
         "params": [],
         "category": "config",
         "skill": "gms-rt-config-read"
+    },
+    {
+        "method": "GET",
+        "path": "/api/config/client",
+        "description": "读取当前页面所需配置，包括默认套件路径和 Wi-Fi 名称。只返回密码是否已配置。",
+        "params": [],
+        "category": "config"
     },
     {
         "method": "POST",
@@ -537,23 +544,13 @@ API_DOCS_LIST = [
         "path": "/api/burn/gsi",
         "description": "烧写GSI镜像",
         "params": [
-            {"name": "gsi_image", "type": "file", "required": True, "desc": "GSI镜像文件（.img格式）"},
-            {"name": "devices", "type": "string", "required": True, "desc": "设备序列号（多个用逗号分隔）"},
-            {"name": "wipe_data", "type": "boolean", "required": False, "desc": "是否清除数据（默认true）"}
+            {"name": "devices", "type": "array", "required": True, "desc": "设备序列号列表"},
+            {"name": "script_path", "type": "string", "required": True, "desc": "测试主机上的 GSI 烧写脚本路径"},
+            {"name": "system_img", "type": "string", "required": False, "desc": "System 镜像路径"},
+            {"name": "vendor_img", "type": "string", "required": False, "desc": "Vendor Boot 镜像路径，至少提供一种镜像"}
         ],
         "category": "burn",
         "skill": "gms-rt-burn-gsi"
-    },
-    {
-        "method": "POST",
-        "path": "/api/burn/serial",
-        "description": "烧写设备序列号",
-        "params": [
-            {"name": "device_id", "type": "string", "required": True, "desc": "当前设备序列号"},
-            {"name": "new_serial", "type": "string", "required": True, "desc": "新的序列号"}
-        ],
-        "category": "burn",
-        "skill": "gms-rt-burn-serial"
     },
     {
         "method": "GET",
@@ -632,7 +629,7 @@ API_DOCS_LIST = [
     {
         "method": "GET",
         "path": "/api/system/skills",
-        "description": "下载Skill ZIP离线包（不安装CLI命令）",
+        "description": "下载 Skill ZIP 离线包。安装或更新 CLI 使用 Agent 安装器。",
         "params": [],
         "category": "system",
         "skill": "gms-rt-system-skills"
@@ -970,10 +967,3 @@ dict(method="GET", path="/api/agent/ca.crt", description="分发 Controller CA �
         "skill": ""
     }
 ]
-
-
-def build_openapi_api_docs(openapi_schema: dict) -> list[dict]:
-    """Compatibility import for callers; Catalog is the shared implementation."""
-    from features.system.api_catalog import build_api_catalog
-
-    return build_api_catalog(openapi_schema)

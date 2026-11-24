@@ -9,17 +9,19 @@ from __future__ import annotations
 
 import argparse
 import ast
-from collections import Counter, defaultdict
-from hashlib import sha256
 import json
-from pathlib import Path
 import re
 import subprocess
 import sys
+from collections import Counter, defaultdict
+from hashlib import sha256
+from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from _common import find_repo_root  # noqa: E402
+from _common import find_repo_root
+
 
 ROOT = find_repo_root()
 SPRITE = ROOT / "web/static/icons/ui.svg"

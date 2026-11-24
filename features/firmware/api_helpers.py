@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
 import shlex
 
+from foundation.error_model import ApiError
 from foundation.security import sanitize_device_ids
 
 from . import runtime
+
+
+logger = logging.getLogger(__name__)
 
 
 _REMOTE_FILE_FOUND_MARKER = "__GMS_REMOTE_FILE_FOUND__"
@@ -26,14 +31,25 @@ def adb_proxy_devices(devices: list[str]) -> list[str]:
 
 
 def remote_file_exists(ssh, path: str) -> bool:
+    """Return whether ``path`` is a regular file on the connected host.
+
+    A transport failure is not "missing". Callers must not fall through to a
+    Controller-local file of the same path when the probe itself failed.
+    """
     command = (
         f"test -f {shlex.quote(path)} && echo {_REMOTE_FILE_FOUND_MARKER} "
         f"|| echo {_REMOTE_FILE_MISSING_MARKER}"
     )
     result = runtime.ssh_manager.execute_command(ssh, command, timeout=5)
-    return _REMOTE_FILE_FOUND_MARKER in {
-        line.strip() for line in result.stdout.splitlines()
-    }
+    if getattr(result, "timed_out", False):
+        raise ApiError.dependency_timeout("探测远端固件文件超时")
+    lines = {line.strip() for line in (result.stdout or "").splitlines()}
+    if _REMOTE_FILE_FOUND_MARKER in lines:
+        return True
+    if _REMOTE_FILE_MISSING_MARKER in lines:
+        return False
+    logger.warning("remote file probe failed code=%s", result.code)
+    raise ApiError.upstream_failure("探测远端固件文件失败", service="ssh")
 
 
 def normalize_firmware_devices(

@@ -162,8 +162,11 @@ python tools/scripts/agent/sync_package.py .
 
 运行 `python tools/scripts/docs/generate_guide_screenshots.py` 可重新生成全部
 指导图。脚本启动临时认证实例，用 `guide_fixtures.py` 的演示数据渲染当前
-页面，不连接真实测试主机或模型、不执行测试或烧写。图注位于截图下方，
-编号放在控件外侧；全部生成且与指南引用清单一致后才替换目标文件。
+页面，不连接真实测试主机或模型、不执行测试或烧写。网页截图区域为
+1912 × 914，编号放在控件外侧。底部附加 144 像素高的编号说明，成品 PNG
+统一为 1912 × 1058。步骤文案取自图库按钮的 `data-guide-steps`。
+全部生成且与指南引用清单一致后才替换目标文件。
+编号标记对应当前截图可见的控件。需滚动后操作的步骤会在图注中说明。
 不要把真实配对码、Token、密码或业务日志放进截图。
 
 只修订个别截图时可追加 `--only agent-routing.png cluster-refresh.png`；脚本
@@ -205,7 +208,7 @@ python tools/scripts/agent/sync_package.py .
    `tools/scripts/agent/release.py --check` 通过（`make agent-check`）。
 5. 前端：`node --check` 与前端完整性/重复导航检查通过。
 6. 对外契约变更同步更新 `tests/contract/snapshots/` 并在评审中说明差异。
-7. 架构决策或安边界变化已补入 `docs/architecture/adr/`。
+7. 架构决策或安全边界变化已补入 `docs/architecture/adr/`。
 
 ## 相关文档
 

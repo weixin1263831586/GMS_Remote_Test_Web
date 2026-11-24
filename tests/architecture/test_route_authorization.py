@@ -308,7 +308,17 @@ def _handler_authorized(
                 name = sub.func.attr
                 if (origin, name) not in seen:
                     seen.add((origin, name))
-                    entry = feature_index.get(name)
+                    entry = None
+                    receiver = sub.func.value
+                    if isinstance(receiver, ast.Name) and receiver.id in imported_sources:
+                        source = imported_sources[receiver.id]
+                        module_helpers, module_deps = _helpers_for_module(
+                            source, parse_cache,
+                        )
+                        if name in module_helpers:
+                            entry = (source, (module_helpers, module_deps))
+                    if entry is None:
+                        entry = feature_index.get(name)
                     if entry is not None:
                         source, (module_helpers, module_deps) = entry
                         cross_helper = module_helpers.get(name)
@@ -328,11 +338,13 @@ def _handler_authorized(
             seen.add(key)
             helper = current_helpers.get(name)
             if helper is None:
-                # Name not defined in this module: it may be imported from
-                # another feature module (module-level or function-level
-                # import) — resolve via the feature-wide index and continue.
-                entry = feature_index.get(name) or _resolve_imported(
-                    name, imported_sources, parse_cache)
+                # Prefer the module this file actually imports. The global
+                # index keeps the alphabetically first function of that
+                # name, which can authorize a different helper than the one
+                # the handler calls.
+                entry = _resolve_imported(
+                    name, imported_sources, parse_cache,
+                ) or feature_index.get(name)
                 if entry is not None:
                     source, (module_helpers, module_deps) = entry
                     cross_helper = module_helpers.get(name)

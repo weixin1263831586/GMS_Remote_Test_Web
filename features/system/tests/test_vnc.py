@@ -217,5 +217,64 @@ class VNCManagerTests(unittest.TestCase):
         kill_processes.assert_called_once_with("x11vnc.*:0", force=True)
 
 
+class DesktopVncRouteTests(unittest.TestCase):
+    def setUp(self):
+        from fastapi import FastAPI, Request
+        from fastapi.testclient import TestClient
+
+        from features.auth import CurrentUser, require_elevated_admin
+        from features.system import desktop
+
+        self.desktop = desktop
+        app = FastAPI()
+
+        def admin(_request: Request):
+            return CurrentUser(id="id-admin", username="admin", role="admin")
+
+        app.dependency_overrides[require_elevated_admin] = admin
+        app.include_router(desktop.router)
+        self.client = TestClient(app)
+        self.addCleanup(self.client.close)
+
+    def test_start_ssh_failure_is_502_and_other_failures_stay_200(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        cluster = SimpleNamespace(config=SimpleNamespace(local_worker_id="local"))
+        with patch("foundation.cluster_port.get_cluster_service", return_value=cluster), \
+                patch.object(self.desktop, "_authorized_vnc_target", return_value=("host", "", "")), \
+                patch.object(
+                    self.desktop.vnc_manager, "start_vnc",
+                    return_value={"success": False, "error": "SSH连接失败"},
+                ):
+            failed = self.client.post("/api/desktop/vnc/start")
+        self.assertEqual(failed.status_code, 502)
+        body = failed.json()
+        self.assertEqual(body["code"], "UPSTREAM_FAILURE")
+        self.assertEqual(body["error"], "SSH连接失败")
+        self.assertEqual(body["details"]["service"], "ssh")
+
+        with patch("foundation.cluster_port.get_cluster_service", return_value=cluster), \
+                patch.object(self.desktop, "_authorized_vnc_target", return_value=("host", "", "")), \
+                patch.object(
+                    self.desktop.vnc_manager, "start_vnc",
+                    return_value={"success": False, "error": "未配置主机地址"},
+                ):
+            other = self.client.post("/api/desktop/vnc/start")
+        self.assertEqual(other.status_code, 200)
+        self.assertEqual(other.json()["error"], "未配置主机地址")
+
+    def test_stop_ssh_failure_is_502(self):
+        from unittest.mock import patch
+
+        with patch.object(
+            self.desktop.vnc_manager, "stop_vnc",
+            return_value={"success": False, "error": "SSH连接失败"},
+        ):
+            failed = self.client.post("/api/desktop/vnc/stop")
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(failed.json()["code"], "UPSTREAM_FAILURE")
+
+
 if __name__ == "__main__":
     unittest.main()

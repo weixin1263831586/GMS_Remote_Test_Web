@@ -2,7 +2,6 @@
 import logging
 import re
 import socket
-from typing import Any
 
 
 logger = logging.getLogger(__name__)
@@ -43,48 +42,6 @@ class CommonUtils:
         """将 ``username@host`` 解析为用户名和主机。"""
         from foundation.networking import parse_host_address
         return parse_host_address(host)
-
-    @classmethod
-    def create_result_dict(
-        cls,
-        success: bool = True,
-        message: str = '',
-        error: str = '',
-        data: Any = None
-    ) -> dict[str, Any]:
-        """创建标准结果字典。"""
-        result = {'success': success}
-
-        if message:
-            result['message'] = message
-
-        if not success and error:
-            result['error'] = error
-        elif not success and message:
-            result['error'] = message
-
-        if data is not None:
-            result['data'] = data
-
-        return result
-
-    @classmethod
-    def create_success_result(
-        cls,
-        message: str = '',
-        data: Any = None
-    ) -> dict[str, Any]:
-        """创建成功结果字典。"""
-        return cls.create_result_dict(True, message, '', data)
-
-    @classmethod
-    def create_error_result(
-        cls,
-        error: str,
-        data: Any = None
-    ) -> dict[str, Any]:
-        """创建错误结果字典。"""
-        return cls.create_result_dict(False, '', error, data)
 
     @staticmethod
     def extract_ip_from_host(host: str) -> str:

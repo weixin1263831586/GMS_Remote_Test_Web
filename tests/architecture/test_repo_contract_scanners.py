@@ -103,7 +103,7 @@ class RouteDocsContractTests(unittest.TestCase):
     def test_route_snapshot_covers_registered_api_prefixes(self):
         snapshot = ROOT / 'tests' / 'contract' / 'snapshots' / 'routes.json'
         if not snapshot.is_file():
-            self.skipTest('routes.json snapshot 不存在，契约由 tests/contract 维护')
+            self.fail('routes.json snapshot 不存在，契约由 tests/contract 维护')
         import json
 
         snapshot_paths = {

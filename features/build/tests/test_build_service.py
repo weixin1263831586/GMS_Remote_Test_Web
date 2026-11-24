@@ -325,6 +325,52 @@ def test_artifact_discovery_searches_only_static_pattern_prefixes():
     assert timeout == 60
 
 
+def test_poll_probe_failure_stays_an_exception():
+    backend = SshTmuxBuildBackend()
+    backend._run = lambda *_args, **_kwargs: (1, "", "connection reset")
+    with pytest.raises(BuildExecutionError):
+        backend.poll(
+            server={},
+            job={"id": "job-1", "remote_log_path": "/tmp/job-1.log"},
+            artifact_patterns=[],
+        )
+
+
+def test_cancel_does_not_ignore_a_failed_tmux_kill():
+    backend = SshTmuxBuildBackend()
+    commands = []
+
+    def fake_run(_server, command, timeout=10):
+        commands.append(command)
+        return 1, "", "permission denied"
+
+    backend._run = fake_run
+    with pytest.raises(BuildExecutionError):
+        backend.cancel(server={}, session="gms_build_job")
+    assert "kill-session" in commands[0]
+    assert not commands[0].rstrip().endswith("|| true")
+
+
+def test_local_build_timeout_is_a_build_error(monkeypatch):
+    from features.build.executor import LocalBuildBackend
+
+    def timed_out(*_args, **_kwargs):
+        raise subprocess.TimeoutExpired(cmd="build", timeout=1)
+
+    monkeypatch.setattr("features.build.executor.subprocess.run", timed_out)
+    with pytest.raises(BuildExecutionError) as raised:
+        LocalBuildBackend()._run({}, "true", timeout=1)
+    assert isinstance(raised.value.__cause__, TimeoutError)
+
+
+def test_validate_workspace_rejects_paths_outside_the_server_root():
+    from features.build.executor import validate_workspace
+
+    assert validate_workspace("tree", "/srv/aosp") == "/srv/aosp/tree"
+    with pytest.raises(BuildExecutionError):
+        validate_workspace("/", "/srv/aosp")
+
+
 def test_poll_api_returns_service_unavailable_for_build_connection_error(monkeypatch):
     from features.build import api as build_api
 
@@ -342,7 +388,11 @@ def test_poll_api_returns_service_unavailable_for_build_connection_error(monkeyp
     request.state.current_user = CurrentUser(
         id="id-alice", username="alice", role="user"
     )
-    response = asyncio.run(build_api.get_build_job("build_demo", request, poll=True))
+    payload = asyncio.run(build_api.get_build_job("build_demo", request))
+    assert payload["success"] is True
+    response = asyncio.run(
+        build_api.poll_build_job("build_demo", request, request.state.current_user)
+    )
 
     assert response.status_code == 503
     assert json.loads(response.body)["error"] == "构建服务器暂不可用"

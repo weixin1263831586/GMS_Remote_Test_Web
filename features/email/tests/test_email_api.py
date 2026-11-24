@@ -161,6 +161,36 @@ class EmailApiTests(unittest.TestCase):
         self.assertIn("发送过于频繁", response.json()["error"])
         email_api._rate_events.clear()
 
+    def test_send_rejects_non_object_json(self):
+        self._login()
+        response = self.client.post(
+            "/api/email/send",
+            content=b"[1]",
+            headers={"Content-Type": "application/json"},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("JSON", response.json()["error"])
+
+    @patch("features.email.api.send_email")
+    def test_send_failure_status_follows_mode(self, send_email_mock):
+        self._login()
+        cases = (
+            ("invalid", 400),
+            ("unconfigured", 400),
+            ("disabled", 409),
+            ("smtp", 503),
+        )
+        for mode, status in cases:
+            with self.subTest(mode=mode):
+                send_email_mock.return_value = {
+                    "sent": False, "mode": mode, "error": "no",
+                }
+                response = self.client.post(
+                    "/api/email/send",
+                    json={"to": "dev@example.com", "subject": "s", "body": "b"},
+                )
+                self.assertEqual(response.status_code, status)
+
     def test_send_requires_email_send_permission(self):
         """无 email.send 权限的登录用户被拒(权限细分)。"""
         import features.email.api as email_api

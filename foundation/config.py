@@ -245,11 +245,6 @@ class ConfigManager(ConfigPersistenceMixin):
         providers = ai_config.get('providers', {})
         return providers.get(provider_name)
 
-    def is_ai_enabled(self) -> bool:
-        """True iff the AI feature is enabled and usable."""
-        ai_config = self.get_ai_config()
-        return ai_config.get('enabled', False)
-
     def _load_static_config(self) -> dict[str, Any]:
         """Load and validate the static config from disk (placeholders expanded).
 
@@ -486,21 +481,6 @@ class ConfigManager(ConfigPersistenceMixin):
     def save_redmine_dashboard_config(self, dashboard_config: dict[str, Any]) -> bool:
         """Save Redmine dashboard profiles to runtime config."""
         return self._save_section('redmine_dashboard', dashboard_config)
-
-    def save_client_ssh_credentials(self, credentials: list) -> bool:
-        """Persist host-scoped SSH credentials encrypted at rest."""
-        try:
-            if credentials is None:
-                credentials = []
-            if not isinstance(credentials, list):
-                raise ValueError("client_ssh_credentials must be a list")
-
-            return self.update_runtime_config(
-                {'client_ssh_credentials': self._encrypt_ssh_credentials(credentials)},
-            )
-        except Exception as e:
-            logger.error(f"Error saving client SSH credentials: {e}")
-            return False
 
     @staticmethod
     def _encrypt_ssh_credentials(credentials: list) -> list[dict[str, Any]]:

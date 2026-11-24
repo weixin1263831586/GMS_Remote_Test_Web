@@ -19,6 +19,7 @@ from urllib.parse import quote, urlencode
 
 from foundation.log_setup import resolve_log_level
 from foundation.network_quality import probe_tcp_quality
+from foundation.networking import parse_vpn_connection_names
 from foundation.tradefed_progress import parse_progress_line
 from foundation.transport_contract import TransportOperationError
 
@@ -513,6 +514,8 @@ class WorkerAgent:
                 return
             elif kind == "stop_test":
                 result = self.runtime.stop_process(command.get("payload", {}).get("worker_job_id", ""))
+                if result["status"] not in {"cancelled", "completed", "failed"}:
+                    raise RuntimeError("worker job has no confirmed terminal state")
             elif kind == "aoa_playback_control":
                 # AOA 回放过程控制（远端 Worker 路径）：改写执行线程
                 # 进程内的控制注册表，毫秒级生效；本机 Worker 由
@@ -541,13 +544,7 @@ class WorkerAgent:
                         raise RuntimeError(
                             (proc.stderr or proc.stdout or "nmcli status check failed").strip()
                         )
-                    connected = False
-                    for line in proc.stdout.splitlines():
-                        parts = line.split(':')
-                        if len(parts) >= 2 and parts[1].strip().lower() == 'vpn':
-                            connected = True
-                            break
-                    result = {"connected": connected}
+                    result = {"connected": bool(parse_vpn_connection_names(proc.stdout))}
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     raise RuntimeError("nmcli status check failed") from exc
             elif kind == "list_vpn_connections":
@@ -562,14 +559,7 @@ class WorkerAgent:
                         raise RuntimeError(
                             (proc.stderr or proc.stdout or "nmcli connection listing failed").strip()
                         )
-                    connections = [
-                        line.split(':', 1)[0].strip()
-                        for line in proc.stdout.splitlines()
-                        if len(line.split(':', 1)) == 2
-                        and line.split(':', 1)[1].strip().lower() == 'vpn'
-                        and line.split(':', 1)[0].strip()
-                    ]
-                    result = {"connections": connections}
+                    result = {"connections": parse_vpn_connection_names(proc.stdout)}
                 except (OSError, subprocess.TimeoutExpired) as exc:
                     raise RuntimeError("nmcli connection listing failed") from exc
             elif kind == "uninstall_agent":

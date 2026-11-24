@@ -5,7 +5,7 @@
 // Single owner for everything the pages used to reimplement separately:
 // modal stack + z-index, inert/aria attributes, Escape, backdrop click,
 // focus trap + initial focus + focus restore, background inert, scroll lock.
-// 语义契约（tests/test_runtime_ui_smoke.py 固化）：
+// 语义契约由 tests/runtime_ui/ 中的模态框回归测试覆盖：
 //   - 打开/关闭用 .show 类；非栈顶 modal 置 inert；
 //   - Escape / 点击遮罩只关栈顶；
 //   - 全局 window.showModal / window.hideModal 别名由各页面提供。

@@ -72,9 +72,10 @@ gms-rt-reports-list                                 # 已完成的测试报告
 ### 6. 取证（Redmine 证据链，只读）
 
 ```bash
-gms-rt-redmine-issue-fetch <issue>          # 全量快照（原始 JSON、不截断 journals）
-gms-rt-redmine-attachments <issue>          # 附件清单（kind/size/sha256）
-gms-rt-artifact-search / gms-rt-artifact-read   # 证据文本检索与窗口读取
+gms-rt-redmine-issue-fetch <issue_id_or_url>   # 全量快照，响应里取 snapshot_id
+gms-rt-redmine-attachments <snapshot_id>       # 附件清单（kind/size/sha256）
+gms-rt-artifact-search <snapshot_id> <query>   # 在描述、评论和附件文本里检索
+gms-rt-artifact-read <artifact_id>             # 按字符窗口读取附件文本
 ```
 
 ## 人工会话专用（Agent 禁用）
@@ -82,7 +83,10 @@ gms-rt-artifact-search / gms-rt-artifact-read   # 证据文本检索与窗口读
 ```bash
 gms-rt-auth-login <user> --password-stdin   # 密码登录，仅人工 CLI 会话
 gms-rt-auth-elevate                          # 管理员提权（step-up）
-gms-rt-approval-create                       # 为 Agent 的高风险操作签发一次性审批令牌
+# --tool 与 --device 必填。shell 用 --command；烧录用 --firmware-sha256
+# （服务端忽略 burn 的 --command，缺 sha256 会返回 400）。
+gms-rt-approval-create --tool gms_rt_shell_exec --device <serial> --command '<command>'
+gms-rt-approval-create --tool gms_rt_burn_firmware --device <serial> --firmware-sha256 <sha256>
 ```
 
 Agent 凭据是 Service Token，永远不使用密码登录；破坏性操作（如

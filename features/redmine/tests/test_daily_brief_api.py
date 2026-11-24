@@ -380,6 +380,31 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertFalse(body["data"]["configured"])
         self.assertIn("message", body["data"])
 
+    def test_triage_maps_identity_timeout_upstream_and_internal(self):
+        import requests
+        from redminelib.exceptions import BaseRedmineError
+
+        from features.redmine.daily_brief_snapshot import DailyBriefIdentityError
+
+        cases = (
+            (DailyBriefIdentityError("owner secret-id"), 503, "DEPENDENCY_UNAVAILABLE"),
+            (requests.exceptions.Timeout("slow secret"), 504, "DEPENDENCY_TIMEOUT"),
+            (TimeoutError("slow secret"), 504, "DEPENDENCY_TIMEOUT"),
+            (requests.exceptions.ConnectionError("down secret"), 502, "UPSTREAM_FAILURE"),
+            (BaseRedmineError("redmine secret"), 502, "UPSTREAM_FAILURE"),
+            (RuntimeError("boom secret"), 500, "INTERNAL_ERROR"),
+        )
+        for exc, status, code in cases:
+            with self.subTest(code=code, exc=type(exc).__name__):
+                self.triage_mock.side_effect = exc
+                resp = self.client.get("/api/redmine-agent/daily-brief/triage")
+                body = resp.json()
+                self.assertEqual(resp.status_code, status)
+                self.assertEqual(body["code"], code)
+                self.assertNotIn("secret", body["error"])
+                if code == "UPSTREAM_FAILURE":
+                    self.assertEqual(body["details"]["service"], "redmine")
+
     # ------------------------------------------------------------------ run
 
     def test_admin_latest_reports_account_unavailable(self):

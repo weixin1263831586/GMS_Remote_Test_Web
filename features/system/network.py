@@ -9,6 +9,7 @@ import subprocess
 from typing import Any
 
 from foundation.command_result import CommandResult
+from foundation.networking import parse_vpn_connection_names
 from foundation.processes import run_local_shell_command
 
 
@@ -33,12 +34,6 @@ def get_primary_vpn_target(config: dict[str, Any]) -> str:
     if isinstance(vpn_target, list):
         vpn_target = vpn_target[0] if vpn_target else 'www.google.com'
     return str(vpn_target or 'www.google.com')
-
-
-# This UI manages NetworkManager VPN profiles. Generic tunnel interfaces such
-# as Tailscale's ``tun`` connection have their own lifecycle and must not make
-# the managed VPN status look connected.
-VPN_CONNECTION_TYPES = {"vpn"}
 
 
 def has_active_vpn_connection(nmcli_output: str) -> bool:
@@ -74,16 +69,6 @@ def check_local_vpn_connected() -> bool:
 def get_configured_vpn_connection_name(config: dict[str, Any]) -> str:
     """获取配置的VPN连接名称"""
     return str(config.get('vpn_connection_name') or os.getenv('GMS_VPN_CONNECTION_NAME', '')).strip()
-
-
-def parse_vpn_connection_names(nmcli_output: str) -> list:
-    """解析 nmcli 输出，返回所有 VPN 连接名称列表"""
-    names = []
-    for line in nmcli_output.splitlines():
-        parts = re.split(r"(?<!\\):", line)
-        if len(parts) >= 2 and parts[1].strip().lower() in VPN_CONNECTION_TYPES:
-            names.append(parts[0].replace(r'\:', ':').strip())
-    return names
 
 
 async def execute_config_host_command(

@@ -455,11 +455,6 @@ class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
                     "system_img": "/tmp/system.img",
                 },
             ),
-            self.client.post(
-                "/api/burn/serial",
-                headers={"Origin": "https://testserver"},
-                json={"devices": ["ABC"], "sn_code": "SERIAL"},
-            ),
         )
 
         for response in responses:

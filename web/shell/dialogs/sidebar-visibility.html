@@ -105,8 +105,14 @@
                             <h4>图片操作实例 <span style="font-weight: normal; color: var(--text-secondary); font-size: var(--ui-type-size-compact);">点击图片可放大，放大后可切换 1:1 原图</span></h4>
                             <div class="project-guide-gallery">
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="测试实例：类型、套件、模块与用例" data-guide-caption="先确认测试主机并选择测试类型，系统会自动匹配该 Worker 最新同类套件；确认套件后再填写模块和用例。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/test-parameters.png?v=20261114-guide4" alt="测试实例标注：测试类型自动匹配套件、测试模块、测试用例、重试报告和测试主机" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试实例：类型、套件、模块与用例" data-guide-caption="先确认测试主机并选择测试类型，系统会自动匹配该 Worker 最新同类套件；确认套件后再填写模块和用例。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="先核对测试 Worker，设备与套件必须来自同一执行主机。
+                                        选择 CTS / GTS / VTS / STS 等测试类型。
+                                        确认套件版本与目标 Android 版本相符。
+                                        按需填写测试模块；模块名必须存在于当前套件。
+                                        指定用例可缩小测试范围；留空使用模块或套件默认范围。
+                                        Retry 使用同一 Worker 的原始报告，开始后查看测试日志。">
+                                        <img src="/static/images/guide/test-parameters.png?v=20261123-guide-audit" alt="测试实例标注：测试类型自动匹配套件、测试模块、测试用例、重试报告和测试主机" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -115,8 +121,12 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="设备投屏：在主机桌面查看" data-guide-caption="选择 Available 设备并点击“设备投屏”；成功后页面自动进入主机桌面，scrcpy 窗口显示在远程桌面中。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/device-screen.png?v=20261114-guide4" alt="设备投屏标注：选择设备、设备投屏按钮、主机桌面入口和系统日志" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备投屏：在主机桌面查看" data-guide-caption="选择 Available 设备并点击“设备投屏”；成功后页面自动进入主机桌面，scrcpy 窗口显示在远程桌面中。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="选择当前 Worker 下可用的设备；占用与离线设备不可操作。
+                                        点击设备投屏，在目标 Worker 上启动 scrcpy。
+                                        进入主机桌面查看 scrcpy 窗口；画面来自所选 Worker。
+                                        连接与设备操作的提示在系统日志中查看。">
+                                        <img src="/static/images/guide/device-screen.png?v=20261123-guide-audit" alt="设备投屏标注：选择设备、设备投屏按钮、主机桌面入口和系统日志" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -125,8 +135,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows/Ubuntu 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/usbip-local-device.png?v=20261114-guide4" alt="USB/IP 接入标注：Windows/Ubuntu 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="本地设备：USB/IP 精确接入" data-guide-caption="选择 Windows/Ubuntu 来源、Controller 或远端 Worker 目标及 BUSID；当前接入按端口显示，可单独断开且不会清理同来源其他设备。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="选择实际连接 Android USB 的 Windows / Ubuntu 来源主机。
+                                        目标可为 Controller 或具备 USB/IP 能力的在线 Worker。
+                                        按 BUSID 多选设备；同一设备同一时间只接入一个目标。
+                                        当前接入逐端口显示；可单独断开且不会影响同来源其他端口。
+                                        连接/断开期间服务端拒绝同来源重复操作；测试占用时禁止断开。">
+                                        <img src="/static/images/guide/usbip-local-device.png?v=20261123-guide-audit" alt="USB/IP 接入标注：Windows/Ubuntu 来源、目标 Worker、BUSID 多选、当前接入和服务端操作保护" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -135,8 +150,11 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="测试完成后：报告管理" data-guide-caption="测试完成后进入报告管理，先按 Worker、用户、类型、套件和时间戳确认本次报告，再选择分析、Retry、下载、删除、results 或 logs。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/report-management.png?v=20261114-guide4" alt="报告管理标注：报告筛选、分析、Retry、下载、删除、results 和 logs" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试完成后：报告管理" data-guide-caption="测试完成后进入报告管理，先按 Worker、用户、类型、套件和时间戳确认本次报告，再选择分析、Retry、下载、删除、results 或 logs。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="先按 Worker 筛选，报告筛选不会改变测试执行主机。
+                                        按需只显示本人报告，再核对套件版本、报告名称和统计。
+                                        按行分析、Retry、下载或打开目录；删除前核对报告身份。">
+                                        <img src="/static/images/guide/report-management.png?v=20261123-guide-audit" alt="报告管理标注：报告筛选、分析、Retry、下载、删除、results 和 logs" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -145,8 +163,11 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="报告分析：失败定位与复现" data-guide-caption="从报告管理点击“分析”自动加载报告；核对统计后查看失败用例，可回填单测或进入报错诊断。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/report-analysis.png?v=20261114-guide4" alt="报告分析标注：上传报告、统计、失败用例、单测用例、报错诊断和发送邮件" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="报告分析：失败定位与复现" data-guide-caption="从报告管理点击“分析”自动加载报告；核对统计后查看失败用例，可回填单测或进入报错诊断。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="从报告管理打开，或上传 XML / 压缩包 / 结果目录。
+                                        先核对 Android、套件版本与通过 / 失败统计。
+                                        查看模块、用例与错误堆栈，可回填单测或进入报错诊断。">
+                                        <img src="/static/images/guide/report-analysis.png?v=20261123-guide-audit" alt="报告分析标注：上传报告、统计、失败用例、单测用例、报错诊断和发送邮件" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -155,8 +176,14 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：任务恢复、Manifest、权限与源码" data-guide-caption="可从最近任务恢复刷新前的进度或历史结果；上传 APK/JAR 后核对 Manifest 与权限，再使用搜索和源码浏览定位实现。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/apk-analysis.png?v=20261114-guide4" alt="APK 分析标注：最近任务恢复、上传、源码下载、Manifest、权限和源码检索" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="APK 分析：任务恢复、Manifest、权限与源码" data-guide-caption="可从最近任务恢复刷新前的进度或历史结果；上传 APK/JAR 后核对 Manifest 与权限，再使用搜索和源码浏览定位实现。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="进入 APK 分析，支持 APK 与 JAR。
+                                        从“最近任务”恢复刷新前的分析进度或历史结果。
+                                        上传新文件会创建独立任务，不会覆盖其他用户任务。
+                                        完成后可下载反编译源码；失败任务可重新分析。
+                                        在 Manifest、权限和源码间切换并搜索定位。
+                                        先核对包名、版本、SDK，再检查权限和实现。">
+                                        <img src="/static/images/guide/apk-analysis.png?v=20261123-guide-audit" alt="APK 分析标注：最近任务恢复、上传、源码下载、Manifest、权限和源码检索" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -165,8 +192,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="测试套件：准备与结果目录" data-guide-caption="管理不同 Worker 上的测试套件；下载或添加套件后，可通过结果列表及 results/logs 目录核对运行产物。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/test-suites.png?v=20261114-guide4" alt="测试套件标注：Worker、下载解压、套件列表、测试结果、本地路径和 results logs" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="测试套件：准备与结果目录" data-guide-caption="管理不同 Worker 上的测试套件；下载或添加套件后，可通过结果列表及 results/logs 目录核对运行产物。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="选择产生测试结果的 Worker；套件浏览选择与执行上下文独立。
+                                        支持下载、解压或添加该 Worker 已有的本地套件。
+                                        按套件类型与版本选择对应套件。
+                                        原生运行产物在 results / logs；未登记到报告管理也可在这里查看。
+                                        测试结果入口查询 Tradefed 结果，按运行时间戳匹配目录。">
+                                        <img src="/static/images/guide/test-suites.png?v=20261123-guide-audit" alt="测试套件标注：Worker、下载解压、套件列表、测试结果、本地路径和 results logs" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -175,8 +207,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="GMS ATS：创建自动化运行" data-guide-caption="按 Profile、源码目录、Lunch Target、Worker、设备和套件顺序确认参数，再创建运行并跟踪各阶段。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/ats-create-run.png?v=20261114-guide4" alt="GMS ATS 标注：Profile、源码目录、Lunch Target、Worker 设备和创建运行" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="GMS ATS：创建自动化运行" data-guide-caption="按 Profile、源码目录、Lunch Target、Worker、设备和套件顺序确认参数，再创建运行并跟踪各阶段。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="从“发起”选择 Profile；也可在“平台”配置资源。
+                                        使用已有固件，或选择编译服务器、构建模板与源码目录。
+                                        Lunch Target 只取当前源码目录扫描结果。
+                                        核对 Worker 与可用设备，烧写模式限选 1 台本地 USB / USB-IP 设备。
+                                        选测试类型与套件，完成预检后创建运行；在“追踪与诊断”查看进度。">
+                                        <img src="/static/images/guide/ats-create-run.png?v=20261123-guide-audit" alt="GMS ATS 标注：Profile、源码目录、Lunch Target、Worker 设备和创建运行" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -185,8 +222,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="设备烧写：高风险操作检查" data-guide-caption="烧写前复核唯一目标设备和镜像路径；过程在系统日志中跟踪，不要断电、拔线或刷新页面。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/device-flashing.png?v=20261114-guide4" alt="设备烧写标注：目标设备、固件、GSI、系统日志和设备信息" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="设备烧写：高风险操作检查" data-guide-caption="烧写前复核目标设备、所属 Worker 和镜像路径。在系统日志中跟踪进度。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="先确认唯一目标设备、所属 Worker 与接入方式。
+                                        核对设备信息与镜像适配关系。
+                                        整包固件先分块暂存并校验，再进入最终烧写。
+                                        GSI 入口用于系统镜像；ADB Proxy 不支持 Fastboot / 烧写。
+                                        最终烧写期间不要断电或拔线；异常保留日志与任务编号。">
+                                        <img src="/static/images/guide/device-flashing.png?v=20261123-guide-audit" alt="设备烧写标注：目标设备、固件、GSI、系统日志和设备信息" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -195,8 +237,13 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="对话 Agent：项目工具规划与执行确认" data-guide-caption="kkagent 按目标发现资源、补齐参数并规划项目工具调用。对话引擎和分析模型状态分开显示；需确认的计划先通过预检，再由用户确认执行。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/agent-routing.png?v=20261114-guide4" alt="对话 Agent 标注：历史会话、对话引擎、分析模型、预检计划与执行步骤" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="对话 Agent：项目工具规划与执行确认" data-guide-caption="kkagent 按目标发现资源、补齐参数并规划项目工具调用。对话引擎和分析模型状态分开显示；需确认的计划先通过预检，再由用户确认执行。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="对话引擎由 kkagent 规划并选择项目工具，状态单独显示。
+                                        分析模型负责报告与知识分析，与对话引擎分别查看。
+                                        先查询资源并补齐参数，再核对 Worker、设备、套件和重试次数。
+                                        步骤区显示预检、执行、等待确认与错误；失败可按提示重试。
+                                        需确认的计划通过预检后才可执行；阻塞时先处理原因再重新规划。">
+                                        <img src="/static/images/guide/agent-routing.png?v=20261123-guide-audit" alt="对话 Agent 标注：历史会话、对话引擎、分析模型、预检计划与执行步骤" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -205,8 +252,12 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="主机集群：无黑屏稳定刷新" data-guide-caption="刷新时保留当前主机、设备、任务和图表内容；刷新期间按钮暂不可点击，新数据齐备后再原子替换，局部失败不会清空整页。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/cluster-refresh.png?v=20261114-guide4" alt="主机集群刷新标注：保留摘要、刷新按钮、图表和运行任务" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="主机集群：无黑屏稳定刷新" data-guide-caption="刷新时保留当前主机、设备、任务和图表内容；刷新期间按钮暂不可点击，新数据齐备后再原子替换，局部失败不会清空整页。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="已渲染的主机、设备和任务摘要在刷新期间继续保留。
+                                        刷新期间按钮暂不可点击，防止重复刷新。
+                                        资源图表仅在新数据齐备后原子替换，旧内容不会跳动。
+                                        局部接口失败只提示对应错误，其余面板仍可查看和操作。">
+                                        <img src="/static/images/guide/cluster-refresh.png?v=20261123-guide-audit" alt="主机集群刷新标注：保留摘要、刷新按钮、图表和运行任务" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header">
@@ -215,15 +266,27 @@
                                     </div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="SDK 配置：源码目录、Android 版本与校验" data-guide-caption="在用户管理的 SDK 配置中添加本机或编译服务器源码；发现目录后可多选添加，核对 Android 版本、默认 revision 和路径校验结果。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/sdk-config.png?v=20261114-guide4" alt="SDK 配置标注：源码类型、服务器、候选目录、Android 版本、revision 与路径校验" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="SDK 配置：源码目录、Android 版本与校验" data-guide-caption="在用户管理的 SDK 配置中添加本机或编译服务器源码；发现目录后可多选添加，核对 Android 版本、默认 revision 和路径校验结果。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="选择本机 Git 或编译服务器 SSH 只读源码。
+                                        填写服务器，按回车或点击“发现目录”。
+                                        仅列出 Android 源码树；可多选批量添加，也可手动输入路径。
+                                        向下滚动到「索引元数据」，核对自动识别的 Android 版本，单条添加时可手动调整。
+                                        核对默认 revision；分析时还需绑定匹配问题版本的 commit。
+                                        校验路径后添加，返回列表查看版本统计与校验状态。">
+                                        <img src="/static/images/guide/sdk-config.png?v=20261123-guide-audit" alt="SDK 配置标注：源码类型、服务器、候选目录、Android 版本、revision 与路径校验" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header"><h5>⑫ SDK 源码配置</h5><p>演示源码根目录发现、多选添加、版本识别与只读取证来源的配置。</p></div>
                                 </article>
                                 <article class="project-guide-example">
-                                    <button type="button" class="project-guide-image-button" data-guide-title="Agent 接入：配对与授权范围" data-guide-caption="在用户管理的 Agent 接入中创建配对码，配置凭据有效期、scope、Worker 与设备范围。生成需管理员验证，配对码 5 分钟内单次使用。" data-click="openGuideImageLightbox" data-r0="el">
-                                        <img src="/static/images/guide/agent-enrollment.png?v=20261114-guide4" alt="Agent 接入标注：标识名、凭据有效期、scope、Worker 和设备限制与生成入口" loading="lazy">
+                                    <button type="button" class="project-guide-image-button" data-guide-title="Agent 接入：配对与授权范围" data-guide-caption="在用户管理的 Agent 接入中创建配对码，配置凭据有效期、scope、Worker 与设备范围。生成需管理员验证，配对码 5 分钟内单次使用。" data-click="openGuideImageLightbox" data-r0="el"
+                                        data-guide-steps="Agent 名称建议包含客户端与主机，方便后续识别。
+                                        设置接入凭据有效期；配对码在 Web 创建后 5 分钟内有效。
+                                        只授予需要的 scope；可恢复推荐、全选或清空。
+                                        向下滚动到「限制 Worker 和设备」，按 Worker ID 限制执行目标，多个 ID 用逗号分隔。
+                                        同一节按设备序列号限制范围，* 表示全部。
+                                        生成时验证管理员身份，配对码单次使用；截图未创建凭据。">
+                                        <img src="/static/images/guide/agent-enrollment.png?v=20261123-guide-audit" alt="Agent 接入标注：标识名、凭据有效期、scope、Worker 和设备限制与生成入口" loading="lazy">
                                         <span class="project-guide-zoom-hint">🔍 点击放大</span>
                                     </button>
                                     <div class="project-guide-example-header"><h5>⑬ Agent 接入</h5><p>展示配对前的授权配置；截图不包含可使用的配对码或 Token。</p></div>

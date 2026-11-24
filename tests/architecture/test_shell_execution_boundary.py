@@ -30,9 +30,33 @@ SCAN_DIRS = ("features", "foundation", "worker_agent", "workflows", "bootstrap")
 UNPARSEABLE_ALLOWLIST: set[str] = set()
 
 
+def _shell_api_names(tree: ast.AST) -> tuple[set[str], set[str]]:
+    """Return ``(os aliases, names bound to os.system/os.popen)``.
+
+    ``os.system`` written as ``operating_system.system`` or
+    ``from os import system`` is the same shell-string API.
+    """
+    os_aliases = {"os"}
+    shell_calls: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "os":
+                    os_aliases.add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module == "os":
+            for alias in node.names:
+                if alias.name in {"system", "popen"}:
+                    shell_calls.add(alias.asname or alias.name)
+    return os_aliases, shell_calls
+
+
 class _ShellTrueVisitor(ast.NodeVisitor):
-    def __init__(self, display_path: str) -> None:
+    def __init__(
+        self, display_path: str, os_aliases: set[str], shell_calls: set[str],
+    ) -> None:
         self.path = display_path
+        self.os_aliases = os_aliases
+        self.shell_calls = shell_calls
         self.violations: list[str] = []
 
     def _check_keyword(self, node: ast.Call) -> None:
@@ -46,14 +70,20 @@ class _ShellTrueVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         self._check_keyword(node)
+        func = node.func
+        if isinstance(func, ast.Name) and func.id in self.shell_calls:
+            self.violations.append(
+                f"{self.path}:{node.lineno} {func.id}() is a shell-string API; "
+                "use foundation.processes.run_local_command instead"
+            )
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         # os.system / os.popen are shell-string APIs without a keyword flag.
-        if isinstance(node.value, ast.Name) and node.value.id == "os":
+        if isinstance(node.value, ast.Name) and node.value.id in self.os_aliases:
             if node.attr in {"system", "popen"}:
                 self.violations.append(
-                    f"{self.path}:{node.lineno} os.{node.attr}() is a shell-string API; "
+                    f"{self.path}:{node.lineno} {node.value.id}.{node.attr}() is a shell-string API; "
                     "use foundation.processes.run_local_command instead"
                 )
         self.generic_visit(node)
@@ -77,7 +107,8 @@ class ShellExecutionBoundaryTests(unittest.TestCase):
                     continue
                 if relative in ALLOWED_SHELL_TRUE_FILES:
                     continue
-                visitor = _ShellTrueVisitor(relative)
+                os_aliases, shell_calls = _shell_api_names(tree)
+                visitor = _ShellTrueVisitor(relative, os_aliases, shell_calls)
                 visitor.visit(tree)
                 violations.extend(visitor.violations)
         self.assertEqual(

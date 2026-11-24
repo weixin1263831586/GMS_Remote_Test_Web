@@ -213,10 +213,7 @@ function appendSecurityAuditRows(records) {
     while (temp.firstChild) {
         tbody.appendChild(temp.firstChild);
     }
-
-    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
-        row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
-    });
+    bindSecurityAuditRowClicks(tbody);
 }
 
 function updateSecurityAuditStats(stats) {
@@ -328,8 +325,14 @@ function renderSecurityAuditRows(records) {
     }
 
     tbody.innerHTML = buildSecurityAuditRowsHtml(records);
+    bindSecurityAuditRowClicks(tbody);
+}
 
-    tbody.querySelectorAll('[data-audit-id]').forEach(row => {
+function bindSecurityAuditRowClicks(tbody) {
+    // 分页追加不能再次给旧行绑点击。重复监听会把同一次点击变成多次详情请求，
+    // 后返回的旧请求还会盖掉用户随后点开的另一条记录。
+    tbody.querySelectorAll('[data-audit-id]:not([data-audit-bound])').forEach(row => {
+        row.setAttribute('data-audit-bound', '1');
         row.addEventListener('click', () => showSecurityAuditDetail(row.dataset.auditId));
     });
 }
@@ -414,6 +417,7 @@ function ensureSecurityAuditDetailModal() {
 }
 
 function closeSecurityAuditDetailModal() {
+    ++securityAuditDetailRequestGeneration;
     ModalManager.close('security-audit-detail-modal');
 }
 
@@ -437,8 +441,11 @@ function renderRelatedAuditLogs(relatedLogs) {
     return blocks.join('') || renderAuditDetailBlock('关联日志', '暂无关联日志', { json: false });
 }
 
+let securityAuditDetailRequestGeneration = 0;
+
 async function showSecurityAuditDetail(auditId) {
     if (!auditId) return;
+    const generation = ++securityAuditDetailRequestGeneration;
     const modal = ensureSecurityAuditDetailModal();
     const body = $('security-audit-detail-body');
     ModalManager.open('security-audit-detail-modal');
@@ -446,6 +453,7 @@ async function showSecurityAuditDetail(auditId) {
 
     try {
         const result = await apiCall(`/api/security-audit/detail/${encodeURIComponent(auditId)}`);
+        if (generation !== securityAuditDetailRequestGeneration) return;
         const payload = result.data || {};
         const record = payload.record || {};
         const relatedLogs = payload.related_logs || {};
@@ -474,6 +482,7 @@ async function showSecurityAuditDetail(auditId) {
             ${renderRelatedAuditLogs(relatedLogs)}
         `;
     } catch (error) {
+        if (generation !== securityAuditDetailRequestGeneration) return;
         body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }

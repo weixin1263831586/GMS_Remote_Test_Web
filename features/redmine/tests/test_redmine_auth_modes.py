@@ -10,6 +10,17 @@ from features.redmine.agent import RedmineAgent
 from features.redmine.client import RedmineClient
 
 
+def test_attachment_requests_send_api_key_header_not_basic_auth():
+    with patch("features.redmine.client.Redmine"):
+        client = RedmineClient(
+            "https://redmine.example",
+            username="operator",
+            password="password",
+            api_key="api-key",
+        )
+    assert client.auth_headers() == {"X-Redmine-API-Key": "api-key"}
+
+
 def test_client_prefers_api_key_over_password_credentials():
     with patch("features.redmine.client.Redmine") as redmine:
         RedmineClient(

@@ -330,17 +330,17 @@ class BuildService:
 
     def discover_workspaces(self, server_id: str, server_password: str = "", base_dir: str = "") -> list[str]:
         server = self._with_runtime_password(self._get_server(server_id), server_password)
-        root = base_dir.strip() or str(server.get("workspace_root") or "")
+        configured_root = str(server.get("workspace_root") or "").strip()
+        root = validate_workspace(base_dir.strip() or configured_root, configured_root)
         backend = self._backend(server)
         command = (
             f"find {shlex.quote(root)} -maxdepth 1 -mindepth 1 -type d "
             r"\( -name '*Android*' -o -name '*android*' \) -printf '%f\n' "
-            "| sort"
         )
         code, out, err = backend._run(server, command, timeout=30)
         if code != 0:
             raise BuildExecutionError(err or out or "failed to discover SDK directories")
-        return [line.strip() for line in out.splitlines() if line.strip()]
+        return sorted(line.strip() for line in out.splitlines() if line.strip())
 
     def discover_lunch_options(
         self,

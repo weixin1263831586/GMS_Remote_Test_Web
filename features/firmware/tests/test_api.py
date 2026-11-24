@@ -16,7 +16,7 @@ from features.auth import CurrentUser
 from features.firmware import (
     api,
     firmware_api,
-    gsi_sn_burn,
+    gsi_burn,
     runtime,
     shares_api,
 )
@@ -152,6 +152,30 @@ class FirmwareApiTests(unittest.TestCase):
         )
         self.assertFalse(any("reboot loader" in command for command, _ in fake_ssh.commands))
 
+    def test_remote_probe_failure_does_not_flash_a_same_path_local_file(self):
+        class FailingSsh(FakeSshManager):
+            def execute_command(self, _ssh, cmd, timeout=None):
+                self.commands.append((cmd, timeout))
+                if "test -f" in cmd:
+                    return CommandResult(stdout="", stderr="connection reset", code=-1)
+                return CommandResult(stdout="", stderr="", code=0)
+
+        fake_ssh = FailingSsh("")
+        runtime.configure_runtime(ssh_manager=fake_ssh)
+        with TemporaryDirectory() as tmp:
+            firmware = os.path.join(tmp, "update.img")
+            with open(firmware, "wb") as handle:
+                handle.write(b"controller-local-image")
+            response = self.client.post(
+                "/api/burn/firmware?devices=D1",
+                data={"firmware_path": firmware},
+            )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["code"], "UPSTREAM_FAILURE")
+        self.assertNotIn("connection reset", response.json()["error"])
+        self.assertFalse(any("sha256sum" in command for command, _ in fake_ssh.commands))
+
 
 
 
@@ -218,7 +242,7 @@ class FirmwareApiTests(unittest.TestCase):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_FOUND__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
 
-        resolved, error = gsi_sn_burn._resolve_gsi_remote_image(
+        resolved, error = gsi_burn._resolve_gsi_remote_image(
             fake_ssh,
             "/home/hcq/GMS-Suite",
             "vendor_boot-debug.img",
@@ -236,7 +260,7 @@ class FirmwareApiTests(unittest.TestCase):
         fake_ssh = FakeSshManager("__GMS_REMOTE_FILE_MISSING__\n")
         runtime.configure_runtime(ssh_manager=fake_ssh)
 
-        resolved, error = gsi_sn_burn._resolve_gsi_remote_image(
+        resolved, error = gsi_burn._resolve_gsi_remote_image(
             fake_ssh,
             "/home/hcq/GMS-Suite",
             "vendor_boot-debug.img",
@@ -330,7 +354,11 @@ class FirmwareApiTests(unittest.TestCase):
             lock_path = firmware_api._firmware_upload_session_dir(
                 'client', 'failed-merge'
             )
-            self.assertFalse(os.path.exists(os.path.join(lock_path, '.merge.lock')))
+            from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
+
+            descriptor = try_acquire_sync_lock(Path(lock_path) / ".merge.lock")
+            self.assertIsNotNone(descriptor)
+            release_sync_lock(descriptor)
 
     def test_firmware_chunk_upload_rejects_changed_session_metadata(self):
         with TemporaryDirectory() as tmp, patch(

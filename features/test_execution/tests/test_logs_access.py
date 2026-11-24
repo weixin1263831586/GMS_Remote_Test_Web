@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from zipfile import ZipFile
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -101,6 +103,16 @@ class TestLogAccessTests(unittest.TestCase):
         )
 
         self.assertEqual(response.status_code, 404)
+
+    def test_batch_download_serves_only_requested_log_and_removes_temporary_zip(self):
+        saved = self._save("alice", "run output").json()
+        response = self.client.post("/api/test/logs/batch", json={"log_ids": [saved["log_id"]]})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["content-type"], "application/zip")
+        with ZipFile(BytesIO(response.content)) as archived:
+            self.assertEqual(archived.namelist(), [saved["filename"]])
+            self.assertIn(b"run output", archived.read(saved["filename"]))
+        self.assertEqual(list(self.manager.downloads_dir.rglob("*.zip")), [])
 
     def test_list_and_save_do_not_expose_server_paths(self):
         saved = self._save("alice", "secret").json()

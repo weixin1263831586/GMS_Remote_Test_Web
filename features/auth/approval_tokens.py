@@ -11,25 +11,11 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Any
 
 from .constants import APPROVAL_TOKEN_TTL_SECONDS, CurrentUser
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _to_iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
-
-
-def _from_iso(value: str) -> datetime:
-    parsed = datetime.fromisoformat(value)
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+from .timestamps import from_utc_iso, to_utc_iso, utc_now
 
 
 class ApprovalTokenServiceMixin:
@@ -120,13 +106,13 @@ class ApprovalTokenServiceMixin:
                 raise ValueError("device 必须包含至少一个有效设备序列号")
         ttl = max(30, min(600, int(ttl_seconds or APPROVAL_TOKEN_TTL_SECONDS)))
         token = secrets.token_urlsafe(32)
-        now = _utcnow()
+        now = utc_now()
         expires_at = now + timedelta(seconds=ttl)
         with self._lock, self._connect() as conn:
             # Bound the table: drop fully consumed/expired approvals.
             conn.execute(
                 "DELETE FROM platform_approval_tokens WHERE expires_at <= ? OR used_at IS NOT NULL",
-                (_to_iso(now),),
+                (to_utc_iso(now),),
             )
             conn.execute(
                 """
@@ -141,8 +127,8 @@ class ApprovalTokenServiceMixin:
                     tool_name,
                     device_name,
                     self.command_hash(command),
-                    _to_iso(now),
-                    _to_iso(expires_at),
+                    to_utc_iso(now),
+                    to_utc_iso(expires_at),
                 ),
             )
             conn.commit()
@@ -150,7 +136,7 @@ class ApprovalTokenServiceMixin:
             "token": token,
             "tool": tool_name,
             "device": device_name,
-            "expires_at": _to_iso(expires_at),
+            "expires_at": to_utc_iso(expires_at),
             "ttl_seconds": ttl,
         }
 
@@ -168,7 +154,7 @@ class ApprovalTokenServiceMixin:
         if not token:
             return False
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
@@ -181,7 +167,7 @@ class ApprovalTokenServiceMixin:
         if not row or row["used_at"]:
             return False
         try:
-            if _from_iso(row["expires_at"]) <= now:
+            if from_utc_iso(row["expires_at"]) <= now:
                 return False
         except ValueError:
             return False
@@ -196,7 +182,7 @@ class ApprovalTokenServiceMixin:
         if not token:
             return False
         token_hash = self.hash_token(token)
-        now = _utcnow()
+        now = utc_now()
         with self._lock, self._connect() as conn:
             row = conn.execute(
                 """
@@ -209,7 +195,7 @@ class ApprovalTokenServiceMixin:
             if not row or row["used_at"]:
                 return False
             try:
-                if _from_iso(row["expires_at"]) <= now:
+                if from_utc_iso(row["expires_at"]) <= now:
                     return False
             except ValueError:
                 return False
@@ -222,7 +208,7 @@ class ApprovalTokenServiceMixin:
             cursor = conn.execute(
                 "UPDATE platform_approval_tokens SET used_at = ? "
                 "WHERE token_hash = ? AND used_at IS NULL",
-                (_to_iso(now), token_hash),
+                (to_utc_iso(now), token_hash),
             )
             conn.commit()
             return cursor.rowcount == 1
