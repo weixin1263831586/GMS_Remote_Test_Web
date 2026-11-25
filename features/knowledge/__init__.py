@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from .api import page_router, router
-from .external.web_sources import recall_web_references
+from .external.web_sources import partner_policy_allowed, policy_search_terms, recall_web_references
 from .external import (
     EVIDENCE_LEVEL_BACKGROUND,
     ExternalKnowledgeError,
@@ -25,6 +25,8 @@ __all__ = [
     "federated_reindex",
     "federated_search",
     "federated_status",
+    "partner_policy_allowed",
+    "policy_search_terms",
     "recall_web_references",
     "page_router",
     "router",
