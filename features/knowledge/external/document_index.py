@@ -7,8 +7,8 @@ from urllib.parse import quote
 
 from lxml import html
 
-_REQUIREMENT = re.compile(r"\[([A-Z][A-Z0-9]*-\d+-\d+)\]")
-_LEVEL = re.compile(r"\b(MUST NOT|SHALL NOT|SHOULD NOT|MUST|SHALL|REQUIRED|SHOULD|RECOMMENDED|MAY|OPTIONAL)\b")
+_REQUIREMENT = re.compile(r"\[([A-Z][A-Z0-9]*-(?:\d+|SR)-\d+)\]")
+_LEVEL = re.compile(r"\b(MUST NOT|SHALL NOT|SHOULD NOT|STRONGLY RECOMMENDED|NOT RECOMMENDED|MUST|SHALL|REQUIRED|SHOULD|RECOMMENDED|MAY|OPTIONAL)\b")
 _HEADING = {"h1", "h2", "h3", "h4", "h5", "h6"}
 
 
@@ -58,7 +58,7 @@ def parse_document(body: bytes, url: str, kind: str, android_version: int | None
                              context, original, link))
         else:
             sections.append((section, "", "", condition, text, link))
-            if tag in {"p", "li"}:
+            if tag == "p":
                 condition = text[-4000:]
     if kind == "cdd" and len(rows) < 50:
         raise ValueError("CDD requirement coverage unexpectedly low")
