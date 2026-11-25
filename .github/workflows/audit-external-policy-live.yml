@@ -1,0 +1,38 @@
+name: External policy knowledge live validation
+on:
+  push:
+    branches: ['audit/**']
+    paths:
+      - 'features/knowledge/external/**'
+      - 'features/knowledge/tests/test_web_sources*.py'
+      - '.github/workflows/audit-external-policy-live.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-policy-live-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  public-cdd:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          persist-credentials: false
+      - name: Test isolated indexes against public CDD
+        shell: bash
+        env:
+          GMS_EXTERNAL_POLICY_LIVE: '1'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/external-policy.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          export GMS_DATA_ROOT="$scratch/data"
+          python3 -m pytest -q -s features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py --basetemp="$scratch/pytest"
