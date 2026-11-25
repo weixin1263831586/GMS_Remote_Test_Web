@@ -45,17 +45,14 @@ def parse_document(body: bytes, url: str, kind: str, android_version: int | None
         text = _text(node)
         if not text or not section:
             continue
-        ids = list(_REQUIREMENT.finditer(text))
+        ids = list(_REQUIREMENT.finditer(text)) if _REQUIREMENT.match(text) else []
         link = url + ("#" + quote(anchor, safe="-_.:") if anchor else "")
         if ids:
-            for i, match in enumerate(ids):
-                end = ids[i + 1].start() if i + 1 < len(ids) else len(text)
-                original = text[match.start():end].strip()
-                level = _LEVEL.search(original)
-                prefix = text[:match.start()].strip() if i == 0 else ""
-                context = " ".join(x for x in (condition, prefix) if x)
-                rows.append((section, match.group(1), level.group(1) if level else "",
-                             context, original, link))
+            # Inline references may point to other clauses, not define new ones.
+            match = ids[0]
+            level = _LEVEL.search(text[match.end():])
+            rows.append((section, match.group(1), level.group(1) if level else "",
+                         condition, text, link))
         else:
             sections.append((section, "", "", condition, text, link))
             if tag == "p":
