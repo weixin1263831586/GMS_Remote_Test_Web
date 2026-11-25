@@ -13,7 +13,7 @@ from .manager import device_manager, has_blocked_adb_process
 from .usbip.flash import resolve_usbip_flash_routes
 from .usbip.manager import find_device_host_password, usbip_manager
 from .usbip.operations import usbip_operation_gate
-from .usbip.persistence import migrate_local_usbip_busid
+from .usbip.persistence import migrate_local_usbip_busid, update_usbip_source_records
 from .usbip.support import (
     _invalidate_device_cache,
     _known_usbip_sources,
@@ -880,14 +880,11 @@ def _record_reconnected_devices(
     _invalidate_device_cache()
 
     try:
-        runtime_config = runtime.config_manager.get_runtime_config()
-        sources = runtime_config.get("usbip_devices_source", {})
-        if not isinstance(sources, dict):
-            sources = {}
-        for device_id in device_list:
-            sources[device_id] = {"source": device_host, "timestamp": now}
-        runtime_config["usbip_devices_source"] = sources
-        runtime.config_manager.save_runtime_config(runtime_config)
+        if not update_usbip_source_records(updates={
+            device_id: {"source": device_host, "timestamp": now}
+            for device_id in device_list
+        }):
+            logger.warning("[USB/IP Reconnect] failed to persist sources for %s", device_host)
     except Exception as exc:
         logger.warning("[USB/IP Reconnect] failed to persist sources: %s", exc)
 

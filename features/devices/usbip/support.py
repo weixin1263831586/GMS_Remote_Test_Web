@@ -31,6 +31,7 @@ from .assignments import (
     save_usbip_assignments as _save_usbip_assignments,
 )
 from .manager import detach_ubuntu_usbip_ports, usbip_manager
+from .persistence import update_usbip_source_records
 from .persistence import (
     usbip_assignment_lock as _usbip_assignment_lock,
 )
@@ -302,13 +303,7 @@ def _persist_device_source_removal(devices_to_remove: list):
     if not devices_to_remove:
         return
     try:
-        existing_runtime = runtime.config_manager.get_runtime_config()
-        usbip_sources = existing_runtime.get("usbip_devices_source", {})
-        for device_id in devices_to_remove:
-            if device_id in usbip_sources:
-                del usbip_sources[device_id]
-        existing_runtime["usbip_devices_source"] = usbip_sources
-        if runtime.config_manager.save_runtime_config(existing_runtime):
+        if update_usbip_source_records(remove=devices_to_remove):
             logger.info(f"[USB/IP Stop] Persisted device source removal for {len(devices_to_remove)} devices")
     except Exception as e:
         logger.warning(f"[USB/IP Stop] Failed to persist device source removal: {e}")

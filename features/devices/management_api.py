@@ -19,6 +19,7 @@ from .inventory.management import local_management_inventory
 from .locks import device_lock_manager
 from .manager import device_manager, has_blocked_adb_process
 from .support import SSHConnection, device_fencing_owner_id
+from .usbip.persistence import update_usbip_source_records
 from .usbip.transaction import USBIP_PORT_COMMAND
 from .utils import DeviceUtils
 
@@ -132,12 +133,8 @@ def _clear_usbip_source_record(
     sources.pop(device_id, None)
 
     try:
-        runtime_config = runtime.config_manager.get_runtime_config()
-        runtime_sources = runtime_config.get("usbip_devices_source", {})
-        if isinstance(runtime_sources, dict) and device_id in runtime_sources:
-            runtime_sources.pop(device_id, None)
-            runtime_config["usbip_devices_source"] = runtime_sources
-            runtime.config_manager.save_runtime_config(runtime_config)
+        if not update_usbip_source_records(remove=[device_id]):
+            logger.warning("[USB/IP] Failed to clear stale source for %s", device_id)
     except Exception as exc:
         logger.warning("[USB/IP] Failed to clear stale source for %s: %s", device_id, exc)
 

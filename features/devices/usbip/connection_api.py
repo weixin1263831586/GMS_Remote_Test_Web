@@ -70,6 +70,7 @@ from .persistence import (
 from .persistence import (
     record_usbip_source_os as _record_usbip_source_os,
 )
+from .persistence import update_usbip_source_records
 from .persistence import (
     usbip_assignment_lock as _usbip_assignment_lock,
 )
@@ -996,11 +997,7 @@ async def start_usbip(
                 )
 
                 try:
-                    existing_runtime = runtime.config_manager.get_runtime_config()
-                    usbip_sources = existing_runtime.get("usbip_devices_source", {})
-                    usbip_sources.update(source_updates)
-                    existing_runtime["usbip_devices_source"] = usbip_sources
-                    if runtime.config_manager.save_runtime_config(existing_runtime):
+                    if update_usbip_source_records(updates=source_updates):
                         logger.info(f"[USB/IP Start] Persisted device sources for {len(source_updates)} devices")
                 except Exception as e:
                     logger.warning(f"[USB/IP Start] Failed to persist device sources: {e}")
