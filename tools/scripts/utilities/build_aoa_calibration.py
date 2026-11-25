@@ -12,7 +12,7 @@ import tempfile
 import zipfile
 from pathlib import Path
 
-from lxml import etree as ET
+from lxml import etree
 
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -52,8 +52,8 @@ def main():
         classes.mkdir()
         dex.mkdir()
         # Parse the repository-owned calibration manifest; no external XML input.
-        parser = ET.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
-        manifest = ET.parse(str(source / "AndroidManifest.xml"), parser=parser)
+        parser = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+        manifest = etree.parse(str(source / "AndroidManifest.xml"), parser=parser)
         manifest.getroot().set("package", "com.gms.remote.aoacalibration")
         manifest.write(temporary / "AndroidManifest.xml", encoding="utf-8", xml_declaration=True)
         run("javac", "--release", "8", "-classpath", android, "-d", classes,

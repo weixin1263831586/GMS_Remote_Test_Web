@@ -725,10 +725,12 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
             if request.method == 'POST':
                 self.assertTrue(request.url.endswith('/daily-brief/analyze-issue'))
                 submissions.append(request.post_data_json)
-                data = {'run_id': 'single-fixture', 'issue_id': submissions[-1]['issue_id']}
-            elif request.url.endswith('/daily-brief/runs/single-fixture'):
                 issue_id = submissions[-1]['issue_id']
-                data = {'run': {'run_id': 'single-fixture', 'status': 'completed'},
+                data = {'run_id': f'single-fixture-{issue_id}', 'issue_id': issue_id}
+            elif '/daily-brief/runs/single-fixture-' in request.url:
+                run_id = request.url.rsplit('/', 1)[-1]
+                issue_id = int(run_id.removeprefix('single-fixture-'))
+                data = {'run': {'run_id': run_id, 'status': 'completed'},
                         'issues': [{'issue_id': issue_id, 'status': 'completed',
                                     'result': {'detailed_report': '# 原始分析总结\n\n仅分析 #' + str(issue_id)}}]}
             route.fulfill(status=200, content_type='application/json', body=json.dumps({'success': True, 'data': data}))
@@ -741,7 +743,9 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                 page.evaluate("switchTab('stats'); switchTab('daily-brief')")
                 page.locator('#singleIssueAnalysisId').fill(str(issue_id))
                 page.locator('#singleIssueAnalysisId').press('Enter')
-                page.locator('#singleIssueAnalysisHistory').get_by_text('查看分析', exact=True).click()
+                row = page.locator(f'#singleIssueAnalysisHistory [data-single-issue-id="{issue_id}"]')
+                expect(row).to_contain_text('已完成')
+                row.get_by_text('查看分析', exact=True).click()
                 expect(page.locator('.daily-brief-modal').last).to_contain_text('仅分析 #' + str(issue_id))
                 page.locator('.daily-brief-modal').last.get_by_text('关闭', exact=True).click()
                 expect(page.locator('#singleIssueAnalysisStart')).to_be_enabled()
