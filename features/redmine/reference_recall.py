@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import closing
 
 from features.gms import extract_reference_identifiers, recall_mainline_references
+from features.knowledge import recall_web_references
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root
@@ -102,6 +104,12 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
             complete = False
             warnings.append(f"{artifact['artifact_id']}: 附件文本不可读")
     result = recall_mainline_references(sorted(identifiers)[:MAX_IDENTIFIERS], data_root=data_root)
+    versions = set(re.findall(r"\bAndroid\s+(1[5-9]|[2-9]\d)\b", " ".join(texts[:3]), re.I))
+    version = int(next(iter(versions))) if len(versions) == 1 else None
+    policy_query = " ".join(texts[:3])[:512]
+    policy = recall_web_references(policy_query, android_version=version)
+    if policy is not None:
+        result.setdefault("sources", {})["web_documents"] = policy
     if exhausted:
         warnings.append("标识符扫描达到资源预算，未扫描部分不能视为无匹配")
     return {"snapshot_id": snapshot_id, "issue_id": snapshot["issue_id"],
