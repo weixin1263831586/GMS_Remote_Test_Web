@@ -1,6 +1,6 @@
 """gms_agent.package_manager — the GMS agent package lifecycle.
 
-Extracted from the gms-agent single-file installer: registry download +
+Registry download and
 Ed25519 manifest verification, safe extraction, immutable versions/<v>/
 install with whole-package activation, TOML profiles and client adapters.
 `gms-agent` (runtime/gms-agent) is the thin argparse shell; everything it

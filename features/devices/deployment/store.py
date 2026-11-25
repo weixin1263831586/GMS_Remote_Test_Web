@@ -7,7 +7,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from foundation.database import ensure_schema
+from foundation.database import open_initialized_sqlite
 from foundation.error_model import ApiError
 
 
@@ -33,14 +33,7 @@ class DeploymentStore:
         conn.execute('PRAGMA user_version = 1')
 
     def connect(self):
-        conn = sqlite3.connect(self.db, timeout=10)
-        conn.row_factory = sqlite3.Row
-        try:
-            ensure_schema(conn, self.db, self._initialize_schema)
-        except Exception:
-            conn.close()
-            raise
-        return conn
+        return open_initialized_sqlite(self.db, self._initialize_schema)
 
     def create(self, payload: dict):
         with self.connect() as conn:

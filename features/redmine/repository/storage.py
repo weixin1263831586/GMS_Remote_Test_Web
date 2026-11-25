@@ -7,6 +7,8 @@ import re
 import sqlite3
 from typing import Any
 
+from foundation.private_config import write_atomic_text
+
 from ..users import (
     _now,
     name_keys,
@@ -348,12 +350,12 @@ class RepositoryStorageMixin:
 
     def write_issue_doc(self, issue_id: int, content: str) -> str:
         path = self.docs_dir / f"redmine-{issue_id}.md"
-        path.write_text(content, encoding="utf-8")
+        write_atomic_text(path, content)
         return str(path)
 
     def write_run_report(self, run_id: str, content: str) -> str:
         path = self.docs_dir / f"run-{run_id}.md"
-        path.write_text(content, encoding="utf-8")
+        write_atomic_text(path, content)
         return str(path)
 
     # Internal helpers
@@ -372,22 +374,15 @@ class RepositoryStorageMixin:
                     payload.get("subject") or "",
                     payload.get("description") or "",
                     payload.get("summary") or "",
-                    # failures_json 走 _decode_row 后是 list/dict，而 FTS 列是 TEXT：
-                    # 直接绑定会以 "Error binding parameter" 抛 InterfaceError，
-                    # 而 except 只捕 sqlite3.OperationalError，于是索引未更新、
-                    # 整个写事务（含调用方的 UPDATE）回滚。
+                    # FTS text columns require serialized JSON values.
                     self._json_value(payload.get("failures_json") or ""),
                     payload.get("doc_content") or "",
                 ),
             )
         except sqlite3.OperationalError as exc:
-            # 两级分类：旧库缺 FTS5 表属 legacy 容忍（init_db 建表失败时已留
-            # warning，检索侧回退 LIKE，不掩盖真实错误）；其余 OperationalError
-            # （半更新：DELETE 成功 INSERT 失败 / 磁盘错误）会让该 issue 静默
-            # 退出检索，至少留下可排查的日志（同 knowledge_repository._replace_fts）。
-            if "no such table" in str(exc).lower():
-                return
-            logger.warning("redmine_agent_issue_fts 更新失败 (issue %s): %s", payload.get("issue_id"), exc)
+            if str(exc).lower() == "no such table: redmine_agent_issue_fts":
+                return  # FTS5 is optional; search falls back to LIKE.
+            raise  # Roll back the caller's issue and index transaction.
 
     @staticmethod
     def _build_issue_where(status: str = "", priority: str = "", category: str = "", search: str = "", assignee_names: list[str] | None = None) -> tuple:

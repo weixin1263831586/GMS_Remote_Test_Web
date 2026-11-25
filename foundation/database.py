@@ -48,15 +48,7 @@ def _identity(conn, path: Path) -> tuple[int, ...]:
 
 
 def invalidate_schema(path: Path) -> None:
-    """Forget initialization after an explicit database restore.
-
-    The shipped restore flow (scripts/gms_backup.py) is offline by contract:
-    it takes the controller process lock and refuses to run while the Web
-    process, Worker or CLI is alive, so a live process never sees its SQLite
-    files replaced mid-flight.  This hook exists for any future in-process
-    restore path: call it right after the file is replaced so the next
-    connect() re-runs the initializer instead of trusting a stale identity.
-    """
+    """Invalidate cached schema identity after replacing a database file."""
     with _lock:
         _initialized.pop(Path(path).resolve(), None)
 

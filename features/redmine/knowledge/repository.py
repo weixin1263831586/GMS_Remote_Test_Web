@@ -35,10 +35,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
         if not issue_id:
             raise ValueError("case_fact requires issue_id")
         now = _now()
-        # 单事务 read-merge-write：旧实现先独立连接读、再
-        # 开另一连接写，多进程（Web/Worker/CLI）并发保存同一 issue 时
-        # 后写者整行覆盖前者的合并结果。BEGIN IMMEDIATE 持写锁完成整个
-        # RMW，配合 schema 层 WAL + busy_timeout 消除丢失更新。
+        # Hold the write lock across the read, merge and write.
         with self.connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             row = conn.execute(
@@ -248,12 +245,9 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                 ),
             )
         except sqlite3.OperationalError as exc:
-            # 旧库缺 FTS5 表属 legacy 容忍（建表失败时 knowledge_schema 已留
-            # warning）；FTS 半更新（DELETE 成功、INSERT 失败）会让该案例静默
-            # 退出检索，至少留下可排查的日志。
-            if "no such table" in str(exc).lower():
-                return
-            logger.warning("FTS index update failed for issue %s: %s", fields["issue_id"], exc)
+            if str(exc).lower() == "no such table: redmine_case_facts_fts":
+                return  # FTS5 is optional; search falls back to LIKE.
+            raise  # Roll back the caller's case and index transaction.
 
     @staticmethod
     def _decode_list(value: Any) -> list:
