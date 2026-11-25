@@ -10,7 +10,7 @@ from pathlib import Path
 
 from foundation.config import settings
 
-from .base import KnowledgeHit, ProviderStatus, SourceAnchor, fts_safe_query
+from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
 from .document_index import document_revision, parse_document
 from .web_fetch import fetch_html, validate_url
 
@@ -179,7 +179,7 @@ class WebKnowledgeProvider:
     def search(self, query, *, limit=5, android_api_level=None):
         if not self._path().is_file():
             return []
-        match = fts_safe_query(query)
+        match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in search_terms(query))
         if not match:
             return []
         version = API_TO_ANDROID.get(android_api_level)
@@ -211,8 +211,6 @@ def partner_policy_allowed(owner_id: str):
 
 
 def policy_search_terms(query: str):
-    from .base import search_terms
-
     return search_terms(query, limit=12)
 
 
