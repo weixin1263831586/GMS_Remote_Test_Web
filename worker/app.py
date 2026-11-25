@@ -19,6 +19,10 @@ from urllib.parse import quote, urlencode
 
 from foundation.log_setup import resolve_log_level
 from foundation.networking import parse_vpn_connection_names, probe_tcp_quality
+from foundation.process_inventory import (
+    discover_tradefed_processes,
+    process_inventory_capability_status,
+)
 from foundation.tradefed_progress import parse_progress_line
 from foundation.transport_contract import TransportOperationError
 
@@ -51,10 +55,6 @@ from .inventory import (
     probe_devices,
     scan_suites,
     tradefed_launcher_families,
-)
-from .process_inventory import (
-    discover_tradefed_processes,
-    process_inventory_capability_status,
 )
 from .runtime import WorkerRuntime
 

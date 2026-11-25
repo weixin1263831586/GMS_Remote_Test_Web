@@ -158,7 +158,7 @@ def _reconfigure_local_software() -> str:
 def _local_worker_has_active_tests(worker: dict) -> bool:
     if int(worker.get("running_jobs") or 0) > 0:
         return True
-    from worker.process_inventory import discover_tradefed_processes
+    from foundation.process_inventory import discover_tradefed_processes
 
     return bool(discover_tradefed_processes())
 

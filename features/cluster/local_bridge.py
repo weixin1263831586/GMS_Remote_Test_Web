@@ -15,8 +15,8 @@ from typing import Any
 
 from foundation.config import settings
 from foundation.host_metrics import collect_host_metrics
+from foundation.process_inventory import discover_tradefed_processes
 from worker.inventory import aoa_capabilities, probe_devices
-from worker.process_inventory import discover_tradefed_processes
 from worker.suite_actions import scan_suite_roots, tradefed_launcher_families
 
 from .config import ClusterConfig, normalize_max_jobs

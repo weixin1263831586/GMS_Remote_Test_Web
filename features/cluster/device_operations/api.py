@@ -68,8 +68,8 @@ def _local_aoa_adb_suppression_allowed() -> bool:
     daemon 共存的现状。
     """
     try:
+        from foundation.process_inventory import discover_tradefed_processes
         from worker.adb_proxy import imported_devices
-        from worker.process_inventory import discover_tradefed_processes
 
         return (not discover_tradefed_processes()
                 and not imported_devices())
