@@ -9,8 +9,8 @@ import re
 import sqlite3
 from contextlib import closing
 
-from features.gms import extract_reference_identifiers, recall_mainline_references
-from features.knowledge import recall_web_references
+from features.gms import extract_reference_identifiers, recall_gms_requirements, recall_mainline_references
+from features.knowledge import partner_policy_allowed, policy_search_terms, recall_web_references
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root
@@ -110,6 +110,10 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     policy = recall_web_references(policy_query, android_version=version)
     if policy is not None:
         result.setdefault("sources", {})["web_documents"] = policy
+    if partner_policy_allowed(str(owner_id)):
+        result.setdefault('sources', {})['gms_requirements'] = recall_gms_requirements(
+            policy_search_terms(policy_query), data_root=data_root
+        )
     if exhausted:
         warnings.append("标识符扫描达到资源预算，未扫描部分不能视为无匹配")
     return {"snapshot_id": snapshot_id, "issue_id": snapshot["issue_id"],
