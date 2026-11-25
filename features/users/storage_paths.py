@@ -8,6 +8,7 @@ def owner_storage_key(owner_id: str) -> str:
     """Return a stable, filesystem-safe owner directory name."""
     raw = str(owner_id or "anonymous").strip() or "anonymous"
     readable = re.sub(r"[^A-Za-z0-9._-]+", "_", raw).strip("._") or "anonymous"
-    if readable != raw:
-        readable = f"{readable}_{hashlib.sha256(raw.encode()).hexdigest()[:12]}"
-    return readable[:160]
+    if readable != raw or len(readable) > 160:
+        suffix = f"_{hashlib.sha256(raw.encode()).hexdigest()[:12]}"
+        return readable[:160 - len(suffix)] + suffix
+    return readable
