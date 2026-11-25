@@ -33,10 +33,17 @@ SSHD_INSTALL_CMD = 'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.
 SSHD_START_CMD = 'Start-Service sshd'
 SSHD_ENABLE_CMD = 'Set-Service -Name sshd -StartupType \'Automatic\''
 
+def _connection_target(host: str, port: int | str | None = None) -> tuple[str, int]:
+    host, parsed_port = split_host_port(host.strip())
+    selected_port = parsed_port if port is None or port == '' else int(port)
+    if not host or not 1 <= selected_port <= 65535:
+        raise ValueError('Invalid SSH host or port')
+    return host, selected_port
+
+
 def _connection_identity(config: dict) -> tuple[str, int, str]:
     host = config.get('host') or config.get('hostname') or config.get('ubuntu_host')
-    host, parsed_port = split_host_port(str(host or ''))
-    port = int(config.get('port') or parsed_port)
+    host, port = _connection_target(str(host or ''), config.get('port'))
     username = str(config.get('username') or config.get('ubuntu_user') or get_ubuntu_user())
     return host, port, username
 
@@ -81,11 +88,11 @@ class SSHManager:
         self, config: dict, *, raise_on_error: bool = False
     ) -> paramiko.SSHClient | None:
         """根据配置创建 SSH 连接，失败时按需返回 None 或抛出异常。"""
+        ssh = None
         try:
+            host, port, username = _connection_identity(config)
             ssh = paramiko.SSHClient()
             configure_strict_host_keys(ssh)
-
-            host, port, username = _connection_identity(config)
             password = config.get('password') or config.get('ubuntu_pswd', '')
 
             if config.get('use_key_auth', False):
@@ -120,6 +127,7 @@ class SSHManager:
             else:
                 if not password:
                     logger.error("[SSH] No SSH password configured")
+                    ssh.close()
                     return None
                 ssh.connect(
                     host,
@@ -137,6 +145,9 @@ class SSHManager:
             return ssh
 
         except Exception as e:
+            if ssh is not None:
+                with contextlib_suppress(Exception):
+                    ssh.close()
             logger.error(f"[SSH] Connection error: {e}")
             if raise_on_error:
                 raise
@@ -363,8 +374,7 @@ class SSHAsyncManager:
         timeout: int = 10
     ) -> paramiko.SSHClient:
         """在线程中建立 SSH 连接并按目标身份缓存。"""
-        host, parsed_port = split_host_port(host)
-        port = parsed_port if port is None else port
+        host, port = _connection_target(host, port)
         connection_key = (host, port, username)
         async with self._lock:
             if connection_key in self.connections:
@@ -375,21 +385,29 @@ class SSHAsyncManager:
                         return self.connections[connection_key]
                 except Exception:
                     pass
+                stale = self.connections.pop(connection_key)
+                with contextlib_suppress(Exception):
+                    stale.close()
 
             logger.info(f"[SSH] Connecting to {host}...")
 
             def _connect():
                 ssh = paramiko.SSHClient()
-                configure_strict_host_keys(ssh)
-                ssh.connect(
-                    hostname=host,
-                    username=username,
-                    password=password,
-                    port=port,
-                    timeout=timeout,
-                    look_for_keys=False,
-                    allow_agent=False
-                )
+                try:
+                    configure_strict_host_keys(ssh)
+                    ssh.connect(
+                        hostname=host,
+                        username=username,
+                        password=password,
+                        port=port,
+                        timeout=timeout,
+                        look_for_keys=False,
+                        allow_agent=False,
+                    )
+                except Exception:
+                    with contextlib_suppress(Exception):
+                        ssh.close()
+                    raise
                 return ssh
 
             try:
@@ -424,9 +442,11 @@ class SSHAsyncManager:
         keys = [key for key in self.connections
                 if key[0] == hostname and (hostname == host or key[1] == port)]
         for key in keys:
+            client = self.connections.pop(key, None)
+            if client is None:
+                continue
             try:
-                self.connections[key].close()
-                del self.connections[key]
+                client.close()
             except Exception as e:
                 logger.error(f"[SSH] Error closing connection to {host}: {e}")
         if keys:
