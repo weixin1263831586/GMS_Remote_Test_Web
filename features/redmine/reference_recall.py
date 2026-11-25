@@ -106,7 +106,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     result = recall_mainline_references(sorted(identifiers)[:MAX_IDENTIFIERS], data_root=data_root)
     versions = set(re.findall(r"\bAndroid\s+(1[5-9]|[2-9]\d)\b", " ".join(texts[:3]), re.I))
     version = int(next(iter(versions))) if len(versions) == 1 else None
-    policy_query = " ".join(texts[:3])[:512]
+    policy_query = " ".join([*sorted(identifiers)[:8], *texts[:3]])[:512]
     policy = recall_web_references(policy_query, android_version=version)
     if policy is not None:
         result.setdefault("sources", {})["web_documents"] = policy
