@@ -57,6 +57,24 @@
             const api = '/api/knowledge/external/web-sources';
             let editing = '';
             let busy = false;
+            const partnerButton = panel.querySelector('[data-kb-partner-grant]');
+            const partnerApi = '/api/knowledge/external/partner-policy-grant';
+            let partnerEnabled = null;
+            async function loadGrant() {
+                const data = await kbFetch(partnerApi);
+                partnerEnabled = Boolean(data.enabled);
+                partnerButton.textContent = partnerEnabled ? '关闭当前账号政策分析授权' : '启用当前账号政策分析授权';
+            }
+            partnerButton.addEventListener('click', async () => {
+                try {
+                    if (partnerEnabled === null) { await loadGrant(); return; }
+                    const enabled = !partnerEnabled;
+                    if (enabled && !window.confirm('确认当前账号有权访问 Google Partner 文档，并已获得将相关片段交给本系统配置的 AI 分析模型处理的许可？')) return;
+                    await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
+                    await loadGrant();
+                } catch (error) { status.textContent = error.message; }
+            });
             const controls = form.elements;
             function reset() {
                 form.reset();
@@ -79,6 +97,7 @@
             }
             async function load() {
                 const data = await kbFetch(api);
+                await loadGrant();
                 list.replaceChildren();
                 const table = document.createElement('table');
                 table.className = 'data-table';
