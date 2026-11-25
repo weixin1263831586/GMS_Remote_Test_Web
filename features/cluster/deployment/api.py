@@ -116,7 +116,7 @@ def _prepare_gms_host_tools(project_root: Path) -> None:
 
 def _local_software_service_name() -> str:
     base = os.getenv("GMS_SERVICE_NAME", "gms-web-app").strip()
-    if not re.fullmatch(r"[A-Za-z0-9_.@-]+", base):
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.@-]*", base):
         raise RuntimeError("invalid GMS service name")
     return f"{base}-local-software.service"
 
@@ -141,7 +141,8 @@ def _reconfigure_local_software() -> str:
         if not script.is_file():
             raise RuntimeError(f"local Software script is missing: {script}")
         command = ["/bin/bash", str(script), str(project_root), str(Path.home())]
-    completed = subprocess.run(
+    # Both branches select a fixed executable and deployment-owned arguments.
+    completed = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
         command,
         capture_output=True,
         text=True,

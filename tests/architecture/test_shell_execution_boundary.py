@@ -1,12 +1,7 @@
 """Architecture rule: no direct shell-string execution in business code.
 
-``shell=True`` must stay confined to two audited boundaries:
-
-- ``foundation/processes.py`` — the shared ``run_local_shell_command`` helper
-  for genuinely shell-shaped work (pipelines/redirection); everything else
-  should use the argv-based ``run_local_command``.
-- ``features/build/executor.py`` — build templates rendered from whitelisted
-  ``trusted_shell_fragment`` values (choices/fullmatch-validated).
+``shell=True`` must stay confined to the audited foundation/processes.py boundary.
+Build templates use the same helper after validation.
 
 Any new ``shell=True`` elsewhere (raw subprocess/os.system/os.popen) fails
 this test so injection-prone call sites cannot creep back in.
@@ -22,7 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 ALLOWED_SHELL_TRUE_FILES = {
     "foundation/processes.py",
-    "features/build/executor.py",
+
 }
 SCAN_DIRS = ("features", "foundation", "worker", "bootstrap")
 # 受控逃生口：确因模板/生成物而无法用 ast 解析的源码文件才登记在此，

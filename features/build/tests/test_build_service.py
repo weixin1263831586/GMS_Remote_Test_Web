@@ -354,10 +354,12 @@ def test_cancel_does_not_ignore_a_failed_tmux_kill():
 def test_local_build_timeout_is_a_build_error(monkeypatch):
     from features.build.executor import LocalBuildBackend
 
-    def timed_out(*_args, **_kwargs):
-        raise subprocess.TimeoutExpired(cmd="build", timeout=1)
+    from foundation.command_result import CommandResult
 
-    monkeypatch.setattr("features.build.executor.subprocess.run", timed_out)
+    def timed_out(*_args, **_kwargs):
+        return CommandResult(stdout="", stderr="Command timed out", code=-1, timed_out=True)
+
+    monkeypatch.setattr("features.build.executor.run_local_shell_command", timed_out)
     with pytest.raises(BuildExecutionError) as raised:
         LocalBuildBackend()._run({}, "true", timeout=1)
     assert isinstance(raised.value.__cause__, TimeoutError)

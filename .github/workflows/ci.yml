@@ -33,18 +33,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # Audit pinned dependencies; waivers require a reason and exit condition.
       - name: Audit runtime dependencies
+        env:
+          AUDIT_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           python -m pip install --upgrade pip pip-audit
-          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+          if [ "$AUDIT_PYTHON_VERSION" = "3.10" ]; then
             WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
             pip-audit -r requirements.txt --strict $WAIVERS
           else
             pip-audit -r requirements.txt --strict
           fi
       - name: Audit dev dependencies
+        env:
+          AUDIT_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           # requirements-dev.txt 内联 requirements.txt,同栈审计（豁免同上）。
-          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+          if [ "$AUDIT_PYTHON_VERSION" = "3.10" ]; then
             WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
             pip-audit -r requirements-dev.txt --strict $WAIVERS
           else
@@ -136,14 +140,14 @@ jobs:
               --json --output artifacts/semgrep.json \
               --metrics=off --strict
       - name: Gate on ERROR-severity findings
+        if: always()
         run: |
           python - <<'PY'
           import json, pathlib
           data = json.loads(pathlib.Path("artifacts/semgrep.json").read_text())
-          if data["errors"]:
-              for issue in data["errors"]:
-                  print(f"::error::Semgrep scan error: {issue}")
-              raise SystemExit(1)
+          scan_errors = data["errors"]
+          for issue in scan_errors:
+              print(f"::error::Semgrep scan error: {issue}")
           scanned = set(data["paths"]["scanned"])
           required = {
               "plugins/codesearch/scripts/codesearch.py",
@@ -161,7 +165,7 @@ jobs:
                     f"::{f['check_id']} at {loc}")
           print(f"semgrep: {len(data.get('results', []))} findings, "
                 f"{len(errors)} ERROR (gate)")
-          raise SystemExit(1 if errors else 0)
+          raise SystemExit(1 if errors or scan_errors else 0)
           PY
       - name: Upload semgrep report
         if: always()
@@ -343,9 +347,11 @@ jobs:
         run: |
           bash tools/scripts/testing/prepare_knowledge_quality_corpus.sh
       - name: Golden query corpus recall gate
+        env:
+          GMS_KNOWLEDGE_INDEX: ${{ steps.knowledge.outputs.index }}
         run: |
           # Read the index path from the preceding step output.
-          idx="${{ steps.knowledge.outputs.index }}"
+          idx="$GMS_KNOWLEDGE_INDEX"
           test -n "${idx}" || { echo "::error::prepare step did not emit index output"; exit 1; }
           test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
           GMS_WIKI_INDEX_DB="${idx}" pytest \
@@ -541,12 +547,14 @@ jobs:
 
       - name: Browser E2E and smoke tests
         shell: bash
+        env:
+          BROWSER_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
           # Verbose node ids and faulthandler provide an exact last-running
           # test and Python stacks if a browser/iframe request stops progressing.
-          case "${{ matrix.shard }}" in
+          case "$BROWSER_SHARD" in
             early)
               pytest tests/e2e tests/runtime_ui/test_[a-c]*.py -vv \
                 -o faulthandler_timeout=180 --durations=25 \
