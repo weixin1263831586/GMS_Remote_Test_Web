@@ -134,6 +134,9 @@ abc                                   Android ADB Interface
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -184,6 +187,9 @@ abc                                   Android ADB Interface
 
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True
@@ -408,6 +414,9 @@ abc                                   Android ADB Interface
 
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True

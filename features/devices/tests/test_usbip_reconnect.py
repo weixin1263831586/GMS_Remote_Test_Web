@@ -210,6 +210,10 @@ BUSID  VID:PID    DEVICE                                                        
             def get_runtime_config(self):
                 return dict(runtime_config)
 
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
+
             def save_runtime_config(self, data):
                 runtime_config.clear()
                 runtime_config.update(data)
@@ -1036,6 +1040,10 @@ BUSID  VID:PID    DEVICE                                                        
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                saved.setdefault("runtime", {}).update(updates)
+                return True
+
             def save_runtime_config(self, data):
                 saved["runtime"] = data
                 return True
@@ -1075,6 +1083,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return runtime_config
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 saved = dict(data)
@@ -1221,6 +1233,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 runtime_config.clear()

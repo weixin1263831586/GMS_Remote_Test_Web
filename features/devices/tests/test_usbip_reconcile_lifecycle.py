@@ -507,6 +507,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -738,6 +741,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
                     }
                 }
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -817,6 +823,10 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
 
             def get_runtime_config(self):
                 return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 runtime_config.clear()
@@ -915,6 +925,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
                         "USBIP001": {"source": "hcq@172.16.14.66", "timestamp": 1},
                     }
                 }
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True
@@ -1194,6 +1207,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -1285,6 +1301,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -1332,6 +1351,9 @@ class UsbipReconciliationTests(UsbipRuntimeTestCase):
         class FakeConfigManager:
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True
