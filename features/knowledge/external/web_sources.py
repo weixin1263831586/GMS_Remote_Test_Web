@@ -23,6 +23,9 @@ CREATE TABLE IF NOT EXISTS sources (
  generation TEXT NOT NULL, revision TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL DEFAULT '',
  etag TEXT NOT NULL DEFAULT '', modified TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS partner_grants (
+ owner_id TEXT PRIMARY KEY, approved_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS revisions (
  source_id TEXT NOT NULL, revision TEXT NOT NULL, fetched_at TEXT NOT NULL,
  PRIMARY KEY(source_id, revision)
@@ -60,6 +63,25 @@ class WebKnowledgeProvider:
             if write:
                 conn.executescript(_SCHEMA)
             yield conn
+
+    def set_partner_grant(self, owner_id: str, enabled: bool):
+        if not owner_id:
+            raise ValueError('Owner identity required')
+        with self._db(write=True) as db:
+            if enabled:
+                db.execute('INSERT OR REPLACE INTO partner_grants VALUES (?,?)',
+                           (owner_id, datetime.now(timezone.utc).isoformat()))
+            else:
+                db.execute('DELETE FROM partner_grants WHERE owner_id=?', (owner_id,))
+
+    def has_partner_grant(self, owner_id: str):
+        if not owner_id or not self._path().is_file():
+            return False
+        try:
+            with self._db() as db:
+                return db.execute('SELECT 1 FROM partner_grants WHERE owner_id=?', (owner_id,)).fetchone() is not None
+        except sqlite3.Error:
+            return False
 
     def list_sources(self):
         if not self._path().is_file():
@@ -182,6 +204,16 @@ class WebKnowledgeProvider:
                                     "reference": r["token"], "source_url": r["url"],
                                     "source_kind": r["kind"], "status": "stale" if r["error"] else "indexed"})
                 for r in rows]
+
+
+def partner_policy_allowed(owner_id: str):
+    return WebKnowledgeProvider().has_partner_grant(owner_id)
+
+
+def policy_search_terms(query: str):
+    from .base import search_terms
+
+    return search_terms(query, limit=12)
 
 
 def recall_web_references(query: str, *, android_version=None):
