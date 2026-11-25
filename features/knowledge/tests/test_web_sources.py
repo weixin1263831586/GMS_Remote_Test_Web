@@ -114,3 +114,13 @@ def test_disabled_source_does_not_return_cached_content(tmp_path, monkeypatch):
     )
     assert not provider.search('TTS', android_api_level=36)
     assert provider.status().status == 'disabled'
+
+
+def test_partner_grants_are_owner_bound_and_revocable(tmp_path):
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    assert not provider.has_partner_grant('owner-a')
+    provider.set_partner_grant('owner-a', True)
+    assert provider.has_partner_grant('owner-a')
+    assert not provider.has_partner_grant('owner-b')
+    provider.set_partner_grant('owner-a', False)
+    assert not provider.has_partner_grant('owner-a')
