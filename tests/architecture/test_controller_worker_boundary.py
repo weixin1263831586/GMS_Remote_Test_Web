@@ -30,7 +30,7 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     # Same-host bridge: the documented exception in AGENTS.md.
     "features/cluster/local_bridge.py": {
         "worker.adb_proxy",
-        "worker.inventory",
+        "worker.device_actions",
         "worker.suite_actions",
     },
     # Cluster suite transfer/execution surfaces (worker-role execution).
@@ -38,21 +38,19 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
         "worker.adb_proxy",
         "worker.config",
         "worker.device_actions",
-        "worker.inventory",
+        "worker.suite_actions",
     },
     "features/cluster/device_operations/api.py": {
-        # 同主机桥接面（同 deployment/api.py 先例）：AOA 回放派发前
-        # 判定本机是否可抑制 adb daemon（ Tradefed 任务/ADB Proxy 导入
-        # 检查，见 _local_aoa_adb_suppression_allowed）。
+        # Local AOA execution and ADB suppression safety checks.
         "worker.adb_proxy",
-        "worker.inventory",
+        "worker.device_actions",
     },
     "features/cluster/transfers/ingest.py": {
         "worker.android_inspection",
     },
     "features/cluster/transfers/api.py": {
         "worker.config",
-        "worker.inventory",
+        "worker.suite_actions",
     },
     # adb proxy + fastboot workflow execution surfaces.
     "features/devices/adb/proxy_security.py": {

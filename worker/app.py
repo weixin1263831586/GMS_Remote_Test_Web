@@ -40,23 +40,25 @@ from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
 from .command_events import CommandEventUploader
 from .config import WorkerConfig
-from .inventory import (
+from .device_actions import (
     aoa_capabilities,
     browse_directory,
     copy_image_into,
     execute_device_action,
-    execute_suite_action,
     execute_usbip_action,
     flash_firmware,
     flash_gsi,
     host_metrics,
+    probe_devices,
+)
+from .runtime import WorkerRuntime
+from .suite_actions import (
+    execute_suite_action,
     import_suite_report,
     prepare_suite_export,
-    probe_devices,
     scan_suites,
     tradefed_launcher_families,
 )
-from .runtime import WorkerRuntime
 
 
 _log_level = resolve_log_level(os.environ.get("GMS_LOG_LEVEL"))

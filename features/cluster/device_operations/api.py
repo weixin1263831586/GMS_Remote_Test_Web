@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 def execute_local_firmware_aoa(action, devices, options, **kwargs):
     """Same-host execution seam for the fenced firmware continuation."""
-    from worker.inventory import execute_device_action
+    from worker.device_actions import execute_device_action
 
     return execute_device_action(action, devices, {
         **options, "suppress_adb_daemon": _local_aoa_adb_suppression_allowed(),
@@ -50,7 +50,7 @@ def execute_local_firmware_aoa(action, devices, options, **kwargs):
 
 
 def validate_local_firmware_identity(device_id: str, port: str) -> None:
-    from worker.inventory import probe_devices
+    from worker.device_actions import probe_devices
 
     serial = device_id.split(":", 1)[-1]
     device = next((item for item in probe_devices() if item["serial"] == serial), {})
@@ -343,7 +343,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         action_payload["suppress_adb_daemon"] = _local_aoa_adb_suppression_allowed()
     if is_local and not durable_local:
         try:
-            from worker.inventory import execute_device_action
+            from worker.device_actions import execute_device_action
 
             # ADB/aapt2/screenshot actions are blocking subprocess work. Keep
             # them off the FastAPI event loop so unrelated UI controls and
@@ -389,7 +389,7 @@ async def device_action(body: ClusterDeviceAction, request: Request):
         try:
             started = repository.start_local_command(command["id"])
             if started:
-                from worker.inventory import execute_device_action
+                from worker.device_actions import execute_device_action
 
                 threading.Thread(target=execute_local_operation,
                                  args=(repository, command, execute_device_action),

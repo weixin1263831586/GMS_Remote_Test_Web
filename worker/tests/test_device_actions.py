@@ -14,14 +14,8 @@ from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURLError
 from worker import device_actions as _device_actions_module
 from worker.android_inspection import _aapt2_path
 from worker.config import WorkerConfig
-from worker.inventory import (
-    execute_device_action,
-    execute_suite_action,
-    execute_usbip_action,
-    flash_firmware,
-    import_suite_report,
-    prepare_suite_export,
-)
+from worker.device_actions import execute_device_action, execute_usbip_action, flash_firmware
+from worker.suite_actions import execute_suite_action, import_suite_report, prepare_suite_export
 
 
 def test_aapt2_path_accepts_configured_worker_binary(tmp_path):

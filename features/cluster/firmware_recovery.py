@@ -190,7 +190,7 @@ def refresh_post_burn_inventory(repository, worker_id: str) -> None:
     真实 agent 守护进程的下一个周期心跳（默认 15s）之前，库存还停留在
     accessory 窗口的 usb_only；完成触发的设备列表刷新会拿到旧快照。
     本函数让 Controller 主机烧写结束后库存立即可用。探测器经
-    local_bridge 同宿主桥（worker.inventory，白名单内）；
+    local_bridge 同宿主桥；
     刷新失败只告警，绝不影响烧写/恢复结果。
     """
     from . import local_bridge

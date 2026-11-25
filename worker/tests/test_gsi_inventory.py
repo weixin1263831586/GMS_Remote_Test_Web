@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from worker.inventory import browse_directory, copy_image_into, flash_gsi, scan_suites
-from worker.suite_actions import suite_details
+from worker.device_actions import browse_directory, copy_image_into, flash_gsi
+from worker.suite_actions import scan_suites, suite_details
 
 
 def test_browse_directory_lists_entries_with_metadata(tmp_path: Path) -> None:

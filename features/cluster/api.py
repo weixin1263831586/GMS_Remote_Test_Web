@@ -489,7 +489,7 @@ def list_suites(
 def _local_execute(command_type: str, payload: dict) -> dict:
     """Execute a command directly on the Controller host (local Worker)."""
     from worker.config import WorkerConfig
-    from worker.inventory import execute_suite_action as _exec_suite
+    from worker.suite_actions import execute_suite_action as _exec_suite
 
     from .local_bridge import _suite_roots, scan_local_suites
 
