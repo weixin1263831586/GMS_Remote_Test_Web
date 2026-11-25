@@ -1,5 +1,7 @@
 <div class="container page-content page-ui-rework" id="page-notes">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📚</span> 个人知识库{% include 'components/page-header-actions.html' %}
+            <button type="button" class="btn-xs" data-kb-view="personal" aria-pressed="true">个人知识库</button>
+            <button type="button" class="btn-xs" data-kb-view="external" aria-pressed="false">外部知识源</button>
             {% include 'components/page-header-end.html' %}
             <div class="kb-layout split-layout">
                 <div class="pane">
@@ -43,4 +45,19 @@
                     <div id="kb-side-info">选择或新建一篇文档。</div>
                 </div>
             </div>
+            <section class="pane" data-kb-external hidden>
+                <div class="pane-bar spread"><span class="pane-title">外部知识源</span><button type="button" class="btn-xs" data-kb-refresh>刷新</button></div>
+                <div class="pane-label" data-kb-status role="status"></div>
+                <div class="pane-scroll" data-kb-sources></div>
+                <form class="pane-bar" data-kb-source-form>
+                    <input type="text" name="name" class="combo-box" placeholder="知识源名称" required maxlength="160" />
+                    <input type="url" name="url" class="combo-box pane-grow" placeholder="HTTPS 网址" required maxlength="2048" />
+                    <select name="kind" class="combo-box" aria-label="来源类型"><option value="cdd">Android CDD</option><option value="document">公开技术文档</option></select>
+                    <input name="android_version" type="number" min="1" max="100" class="combo-box" placeholder="Android 版本" aria-label="适用 Android 版本" />
+                    <input name="license" class="combo-box" placeholder="内容使用许可" required maxlength="240" />
+                    <label><input name="enabled" type="checkbox" checked /> 启用</label>
+                    <button type="submit" class="btn-xs btn-primary">保存</button><button type="button" class="btn-xs" data-kb-reset>取消编辑</button>
+                </form>
+                <div class="pane-label">仅公开文档；Google Partner 等受限来源暂不支持自动抓取。</div>
+            </section>
         </div>
