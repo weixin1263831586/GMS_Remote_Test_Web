@@ -353,7 +353,6 @@ def test_cancel_does_not_ignore_a_failed_tmux_kill():
 
 def test_local_build_timeout_is_a_build_error(monkeypatch):
     from features.build.executor import LocalBuildBackend
-
     from foundation.command_result import CommandResult
 
     def timed_out(*_args, **_kwargs):

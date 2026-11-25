@@ -5,7 +5,6 @@ import logging
 from typing import Any
 
 from features.auth import get_authenticated_user
-
 from foundation.networking import get_client_ip, parse_host_address
 from foundation.redaction import is_sensitive_field
 

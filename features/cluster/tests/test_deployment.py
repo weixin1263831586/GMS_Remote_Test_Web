@@ -512,9 +512,8 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
     def test_rejects_option_shaped_local_service_name(self):
         from features.cluster.deployment.api import _local_software_service_name
 
-        with patch.dict("os.environ", {"GMS_SERVICE_NAME": "--bad"}):
-            with self.assertRaises(RuntimeError):
-                _local_software_service_name()
+        with patch.dict("os.environ", {"GMS_SERVICE_NAME": "--bad"}), self.assertRaises(RuntimeError):
+            _local_software_service_name()
 
     def test_starts_the_restricted_local_software_unit(self):
         from features.cluster.deployment.api import _reconfigure_local_software

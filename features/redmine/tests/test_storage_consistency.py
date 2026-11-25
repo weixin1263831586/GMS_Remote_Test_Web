@@ -20,9 +20,8 @@ def test_failed_fts_replacement_rolls_back_delete(repository, table, payload):
         conn.execute(f"CREATE TABLE {table} (issue_id INTEGER, subject TEXT)")
         conn.execute(f"INSERT INTO {table} VALUES (1, 'old')")
         conn.commit()
-        with pytest.raises(sqlite3.OperationalError):
-            with conn:
-                repository._replace_fts(conn, payload)
+        with pytest.raises(sqlite3.OperationalError), conn:
+            repository._replace_fts(conn, payload)
         assert conn.execute(f"SELECT subject FROM {table}").fetchone() == ("old",)
 
 
