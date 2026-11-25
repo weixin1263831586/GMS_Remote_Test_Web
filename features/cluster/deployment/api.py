@@ -142,7 +142,7 @@ def _reconfigure_local_software() -> str:
             raise RuntimeError(f"local Software script is missing: {script}")
         command = ["/bin/bash", str(script), str(project_root), str(Path.home())]
     # Both branches select a fixed executable and deployment-owned arguments.
-    completed = subprocess.run(  # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
+    completed = subprocess.run(
         command,
         capture_output=True,
         text=True,

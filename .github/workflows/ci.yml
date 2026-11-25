@@ -123,14 +123,14 @@ jobs:
         with:
           python-version: "3.10"
       - name: Semgrep scan
-        env:
-          SEMGREP_RULES: p/bandit p/owasp-top-ten p/python
+        id: semgrep
         run: |
           python -m pip install --upgrade pip
           python -m pip install semgrep==1.187.0
           mkdir -p artifacts
           # Without --error, findings do not change the scanner exit status.
           # Strict mode rejects scan failures; the next step gates findings by severity.
+          set +e
           semgrep scan --config p/bandit --config p/owasp-top-ten \
               --config p/python . \
               --exclude-rule gitlab.bandit.B404 \
@@ -139,34 +139,15 @@ jobs:
               --exclude-rule gitlab.bandit.B101 \
               --json --output artifacts/semgrep.json \
               --metrics=off --strict
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          test -s artifacts/semgrep.json
       - name: Gate on ERROR-severity findings
         if: always()
-        run: |
-          python - <<'PY'
-          import json, pathlib
-          data = json.loads(pathlib.Path("artifacts/semgrep.json").read_text())
-          scan_errors = data["errors"]
-          for issue in scan_errors:
-              print(f"::error::Semgrep scan error: {issue}")
-          scanned = set(data["paths"]["scanned"])
-          required = {
-              "plugins/codesearch/scripts/codesearch.py",
-              "plugins/codesearch/scripts/mcp_server.py",
-              "tools/scripts/agent/release.py",
-          }
-          if missing := required - scanned:
-              print(f"::error::Semgrep required targets not scanned: {sorted(missing)}")
-              raise SystemExit(1)
-          errors = [f for f in data["results"]
-                    if f["extra"]["severity"] in {"ERROR", "HIGH", "CRITICAL"}]
-          for f in errors:
-              loc = f"{f['path']}:{f['start']['line']}"
-              print(f"::error file={f['path']},line={f['start']['line']}"
-                    f"::{f['check_id']} at {loc}")
-          print(f"semgrep: {len(data.get('results', []))} findings, "
-                f"{len(errors)} ERROR (gate)")
-          raise SystemExit(1 if errors or scan_errors else 0)
-          PY
+        env:
+          SEMGREP_EXIT_CODE: ${{ steps.semgrep.outputs.exit_code }}
+        run: python tools/scripts/maintenance/check_semgrep_report.py artifacts/semgrep.json --scan-exit-code "$SEMGREP_EXIT_CODE"
       - name: Upload semgrep report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
