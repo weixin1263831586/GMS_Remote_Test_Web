@@ -372,3 +372,55 @@ def test_pool_does_not_reuse_different_username():
         assert manager.get_connection({'host': 'host-a:2222', 'username': 'other'}) is None
     client.close.assert_called_once()
     client.exec_command.assert_not_called()
+
+
+def test_ssh_failed_connection_closes_client():
+    manager = SSHManager()
+    client = MagicMock()
+    client.connect.side_effect = OSError('offline')
+    with (
+        patch('features.system.host.ssh.paramiko.SSHClient', return_value=client),
+        patch('features.system.host.ssh.configure_strict_host_keys'),
+    ):
+        assert manager.create_connection({'host': 'host-a', 'username': 'tester', 'password': 'pw'}) is None
+    client.close.assert_called_once_with()
+
+
+def test_async_ssh_replaces_and_closes_inactive_connection():
+    manager = SSHAsyncManager()
+    stale, replacement = MagicMock(), MagicMock()
+    stale.get_transport.return_value.is_active.return_value = False
+    manager.connections[('host-a', 2222, 'tester')] = stale
+    with (
+        patch('features.system.host.ssh.paramiko.SSHClient', return_value=replacement),
+        patch('features.system.host.ssh.configure_strict_host_keys'),
+    ):
+        assert asyncio.run(manager.connect('host-a:2222', 'tester', 'pw')) is replacement
+    stale.close.assert_called_once_with()
+    assert manager.connections == {('host-a', 2222, 'tester'): replacement}
+
+
+def test_async_ssh_failed_connection_closes_client():
+    import pytest
+
+    manager = SSHAsyncManager()
+    client = MagicMock()
+    client.connect.side_effect = OSError('offline')
+    with (
+        patch('features.system.host.ssh.paramiko.SSHClient', return_value=client),
+        patch('features.system.host.ssh.configure_strict_host_keys'),
+        pytest.raises(OSError, match='offline'),
+    ):
+        asyncio.run(manager.connect('host-a', 'tester', 'pw'))
+    client.close.assert_called_once_with()
+    assert manager.connections == {}
+
+
+def test_ssh_rejects_invalid_port_before_opening_client():
+    import pytest
+
+    with patch('features.system.host.ssh.paramiko.SSHClient') as client:
+        assert SSHManager().create_connection({'host': 'host-a', 'port': 0}) is None
+        with pytest.raises(ValueError, match='Invalid SSH host or port'):
+            asyncio.run(SSHAsyncManager().connect('host-a', 'tester', 'pw', port=65536))
+        client.assert_not_called()
