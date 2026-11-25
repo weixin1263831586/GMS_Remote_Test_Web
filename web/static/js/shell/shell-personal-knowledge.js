@@ -41,7 +41,121 @@
             const title = document.getElementById('kb-doc-title');
             const tags = document.getElementById('kb-doc-tags');
             [content, title, tags].forEach(el => { if (el) el.addEventListener('input', () => kbState.dirty = true); });
+            kbInitExternalSources();
             await kbRefreshAll();
+        }
+
+
+        function kbInitExternalSources() {
+            const page = document.getElementById('page-notes');
+            const panel = page?.querySelector('[data-kb-external]');
+            const personal = page?.querySelector('.kb-layout');
+            if (!panel || !personal) return;
+            const form = panel.querySelector('[data-kb-source-form]');
+            const list = panel.querySelector('[data-kb-sources]');
+            const status = panel.querySelector('[data-kb-status]');
+            const api = '/api/knowledge/external/web-sources';
+            let editing = '';
+            let busy = false;
+            const controls = form.elements;
+            function reset() {
+                form.reset();
+                editing = '';
+            }
+            function edit(source) {
+                editing = source.id;
+                for (const key of ['name', 'url', 'kind', 'android_version', 'license']) {
+                    controls.namedItem(key).value = source[key] ?? '';
+                }
+                controls.namedItem('enabled').checked = Boolean(source.enabled);
+            }
+            function button(label, action) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'btn-xs';
+                b.textContent = label;
+                b.addEventListener('click', action);
+                return b;
+            }
+            async function load() {
+                const data = await kbFetch(api);
+                list.replaceChildren();
+                const table = document.createElement('table');
+                table.className = 'data-table';
+                const header = table.createTHead().insertRow();
+                for (const title of ['名称', '网址', '版本', '状态', '同步时间', '操作']) {
+                    const th = document.createElement('th');
+                    th.textContent = title;
+                    header.append(th);
+                }
+                const body = table.createTBody();
+                for (const source of data.sources || []) {
+                    const row = body.insertRow();
+                    for (const value of [source.name, source.url, source.android_version ?? '未指定',
+                        !source.enabled ? '已禁用' : source.error ? (source.revision ? '同步失败，保留旧索引' : '同步失败') : source.revision ? '已索引' : '未同步',
+                        source.synced_at || '—']) {
+                        row.insertCell().textContent = String(value);
+                    }
+                    const actions = row.insertCell();
+                    actions.append(button('编辑', () => edit(source)),
+                        button('同步', () => run(async () => {
+                            status.textContent = '正在同步…';
+                            await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
+                        })),
+                        button('删除', () => {
+                            if (window.confirm('删除此知识源及其索引？')) {
+                                run(async () => {
+                                    await kbFetch(api + '/' + encodeURIComponent(source.id), {method: 'DELETE'});
+                                    if (editing === source.id) reset();
+                                });
+                            }
+                        }));
+                }
+                list.append(table);
+                status.textContent = '共 ' + (data.sources || []).length + ' 个知识源';
+            }
+            async function run(action) {
+                if (busy) return;
+                busy = true;
+                try {
+                    await action();
+                    await load();
+                } catch (error) {
+                    status.textContent = error.message;
+                } finally {
+                    busy = false;
+                }
+            }
+            form.addEventListener('submit', event => {
+                event.preventDefault();
+                const values = new FormData(form);
+                const payload = Object.fromEntries(values);
+                payload.android_version = values.get('android_version') ? Number(values.get('android_version')) : null;
+                payload.enabled = controls.namedItem('enabled').checked;
+                run(async () => {
+                    await kbFetch(api + (editing ? '/' + encodeURIComponent(editing) : ''), {
+                        method: editing ? 'PUT' : 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                    reset();
+                });
+            });
+            panel.querySelector('[data-kb-reset]').addEventListener('click', reset);
+            panel.querySelector('[data-kb-refresh]').addEventListener('click', () => run(async () => {}));
+            for (const tab of page.querySelectorAll('[data-kb-view]')) {
+                tab.addEventListener('click', () => {
+                    const external = tab.dataset.kbView === 'external';
+                    panel.hidden = !external;
+                    panel.style.display = external ? '' : 'none';
+                    personal.style.display = external ? 'none' : '';
+                    for (const item of page.querySelectorAll('[data-kb-view]')) {
+                        item.setAttribute('aria-pressed', String(item === tab));
+                    }
+                    if (external) run(async () => {});
+                });
+            }
+            panel.style.display = 'none';
         }
 
         async function kbRefreshAll() {
