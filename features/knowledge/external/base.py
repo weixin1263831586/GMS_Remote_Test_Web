@@ -24,7 +24,7 @@ EVIDENCE_LEVEL_BACKGROUND = "background"
 #: ``KnowledgeHit.extra`` 允许透传联邦边界（``to_dict``）的键白名单：
 #: 目前是 provider 写入的 section 行号锚点 / 状态 / tags；白名单外的键
 #: 视为 provider 内部字段，不外发给消费方。
-EXTRA_SERIALIZED_KEYS = frozenset({"status", "tags", "section"})
+EXTRA_SERIALIZED_KEYS = frozenset({"status", "tags", "section", "requirement_id", "requirement_level", "applicability_context", "reference", "source_url", "source_kind"})
 
 #: 上游 knowledge-pack/policy.yaml 的 license.expression（ADR 0014）：
 #: 不要硬编码简化后的 "CC BY-NC-SA 4.0"——上游声明的是双许可表达式，且
@@ -33,7 +33,7 @@ EXTRA_SERIALIZED_KEYS = frozenset({"status", "tags", "section"})
 EXTERNAL_KNOWLEDGE_LICENSE = "CC-BY-NC-SA-4.0 OR LicenseRef-AIW-Commercial"
 
 #: 联邦结果允许的 source 标识（新增 provider 时在此登记）。
-KNOWN_SOURCES: tuple[str, ...] = ("android_internals",)
+KNOWN_SOURCES: tuple[str, ...] = ("android_internals", "web_documents")
 
 
 @dataclass(frozen=True)
