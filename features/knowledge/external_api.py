@@ -19,6 +19,8 @@ import logging
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
+import sqlite3
+from typing import Literal
 
 from features.auth import (
     require_agent_scope,
@@ -35,6 +37,9 @@ from .external import (
     federated_search,
     federated_status,
 )
+
+
+from .external.web_sources import WebKnowledgeProvider
 
 
 def _federated_provider(source_id: str):
@@ -166,3 +171,61 @@ def agent_android_internals_status(request: Request):
     require_agent_scope("knowledge.read")(request)
     rows = [s for s in federated_status() if s.get("source") == KNOWN_SOURCES[0]]
     return success_response(data={"sources": rows})
+
+
+class WebSourceRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=160)
+    url: str = Field(..., min_length=1, max_length=2048)
+    kind: Literal["cdd", "document"] = "document"
+    android_version: int | None = Field(None, ge=1, le=100)
+    license: str = Field(..., min_length=1, max_length=240)
+    enabled: bool = True
+
+
+@router.get("/web-sources")
+@handle_api_errors
+def list_web_sources(request: Request):
+    require_elevated_admin(request)
+    return success_response(data={"sources": WebKnowledgeProvider().list_sources()})
+
+
+@router.post("/web-sources")
+@handle_api_errors
+def create_web_source(request: Request, payload: WebSourceRequest):
+    require_elevated_admin(request)
+    try:
+        source_id = WebKnowledgeProvider().save(**payload.model_dump())
+    except (ValueError, sqlite3.IntegrityError):
+        return error_response("知识源配置无效、重复或访问方式不受支持", 422)
+    return success_response(data={"id": source_id})
+
+
+@router.put("/web-sources/{source_id}")
+@handle_api_errors
+def update_web_source(request: Request, source_id: str, payload: WebSourceRequest):
+    require_elevated_admin(request)
+    try:
+        WebKnowledgeProvider().save(source_id=source_id, **payload.model_dump())
+    except (ValueError, sqlite3.IntegrityError):
+        return error_response("知识源配置无效、重复或不存在", 422)
+    return success_response(data={"id": source_id})
+
+
+@router.delete("/web-sources/{source_id}")
+@handle_api_errors
+def delete_web_source(request: Request, source_id: str):
+    require_elevated_admin(request)
+    WebKnowledgeProvider().delete(source_id)
+    return success_response(data={"id": source_id})
+
+
+@router.post("/web-sources/{source_id}/sync")
+@handle_api_errors
+def sync_web_source(request: Request, source_id: str):
+    require_elevated_admin(request)
+    try:
+        data = WebKnowledgeProvider().sync(source_id)
+    except Exception as exc:
+        logger.warning("Web knowledge synchronization failed: %s", type(exc).__name__)
+        return error_response("知识源同步失败；请检查网址、访问权限和文档格式，已有索引未覆盖", 502)
+    return success_response(data=data)
