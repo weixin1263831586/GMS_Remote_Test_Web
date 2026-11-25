@@ -18,8 +18,10 @@ class RuntimeConfigPreservationTests(unittest.TestCase):
                     "redmine_auth": {"username": "chaoqun.huang@rock-chips.com"},
                 }
 
-            def save_runtime_config(self, data):
-                self.saved = data
+            def update_runtime_config(self, updates):
+                self.saved = self.get_runtime_config()
+                self.saved.update(updates)
+                self.updates = updates
                 return True
 
         fake = FakeConfigManager()
@@ -34,6 +36,7 @@ class RuntimeConfigPreservationTests(unittest.TestCase):
 
         body = json.loads(response.body.decode("utf-8"))
         self.assertTrue(body["success"])
+        self.assertEqual(fake.updates, {"client_hosts": {"172.16.14.67": "alice"}})
         self.assertEqual(fake.saved["client_hosts"], {"172.16.14.67": "alice"})
         self.assertEqual(fake.saved["gerrit_dashboard"]["ssh_host"], "10.10.10.29")
         self.assertEqual(fake.saved["redmine_auth"]["username"], "chaoqun.huang@rock-chips.com")
@@ -61,3 +64,24 @@ class RuntimeConfigPreservationTests(unittest.TestCase):
             self.assertEqual(saved["client_hosts"], {"192.0.2.1": "old", "192.0.2.2": "alice"})
             self.assertEqual(saved["client_ssh_credentials"][0]["username"], "new")
             self.assertEqual(saved["gerrit_dashboard"]["ssh_host"], "gerrit.example")
+
+    def test_remove_client_host_preserves_other_runtime_sections(self):
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+
+        from foundation.config import ConfigManager
+
+        with TemporaryDirectory() as tmp:
+            config = ConfigManager(project_root=Path(tmp))
+            original = {
+                "client_hosts": {"192.0.2.1": "old", "192.0.2.2": "alice"},
+                "client_ssh_credentials": [{"username": "alice", "encrypted_password": "saved"}],
+                "gerrit_dashboard": {"ssh_host": "gerrit.example"},
+            }
+            self.assertTrue(config.update_runtime_config(original))
+            self.assertTrue(config.remove_client_host("192.0.2.1"))
+            saved = config.get_runtime_config()
+            self.assertEqual(saved["client_hosts"], {"192.0.2.2": "alice"})
+            self.assertEqual(saved["client_ssh_credentials"], original["client_ssh_credentials"])
+            self.assertEqual(saved["gerrit_dashboard"], original["gerrit_dashboard"])
+            self.assertTrue(config.remove_client_host("192.0.2.1"))
