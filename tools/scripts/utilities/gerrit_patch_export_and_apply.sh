@@ -143,7 +143,7 @@ _fetch_and_format_patch() {
 export_patches() {
     local topic="$1"
     local output_path="$2"
-    if [[ ! "$GERRIT_USER" =~ ^[a-zA-Z0-9._-]+$ || ! "$GERRIT_HOST" =~ ^[a-zA-Z0-9.-]+$ || "$GERRIT_HOST" == -* || ! "$GERRIT_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$GERRIT_PORT < 1 || 10#$GERRIT_PORT > 65535 )); then
+    if [[ ! "$GERRIT_USER" =~ ^[a-zA-Z0-9._-]+$ || ! "$GERRIT_HOST" =~ ^[a-zA-Z0-9.-]+$ || "$GERRIT_HOST" == -* || ! "$GERRIT_PORT" =~ ^[0-9]{1,5}$ ]] || [ "$GERRIT_PORT" -lt 1 ] || [ "$GERRIT_PORT" -gt 65535 ]; then
         echo "Set GERRIT_USER, GERRIT_HOST and optionally GERRIT_PORT before export." >&2
         return 2
     fi
