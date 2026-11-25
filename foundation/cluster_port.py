@@ -9,13 +9,46 @@ single-host behavior.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol
+
+from starlette.requests import Request
 
 
 ClusterServiceProvider = Callable[[], Any]
-LateBoundCallable = Callable[..., Any]
 WorkerTokens = Callable[[], dict[str, str]]
+CancelJob = Callable[[str, Request], dict[str, Any]]
+AuthenticateWorker = Callable[[str, str | None], None]
+DeviceActionRequest = Callable[[Request, dict[str, Any]], Awaitable[Any]]
+AoaPlaybackControl = Callable[[str, str, str, str], Awaitable[dict[str, Any]]]
+FirmwareRecoveryCheck = Callable[[dict[str, Any] | None], None]
+
+
+class RunWorkerCommand(Protocol):
+    def __call__(
+        self, worker_id: str, command_type: str, payload: dict[str, Any], timeout: float = 10,
+    ) -> Awaitable[dict[str, Any]]: ...
+
+
+class RequireWorkerSession(Protocol):
+    def __call__(self, worker_id: str, session_id: str = "", generation: int = 0) -> None: ...
+
+
+class RequireClusterEnabled(Protocol):
+    def __call__(self, remote: bool = False) -> None: ...
+
+
+class PrepareFirmwareRecovery(Protocol):
+    def __call__(
+        self, request: Request, client_id: str, devices: list[str],
+        profile_id: str, boot_wait_seconds: int = 60,
+    ) -> dict[str, Any] | None: ...
+
+
+class RunFirmwareRecovery(Protocol):
+    def __call__(
+        self, prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> Awaitable[dict[str, Any]]: ...
 
 # Single source of truth for the Controller host's Worker ID. The literal
 # must appear only here (the default), in fixtures/examples/tests/docs, and
@@ -28,35 +61,35 @@ DEFAULT_LOCAL_WORKER_ID = "ats-worker-controller"
 _UNSET: Any = object()
 
 _cluster_service_provider: ClusterServiceProvider | None = None
-_cancel_job: LateBoundCallable | None = None
+_cancel_job: CancelJob | None = None
 _worker_tokens: WorkerTokens | None = None
-_run_worker_command: LateBoundCallable | None = None
-_require_worker_session: LateBoundCallable | None = None
-_require_cluster_enabled: LateBoundCallable | None = None
-_authenticate_worker: LateBoundCallable | None = None
-_device_action_request: LateBoundCallable | None = None
-_aoa_playback_control: LateBoundCallable | None = None
-_prepare_local_firmware_recovery: LateBoundCallable | None = None
-_run_local_firmware_recovery: LateBoundCallable | None = None
-_validate_local_firmware_recovery: LateBoundCallable | None = None
-_release_local_firmware_recovery: LateBoundCallable | None = None
+_run_worker_command: RunWorkerCommand | None = None
+_require_worker_session: RequireWorkerSession | None = None
+_require_cluster_enabled: RequireClusterEnabled | None = None
+_authenticate_worker: AuthenticateWorker | None = None
+_device_action_request: DeviceActionRequest | None = None
+_aoa_playback_control: AoaPlaybackControl | None = None
+_prepare_local_firmware_recovery: PrepareFirmwareRecovery | None = None
+_run_local_firmware_recovery: RunFirmwareRecovery | None = None
+_validate_local_firmware_recovery: FirmwareRecoveryCheck | None = None
+_release_local_firmware_recovery: FirmwareRecoveryCheck | None = None
 
 
 def configure_cluster_access(
     *,
     service_provider: ClusterServiceProvider | None = _UNSET,
-    cancel_job: LateBoundCallable | None = _UNSET,
+    cancel_job: CancelJob | None = _UNSET,
     worker_tokens: WorkerTokens | None = _UNSET,
-    run_worker_command: LateBoundCallable | None = _UNSET,
-    require_worker_session: LateBoundCallable | None = _UNSET,
-    require_cluster_enabled: LateBoundCallable | None = _UNSET,
-    authenticate_worker: LateBoundCallable | None = _UNSET,
-    device_action_request: LateBoundCallable | None = _UNSET,
-    aoa_playback_control: LateBoundCallable | None = _UNSET,
-    prepare_local_firmware_recovery: LateBoundCallable | None = _UNSET,
-    run_local_firmware_recovery: LateBoundCallable | None = _UNSET,
-    validate_local_firmware_recovery: LateBoundCallable | None = _UNSET,
-    release_local_firmware_recovery: LateBoundCallable | None = _UNSET,
+    run_worker_command: RunWorkerCommand | None = _UNSET,
+    require_worker_session: RequireWorkerSession | None = _UNSET,
+    require_cluster_enabled: RequireClusterEnabled | None = _UNSET,
+    authenticate_worker: AuthenticateWorker | None = _UNSET,
+    device_action_request: DeviceActionRequest | None = _UNSET,
+    aoa_playback_control: AoaPlaybackControl | None = _UNSET,
+    prepare_local_firmware_recovery: PrepareFirmwareRecovery | None = _UNSET,
+    run_local_firmware_recovery: RunFirmwareRecovery | None = _UNSET,
+    validate_local_firmware_recovery: FirmwareRecoveryCheck | None = _UNSET,
+    release_local_firmware_recovery: FirmwareRecoveryCheck | None = _UNSET,
 ) -> None:
     """Register or clear the cluster access callables.
 
@@ -98,14 +131,14 @@ def configure_cluster_access(
         _release_local_firmware_recovery = release_local_firmware_recovery
 
 
-def control_aoa_playback(*args: Any, **kwargs: Any) -> Any:
+def control_aoa_playback(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
     """Control an existing playback through the registered ownership boundary."""
     if _aoa_playback_control is None:
         raise RuntimeError("AOA playback control is not configured")
     return _aoa_playback_control(*args, **kwargs)
 
 
-def submit_device_action(request: Any, payload: dict) -> Any:
+def submit_device_action(request: Request, payload: dict[str, Any]) -> Awaitable[Any]:
     """Submit through the configured device ownership and execution boundary."""
     if _device_action_request is None:
         raise RuntimeError('cluster device actions are not configured')
@@ -140,7 +173,7 @@ def get_local_worker_id() -> str:
         return DEFAULT_LOCAL_WORKER_ID
 
 
-def cancel_durable_job(*args: Any, **kwargs: Any) -> Any:
+def cancel_durable_job(*args: Any, **kwargs: Any) -> dict[str, Any]:
     """Cancel a durable cluster job via the registered callable."""
     if _cancel_job is None:
         raise RuntimeError("cluster job cancellation is not configured")
@@ -154,56 +187,56 @@ def worker_tokens() -> dict[str, str]:
     return _worker_tokens()
 
 
-def run_worker_command(*args: Any, **kwargs: Any) -> Any:
+def run_worker_command(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
     """Execute a Worker command via the registered callable."""
     if _run_worker_command is None:
         raise RuntimeError("cluster worker commands are not configured")
     return _run_worker_command(*args, **kwargs)
 
 
-def require_worker_session(*args: Any, **kwargs: Any) -> Any:
+def require_worker_session(*args: Any, **kwargs: Any) -> None:
     """Validate a Worker session via the registered callable."""
     if _require_worker_session is None:
         raise RuntimeError("cluster worker sessions are not configured")
     return _require_worker_session(*args, **kwargs)
 
 
-def require_cluster_enabled(*args: Any, **kwargs: Any) -> Any:
+def require_cluster_enabled(*args: Any, **kwargs: Any) -> None:
     """Apply the cluster-mode gate via the registered callable."""
     if _require_cluster_enabled is None:
         raise RuntimeError("cluster mode gating is not configured")
     return _require_cluster_enabled(*args, **kwargs)
 
 
-def authenticate_worker(*args: Any, **kwargs: Any) -> Any:
+def authenticate_worker(*args: Any, **kwargs: Any) -> None:
     """Authenticate a Worker request via the registered callable."""
     if _authenticate_worker is None:
         raise RuntimeError("cluster worker authentication is not configured")
     return _authenticate_worker(*args, **kwargs)
 
 
-def prepare_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+def prepare_local_firmware_recovery(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
     """Prepare a burn+AOA continuation via the registered cluster boundary."""
     if _prepare_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _prepare_local_firmware_recovery(*args, **kwargs)
 
 
-def run_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+def run_local_firmware_recovery(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
     """Run a burn+AOA continuation via the registered cluster boundary."""
     if _run_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _run_local_firmware_recovery(*args, **kwargs)
 
 
-def validate_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+def validate_local_firmware_recovery(*args: Any, **kwargs: Any) -> None:
     """Validate staged recovery identity via the registered cluster boundary."""
     if _validate_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _validate_local_firmware_recovery(*args, **kwargs)
 
 
-def release_local_firmware_recovery(*args: Any, **kwargs: Any) -> Any:
+def release_local_firmware_recovery(*args: Any, **kwargs: Any) -> None:
     """Release a finished recovery via the registered cluster boundary."""
     if _release_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
