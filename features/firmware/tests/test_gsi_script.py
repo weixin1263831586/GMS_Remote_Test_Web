@@ -8,7 +8,7 @@ from features.firmware.gsi_burn import diagnose_gsi_burn_failure
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-GSI_SCRIPT = PROJECT_ROOT / "scripts" / "run_GSI_Burn.sh"
+GSI_SCRIPT = PROJECT_ROOT / "scripts/execution" / "run_GSI_Burn.sh"
 
 
 def _write_executable(path: Path, content: str) -> None:

@@ -29,7 +29,7 @@ WORKSPACES = {
     "gerrit": ("features/gerrit/ui/page.html", "/gerrit-dashboard"),
     "cluster": ("features/cluster/ui/page.html", "/cluster"),
     "devices": ("features/devices/ui/page.html", "/devices-console"),
-    "update-monitor": ("features/system/update_monitor/ui/page.html", "/gms-update-monitor"),
+    "update-monitor": ("features/gms/ui/page.html", "/gms-update-center"),
 }
 SOURCE_MODAL = re.compile(r'<div\b[^>]*\bid="([^"]+)"[^>]*\bclass="([^"]+)"', re.S)
 
@@ -50,7 +50,7 @@ SHELL_CASES = sorted(
 # Update Radar injects its shared dialog server-side; it is absent from
 # the static page.html source, but must still be checked as a standalone route.
 INJECTED_WORKSPACE_CASES = [
-    ("radar", "features/system/update_radar/ui/page.html",
+    ("radar", "features/gms/radar/ui/page.html",
      "/gms-update-radar", "radar-settings-modal"),
 ]
 WORKSPACE_CASES = sorted(
@@ -136,7 +136,7 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
                 "recipients": ["reader@example.invalid"], "notify": "changes",
                 "dashboard_url": self.base_url + "/gms-update-radar",
                 "tasks": ["packages", "exemptions", "bulletins", "requirements",
-                          "mainline", "artifacts"],
+                          "mainline", "artifacts", "security_patches"],
             }},
         }
         def read_fixture(data):
@@ -158,7 +158,7 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
         elif modal_id == "radar-settings-modal":
             page.evaluate("() => { void GmsUpdateRadarSettings.open(); }")
             expect(page.locator("#radar-time")).to_have_value("04:00")
-            expect(page.locator("#radar-task-count")).to_have_text("已选择 6 / 6 项")
+            expect(page.locator("#radar-task-count")).to_have_text("已选择 7 / 7 项")
             expect(page.locator("#radar-settings-save")).to_be_enabled()
         elif modal_id == "guide-image-modal":
             page.evaluate("""() => {

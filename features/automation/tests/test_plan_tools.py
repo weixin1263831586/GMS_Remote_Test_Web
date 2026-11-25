@@ -5,8 +5,7 @@ import pytest
 from features.auth import CurrentUser
 from features.automation.plan_models import TestPlanRequest as PlanRequest
 from features.automation.plan_store import PlanConflictError
-from features.automation.plan_tools import bulk_settings, export_plan, import_plan
-from features.automation.planning import AutomationPlanner
+from features.automation.planning import AutomationPlanner, bulk_settings, export_plan, import_plan
 from features.automation.repository import AutomationStore
 from features.automation.service import AutomationService
 

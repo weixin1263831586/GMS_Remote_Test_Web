@@ -130,9 +130,7 @@ def main() -> int:
     replace_once(
         MCP_SERVER, r'^SERVER_VERSION = "[^"]*"$', f'SERVER_VERSION = "{args.version}"', "SERVER_VERSION"
     )
-    # SDK __version__ participates in the same contract — it used to be
-    # stuck on a historical release number (0.13.0) because the bump flow
-    # never rewrote it.
+    # Keep the SDK version aligned with the package.
     replace_once(
         AGENT_DIR / "runtime" / "gms_agent" / "__init__.py",
         r'^__version__ = "[^"]*"$',

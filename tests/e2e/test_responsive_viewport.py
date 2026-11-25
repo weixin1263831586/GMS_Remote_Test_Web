@@ -23,8 +23,8 @@ Skipped automatically when Playwright is unavailable (same contract as
 """
 from __future__ import annotations
 
-from tests import test_runtime_ui_smoke as runtime_ui_smoke
 from tests.e2e.test_all_controls import ALL_PAGES
+from tests.runtime_ui import harness as runtime_ui_smoke
 
 
 # Minimum viewport matrix — phone portrait, tablet, laptop,

@@ -37,9 +37,9 @@ from foundation.redaction import redact_sensitive_data
 from foundation.responses import error_response
 from foundation.security import secrets_equal
 
+from .orchestrator import cleanup_state
 from .plan_api import router as plans_router
 from .profiles import mask_profile_secrets
-from .resource_cleanup import cleanup_state
 from .run_history import decorate_run_summary, run_configuration
 
 
@@ -152,9 +152,9 @@ def automation_ui_asset(ui_asset: str):
       等价拆分前单文件（共享助手前移 / 入口初始化后移，无逻辑改写）。
     """
     if ui_asset not in {
-        'page.js', 'state.js', 'workflow.js', 'devices.js',
+        'page.js', 'state.js', 'devices.js',
         'build-config.js', 'build-jobs.js', 'events.js', 'runs.js',
-        'run-launch.js', 'run-actions.js', 'runs-payload.js', 'trace.js',
+        'run-launch.js', 'trace.js',
         'patch-utils.js', 'view-restore.js', 'plans.js', 'resources.js',
         'ops-panel.js',
     }:

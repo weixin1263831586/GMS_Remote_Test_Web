@@ -12,13 +12,13 @@ class ConfigContractTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             project_root = Path(directory)
             configs = project_root / "configs"
-            configs.mkdir()
+            (configs / "local").mkdir(parents=True)
             (project_root / "foundation").mkdir()
             # 契约只针对随源码携带的 example 默认值，保证形状稳定：
             # 部署机上的真实 config.json 是本机数据，其形状可能随部署
             # 漂移（空数组/置空字段），不应参与契约比较。
             shutil.copy2(
-                config_manager.config_fallback_path, configs / "config.json"
+                config_manager.config_fallback_path, configs / "local/config.json"
             )
             isolated = ConfigManager(project_root=project_root)
 

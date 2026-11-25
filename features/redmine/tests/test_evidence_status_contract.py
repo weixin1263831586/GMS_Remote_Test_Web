@@ -9,8 +9,8 @@
 本文件把三条语义钉进契约测试，防止后续改动让三者漂移。
 """
 
-from features.redmine.evidence import snapshot_completeness
-from features.redmine.evidence_store import EvidenceStore
+from features.redmine.evidence.service import snapshot_completeness
+from features.redmine.evidence.store import EvidenceStore
 
 
 def _ready_snapshot(store: EvidenceStore, **fields):

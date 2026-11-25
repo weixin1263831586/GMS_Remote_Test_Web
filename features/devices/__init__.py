@@ -1,6 +1,6 @@
 from importlib import import_module
 
-from .aoa_service import profile_store
+from .aoa.service import profile_store
 from .locks import DeviceLockManager, device_lock_manager
 from .manager import device_manager
 from .models import (
@@ -26,7 +26,7 @@ from .support import (
     update_user_state_field,
 )
 from .ui_control_api import UiControlRequest, UiTapRequest
-from .usbip import parse_adb_device_states, usbip_manager
+from .usbip.manager import parse_adb_device_states, usbip_manager
 
 
 # 模块内部实现函数（_ 前缀）不再通过 package facade 暴露（ADR 0002：
@@ -34,46 +34,47 @@ from .usbip import parse_adb_device_states, usbip_manager
 # 它们的使用方只有 management_api 自身与其单测（经 from .management_api
 # import 直连）。跨 Feature 需要的能力走下方显式公开符号。
 _LAZY_API_EXPORTS = {
-    'AoaCertificationStore': '.aoa_certifications',
-    'authorize_semantic_options': '.aoa_semantic_service',
+    'AoaCertificationStore': '.aoa.certifications',
+    'authorize_semantic_options': '.aoa.mapping_service',
     'annotate_cluster_usbip_devices': '.integrations_api',
-    'connect_wifi': '.operations_api',
-    'create_pair_grant': '.adb_proxy_security',
+    'connect_wifi': '.operations.api',
+    'create_pair_grant': '.adb.proxy_security',
     'DeviceUtils': '.utils',
-    'calibration_store': '.aoa_calibrations',
-    'replay_mapping_options': '.aoa_mapping_service',
-    'ensure_usbip_auto_bind_policies': '.usbip_flash',
-    'incompatible_test_devices': '.transport_policy',
-    'test_transport_requirement': '.transport_policy',
+    'calibration_store': '.aoa.calibrations',
+    'replay_mapping_options': '.aoa.mapping_service',
+    'ensure_usbip_auto_bind_policies': '.usbip.flash',
+    'incompatible_test_devices': '.transport.registry',
+    'test_transport_requirement': '.transport.registry',
     'pause_usbip_reconnect': '.reconnect',
     'resume_usbip_reconnect': '.reconnect',
     'schedule_usbip_reconnect': '.reconnect',
     'usbip_source_host_for_device': '.reconnect',
-    'local_proxy_secret': '.adb_proxy_security',
-    'pair_code_for_worker': '.adb_proxy_security',
+    'local_proxy_secret': '.adb.proxy_security',
+    'pair_code_for_worker': '.adb.proxy_security',
     'reconcile_cluster_usbip_command': '.integrations_api',
     'reconcile_cluster_usbip_heartbeat': '.integrations_api',
-    'resolve_usbip_flash_routes': '.usbip_flash',
-    'open_usbip_source_ssh': '.usbip_flash',
-    'lookup_usbip_source_os': '.usbip_persistence',
-    'record_usbip_source_os': '.usbip_persistence',
+    'resolve_usbip_flash_routes': '.usbip.flash',
+    'open_usbip_source_ssh': '.usbip.flash',
+    'lookup_usbip_source_os': '.usbip.persistence',
+    'record_usbip_source_os': '.usbip.persistence',
+    'register_devices_port': '.inventory.host',
     'rockusb_loader_serials': '.rockusb',
     'rockusb_loader_vid_pids': '.rockusb',
     'probe_rockusb_sysfs': '.rockusb',
-    'query_usbipd_busid_instance_ids': '.usbip_identity',
-    'query_usbipd_device_states': '.usbip_identity',
-    'list_attached_usbip_ports': '.usbip_transaction',
-    'detach_attached_usbip_port': '.usbip_transaction',
-    'parse_usbip_port_entries': '.usbip_transaction',
-    'resolve_usbip_command': '.usbip_transaction',
-    'validate_pair_grant': '.adb_proxy_security',
-    'validate_owned_semantic': '.aoa_semantic_service',
+    'query_usbipd_busid_instance_ids': '.usbip.identity',
+    'query_usbipd_device_states': '.usbip.identity',
+    'list_attached_usbip_ports': '.usbip.transaction',
+    'detach_attached_usbip_port': '.usbip.transaction',
+    'parse_usbip_port_entries': '.usbip.transaction',
+    'resolve_usbip_command': '.usbip.transaction',
+    'validate_pair_grant': '.adb.proxy_security',
+    'validate_owned_semantic': '.aoa.mapping_service',
 }
 
 
 def get_adb_proxy_service():
     """Return the shared service without colliding with its submodule name."""
-    from .adb_proxy_service import adb_proxy_service
+    from .adb.proxy_service import adb_proxy_service
 
     return adb_proxy_service
 
@@ -115,6 +116,7 @@ __all__ = [
     "device_manager",
     "ensure_usbip_auto_bind_policies",
     "get_adb_proxy_service",
+    "get_aoa_router",
     "get_or_create_user_state",
     "get_usb_monitor",
     "incompatible_test_devices",
@@ -134,6 +136,7 @@ __all__ = [
     "reconcile_cluster_usbip_command",
     "reconcile_cluster_usbip_heartbeat",
     "record_usbip_source_os",
+    "register_devices_port",
     "release_device_locks",
     "replay_mapping_options",
     "resolve_usbip_command",
@@ -151,6 +154,13 @@ __all__ = [
 
 def list_aoa_profiles(request):
     """Owner-scoped AOA catalog for project tool discovery."""
-    from .aoa_api import list_profiles
+    from .aoa.api import list_profiles
 
     return list_profiles(request)
+
+
+def get_aoa_router():
+    """Expose the AOA router for application composition and integration tests."""
+    from .aoa.api import router
+
+    return router

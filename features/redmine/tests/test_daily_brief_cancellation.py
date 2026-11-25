@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 from features.redmine.tests.test_daily_brief_service import (
     SNAPSHOT,
     VALID,
@@ -26,7 +26,7 @@ class DailyBriefCancellationTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         owner_revalidation = patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(return_value={
                 "pending": True,
                 "assigned_to_name": "张三",

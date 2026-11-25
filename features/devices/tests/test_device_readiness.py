@@ -9,7 +9,7 @@ from unittest.mock import Mock
 import pytest
 from starlette.requests import Request
 
-from features.devices import api, bootloader_api, info_service
+from features.devices import api, bootloader_api, support
 from features.devices.manager import DeviceManager
 from features.devices.models import DeviceActionRequest
 from foundation.command_result import CommandResult
@@ -20,8 +20,8 @@ from foundation.error_model import ApiError
 def reader(monkeypatch):
     ssh_manager = Mock()
     manager = DeviceManager(ssh_manager=ssh_manager, config_manager=SimpleNamespace(load_config=lambda: {}))
-    monkeypatch.setattr(info_service, 'device_manager', manager)
-    monkeypatch.setattr(info_service, 'get_device_properties_optimized', lambda *_: {})
+    monkeypatch.setattr(support, 'device_manager', manager)
+    monkeypatch.setattr(support, 'get_device_properties_optimized', lambda *_: {})
     return manager, ssh_manager
 
 

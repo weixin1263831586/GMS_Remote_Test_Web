@@ -25,12 +25,10 @@
     align-items: center;
     margin-bottom: 8px;
 }
-
 .report-failure-list {
     max-height: 580px;
     overflow-y: auto;
 }
-
 .report-empty-success {
     display: grid;
     gap: 6px;
@@ -39,12 +37,9 @@
     border-radius: 7px;
     background: color-mix(in srgb, var(--success-color) 8%, transparent);
     color: var(--text-secondary);
-
 }
-
 .report-empty-success b {
     color: var(--success-color);
-
 }
 
 /* 上传区状态/进度条规则统一在 common-page.css，此处仅保留外框几何。 */
@@ -53,7 +48,6 @@
     padding: 0;
     margin-bottom: 10px;
 }
-
 #report-summary > div {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -63,31 +57,24 @@
     align-items: center;
     gap: 6px;
 }
-
 #report-summary .summary-label {
 
     color: var(--text-secondary);
     margin-bottom: 0;
 }
-
 #report-summary .summary-value {
-
 
     color: var(--primary-color);
 }
-
 #report-summary .summary-value.pass {
     color: var(--success-color);
 }
-
 #report-summary .summary-value.fail {
     color: var(--danger-color);
 }
-
 #report-summary .summary-value.rate {
     color: var(--info-color);
 }
-
 #report-failure-list > div {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -96,13 +83,11 @@
     padding: 8px;
     margin-bottom: 8px;
 }
-
 #report-failure-list .failure-name {
 
     color: var(--text-primary);
     margin-bottom: 4px;
 }
-
 #report-failure-list .failure-reason {
 
     color: var(--text-secondary);
@@ -113,7 +98,6 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 }
-
 .report-failure-card {
     display: grid;
     gap: 10px;
@@ -123,42 +107,33 @@
     border-radius: 6px;
     background: var(--darker-bg);
 }
-
 .report-failure-card-head {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 12px;
     align-items: start;
 }
-
 .report-failure-title {
     display: grid;
     gap: 6px;
     min-width: 0;
     color: var(--text-secondary);
-
 }
-
 .report-failure-title span {
     color: var(--text-primary);
-
 }
-
 .report-failure-title code {
     color: var(--primary-color);
-
 
     white-space: normal;
     word-break: break-word;
 }
-
 .report-failure-actions {
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 6px;
 }
-
 .report-failure-action {
     min-height: var(--ui-control-height-small);
     padding: 4px 9px;
@@ -167,33 +142,25 @@
     color: #fff;
     cursor: pointer;
 
-
     white-space: nowrap;
 }
-
 .report-failure-action.reply {
     background: var(--skill-accent);
 }
-
 .report-failure-action.test {
     background: var(--success-color);
 }
-
 .report-failure-action.diagnose {
     background: var(--primary-gradient);
 }
-
 .report-failure-reason-label {
     margin-bottom: 5px;
     color: var(--text-secondary);
-
 }
-
 @media (max-width: 760px) {
     .report-failure-card-head {
         grid-template-columns: 1fr;
     }
-
     .report-failure-actions {
         justify-content: flex-start;
     }
@@ -211,7 +178,6 @@
     margin-top: 8px;
     flex-shrink: 0; /* 防止被压缩 */
 }
-
 .log-progress-bar {
     flex: 1;
     height: 8px;
@@ -220,7 +186,6 @@
     overflow: hidden;
     position: relative;
 }
-
 .log-progress-fill {
     height: 100%;
     background: var(--primary-gradient);
@@ -228,15 +193,12 @@
     transition: width 0.3s ease;
     width: 0%;
 }
-
 .log-progress-text {
     min-width: 45px;
     text-align: right;
 
-
     color: var(--primary-light);
 }
-
 
 /* 检查路由连通性：冷灰底、紫色折角。宽度高度走 modal-s。 */
 #route-check-dialog .modal-content {
@@ -249,7 +211,6 @@
     overflow: visible;
     filter: none;
 }
-
 #route-check-dialog .modal-content::before {
     content: "";
     position: absolute;
@@ -266,14 +227,12 @@
     pointer-events: none;
     filter: drop-shadow(0 14px 28px rgba(0, 0, 0, 0.45));
 }
-
 #route-check-dialog .route-check-rule,
 #route-check-dialog .modal-body,
 #route-check-dialog .route-check-actions {
     position: relative;
     z-index: 1;
 }
-
 #route-check-dialog .route-check-corner {
     position: absolute;
     width: 36px;
@@ -287,19 +246,16 @@
     stroke-linejoin: miter;
     filter: drop-shadow(0 0 4px rgba(167, 139, 250, 0.95));
 }
-
 #route-check-dialog .route-check-corner.is-tl { top: 0; left: 0; }
 #route-check-dialog .route-check-corner.is-tr { top: 0; right: 0; }
 #route-check-dialog .route-check-corner.is-bl { bottom: 0; left: 0; }
 #route-check-dialog .route-check-corner.is-br { right: 0; bottom: 0; }
-
 #route-check-dialog .modal-header {
     background: transparent;
     border-bottom: 0;
     padding: 18px 20px 6px 22px;
     gap: 14px;
 }
-
 #route-check-dialog .modal-title {
     display: flex;
     align-items: center;
@@ -308,10 +264,8 @@
     flex: 1;
     color: #f7f4ff;
 
-
     letter-spacing: 0.4px;
 }
-
 #route-check-dialog .route-check-badge {
     display: inline-flex;
     align-items: center;
@@ -325,14 +279,12 @@
     background: rgba(139, 116, 232, 0.18);
     box-shadow: 0 0 12px rgba(139, 116, 232, 0.35);
 }
-
 #route-check-dialog .route-check-title-sep {
     width: 1px;
     height: 16px;
     flex: 0 0 auto;
     background: rgba(196, 181, 253, 0.8);
 }
-
 #route-check-dialog .route-check-slashes {
     width: 22px;
     height: 12px;
@@ -344,7 +296,6 @@
         transparent 4.5px 7px
     );
 }
-
 #route-check-dialog .modal-close {
     width: 30px;
     min-width: 30px;
@@ -353,15 +304,12 @@
     background: transparent;
     border: 1px solid rgba(196, 181, 253, 0.35);
     border-radius: 6px;
-
 }
-
 #route-check-dialog .modal-close:hover {
     color: #fff;
     background: rgba(139, 116, 232, 0.22);
     border-color: #c4b5fd;
 }
-
 #route-check-dialog .route-check-rule {
     display: block;
     width: calc(100% - 40px);
@@ -370,25 +318,20 @@
     flex-shrink: 0;
     color: #c4b5fd;
 }
-
 #route-check-dialog .modal-body {
     background: transparent;
     padding: 10px 28px 8px;
 }
-
 .route-check-form {
     overflow-y: auto;
     flex: 1;
 }
-
 #route-check-dialog .route-check-form .form-group {
     margin: 0 0 18px;
 }
-
 #route-check-dialog .route-check-form .form-group:has(+ .ping-result) {
     margin-bottom: 4px;
 }
-
 #route-check-dialog .route-check-form label {
     display: flex;
     align-items: center;
@@ -396,9 +339,7 @@
     margin-bottom: 8px;
     color: #f7f4ff;
 
-
 }
-
 #route-check-dialog .route-check-form label::before {
     content: "";
     width: 3px;
@@ -408,7 +349,6 @@
     background: #c4b5fd;
     box-shadow: 0 0 8px rgba(196, 181, 253, 0.8);
 }
-
 #route-check-dialog .route-check-field {
     display: flex;
     align-items: center;
@@ -419,12 +359,10 @@
     border-radius: 8px;
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-
 #route-check-dialog .route-check-field:focus-within {
     border-color: #e4dcff;
     box-shadow: 0 0 0 1px rgba(228, 220, 255, 0.35), 0 0 16px rgba(139, 116, 232, 0.4);
 }
-
 #route-check-dialog .route-check-field-icon {
     display: inline-flex;
     align-items: center;
@@ -434,7 +372,6 @@
     color: #c4b5fd;
     border-right: 1px solid rgba(196, 181, 253, 0.55);
 }
-
 #route-check-dialog .route-check-form input[type="text"] {
     flex: 1;
     width: auto;
@@ -444,26 +381,20 @@
     border: 0;
     border-radius: 0;
     color: #f7f4ff;
-
     box-shadow: none;
 }
-
 #route-check-dialog .route-check-form input[type="text"]:focus {
     outline: none;
     border-color: transparent;
 }
-
 #route-check-dialog .route-check-form input::placeholder {
     color: #9b93b8;
 }
-
 #route-check-dialog .route-check-form small {
     display: block;
     margin-top: 8px;
     color: #a399c4;
-
 }
-
 #route-check-dialog .route-check-actions {
     position: relative;
     display: flex;
@@ -474,7 +405,6 @@
     background: transparent;
     border-top: 1px solid rgba(183, 155, 255, 0.38);
 }
-
 #route-check-dialog .route-check-ticks {
     position: absolute;
     left: 22px;
@@ -484,7 +414,6 @@
     pointer-events: none;
     z-index: 2;
 }
-
 #route-check-dialog .route-check-actions .btn-xxs {
     min-width: 96px;
     min-height: 38px;
@@ -492,18 +421,15 @@
     gap: 6px;
     border-radius: 8px;
 
-
     letter-spacing: 0.2px;
     transform: none;
     box-shadow: none;
 }
-
 #route-check-dialog .route-check-actions .btn-xxs:not(.btn-primary) {
     color: #f4f1ff;
     background: transparent;
     border: 1px solid rgba(196, 181, 253, 0.85);
 }
-
 #route-check-dialog .route-check-actions .btn-xxs:not(.btn-primary):hover {
     color: #fff;
     background: rgba(139, 116, 232, 0.16);
@@ -511,7 +437,6 @@
     transform: none;
     box-shadow: none;
 }
-
 #route-check-dialog .route-check-actions .btn-primary {
     min-width: 138px;
     color: #fff;
@@ -519,118 +444,88 @@
     border: 1px solid #d8ccff;
     box-shadow: 0 0 16px rgba(124, 92, 246, 0.48);
 }
-
 #route-check-dialog .route-check-actions .btn-primary:hover:not(:disabled) {
     background: linear-gradient(180deg, #a894f6 0%, #7c5cf0 100%);
     transform: none;
     box-shadow: 0 0 20px rgba(167, 139, 250, 0.62);
 }
-
 #route-check-dialog .ping-result {
     min-height: 0;
 }
-
 #route-check-dialog .ping-result:empty {
     display: none;
 }
-
 #route-check-dialog .ping-result:not(:empty) {
     margin-top: 14px;
 }
-
 .btn-secondary {
     background: var(--light-bg);
     color: var(--text-secondary);
     border: 1px solid var(--border-color);
 }
-
 .btn-secondary:hover {
     background: var(--lighter-bg);
     border-color: var(--border-light);
 }
-
 .ping-result {
     min-height: 100px;
 }
-
 .ping-testing {
     padding: 16px;
     background: var(--light-bg);
     border-radius: 8px;
     text-align: center;
     color: var(--info-color);
-
 }
-
 .ping-success {
     padding: 16px;
     background: color-mix(in srgb, var(--success-color) 10%, transparent);
     border: 1px solid var(--success-color);
     border-radius: 8px;
 }
-
 .ping-success h4 {
     color: var(--success-color);
     margin-bottom: 12px;
-
 }
-
 .ping-success p {
     color: var(--text-secondary);
     margin-bottom: 8px;
-
 }
-
 .status-success {
     color: var(--success-color);
-
 }
-
 .ping-failure {
     padding: 16px;
     background: color-mix(in srgb, var(--danger-color) 10%, transparent);
     border: 1px solid var(--danger-color);
     border-radius: 8px;
 }
-
 .ping-failure h4 {
     color: var(--danger-color);
     margin-bottom: 12px;
-
 }
-
 .ping-failure p {
     color: var(--text-secondary);
     margin-bottom: 8px;
-
 }
-
 .status-error {
     color: var(--danger-color);
-
 }
-
 .ping-failure ul {
     margin: 12px 0;
     padding-left: 20px;
     color: var(--text-secondary);
 }
-
 .ping-failure li {
     margin-bottom: 4px;
-
 }
-
 .route-commands {
     margin-top: 16px;
 }
-
 .route-commands h5 {
     color: var(--text-primary);
     margin-bottom: 8px;
-
 }
-
 .route-commands pre {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -639,12 +534,10 @@
     margin-bottom: 12px;
     color: var(--text-secondary);
 
-
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
 }
-
 .route-warning {
     margin-top: 16px;
     padding: 16px;
@@ -652,13 +545,10 @@
     border: 2px solid var(--warning-color);
     border-radius: 8px;
 }
-
 .route-warning p {
     margin: 8px 0;
 
-
 }
-
 .route-check-terminal-actions {
     margin-top: 12px;
     padding: 6px;
@@ -667,14 +557,12 @@
     border-radius: 6px;
     text-align: center;
 }
-
 .btn-terminal {
     background: var(--primary-gradient);
     color: var(--text-primary);
     border: none;
     padding: 6px;
     border-radius: 6px;
-
 
     cursor: pointer;
     transition: all 0.2s ease;
@@ -732,14 +620,12 @@
     margin: 12px 0;
     color: var(--text-primary);
 
-
 }
 
 .terminal-opened code {
     background: var(--darker-bg);
     padding: 2px 6px;
     border-radius: 4px;
-
 
     color: var(--primary-color);
 }
@@ -859,7 +745,6 @@
     padding: 8px 16px;
     border-radius: 8px;
 
-
     cursor: pointer;
     transition: var(--transition-normal);
     border: 1px solid transparent;
@@ -899,7 +784,6 @@
 
 .category-header span:nth-child(2) {
 
-
     color: var(--text-primary);
 }
 
@@ -928,7 +812,6 @@
 }
 
 .tool-title {
-
 
     color: var(--text-primary);
     margin-bottom: 4px;
@@ -1053,7 +936,6 @@
     background: var(--border-light);
 }
 
-
 /* 768px 响应式布局。 */
 @media (max-width: 768px) {
     /* Page edge uses --ui-page-edge at every width; adapt controls only. */
@@ -1131,8 +1013,6 @@
         height: 20px;
     }
 
-
-
     .tools-grid {
         grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
         gap: 12px;
@@ -1141,10 +1021,6 @@
     .category-header {
         margin-bottom: 10px;
     }
-
-
-
-
 
     /* 拖拽样式 */
     .tool-card.dragging {
@@ -1258,7 +1134,6 @@
 .suite-browser-title {
     color: var(--text-primary);
 
-
 }
 .suite-file-name {
     flex: 0 1 auto;
@@ -1332,7 +1207,6 @@
 }
 .suite-search-result-name {
     color: var(--text-primary);
-
 
     white-space: nowrap;
     overflow: hidden;
@@ -1409,7 +1283,6 @@
 
 .dx-title-main {
 
-
     line-height: 1.45;
     word-break: break-word;
 }
@@ -1465,7 +1338,6 @@
 .dx-metric-value {
     color: var(--text-primary);
 
-
     line-height: 1.45;
     word-break: break-word;
 }
@@ -1499,7 +1371,6 @@
     min-width: 0;
     color: var(--text-primary);
 
-
     line-height: 1.6;
     overflow-x: auto;
     white-space: nowrap;
@@ -1524,7 +1395,6 @@
     border-radius: 6px;
     background: transparent;
     color: var(--text-secondary);
-
 
     cursor: pointer;
     transition: var(--transition-fast);
@@ -1586,13 +1456,11 @@
     background: var(--success-color);
     color: #fff;
 
-
     padding: 2px 10px;
     border-radius: 999px;
 }
 .dx-exempt-title {
     color: var(--text-primary);
-
 
 }
 .dx-exempt-list {
@@ -1628,7 +1496,6 @@
     padding: 0 6px;
 }
 .dx-exempt-case {
-
 
     color: var(--text-primary);
     word-break: break-all;
@@ -1727,7 +1594,6 @@
     background: var(--light-bg);
     color: var(--primary-light);
 
-
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1781,7 +1647,6 @@
     margin-bottom: 10px;
     color: var(--text-primary);
 
-
 }
 
 .dx-section-title span {
@@ -1810,7 +1675,6 @@
 .dx-root-cause span,
 .dx-observed-failure span {
     color: var(--warning-color);
-
 
 }
 
@@ -1847,7 +1711,6 @@
     border-radius: 6px;
     background: var(--light-bg);
 
-
     line-height: 1.55;
 }
 
@@ -1876,7 +1739,6 @@
     cursor: pointer;
     padding: 8px 10px;
     color: var(--text-secondary);
-
 
 }
 
@@ -1907,7 +1769,6 @@
 
 .dx-list-title {
     color: var(--text-primary);
-
 
     line-height: 1.45;
     word-break: break-word;
@@ -1982,7 +1843,6 @@
     background: color-mix(in srgb, var(--success-color) 18%, transparent);
     color: var(--success-color);
 
-
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -2033,7 +1893,6 @@
     align-items: center;
     justify-content: center;
 
-
     flex-shrink: 0;
 }
 
@@ -2059,16 +1918,45 @@
         white-space: nowrap;
     }
 }
+/* Shared semantic suite palette: list, selected suite and report type. */
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell) {
+    --suite-type-color: var(--text-secondary);
+    --suite-type-bg: color-mix(in srgb, var(--text-secondary) 12%, transparent);
+    color: var(--suite-type-color);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell)[data-type="cts"] {
+    --suite-type-color: var(--primary-light);
+    --suite-type-bg: color-mix(in srgb, var(--primary-color) 20%, transparent);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell)[data-type="apts"] {
+    --suite-type-color: #e6a5d4;
+    --suite-type-bg: rgba(200, 103, 169, .17);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell)[data-type="gts"] {
+    --suite-type-color: #7bdcc7;
+    --suite-type-bg: rgba(57,201,148,.15);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell):is([data-type="cts-v"], [data-type="vts"]) {
+    --suite-type-color: #89b7ff;
+    --suite-type-bg: rgba(106,166,255,.15);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell)[data-type="sts"] {
+    --suite-type-color: #e7c36c;
+    --suite-type-bg: rgba(231,184,84,.16);
+}
+:is(.suite-type-badge, .suite-header-type, .reports-type-cell)[data-type="xts"] {
+    --suite-type-color: #ec4899;
+    --suite-type-bg: color-mix(in srgb, #ec4899 16%, transparent);
+}
+.suite-type-badge, .suite-header-type {
+    background: var(--suite-type-bg);
+}
 .suite-type-badge {
     flex-shrink: 0;
     min-width: 42px;
     padding: 3px 6px;
     border-radius: 4px;
-    background: color-mix(in srgb, var(--primary-color) 16%, transparent);
-    color: var(--primary-color);
-
     text-align: center;
-
 }
 
 @media (max-width: 900px) {

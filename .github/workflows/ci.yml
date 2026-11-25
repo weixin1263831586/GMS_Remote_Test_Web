@@ -1,14 +1,6 @@
 name: CI
 
-# 门禁流程（并行 job 拆分：Agent Package gate 不再被无关 UI/单测失败连坐跳过）：
-#   secret-scan ─┐
-#   lint ────────┤
-#   dep-audit ───┤
-#   static-sast ─┤
-#   unit ────────┤
-#   security ────┼─→ release-ready（汇总）
-#   agent-pkg ───┤
-#   browser-e2e ─┘
+# Independent CI gates feed the release-ready aggregate.
 on:
   push:
     # main、audit/** 与 ui/** 推送共享完整门禁，不依赖临时分支专属工作流。
@@ -30,8 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # 双解释器审计：只审计 3.11 解析会掩盖 3.10
-      # 运行基线的真实风险；3.10 腿带显式豁免清单，清单外新告警仍失败。
+      # Audit both supported Python versions; only explicit 3.10 waivers apply.
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.10"]
@@ -40,15 +31,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: ${{ matrix.python-version }}
-      # pip-audit 扫描 requirements*.txt 的已知漏洞(OSV/PyPIADVISORY)。
-      # 精确 pin 的依赖使结果可复现;新漏洞进入门禁而不是潜伏到运行时。
-      # PYSEC-2026-2858(paramiko rsakey SHA-1)已随 paramiko 5.0.0 升级修复,
-      # 不再需要豁免;如新增豁免必须在注释中给出理由与退出条件。
-      # requirements.txt 按 python_version 分流 Pillow：3.11 解析出安全
-      # 修复版 13.0.0（本腿零豁免、零告警）；3.10 只能解析出 12.3.0
-      # （13.0.0 requires-python>=3.11，无可用修复版本），其清单内已知
-      # 告警按 .github/pip-audit-py310-waivers.txt 逐 ID 显式豁免——
-      # 显式接受风险而不是换解释器绕开审计；清单之外的新告警仍失败。
+      # Audit pinned dependencies; waivers require a reason and exit condition.
       - name: Audit runtime dependencies
         run: |
           python -m pip install --upgrade pip pip-audit
@@ -75,8 +58,7 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          # Gitleaks 需要 parent^..HEAD 的完整历史；fetch-depth: 1 会导致
-          # "fatal: ambiguous argument" 并连锁跳过后续步骤。
+          # Gitleaks requires complete commit history.
           fetch-depth: 0
 
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
@@ -85,7 +67,7 @@ jobs:
           cache: pip
 
       - name: Tracked-file secret scan
-        run: python scripts/check_source_secrets.py .
+        run: python scripts/security/check_source_secrets.py .
 
       - name: Gitleaks
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
@@ -109,11 +91,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          pip install ruff
       - name: Ruff lint
         run: ruff check .
+      # Formatter differences are advisory.
+      - name: Ruff format baseline report
+        if: always()
+        continue-on-error: true
+        run: ruff format --check .
       - name: Vulture dead-code scan
-        run: python -m vulture bootstrap features foundation worker_agent workflows tools/scripts --min-confidence 90
+        run: python -m vulture bootstrap features foundation worker tools/scripts --min-confidence 90
 
   # Semgrep 静态安全扫描（SAST 门禁）：
   # - ERROR 级发现直接阻断（shell 注入、taint 传播等高危模式）；审计过的
@@ -136,10 +122,11 @@ jobs:
         env:
           SEMGREP_RULES: p/bandit p/owasp-top-ten p/python
         run: |
-          python -m pip install --upgrade pip semgrep
+          python -m pip install --upgrade pip
+          python -m pip install semgrep==1.187.0
           mkdir -p artifacts
-          # 退出码不作为本步判定（存在 WARNING 时 semgrep 也返回 1），
-          # 门禁在下一步按 severity 精确判定。
+          # Without --error, findings do not change the scanner exit status.
+          # Strict mode rejects scan failures; the next step gates findings by severity.
           semgrep scan --config p/bandit --config p/owasp-top-ten \
               --config p/python . \
               --exclude-rule gitlab.bandit.B404 \
@@ -147,14 +134,27 @@ jobs:
               --exclude-rule python.lang.security.use-defused-xml.use-defused-xml \
               --exclude-rule gitlab.bandit.B101 \
               --json --output artifacts/semgrep.json \
-              --metrics=off || true
+              --metrics=off --strict
       - name: Gate on ERROR-severity findings
         run: |
           python - <<'PY'
           import json, pathlib
           data = json.loads(pathlib.Path("artifacts/semgrep.json").read_text())
-          errors = [f for f in data.get("results", [])
-                    if f["extra"]["severity"] == "ERROR"]
+          if data["errors"]:
+              for issue in data["errors"]:
+                  print(f"::error::Semgrep scan error: {issue}")
+              raise SystemExit(1)
+          scanned = set(data["paths"]["scanned"])
+          required = {
+              "plugins/codesearch/scripts/codesearch.py",
+              "plugins/codesearch/scripts/mcp_server.py",
+              "tools/scripts/agent/release.py",
+          }
+          if missing := required - scanned:
+              print(f"::error::Semgrep required targets not scanned: {sorted(missing)}")
+              raise SystemExit(1)
+          errors = [f for f in data["results"]
+                    if f["extra"]["severity"] in {"ERROR", "HIGH", "CRITICAL"}]
           for f in errors:
               loc = f"{f['path']}:{f['start']['line']}"
               print(f"::error file={f['path']},line={f['start']['line']}"
@@ -172,10 +172,7 @@ jobs:
           if-no-files-found: error
 
 
-  # 历史上这里是一个 `pytest tests features worker_agent/tests -q` 大 job：
-  # 某个域卡住会把整组测试 cancel 掉，已经出现的 failure 连 failure
-  # summary 都来不及打印。按域拆分后每组独立判定，失败时上传 JUnit 与
-  # durations 定位。
+  # Each unit-test domain reports its own result and JUnit evidence.
   unit-foundation:
     name: unit-foundation
     runs-on: ubuntu-latest
@@ -222,10 +219,10 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-      - name: Auth / system / users feature tests
+      - name: Auth / system / users / GMS / SDK / ops feature tests
         run: |
           mkdir -p artifacts
-          pytest features/auth features/system features/users \
+          pytest features/auth features/system features/users features/gms features/sdk features/ops \
             -q --junitxml=artifacts/unit-auth-system.xml --durations=30
       - name: Upload JUnit report
         if: always()
@@ -252,7 +249,7 @@ jobs:
       - name: Devices / firmware / cluster feature tests
         run: |
           mkdir -p artifacts
-          pytest features/devices features/firmware features/cluster \
+          pytest features/devices features/firmware features/apk features/cluster \
             -q --junitxml=artifacts/unit-devices-firmware.xml --durations=30
       - name: Upload JUnit report
         if: always()
@@ -291,9 +288,7 @@ jobs:
 
   unit-feature-assistant-reports:
     name: unit-assistant-reports-rest
-    # 固定 22.04：tools/tesseract 内置引擎按 libtiff.so.5/libgif.so.7 链接，
-    # ubuntu-latest(24.04) 只有 libtiff6，OCR 真机加载测试全部失败。迁移
-    # 24.04 前必须在目标系统重建内置引擎（ldd 全量核查），不要逐库打补丁。
+    # Bundled OCR requires libtiff.so.5 and libgif.so.7 on Ubuntu 22.04.
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -308,15 +303,13 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Install system libraries for the bundled OCR engine
         run: |
-          # tools/tesseract 内置二进制动态链接 libgif.so.7 / libtiff.so.5
-          # （镜像默认不带）；缺失时 tesseract_finder 真机加载测试与 OCR
-          # 单测全部以 "error while loading shared libraries" 失败。
+          # Install the bundled OCR engine's shared libraries.
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgif7 libtiff5
-      - name: Assistant / reports / redmine / gerrit / knowledge / email tests
+      - name: Assistant / reports / redmine / kkagent / gerrit / knowledge / email tests
         run: |
           mkdir -p artifacts
-          pytest features/assistant features/reports features/redmine \
+          pytest features/assistant features/reports features/redmine features/kkagent \
                  features/gerrit features/knowledge features/email \
             -q --junitxml=artifacts/unit-assistant-reports.xml --durations=30
       - name: Upload JUnit report
@@ -327,20 +320,13 @@ jobs:
           path: artifacts/
           if-no-files-found: ignore
 
-  # 知识召回质量专用 job（评审 P1）：普通 unit job 不部署 gitignored 的
-  # tools/android-internals-wiki，Golden Query 语料级测试只会静默 skip——
-  # "看起来在跑 knowledge tests，实际召回质量零验证"。这里显式 clone
-  # pinned revision（pin 变更必须走评审提交，fail-closed）→ 全量重建
-  # 临时索引 → 重放 golden corpus（recall@5 + 负例零召回 + 防漂移）。
-  # 上游 revision 升级流程：改 GMS_WIKI_PINNED_REVISION → 本 job 红转绿
-  # 即召回质量对齐；若 recall 断言失败说明上游语料变化，需要评审判断。
+  # Rebuild the pinned knowledge corpus and gate golden-query recall.
   knowledge-quality:
     name: knowledge-quality-golden-corpus
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      # 本地已验证的语料 revision（golden corpus 通过）；升级 pin 时先在
-      # 本地重放 golden query，确认 recall 断言仍成立再改这里。
+      # Validate golden-query recall before changing the corpus revision.
       GMS_WIKI_PINNED_REVISION: "64a3963aedee5a5961ef25963520b991f14b51a1"
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -358,8 +344,7 @@ jobs:
           bash tools/scripts/testing/prepare_knowledge_quality_corpus.sh
       - name: Golden query corpus recall gate
         run: |
-          # 索引路径由上一步经 GITHUB_OUTPUT 显式传递（step 间环境变量
-          # 不存活；评审 P0：脚本作用域退化导致 idx 缺根目录）。
+          # Read the index path from the preceding step output.
           idx="${{ steps.knowledge.outputs.index }}"
           test -n "${idx}" || { echo "::error::prepare step did not emit index output"; exit 1; }
           test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
@@ -371,9 +356,7 @@ jobs:
           python tools/scripts/testing/eval_diagnosis_quality.py --split development --replay tests/quality/diagnosis_replay_fixtures.jsonl --json
 
   diagnosis-holdout:
-    # Holdout 语料是 release gate，不只是 nightly 监控：release-ready 显式
-    # 依赖本 job，防止 development 全绿但 nightly holdout 未跑/失败时
-    # 仍可发版（外审 P1：holdout 必须真正阻断 release）。
+    # Holdout replay must pass for release readiness.
     name: diagnosis-holdout-replay
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -408,7 +391,7 @@ jobs:
       - name: Worker agent tests
         run: |
           mkdir -p artifacts
-          pytest worker_agent/tests \
+          pytest worker/tests \
             -q --junitxml=artifacts/worker-agent.xml --durations=30
       - name: Soak tests (self-skipping without real devices)
         run: pytest tests/soak -q
@@ -434,6 +417,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+      - name: Audit tracked repository inventory
+        run: python tools/scripts/maintenance/audit_repository_inventory.py --output artifacts/repository-inventory --strict
+      - name: Upload repository inventory
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: repository-inventory
+          path: artifacts/repository-inventory/
+          if-no-files-found: error
       - name: Regenerate all frozen contract snapshots and reject drift
         run: |
           python -m tests.contract.generate_snapshots
@@ -450,6 +442,9 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.10"
@@ -485,19 +480,11 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-dev.txt
       - name: Agent plugin gate
-        # plugins/gms-remote-test is a generated release payload synced from
-        # agent/gms-remote-test (single source of truth) with a
-        # six-way version contract (package.yaml / three manifests / CLI /
-        # MCP). The git diff covers the WHOLE plugin directory, so a stale
-        # MCP or skill copy can no longer sneak into main.
-        # 生成树的测试也必须运行——其 scripts/ 布局、
-        # launcher 可执行位与自包含性只有在这套测试里才被覆盖。两个测试树
-        # 的文件同名，必须分开两次 pytest 调用收集。
+        # Verify generated package parity and run source and generated tests separately.
         run: |
-          python tools/scripts/agent/sync_package.py .
-          git diff --exit-code -- plugins/gms-remote-test/
-          python -m pytest agent/gms-remote-test/tests -q
-          python -m pytest plugins/gms-remote-test/tests -q
+          make agent-sync-check agent-test PY=python
+      - name: Standalone CodeSearch plugin tests
+        run: make codesearch-check PY=python
       - name: Agent package lifecycle + registry contract
         # install/update/rollback/bootstrap lifecycle, single-root ZIP
         # contract between the registry and the release builder.
@@ -511,14 +498,11 @@ jobs:
     name: browser-e2e (${{ matrix.shard }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-    # A single 420+ case process previously stalled after 31% progress and
-    # hit the 30-minute job deadline without a useful failure trace. Run
-    # disjoint file groups in separate processes, concurrently, without
-    # reducing coverage or relaxing the release-ready aggregate gate.
+    # Run disjoint browser shards in parallel with complete module coverage.
     strategy:
       fail-fast: false
       matrix:
-        shard: [early, dashboards, late]
+        shard: [early, dashboards, late, daily-brief-review]
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -544,8 +528,9 @@ jobs:
           root = Path("tests/runtime_ui")
           groups = [
               list(root.glob("test_[a-c]*.py")),
-              list(root.glob("test_[d-m]*.py")),
+              [path for path in root.glob("test_[d-m]*.py") if path.name != "test_daily_brief_review.py"],
               list(root.glob("test_[n-z]*.py")),
+              [root / "test_daily_brief_review.py"],
           ]
           all_tests = list(root.glob("test_*.py"))
           selected = [path for group in groups for path in group]
@@ -567,9 +552,19 @@ jobs:
                 -o faulthandler_timeout=180 --durations=25 \
                 --junitxml=artifacts/browser-early.xml ;;
             dashboards)
-              pytest tests/runtime_ui/test_[d-m]*.py -vv \
+              files=()
+              for file in tests/runtime_ui/test_[d-m]*.py; do
+                if [[ "$file" != tests/runtime_ui/test_daily_brief_review.py ]]; then
+                  files+=("$file")
+                fi
+              done
+              pytest "${files[@]}" -vv \
                 -o faulthandler_timeout=180 --durations=25 \
                 --junitxml=artifacts/browser-dashboards.xml ;;
+            daily-brief-review)
+              pytest tests/runtime_ui/test_daily_brief_review.py -vv \
+                -o faulthandler_timeout=180 --durations=25 \
+                --junitxml=artifacts/browser-daily-brief-review.xml ;;
             late)
               pytest tests/runtime_ui/test_[n-z]*.py -vv \
                 -o faulthandler_timeout=180 --durations=25 \
@@ -606,14 +601,9 @@ jobs:
           RESULTS: ${{ toJSON(needs.*.result) }}
         run: |
           echo "Gate results: ${RESULTS}"
-          # 旧的 `grep -Ev '"(success|skipped)"'` 对单行
-          # JSON 无效——只要整行含 "success" 就会被整体过滤，掩盖真实失败
-          # （["success","failure"] 被判通过）。改为逐元素精确判定。
+          # Evaluate each gate result independently.
           fail=0
-          # "every gate green" means success — a skipped
-          # gate (e.g. its `if:` skipped the job after an earlier failure)
-          # used to count as green and masked the failure. Only `success`
-          # is acceptable; anything else (including skipped/cancelled) fails.
+          # Only success satisfies the release gate.
           for result in $(echo "${RESULTS}" | jq -r '.[]'); do
             if [ "${result}" != "success" ]; then
               echo "::error::Gate result '${result}' is not acceptable (only success counts as green)."

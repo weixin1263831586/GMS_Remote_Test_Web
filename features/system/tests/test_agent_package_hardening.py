@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GMS_AGENT = REPO_ROOT / "agent" / "gms-remote-test" / "runtime" / "gms-agent"
-REGISTRY = REPO_ROOT / "features" / "system" / "agent_package_registry.py"
+REGISTRY = REPO_ROOT / "features" / "system" / "agent_package" / "registry.py"
 
 
 def load_pm():

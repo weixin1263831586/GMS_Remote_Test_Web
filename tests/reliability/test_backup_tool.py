@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "gms_backup.py"
+SCRIPT = Path(__file__).resolve().parents[2] / "scripts/backup" / "gms_backup.py"
 
 
 class BackupToolTests(unittest.TestCase):

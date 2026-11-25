@@ -2,12 +2,12 @@ import unittest
 from itertools import count
 from unittest.mock import patch
 
-from features.system.terminal_service import LocalPtyChannel, create_local_terminal_channel
+from features.system.host.terminal.service import LocalPtyChannel, create_local_terminal_channel
 
 
 class LocalPtyChannelTests(unittest.TestCase):
     def test_local_terminal_uses_same_term_type_as_xterm_client(self):
-        with patch("features.system.terminal_service.LocalPtyChannel") as channel_class:
+        with patch("features.system.host.terminal.service.LocalPtyChannel") as channel_class:
             create_local_terminal_channel(["/bin/sh"])
 
         env = channel_class.call_args.kwargs["env"]
@@ -26,10 +26,10 @@ class LocalPtyChannelTests(unittest.TestCase):
             return wait_results.pop(0)
 
         with (
-            patch("features.system.terminal_service.os.close"),
-            patch("features.system.terminal_service.os.kill") as kill,
-            patch("features.system.terminal_service.os.waitpid", side_effect=fake_waitpid) as waitpid,
-            patch("features.system.terminal_service.time.sleep"),
+            patch("features.system.host.terminal.service.os.close"),
+            patch("features.system.host.terminal.service.os.kill") as kill,
+            patch("features.system.host.terminal.service.os.waitpid", side_effect=fake_waitpid) as waitpid,
+            patch("features.system.host.terminal.service.time.sleep"),
         ):
             channel.close()
 
@@ -52,11 +52,11 @@ class LocalPtyChannelTests(unittest.TestCase):
             return wait_results.pop(0)
 
         with (
-            patch("features.system.terminal_service.os.close"),
-            patch("features.system.terminal_service.os.kill"),
-            patch("features.system.terminal_service.os.waitpid", side_effect=fake_waitpid) as waitpid,
-            patch("features.system.terminal_service.time.monotonic", side_effect=monotonic_results),
-            patch("features.system.terminal_service.time.sleep"),
+            patch("features.system.host.terminal.service.os.close"),
+            patch("features.system.host.terminal.service.os.kill"),
+            patch("features.system.host.terminal.service.os.waitpid", side_effect=fake_waitpid) as waitpid,
+            patch("features.system.host.terminal.service.time.monotonic", side_effect=monotonic_results),
+            patch("features.system.host.terminal.service.time.sleep"),
         ):
             channel.close()
 

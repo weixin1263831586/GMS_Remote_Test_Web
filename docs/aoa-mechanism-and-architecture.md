@@ -237,7 +237,7 @@ DisplayManager 核对，仍须识别唯一有效的主显示器，不使用 scrc
 
 “触摸标定”会通过 AOA 发送探测点击，再结合 ADB 输入信息计算映射，因此会
 真实点击设备并切换 USB 模式。由操作者明确触发，并先打开专用安全标定应用。
-录制机需安装 [AOA Calibration](../worker_agent/calibration_app/README.md)。
+录制机需安装 [AOA Calibration](../worker/calibration_app/README.md)。
 应用缺失/启动失败时不发送探针，不再在 Settings 页面降级点击。
 
 多点仿射标定（ADR 0026）：五个探针点（四角 25%/75% 内缩 + 中心）实测
@@ -495,9 +495,9 @@ Loader/Fastboot 不视为 Android 已就绪。无 ADB 时无法直接判断系�
 
 实现入口：[弹框](../web/shell/dialogs/firmware.html)、
 [烧写前端](../web/static/js/pages/firmware-burn.js)、
-[本机恢复服务](../features/firmware/aoa_recovery.py)、
+[本机恢复服务](../features/firmware/local_flash.py)、
 [快照与租约续接](../features/cluster/firmware_recovery.py)、
-[Worker 恢复](../worker_agent/firmware_recovery.py)。
+[Worker 恢复](../worker/firmware_recovery.py)。
 
 ### 9.2 自动化测试运行
 
@@ -551,15 +551,15 @@ flowchart LR
 | 页面与布局 | [devices.html](../web/shell/pages/devices.html)、[aoa-workbench.css](../web/static/css/aoa-workbench.css) |
 | 录制、命令编辑、调试和过程展示 | [shell-aoa.js](../web/static/js/shell/shell-aoa.js) |
 | 浏览器视频解码与截图回退 | [aoa-live-screen.js](../web/static/js/shell/aoa-live-screen.js) |
-| AOA API、Profile 存储 | [aoa_api.py](../features/devices/aoa_api.py)、[aoa_service.py](../features/devices/aoa_service.py) |
+| AOA API、Profile 存储 | [aoa_api.py](../features/devices/aoa/api.py)、[aoa_service.py](../features/devices/aoa/service.py) |
 | 纯显示 scrcpy 会话 | [scrcpy_stream.py](../features/devices/scrcpy_stream.py) |
 | 命令语法、预算和 HID 报文 | [aoa_profile.py](../foundation/aoa_profile.py) |
-| 设备动作、持久回执和控制 | [device_actions_api.py](../features/cluster/device_actions_api.py)、[device_action_operations.py](../features/cluster/device_action_operations.py)、[aoa_playback.py](../features/cluster/aoa_playback.py) |
-| Worker 设备动作入口 | [device_actions.py](../worker_agent/device_actions.py)、[app.py](../worker_agent/app.py) |
-| USB 执行、录制输入和恢复 | [aoa_actions.py](../worker_agent/aoa_actions.py) |
-| 命令边界的 USB 会话重建与 HID 注册 | [aoa_session.py](../worker_agent/aoa_session.py) |
-| 物理身份、标定、暂停控制 | [aoa_usb.py](../worker_agent/aoa_usb.py)、[aoa_calibration.py](../worker_agent/aoa_calibration.py)、[aoa_control.py](../worker_agent/aoa_control.py) |
-| 自动化快照与恢复状态机 | [aoa_snapshot.py](../features/automation/aoa_snapshot.py)、[recovery_executor.py](../features/automation/recovery_executor.py)、[orchestrator.py](../features/automation/orchestrator.py) |
+| 设备动作、持久回执和控制 | [api.py](../features/cluster/device_operations/api.py)、[execution.py](../features/cluster/device_operations/execution.py)、[aoa_playback.py](../features/cluster/device_operations/aoa_playback.py) |
+| Worker 设备动作入口 | [device_actions.py](../worker/device_actions.py)、[app.py](../worker/app.py) |
+| USB 执行、录制输入和恢复 | [aoa_actions.py](../worker/aoa_actions.py) |
+| 命令边界的 USB 会话重建与 HID 注册 | [aoa_session.py](../worker/aoa_session.py) |
+| 物理身份、标定、暂停控制 | [aoa_usb.py](../worker/aoa_usb.py)、[aoa_calibration.py](../worker/aoa_calibration.py)、[aoa_control.py](../worker/aoa_control.py) |
+| 自动化快照与恢复状态机 | [recovery_executor.py](../features/automation/recovery_executor.py)、[orchestrator.py](../features/automation/orchestrator.py) |
 
 ## 11. 部署条件与已知边界
 
@@ -651,8 +651,8 @@ Controller 与 Worker 需要匹配更新，刷新网页不能给旧执行器补�
 - [AOA Profile/API 测试](../features/devices/tests/test_aoa_profiles.py)
 - [Cluster AOA 操作测试](../features/cluster/tests/test_aoa_operations.py)、[回放控制测试](../features/cluster/tests/test_aoa_playback.py)
 - [自动恢复测试](../features/automation/tests/test_aoa_recovery.py)
-- 手动烧写接续：[烧写 API](../features/firmware/tests/test_aoa_recovery.py)、[快照与租约](../features/cluster/tests/test_firmware_recovery.py)、[Worker](../worker_agent/tests/test_firmware_recovery.py)、[弹框与上传路径](../tests/runtime_ui/test_firmware_aoa.py)
-- [Worker 执行测试](../worker_agent/tests/test_aoa_actions.py)、[USB 身份测试](../worker_agent/tests/test_aoa_usb.py)、[控制测试](../worker_agent/tests/test_aoa_control.py)
+- 手动烧写接续：[烧写 API](../features/firmware/tests/test_aoa_recovery.py)、[快照与租约](../features/cluster/tests/test_firmware_recovery.py)、[Worker](../worker/tests/test_firmware_recovery.py)、[弹框与上传路径](../tests/runtime_ui/test_firmware_aoa.py)
+- [Worker 执行测试](../worker/tests/test_aoa_actions.py)、[USB 身份测试](../worker/tests/test_aoa_usb.py)、[控制测试](../worker/tests/test_aoa_control.py)
 - [浏览器工作台测试](../tests/runtime_ui/test_aoa_workbench.py)
 
 USB 桩和模拟接口回归不能代替真机验收。具体板型至少需要验证：ADB 关闭后的输入、

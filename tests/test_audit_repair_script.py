@@ -12,7 +12,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts_local" / "repair_audit_chain.py"
+SCRIPT = ROOT / "tools/scripts/maintenance/repair_audit_chain.py"
 
 
 def _sign(key: bytes, record: dict) -> dict:

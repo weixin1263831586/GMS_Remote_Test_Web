@@ -2,7 +2,7 @@
 
 import pytest
 
-from features.redmine import evidence_store
+from features.redmine.evidence import store as evidence_store
 
 
 @pytest.fixture

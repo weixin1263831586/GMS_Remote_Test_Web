@@ -28,7 +28,6 @@ _ASSET_TYPES = {
     **{name: "application/javascript" for name in PAGE_SCRIPTS},
     "daily-brief-session.css": "text/css",
     "case-library.css": "text/css",
-    "rework-chrome.css": "text/css",
 }
 
 

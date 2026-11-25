@@ -1,4 +1,4 @@
-# 配置、密钥与部署迁移
+# 配置与密钥
 
 本文描述当前配置路径与加载行为。配置文件修改后，环境变量需重启消费它们的进程才生效。
 源码依据为 `foundation/config_paths.py`、`foundation/config.py`、
@@ -31,7 +31,7 @@
 
 运行环境优先级为：**进程已有环境 > secrets/environment.json > local/environment.json**。
 `${PROJECT_ROOT}` 按部署树根目录展开；静态配置支持 `${ENV_NAME:默认值}`。
-环境加载在应用模块导入前完成。环境文件模板默认声明 production，开发时不要原样启用。
+环境加载在应用模块导入前完成。已存在的环境配置若无法读取、JSON 损坏、不是对象，或待加载的变量名/值不合法，启动失败，不回退到其他部署树。环境文件模板默认声明 production，开发时不要原样启用。
 
 静态配置先读 `configs/local/config.json`，缺失时回退示例；运行时覆盖由
 `ConfigManager` 和 `RuntimeConfigStore` 分类、合并及加锁保存，静态 `ai_models`
@@ -90,48 +90,9 @@ cp -n configs/examples/automation_profiles.example.json configs/local/automation
 
 当前程序直接读取规范路径，不要求创建 `configs/certs` 或 `configs/config.json` 软链接。
 
-## 旧布局兼容与迁移
+## 当前配置布局
 
-当前代码保留以下“规范路径缺失才读取旧位置”的兼容行为；没有按版本自动停用，
-`config_paths._prefer_existing` 也没有为每次命中输出告警：
-
-| 内容 | 兼容旧位置 |
-| --- | --- |
-| 静态配置、集群、构建服务器、自动化方案 | `configs/` 根下的同名 JSON |
-| 非敏感进程环境 | `configs/runtime.json` |
-| Worker Token | `configs/worker_tokens.json` |
-| 证书 | `configs/certs/` |
-| 运行时覆盖 | `configs/config_runtime.json`，规范位置为 data 根下 `settings/preferences.json` |
-| 按用户集成配置 | data 根下 `<feature>/by_user/<owner>/config_runtime.json` |
-
-迁移工具在 Controller 和本机 Worker 停止后运行；预览与应用：
-
-```bash
-python scripts/migrate_config_layout.py
-python scripts/migrate_config_layout.py --apply
-```
-
-使用标准 systemd 服务的本机，可在操作者终端执行：
-
-```bash
-sudo bash scripts/migrate_running_config.sh
-```
-
-维护脚本检查未完成任务、停止服务、以服务用户迁移，结束后恢复原来运行的服务。
-迁移会拒绝覆盖已有目标、备份原文件、校验 JSON 和收紧权限；证书移入规范目录，
-不创建兼容软链接。`restart_services.sh` 与维护脚本会备份并修正已安装 unit 的旧证书参数。
-工具当前要求被迁移部署的数据根为项目内 `data/`；它不是跨项目历史数据复制工具。
-
-静态配置与环境中凭据不同时，迁移保留各自值及消费关系，静态引用使用
-`_STATIC_CONFIG` 后缀变量；迁移不等于轮换凭据。旧全局 Redmine 用户映射只归档，
-确认归属后才能导入对应账号。回退前停止服务：
-
-```bash
-python scripts/migrate_config_layout.py --apply --rollback /absolute/path/to/data/config-migration-backups/layout-v2-...
-```
-
-回退恢复原文件，并私密备份新布局中的后续修改。兼容层退出需另行实施和验收，
-不要把未实现的版本计划写成当前行为。
+应用只读取规范配置路径，不自动读取、导入或迁移旧布局。部署前应确认配置、凭据、证书及账号身份已经位于当前规范位置。重新启动服务不会自动转换旧配置或删除旧文件。
 
 ## 外部服务与结果下载
 

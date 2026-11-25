@@ -3,7 +3,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.redmine.daily_brief_config import (
+from features.redmine.daily_brief.config import (
     analyzer_env_extra,
     build_brief_analyzer,
     list_daily_brief_agent_profiles,

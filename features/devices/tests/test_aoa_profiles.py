@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from features.devices import aoa_service, deployment_service
-from features.devices.aoa_api import router as aoa_router
+from features.devices.aoa import service as aoa_service
+from features.devices.aoa.api import router as aoa_router
+from features.devices.deployment import service as deployment_service
+from foundation.aoa_profile import commands_digest
 from foundation.error_model import register_api_error_handler
 
 
@@ -40,13 +44,13 @@ def _auth(client):
 def test_profile_crud_roundtrip(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
     )
     monkeypatch.setattr(
-        "features.devices.aoa_api.principal_owner_id",
+        "features.devices.aoa.api.principal_owner_id",
         lambda request: "owner-1",
     )
     created = client.post("/api/devices/aoa/profiles", json={
@@ -76,13 +80,13 @@ def test_profile_crud_roundtrip(environment, monkeypatch):
 def test_invalid_commands_rejected_at_save(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
     )
     monkeypatch.setattr(
-        "features.devices.aoa_api.principal_owner_id",
+        "features.devices.aoa.api.principal_owner_id",
         lambda request: "owner-1",
     )
     response = client.post("/api/devices/aoa/profiles", json={
@@ -115,7 +119,7 @@ def test_profile_save_validates_firmware_declaration_before_persisting(tmp_path)
 def test_record_presets_exposed(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -130,7 +134,7 @@ def test_record_presets_exposed(environment, monkeypatch):
 def test_record_with_preset_expands_steps(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -143,7 +147,7 @@ def test_record_with_preset_expands_steps(environment, monkeypatch):
         return {"success": True, "accepted": True}
 
     monkeypatch.setattr(
-        "features.devices.aoa_api.cluster_port.submit_device_action",
+        "features.devices.aoa.api.cluster_port.submit_device_action",
         fake_device_action)
     response = client.post("/api/devices/aoa/record", json={
         "worker_id": "ats-worker-controller", "device": "ser-1",
@@ -158,7 +162,7 @@ def test_record_with_preset_expands_steps(environment, monkeypatch):
 def test_record_rejects_unknown_preset(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -174,7 +178,7 @@ def test_record_rejects_unknown_preset(environment, monkeypatch):
 def test_record_rejects_preset_and_steps_together(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -192,7 +196,7 @@ def test_record_rejects_preset_and_steps_together(environment, monkeypatch):
 def test_interactive_record_input_uses_device_action_boundary(environment, monkeypatch, frame):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -204,7 +208,7 @@ def test_interactive_record_input_uses_device_action_boundary(environment, monke
         return {"success": True, "command": "click 180 320"}
 
     monkeypatch.setattr(
-        "features.devices.aoa_api.cluster_port.submit_device_action", fake_submit)
+        "features.devices.aoa.api.cluster_port.submit_device_action", fake_submit)
     response = client.post("/api/devices/aoa/record/input", json={
         "worker_id": "ats-worker-controller",
         "device": "ser-1",
@@ -224,7 +228,7 @@ def test_interactive_record_input_uses_device_action_boundary(environment, monke
 def test_interactive_record_input_rejects_unlisted_action(environment, monkeypatch):
     client = environment
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal",
+        "features.devices.aoa.api.require_human_principal",
         lambda request: type("U", (), {"id": "owner-1", "username": "t",
                                        "role": "user",
                                        "resource_owner_id": "owner-1"})(),
@@ -239,13 +243,13 @@ def test_interactive_record_input_rejects_unlisted_action(environment, monkeypat
 
 def test_record_preserves_deferred_calibration(environment, monkeypatch):
     captured = {}
-    monkeypatch.setattr("features.devices.aoa_api.require_human_principal", lambda _: None)
+    monkeypatch.setattr("features.devices.aoa.api.require_human_principal", lambda _: None)
 
     async def submit(_request, payload):
         captured.update(payload)
         return {"success": True}
 
-    monkeypatch.setattr("features.devices.aoa_api.cluster_port.submit_device_action", submit)
+    monkeypatch.setattr("features.devices.aoa.api.cluster_port.submit_device_action", submit)
     response = environment.post("/api/devices/aoa/record", json={
         "worker_id": "worker", "device": "serial", "steps": [{"action": "home"}],
         "calibrate_touch": "after"})
@@ -267,10 +271,17 @@ def test_playback_control_port_uses_authenticated_owner(environment, monkeypatch
 
     from foundation import cluster_port
 
-    monkeypatch.setattr("features.devices.aoa_api.require_human_principal", lambda _: None)
-    monkeypatch.setattr("features.devices.aoa_api.principal_owner_id", lambda _: "owner-1")
+    monkeypatch.setattr("features.devices.aoa.api.require_human_principal", lambda _: None)
+    monkeypatch.setattr("features.devices.aoa.api.principal_owner_id", lambda _: "owner-1")
     control = AsyncMock(return_value={"success": True, "accepted": True})
     monkeypatch.setattr(cluster_port, "control_aoa_playback", control)
     response = environment.post("/api/devices/aoa/playback/pb-owned/control", json={"worker_id": "worker-a", "action": "pause"})
     assert response.status_code == 200
     control.assert_awaited_once_with("pb-owned", "worker-a", "owner-1", "pause")
+
+
+def test_command_digest_preserves_frozen_utf8_wire_format():
+    commands = ["write 中文", "home"]
+    wire = '["write 中文","home"]'.encode()
+    assert commands_digest(commands) == hashlib.sha256(wire).hexdigest()
+    assert commands_digest(list(reversed(commands))) != commands_digest(commands)

@@ -64,7 +64,7 @@ Web「系统架构 → 平台总览」的「分层职责、部署与接入边界
 代表根因已经由设备复现，见 [ADR 0036](adr/0036-analysis-claim-review.md)。
 
 1. **Controller**：FastAPI 应用（入口 `app.py`）。负责 Web UI、认证、权限、任务调度、配置、报告、集群状态和外部系统集成。
-2. **Worker Agent**（`worker_agent/`）：运行在实际执行 GMS 测试的 Linux 主机上，负责 ADB、Fastboot、Tradefed、USB/IP Client、本地资源探测与任务执行。
+2. **Worker Agent**（`worker/`）：运行在实际执行 GMS 测试的 Linux 主机上，负责 ADB、Fastboot、Tradefed、USB/IP Client、本地资源探测与任务执行。
 3. **Device Source**：Android 设备物理 USB 所在主机。直接 USB/IP 来源工作流当前主要支持 Windows + `usbipd-win`（Ubuntu 来源支持设备共享、分配与重连）。
 4. **Agent Runtime**（`agent/gms-remote-test/`）：运行在 Codex / Kimi / kkagent 所在主机，通过 `gms-rt` CLI 和 MCP Adapter 调用 Controller；不直接持有平台用户密码，也不绕过 Controller 的权限、审批和审计边界。
 
@@ -89,10 +89,10 @@ Foundation / Port
 Infrastructure
 ```
 
-- `features/`：业务 Feature（auth、cluster、devices、firmware、build、test_execution 等），Feature 之间不互相 import 内部模块，共享逻辑下沉 `foundation/`（见 [ADR-0002](adr/0002-feature-foundation-boundary.md)）。
+- `features/`：业务 Feature（auth、cluster、devices、firmware、build、test_execution、gms、sdk 等），Feature 之间不互相 import 内部模块，共享逻辑下沉 `foundation/`（见 [ADR-0002](adr/0002-feature-foundation-boundary.md)）。
 - `foundation/`：公共基础设施与跨 Feature Port（配置、响应、安全、SSH 执行器、进程边界等）。
 - `agent/gms-remote-test/`：Agent Package 唯一手工维护源码树；`plugins/gms-remote-test/` 是生成结果。
-- `worker_agent/`：Worker 侧执行与 Controller 通信。
+- `worker/`：Worker 侧执行与 Controller 通信。
 - `web/`：浏览器 Shell 与静态前端。
 
 ## 相关决策记录

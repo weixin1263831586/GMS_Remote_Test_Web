@@ -7,6 +7,7 @@ root wires them via :func:`register_ops_ports` at startup, which keeps the
 feature graph acyclic (ADR 0030).
 """
 
+from features.ops.disk_artifacts import cached_disk_artifacts
 from features.ops.service import (
     advancement_paused,
     get_ops_store,
@@ -26,6 +27,7 @@ def register_ops_ports() -> None:
     from foundation.ops_port import (
         configure_alert_sweep,
         configure_disk_hygiene,
+        configure_disk_inventory,
         configure_incident_recorder,
     )
 
@@ -36,10 +38,12 @@ def register_ops_ports() -> None:
     configure_advancement_gate(advancement_paused)
     configure_alert_sweep(run_ops_sweep)
     configure_disk_hygiene(run_cleanup)
+    configure_disk_inventory(cached_disk_artifacts)
 
 
 __all__ = [
     "advancement_paused",
+    "cached_disk_artifacts",
     "get_ops_store",
     "record_incident",
     "register_ops_ports",

@@ -10,7 +10,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from features.devices import host_inventory
+from features.devices.inventory import host as host_inventory
 from foundation import devices_port
 
 

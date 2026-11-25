@@ -1,7 +1,7 @@
 """Framework-independent ExecutionSpec validation and argv building.
 
 Shared by the Controller (features.cluster.execution_spec wraps it with
-FastAPI HTTP errors) and the Worker Agent (worker_agent.runtime rebuilds
+FastAPI HTTP errors) and the Worker Agent (worker.runtime rebuilds
 argv from the spec instead of trusting Controller-supplied argv).  Keep
 this module free of feature and web-framework imports so it can ship with
 both deployment trees.
@@ -14,6 +14,8 @@ import re
 
 from foundation.test_execution_options import validate_execution_options
 
+
+SUITE_MODULE_EXTENSIONS = (".apk", ".jar", ".config", ".xml")
 
 _VALID_TEST_TYPES = {"cts", "gsi", "gts", "gts-root", "gts-interactive", "sts", "vts", "apts"}
 _SUITE_TEST_TYPES = {

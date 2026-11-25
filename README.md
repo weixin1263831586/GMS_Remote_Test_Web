@@ -130,7 +130,7 @@ gms-rt-system-selfcheck --json
 | --- | --- |
 | `bootstrap/`、`foundation/` | 组合根、配置、安全和共享基础设施 |
 | `features/` | 业务路由、服务、存储、测试及部分专题 UI |
-| `worker_agent/` | Worker 执行器、库存与 Controller 通信 |
+| `worker/` | Worker 执行器、库存与 Controller 通信 |
 | `web/` | 浏览器 Shell 和静态前端 |
 | `agent/gms-remote-test/` | Agent Package 手工维护源 |
 | `plugins/gms-remote-test/` | 由源包生成的发行插件 |

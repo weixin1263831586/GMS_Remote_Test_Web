@@ -96,13 +96,7 @@ class SuiteModuleSearchTests(unittest.TestCase):
         self.assertEqual(payload["modules"][0]["suite_type"], "CTS")
 
     def test_cts_verifier_nested_layout_is_searchable_and_latest_not_truncated(self):
-        """CTS Verifier (cts-v) modules resolve on the nested 17_r1 layout.
-
-        Regression: cts-v used to be excluded from DEFAULT_SUITE_TYPES and
-        build_suite_info truncated tools_path to the outer android-cts-verifier*
-        directory, so testcases resolution missed
-        android-cts-verifier/android-cts-v-host/testcases.
-        """
+        """Resolve CTS Verifier modules from the nested 17_r1 testcases directory."""
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
             # Replicate GMS-Suite/android-cts-verifier-17_r1-linux_x86-arm layout.

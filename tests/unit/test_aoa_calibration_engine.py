@@ -1,4 +1,4 @@
-"""AOA 多点仿射标定引擎与 mapping_policy 的机制测试（审核意见 1.txt）。"""
+"""AOA 多点仿射标定引擎与 mapping_policy 的机制测试。"""
 
 from __future__ import annotations
 
@@ -65,9 +65,9 @@ def test_fit_affine_recovers_scale_and_offset():
 
 
 def test_fit_affine_recovers_axis_coupling_single_point_cannot():
-    """X 比例同时作用于 Y（实机 8e4d 统一 2.216）+ Y 偏移：单点比例必错，仿射拟合恢复。"""
+    """X 比例同时作用于 Y 且有 Y 偏移：单点比例必错，仿射拟合恢复。"""
     scale = 2.216
-    offset_y = 69.0  # 审核意见示例：中心点 Y 偏差约 69px。
+    offset_y = 69.0
     hid_points = five_point_calibration_points(360, 640)
     samples = [((u, v), (u * scale, v * scale + offset_y)) for u, v in hid_points]
     matrix, off = fit_affine(samples)
@@ -221,7 +221,7 @@ def test_context_matches_requires_full_environment_equality():
 
 
 def test_worker_calibration_probe_points_use_five_point_layout():
-    from worker_agent.aoa_actions import CALIBRATION_PROBE_COUNT, calibration_probe_points
+    from worker.aoa_actions import CALIBRATION_PROBE_COUNT, calibration_probe_points
 
     probes = calibration_probe_points()
     assert len(probes) == CALIBRATION_PROBE_COUNT == 5

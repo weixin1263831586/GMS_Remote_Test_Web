@@ -8,7 +8,7 @@ gms-agent install/update/rollback/enroll. What remains here:
                              (traversal guard, gms-remote-test root)
 
 The retired /api/system/skills/install.sh wrapper was removed; the one-line
-install path is GET /api/agent/install.sh (see agent_package_registry).
+install path is GET /api/agent/install.sh (see agent_package.registry).
 """
 
 from __future__ import annotations

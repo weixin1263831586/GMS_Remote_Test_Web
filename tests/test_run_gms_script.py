@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_GMS_Test_Auto.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "scripts/execution" / "run_GMS_Test_Auto.sh"
 
 
 def _write_result(path: Path, *, module: str, case: str, serial: str, plan: str = "vts") -> None:

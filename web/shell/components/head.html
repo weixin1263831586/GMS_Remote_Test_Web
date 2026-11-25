@@ -4,17 +4,17 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-        <link rel="stylesheet" href="/static/css/common.css?v=20261123-sidebar-labels" data-shell-styles>
+        <link rel="stylesheet" href="/static/css/common.css?v=20261125-unified-password-control" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261123-toast-visibility" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261125-toast-layer" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261120-type-size-dedup-v1" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261125-suite-type-palette" data-shell-styles>
     <link rel="stylesheet" href="/static/css/common-page.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/agent-access.css?v=20261116-sdk-autoheight" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261119-title-icon-gap-8" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261124-device-buttons-80px-v2" data-shell-styles>
     <link rel="stylesheet" href="/static/css/device-inventory.css?v=20261112-inventory-v2" data-shell-styles>
     <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261120-aoa-header-dedup" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261120-utility-frame-8px" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261125-suite-type-palette" data-shell-styles>
     <link rel="stylesheet" href="/static/css/host-desktop-workspace.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/host-terminal-workspace.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/audit-disk.css?v=20261120-side-panels-scroll" data-shell-styles>
@@ -22,9 +22,9 @@
     <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261124-summary-cell-widths" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261120-type-size-dedup-v1" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/auth-dialog.css?v=20261117-compact-dialogs" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/auth-dialog.css?v=20261125-narrow-setup" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261120-type-size-dedup-v1" data-shell-styles>
     <link rel="stylesheet" href="/static/css/vpn-proxy-panel.css?v=20261118-windows-brand-match" data-shell-styles>
     <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8" data-shell-styles>
@@ -46,14 +46,13 @@
     }</script>
     <script src="/static/js/shell/shell-config.js?v=20261008-deferred" defer></script>
     <!-- Shell 定义保持在页面模块之前执行；defer 让下载并行且不阻塞 HTML 解析。 -->
-    <script src="/static/js/shell/shell-xterm-loader.js" defer></script>
     <script src="/static/js/shell/ui-primitives.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/shell/device-presentation.js?v=20261112-inventory" defer></script>
     <script src="/static/js/shell/device-inventory.js?v=20261112-inventory" defer></script>
     <script src="/static/js/shell/shell-client-identity.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-host-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-workspace.js?v=20261119-compact-pane-v2" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-terminal-workspace.js?v=20261119-terminal-console" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-terminal-workspace.js?v=20261125-xterm-loader" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-user-management.js?v=20261119-users-single-row" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-management.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-groups.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
@@ -62,8 +61,7 @@
     <script src="/static/js/shell/shell-device-override.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-page-switching.js?v=20261114-orbit-viewport" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-personal-knowledge.js?v=20261116-aligned-corner-path" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-main.js?v=20260930-shell-split" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-late-init.js" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-main.js?v=20261125-init-consolidation" defer data-shell-runtime></script>
     <!-- AOA 工作台独立于不可变 shell bundle，便于设备页增量部署；它依赖
          上面的设备 UI 控制/Worker 轮询函数，但不参与 14 段运行时打包。
          回放、调试与录制器先声明函数，主脚本初始化时再使用共享状态。 -->
@@ -78,7 +76,8 @@
     <script src="/static/js/shell/aoa-screen-grid.js?v=20261106-calibrate-mark" defer></script>
     <script src="/static/js/chunk-upload.js?v=20260910-elev-recovery" defer></script>
     <!-- 加载共享工具函数 - 页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/utils.js?v=20261113-shared-clipboard" defer></script>
+    <script src="/static/js/utils.js?v=20261125-suite-type-palette" defer></script>
+    <script src="/static/js/password-controls.js?v=20261125-unified-password-control" defer></script>
     <!-- 加载全局状态 - 通知中心与页面脚本依赖，须先于其执行 -->
     <script src="/static/js/state.js?v=20261116-aligned-corner-path" defer></script>
     <!-- 用户级 Worker/设备/套件/任务上下文，供主页面与各 iframe 共用。 -->
@@ -96,7 +95,7 @@
     <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261117-radar-fixed-footer">
     <script src="/static/js/update-radar-settings.js?v=20261117-radar-fixed-footer" defer></script>
     <!-- 加载API调用工具 - 通知中心与页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/api.js?v=20261117-auth-dialog" defer></script>
+    <script src="/static/js/api.js?v=20261125-setup-account-name" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20261105-aoa-device-refresh" defer></script>
     <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/tools-render.js?v=20261118-square-cards" defer></script>
@@ -113,12 +112,9 @@
     <!-- 加载通知中心 - 页面脚本依赖，须先于其执行 -->
     <script src="/static/js/notifications.js?v=20261118-targeted-notice-navigation" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
-    <script src="/static/js/pages/test-suite-browser.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-download.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-extract.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-list.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-report-copy.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/test-suite-browser-results.js?v=20260930-pages-split" defer></script>
+    <script src="/static/js/pages/test-suite-browser.js?v=20261125-browser-consolidation" defer></script>
+    <script src="/static/js/pages/test-suite-browser-transfer.js?v=20261125-transfer" defer></script>
+    <script src="/static/js/pages/test-suite-browser-reports.js?v=20261125-report-consolidation" defer></script>
     <script src="/static/js/pages/test-suite-browser-files.js?v=20261119-analysis-status" defer></script>
     <script src="/static/js/pages/test-suite-browser-devices.js?v=20261117-test-color-icons" defer></script>
     <script src="/static/js/pages/firmware-aoa-preflight.js?v=20261105-preflight-v1" defer></script>
@@ -127,17 +123,15 @@
     <script src="/static/js/pages/firmware-burn-gsi.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-vnc.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
-    <script src="/static/js/pages/firmware-burn-usbip.js?v=20261117-test-color-icons" defer></script>
-    <script src="/static/js/pages/auth-elevation.js?v=20261117-test-color-icons" defer></script>
-    <script src="/static/js/pages/vpn-control.js?v=20261117-test-color-icons" defer></script>
+    <script src="/static/js/pages/firmware-burn-usbip.js?v=20261124-usbip-short-label" defer></script>
+    <script src="/static/js/pages/auth-elevation.js?v=20261124-usbip-short-label" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20261124-usbip-short-label" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261118-text-only-test-toggle" defer></script>
-    <script src="/static/js/pages/test-reports.js?v=20261124-retry-suite" defer></script>
+    <script src="/static/js/pages/test-reports.js?v=20261125-suite-type-palette" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20261123-summary-150px-v1" defer></script>
     <script src="/static/js/pages/report-analysis-activity.js?v=20261119-shared-status-v2" defer></script>
     <script src="/static/js/pages/report-failure-workbench.js?v=20261119-hostlog-source" defer></script>
-    <script src="/static/js/pages/report-analysis-diagnosis.js?v=20260920-adr0014" defer></script>
-    <script src="/static/js/pages/agent-questions.js?v=20261110-project-agent" defer></script>
     <script src="/static/js/pages/conversational-agent.js?v=20261112-agent-sessions" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261119-users-single-row" defer></script>
     <script src="/static/js/pages/sdk-config.js?v=20261119-sdk-reload-write-outcomes" defer></script>

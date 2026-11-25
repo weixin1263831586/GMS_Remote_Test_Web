@@ -10,22 +10,23 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.redmine import evidence_api, reference_recall
-from features.redmine.evidence_store import EvidenceStore
-from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer
-from features.redmine.kkagent.evidence_gate import evaluate_evidence_gate, gate_errors
-from features.redmine.kkagent.evidence_preflight import EvidencePreflight
-from features.redmine.kkagent.trace import KkAgentTrace, ToolTrace, consume_line
-from features.system import extract_reference_identifiers, init_mainline_issues_db, recall_mainline_references
-from features.system import query_mainline_security_patches as lookup_patches
+from features.gms import extract_reference_identifiers, init_gms_update_db, recall_mainline_references
+from features.gms import query_mainline_security_patches as lookup_patches
+from features.redmine import reference_recall
+from features.redmine.analysis.kkagent.analyzer import KkAgentRedmineAnalyzer
+from features.redmine.analysis.kkagent.evidence_gate import evaluate_evidence_gate, gate_errors
+from features.redmine.analysis.kkagent.evidence_preflight import EvidencePreflight
+from features.redmine.analysis.kkagent.trace import KkAgentTrace, ToolTrace, consume_line
+from features.redmine.evidence import api as evidence_api
+from features.redmine.evidence.store import EvidenceStore
 
 
 @pytest.fixture
 def references(tmp_path, monkeypatch):
     data_root = tmp_path / "data"
     data_root.mkdir()
-    with sqlite3.connect(data_root / "mainline_known_issues.sqlite3") as conn:
-        init_mainline_issues_db(conn)
+    with sqlite3.connect(data_root / "gms_update.sqlite3") as conn:
+        init_gms_update_db(conn)
         for index, release in enumerate(("RC9", "RC10", "RC12", "RC13", "PRELOAD")):
             conn.execute(
                 "INSERT INTO mainline_security_patches (source_url,source_title,release_year,release_label,"
@@ -41,10 +42,10 @@ def references(tmp_path, monkeypatch):
             "'October','Android','CTS','17','test','CtsBluetoothTestCases','pkg.bluetooth.Test#testFoo',"
             "'568181732','Known failure','2026-11-14','2026-11-14')"
         )
-    with sqlite3.connect(data_root / "gms_update_monitor.sqlite3") as conn:
-        conn.execute("CREATE TABLE gms_update_bulletin_patches (patch_id TEXT,description TEXT,bulletin_url TEXT)")
-        conn.execute("INSERT INTO gms_update_bulletin_patches VALUES "
-                     "('A-568181732','Bluetooth CVE-2026-58835 fix','https://example.com/bulletin')")
+    with sqlite3.connect(data_root / "gms_update.sqlite3") as conn:
+        conn.execute("INSERT INTO gms_update_bulletin_patches "
+                     "(source_key,item_key,year,patch_id,description,bulletin_month,deadline,bulletin_url,content_hash,first_seen_at,last_seen_at) "
+                     "VALUES ('gms_bulletins','fixture','2026','A-568181732','Bluetooth CVE-2026-58835 fix','November','','https://example.com/bulletin','hash','t','t')")
     owners = tmp_path / "owners"
     monkeypatch.setattr(reference_recall, "owner_redmine_root", lambda owner: owners / owner)
     monkeypatch.setattr(reference_recall, "recall_mainline_references",
@@ -113,7 +114,7 @@ def test_exemption_bug_cross_references_critical_fix(references):
 
 def test_latest_preload_precedes_older_rc_with_limited_recall(references):
     root, _store, _snapshot = references
-    with sqlite3.connect(root / "mainline_known_issues.sqlite3") as conn:
+    with sqlite3.connect(root / "gms_update.sqlite3") as conn:
         conn.row_factory = sqlite3.Row
         conn.execute("UPDATE mainline_security_patches SET source_url=? WHERE release_label='RC13'",
                      ("https://example.com/notes-RC-2026-11-05-v0-1",))
@@ -282,7 +283,7 @@ async def test_successful_native_reference_lookup_is_not_repeated(references, mo
 
 
 async def test_failed_preflight_still_requires_official_lookup_after_recovery(references, monkeypatch):
-    from features.redmine import daily_brief_service
+    from features.redmine.daily_brief import service as daily_brief_service
 
     evidence = EvidencePreflight()
     monkeypatch.setattr(daily_brief_service, 'collect_deep_analysis_evidence', AsyncMock(return_value=evidence))
@@ -297,10 +298,10 @@ async def test_failed_preflight_still_requires_official_lookup_after_recovery(re
 
 
 async def test_analyzer_recovers_official_context_before_repair_and_review(references, monkeypatch):
-    from features.redmine.kkagent.analyzer import _StreamFallback
-    from features.redmine.kkagent.mcp_health import McpHealthProbe
-    from features.redmine.tests.kkagent.review_support import review_trace
-    from features.redmine.tests.kkagent.test_native_summary import complete_trace, final_trace
+    from features.redmine.analysis.kkagent.analyzer import _StreamFallback
+    from features.redmine.analysis.kkagent.preflight import McpHealthProbe
+    from features.redmine.tests.analysis.kkagent.review_support import review_trace
+    from features.redmine.tests.analysis.kkagent.test_native_summary import complete_trace, final_trace
 
     _root, store, snapshot = references
     add_text(store, snapshot, 'CVE-2026-58835')
@@ -316,7 +317,7 @@ async def test_analyzer_recovers_official_context_before_repair_and_review(refer
     ])
     analyzer = KkAgentRedmineAnalyzer()
     monkeypatch.setattr(analyzer, '_run_stream', stream)
-    monkeypatch.setattr('features.redmine.kkagent.analyzer.probe_kkagent_mcp_health',
+    monkeypatch.setattr('features.redmine.analysis.kkagent.analyzer.probe_kkagent_mcp_health',
                         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
     outcome = await analyzer.analyze({
         'issue_id': 661620, 'subject': 'BTS warning', 'analysis_mode': 'diagnostic', 'output_style': 'summary',

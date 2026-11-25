@@ -470,7 +470,7 @@ async function submitDevicePassword() {
 
         const btn = $('usbip-btn');
         if (btn) {
-            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP';
             btn.disabled = false;
         }
     }

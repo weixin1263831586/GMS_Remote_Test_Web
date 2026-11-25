@@ -1,15 +1,15 @@
 from .access import can_access_report, filter_accessible_reports
 from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
-from .analyzer import ReportAnalyzer
 from .api import diagnose_report_failure
-from .api_helpers import resolve_redmine_knowledge_service
-from .api_models import ReportDiagnosisRequest
+from .api_helpers import ReportDiagnosisRequest, resolve_redmine_knowledge_service
+from .archive import ReportAnalyzer
 from .archive import ReportAnalyzer as ArchiveReportAnalyzer
 from .display import (
     report_client_display_id,
     report_name_from_result_dir,
     tradefed_result_folder_name,
 )
+from .failure_analysis import ReportFailureAnalyzer
 from .repository import TestReportDB, test_report_db
 from .service import TestReportManager, test_report_manager
 from .xml_parser import XMLReportParser
@@ -20,6 +20,7 @@ __all__ = [
     "ReportAnalysisAgent",
     "ReportAnalyzer",
     "ReportDiagnosisRequest",
+    "ReportFailureAnalyzer",
     "ReportScanIncompleteError",
     "TestReportDB",
     "TestReportManager",

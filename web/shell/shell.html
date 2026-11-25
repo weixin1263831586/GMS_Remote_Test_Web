@@ -26,28 +26,35 @@
                     <label for="auth-password">密码</label>
                     <div class="password-input-wrap">
                         <input id="auth-password" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-describedby="auth-password-help" required>
-                        <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-label="显示密码" title="显示密码"></button>
+                        <button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="auth-password" aria-label="显示密码" title="显示密码"></button>
                     </div>
                     <div class="auth-help" id="auth-password-help">管理员用平台密码；客户端用 SSH 密码。</div>
-                </div>
-                <div class="auth-row auth-field" id="auth-display-name-row" style="display: none;">
-                    <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#edit"></use></svg></span>
-                    <label for="auth-display-name">显示名</label>
-                    <input id="auth-display-name" name="display_name" type="text" autocomplete="name">
                 </div>
                 <div class="auth-row auth-field auth-bootstrap-field" id="auth-bootstrap-token-row" style="display: none;">
                     <span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#unlock"></use></svg></span>
                     <label for="auth-bootstrap-token">初始化令牌</label>
-                    <input id="auth-bootstrap-token" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
-                    <div class="auth-help" id="auth-bootstrap-token-help">
-                        一键安装会自动生成令牌，保存在 Controller 安装目录的 <code>configs/secrets/environment.json</code> 中，字段名为 <code>GMS_BOOTSTRAP_TOKEN</code>；仅用于创建首个管理员。
-                        <details>
-                            <summary>如何获取初始化令牌</summary>
-                            在 Controller 服务器上，以服务运行用户或管理员身份进入实际安装目录，执行：
-                            <code style="display: block; overflow-wrap: anywhere; margin: 6px 0;">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
-                            将输出粘贴到上方。默认安装目录为 <code>/opt/gms-remote-test/web_app</code>。手动部署请使用为 Controller 配置的同名环境变量；配置统一保存在 <code>configs/local/environment.json</code>。
-                        </details>
+                    <input id="auth-bootstrap-token" class="password-input-secret" name="bootstrap_token" type="password" autocomplete="off" aria-describedby="auth-bootstrap-token-help">
+                </div>
+                <div class="auth-help auth-bootstrap-help" id="auth-bootstrap-token-help" hidden>
+                    <div class="auth-bootstrap-hint">
+                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg>
+                        <span>请输入安装时生成的初始化令牌。</span>
                     </div>
+                    <details>
+                        <summary>如何获取初始化令牌</summary>
+                        <div class="auth-bootstrap-instructions">
+                            在 Controller 安装目录下，以服务运行用户或管理员身份执行：
+                            <div class="auth-bootstrap-command">
+                                <div class="auth-bootstrap-command-field">
+                                    <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg>
+                                    <code class="auth-bootstrap-command-text">python3 -c 'import json; print(json.load(open("configs/secrets/environment.json"))["GMS_BOOTSTRAP_TOKEN"])'</code>
+                                </div>
+                                <button type="button" class="btn-small tech-row-action" data-click="copyAuthBootstrapCommand" data-r0="el" aria-label="复制获取初始化令牌命令"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#copy"></use></svg><span>复制</span></button>
+                            </div>
+                            <div>将输出填入上方。默认目录：<code>/opt/gms-remote-test/web_app</code>。</div>
+                            <div>手动部署：使用 Controller <code>configs/local/environment.json</code> 中的 <code>GMS_BOOTSTRAP_TOKEN</code>。</div>
+                        </div>
+                    </details>
                 </div>
                 <div class="auth-message" id="auth-message" role="status" aria-live="polite"></div>
                 <!-- SSH 提示与安装指引继续由认证流程控制。 -->

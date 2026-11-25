@@ -118,7 +118,8 @@ class FoundationConfigTests(unittest.TestCase):
             configs = root / 'configs'
             configs.mkdir()
             (root / 'foundation').mkdir()
-            (configs / 'config.example.json').write_text(
+            (configs / 'examples').mkdir()
+            (configs / 'examples/config.example.json').write_text(
                 '{"ubuntu_user": "operator"}', encoding='utf-8'
             )
             manager = ConfigManager(project_root=root)

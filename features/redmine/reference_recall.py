@@ -6,8 +6,9 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from contextlib import closing
 
-from features.system import extract_reference_identifiers, recall_mainline_references
+from features.gms import extract_reference_identifiers, recall_mainline_references
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root
@@ -23,7 +24,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     if not db.is_file():
         raise ApiError.not_found("证据快照不存在。")
     try:
-        with sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=3) as conn:
+        with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True, timeout=3)) as conn, conn:
             conn.row_factory = sqlite3.Row
             snapshot = conn.execute(
                 "SELECT issue_id,status,manifest_json FROM redmine_evidence_snapshots WHERE snapshot_id=?", (snapshot_id,),
@@ -110,7 +111,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
 
 async def append_reference_preflight(owner_id, entry, preflight, progress=None):
     """控制器侧召回，不依赖已安装 MCP 的版本更新。"""
-    from .kkagent.trace import ToolTrace
+    from .analysis.kkagent.trace import ToolTrace
 
     if not preflight.snapshot_id:
         return
@@ -159,7 +160,7 @@ async def recover_reference_preflight(entry, trace):
         for call in trace.tool_calls if "redmine_references" in call.tool_name
     ):
         return
-    from .kkagent.evidence_preflight import EvidencePreflight
+    from .analysis.kkagent.evidence_preflight import EvidencePreflight
 
     preflight = EvidencePreflight(snapshot_id=snapshots[-1])
     await append_reference_preflight(owner, entry, preflight, entry.get("_progress_recorder"))

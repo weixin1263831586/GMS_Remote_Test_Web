@@ -27,12 +27,13 @@ from features.redmine import (
 from foundation.config import config_manager
 from foundation.redaction import redact_sensitive_text
 
-from .execution_result import ToolResult, http_error_result, internal_error_result
-from .executor_formatting import (
+from .response import ToolResult, http_error_result, internal_error_result
+from .response import (
     json_body as _json_body,
 )
-from .route_binding import build_call_kwargs, cached_signature
 from .route_invocation import (
+    build_call_kwargs,
+    cached_signature,
     call_router_function,
     enforce_route_dependencies,
     guarded_tool_call,
@@ -646,7 +647,7 @@ class ActionExecutor:
 
     async def _query_vnc_status(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "features.system.desktop", "get_desktop_vnc_status", request=request
+            "features.system.host.desktop", "get_desktop_vnc_status", request=request
         )
         if result is not None:
             return result
@@ -659,7 +660,7 @@ class ActionExecutor:
 
     async def _query_terminal(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "features.system.terminal_api", "get_ssh_terminal_info", request=request
+            "features.system.host.terminal.api", "get_ssh_terminal_info", request=request
         )
         if result is not None:
             return result
@@ -684,7 +685,7 @@ class ActionExecutor:
 
     async def _query_apk_tasks(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "features.firmware.apk_api", "list_apk_tasks", request=request
+            "features.apk.api", "list_apk_tasks", request=request
         )
         if result is not None:
             return result
@@ -1191,7 +1192,7 @@ class ActionExecutor:
         return await call_router_function(tool, session, request, params)
 
     def _build_call_kwargs(self, func: Any, tool: AgentTool, request: Any, params: dict[str, Any]) -> dict[str, Any]:
-        """HTTP 模拟层参数绑定（实现见 route_binding）。"""
+        """HTTP 模拟层参数绑定（实现见 route_invocation）。"""
         return build_call_kwargs(func, tool, request, params)
 
 

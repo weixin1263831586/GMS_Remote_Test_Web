@@ -1,11 +1,7 @@
 {
-  "comment": "Python 文件行数 ceiling baseline(独立持久化的 size ratchet)。规则:历史债务只减不增;本文件由 tools/scripts/maintenance/update_size_baseline.py --shrink-only 收紧;任何上调/新增登记必须同时在本文件 waivers 里给出带 expiry 的理由(tests/architecture ratchet 门禁强制)。default_limit 由项目所有者设定:2026-09-28 起为 1200 行(避免同功能模块被行数门禁逼得拆分过细);ceilings 只登记超过默认值的存量巨型文件。",
+  "comment": "Owner-approved 2000-line source budget. Split by cohesive responsibilities rather than arbitrary smaller ceilings.",
   "unit": "lines",
-  "default_limit": 1200,
-  "ceilings": {
-    "features/assistant/api.py": 602,
-    "features/devices/tests/test_usbip_reconnect.py": 3121,
-    "features/redmine/tests/test_dashboard_stats.py": 1286
-  },
+  "default_limit": 2000,
+  "ceilings": {},
   "waivers": {}
 }

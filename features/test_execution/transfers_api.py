@@ -45,19 +45,19 @@ from .suite_download_security import (
     validate_suite_download_url as _validate_suite_download_url,
 )
 from .suite_helpers import resolve_suite_reference
-from .suite_transfer_tasks import (
+from .suite_tasks import (
     MAX_SUITE_ARCHIVE_BYTES,
 )
-from .suite_transfer_tasks import (
+from .suite_tasks import (
     cleanup_old_suite_tasks as _cleanup_old_suite_tasks,
 )
-from .suite_transfer_tasks import (
+from .suite_tasks import (
     run_suite_download_task as _run_suite_download_task,
 )
-from .suite_transfer_tasks import (
+from .suite_tasks import (
     run_suite_extract_task as _run_suite_extract_task,
 )
-from .suite_transfer_tasks import (
+from .suite_tasks import (
     schedule_suite_task as _schedule_suite_task,
 )
 from .suites import (

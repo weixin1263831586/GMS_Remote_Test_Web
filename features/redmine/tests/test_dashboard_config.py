@@ -7,6 +7,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from features.redmine.config import RedmineConfig as ConfigManager
+from foundation.runtime_config_store import RuntimeConfigStore
 from tests.contract.snapshot_tools import read_shell_bundle
 
 
@@ -72,21 +73,18 @@ class RedmineDashboardConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / "core").mkdir()
             configs = root / "configs"
-            configs.mkdir()
-            (configs / "config.json").write_text(
+            (configs / "local").mkdir(parents=True)
+            (configs / "local/config.json").write_text(
                 json.dumps({"redmine_stats": {"stale_days": 3, "window_days": 0, "cache_ttl": 600}}),
                 encoding="utf-8",
             )
-            (configs / "config_runtime.json").write_text(
-                json.dumps({"sidebar_order": ["test"], "redmine_stats": {"stale_days": 3}}),
-                encoding="utf-8",
-            )
+            RuntimeConfigStore(root).write({"sidebar_order": ["test"], "redmine_stats": {"stale_days": 3}})
 
             manager = ConfigManager(base_dir=str(root / "core"))
 
             self.assertTrue(manager.save_redmine_stats_config({"stale_days": 20, "window_days": 60, "cache_ttl": 0}))
 
-            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
+            runtime = RuntimeConfigStore(root).read()
             self.assertEqual(runtime["sidebar_order"], ["test"])
             expected = {"stale_days": 20, "window_days": 60, "cache_ttl": 0, "freshness_days": 180, "chart_date_ranges": {}}
             self.assertEqual(runtime["redmine_stats"], expected)
@@ -158,8 +156,8 @@ class RedmineDashboardConfigTests(unittest.TestCase):
             root = Path(tmp)
             (root / "core").mkdir()
             configs = root / "configs"
-            configs.mkdir()
-            (configs / "config.json").write_text(
+            (configs / "local").mkdir(parents=True)
+            (configs / "local/config.json").write_text(
                 json.dumps({
                     "redmine_dashboard": {
                         "department_defaults": {"list_limit": 50, "issue_limit": 500},
@@ -168,7 +166,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 }),
                 encoding="utf-8",
             )
-            (configs / "config_runtime.json").write_text(json.dumps({"sidebar_order": ["test"]}), encoding="utf-8")
+            RuntimeConfigStore(root).write({"sidebar_order": ["test"]})
 
             manager = ConfigManager(base_dir=str(root / "core"))
 
@@ -180,7 +178,7 @@ class RedmineDashboardConfigTests(unittest.TestCase):
                 ],
             }))
 
-            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
+            runtime = RuntimeConfigStore(root).read()
             self.assertEqual(runtime["sidebar_order"], ["test"])
             self.assertEqual(runtime["redmine_dashboard"]["dashboard_profiles"][0]["user_ids"], ["8744"])
             self.assertEqual(manager.get_redmine_dashboard_config()["profiles"][1]["id"], "new-dept")

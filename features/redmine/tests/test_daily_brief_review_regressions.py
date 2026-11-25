@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 import pytest
 
-from features.redmine.daily_brief_models import (
+from features.redmine.analysis.kkagent.analyzer import KkAgentRedmineAnalyzer
+from features.redmine.analysis.kkagent.evidence_gate import evaluate_evidence_gate, gate_errors
+from features.redmine.daily_brief.models import (
     ISSUE_RESULT_REQUIRED_FIELDS,
     ISSUE_RESULT_SCHEMA,
     DailyBriefIssue,
@@ -14,11 +16,9 @@ from features.redmine.daily_brief_models import (
     base_priority_score,
     validate_issue_result,
 )
-from features.redmine.daily_brief_report import issue_payload, render_daily_brief_markdown
-from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer
-from features.redmine.kkagent.evidence_gate import evaluate_evidence_gate, gate_errors
-from features.redmine.tests.kkagent.test_evidence_gate import _full_trace
-from features.redmine.tests.kkagent.test_process import _valid_result
+from features.redmine.daily_brief.report import issue_payload, render_daily_brief_markdown
+from features.redmine.tests.analysis.kkagent.test_evidence_gate import _full_trace
+from features.redmine.tests.analysis.kkagent.test_process import _valid_result
 from features.redmine.tests.test_daily_brief_service import make_service
 
 

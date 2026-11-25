@@ -20,8 +20,8 @@ def firmware_compatibility(metadata, commands):
     This binds one tested firmware image and environment; it is not device-class
     certification and cannot promote a mapping to direct_standard.
 
-    修订（先关闭强制闸门）：未填写声明时返回 None 放行，Worker 端按未验证
-    回放并如实标注；一旦填写了声明，仍严格校验全部字段并冻结绑定。
+    未填写声明时返回 None，Worker 按未验证回放并如实标注；
+    一旦填写声明，严格校验全部字段并冻结绑定。
     """
     if not has_touch(commands):
         return None
@@ -68,9 +68,9 @@ def require_verified_recovery(commands, options, metadata):
     An affine transform maps a swipe segment to a segment. The HID region is
     convex, so checking both endpoints also checks coverage of the whole swipe.
 
-    修订（先关闭强制闸门）：无固件声明时不做已验证标定强制要求，按未验证
-    映射回放（Worker 端如实标注 estimated/direct_unverified）；声明存在时
-    仍走严格绑定路径。语义回放同样仅在声明存在时做冻结环境绑定。
+    无固件声明时不强制已验证标定，按未验证映射回放；
+    声明存在时严格校验冻结环境。语义计划始终校验源命令，
+    并在有固件声明时额外绑定固件环境。
     """
     if not has_touch(commands):
         return
@@ -83,8 +83,10 @@ def require_verified_recovery(commands, options, metadata):
                             if command.kind != "sleep"), None)
         if first_input and not has_visual_page(first_input.get("before")):
             raise ValueError("无 ADB 固件恢复的首个输入必须包含可用外部画面前置条件")
+        if plan["source_commands"] != list(commands):
+            raise ValueError("semantic source commands differ from the recovery command list")
         if declaration is not None:
-            if (plan["source_commands"] != commands or not context_matches(plan["context"], declaration["context"])
+            if (not context_matches(plan["context"], declaration["context"])
                     or any(plan["context"].get(key) != declaration["context"].get(key)
                            for key in ("board", "hardware", "locale", "display_id"))):
                 raise ValueError("semantic recovery plan does not match the frozen firmware environment")
@@ -111,3 +113,22 @@ def require_verified_recovery(commands, options, metadata):
 def require_firmware_digest(declaration, actual_sha256):
     if declaration and declaration["sha256"] != actual_sha256:
         raise ValueError("AOA compatibility firmware SHA-256 differs from the actual image; validate this firmware before flashing")
+
+
+def recovery_failure_reason(result: dict, error: str = "") -> str:
+    if error:
+        return error
+    if result.get("adb_recovered") is True:
+        if result.get("native_mode_restored") is False:
+            return "ADB 已连接，但原生 USB 模式恢复未确认；请检查 USB 状态"
+        if result.get("cleanup_errors"):
+            return "ADB 已连接，但 AOA USB 清理仍有异常；请检查清理诊断"
+        return result.get("adb_hint") or "ADB 已连接，但 AOA 执行结果未通过验证；请检查回放结果"
+    return result.get("adb_hint") or {
+        "unauthorized": "ADB 尚未授权，请在设备上确认允许 USB 调试",
+        "offline": "ADB 处于 offline，请检查 USB 连接",
+        "absent": "尚未检测到 ADB，请检查 USB 调试开关及连接",
+        "identity_mismatch": "ADB USB 物理端口与回放目标不一致，请核对目标设备",
+        "ambiguous": "ADB 目标设备不唯一，请核对 USB 设备身份",
+        "io_dead": "ADB 显示 device 但 I/O 无响应（adbd 半死）；请重启设备后再验证",
+    }.get(result.get("adb_state"), "ADB 尚未恢复或尚未授权")

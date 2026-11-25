@@ -11,12 +11,12 @@ from fastapi.testclient import TestClient
 
 from bootstrap.application import create_app
 from features.auth import auth_service
-from features.system.state import global_state
-from features.system.terminal_service import (
+from features.system.host.terminal.service import (
     close_websocket_terminal,
     handle_terminal_connect,
     handle_terminal_input,
 )
+from features.system.state import global_state
 from foundation.device_claims import DeviceClaimRegistry
 
 
@@ -146,18 +146,18 @@ class TerminalSecurityTests(unittest.TestCase):
         websocket = _FakeWebSocket()
         channels = [_FakeChannel(), _FakeChannel()]
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.resolve_authorized_terminal_target",
+            "features.system.host.terminal.service.resolve_authorized_terminal_target",
             return_value=("ats-worker-controller", "localhost", "admin", "", ""),
         ), patch(
-            "features.system.terminal_service.is_local_host",
+            "features.system.host.terminal.service.is_local_host",
             return_value=True,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             side_effect=channels,
-        ), patch("features.system.terminal_service.start_terminal_output_pump"):
+        ), patch("features.system.host.terminal.service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
             first = websocket.messages[-1]["connection_id"]
             asyncio.run(handle_terminal_connect("same-client", websocket, {"mode": "ssh"}))
@@ -172,16 +172,16 @@ class TerminalSecurityTests(unittest.TestCase):
     def test_remote_terminal_failure_requests_host_scoped_credential(self):
         websocket = _FakeWebSocket()
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={"use_key_auth": True},
         ), patch(
-            "features.system.terminal_service.resolve_authorized_terminal_target",
+            "features.system.host.terminal.service.resolve_authorized_terminal_target",
             return_value=("worker-118", "172.16.14.118", "hcq", "", ""),
         ), patch(
-            "features.system.terminal_service.is_local_host",
+            "features.system.host.terminal.service.is_local_host",
             return_value=False,
         ), patch(
-            "features.system.terminal_service.ssh_manager.create_connection",
+            "features.system.host.terminal.service.ssh_manager.create_connection",
             return_value=None,
         ):
             asyncio.run(handle_terminal_connect(
@@ -200,20 +200,20 @@ class TerminalSecurityTests(unittest.TestCase):
         registry = DeviceClaimRegistry(Path(self.tmp.name) / "claims.sqlite3")
         cluster = SimpleNamespace(repository=SimpleNamespace(claims=registry))
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.resolve_authorized_terminal_target",
+            "features.system.host.terminal.service.resolve_authorized_terminal_target",
             return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_service.start_terminal_output_pump"):
+        ), patch("features.system.host.terminal.service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))
@@ -241,24 +241,24 @@ class TerminalSecurityTests(unittest.TestCase):
         registry = DeviceClaimRegistry(Path(self.tmp.name) / "echo-claims.sqlite3")
         cluster = SimpleNamespace(repository=SimpleNamespace(claims=registry))
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.resolve_authorized_terminal_target",
+            "features.system.host.terminal.service.resolve_authorized_terminal_target",
             return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             return_value=channel,
         ), patch(
-            "features.system.terminal_service._wait_for_shell_prompt",
+            "features.system.host.terminal.service._wait_for_shell_prompt",
             new_callable=AsyncMock,
         ) as wait_for_prompt, patch(
-            "features.system.terminal_service.start_terminal_output_pump"
+            "features.system.host.terminal.service.start_terminal_output_pump"
         ):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
@@ -274,19 +274,19 @@ class TerminalSecurityTests(unittest.TestCase):
         registry = DeviceClaimRegistry(Path(self.tmp.name) / "revoked-claims.sqlite3")
         cluster = SimpleNamespace(repository=SimpleNamespace(claims=registry))
         with patch(
-            "features.system.terminal_service.config_manager.load_config", return_value={}
+            "features.system.host.terminal.service.config_manager.load_config", return_value={}
         ), patch(
-            "features.system.terminal_service.resolve_authorized_terminal_target",
+            "features.system.host.terminal.service.resolve_authorized_terminal_target",
             return_value=("ats-worker-controller", "localhost", "admin", "", "SERIAL-1"),
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             return_value=channel,
-        ), patch("features.system.terminal_service.start_terminal_output_pump"):
+        ), patch("features.system.host.terminal.service.start_terminal_output_pump"):
             asyncio.run(handle_terminal_connect(
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "SERIAL-1"}
             ))
@@ -314,18 +314,18 @@ class TerminalSecurityTests(unittest.TestCase):
             ),
         )
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             return_value=channel,
         ), patch(
-            "features.system.terminal_service.subprocess.run",
+            "features.system.host.terminal.service.subprocess.run",
             return_value=SimpleNamespace(
                 stdout="List of devices attached\nNEW-SERIAL\tdevice\n", returncode=0
             ),
@@ -349,12 +349,12 @@ class TerminalSecurityTests(unittest.TestCase):
             ),
         )
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.subprocess.run",
+            "features.system.host.terminal.service.subprocess.run",
             return_value=SimpleNamespace(
                 stdout="List of devices attached\n", returncode=0
             ),
@@ -385,15 +385,15 @@ class TerminalSecurityTests(unittest.TestCase):
             ),
         )
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.subprocess.run",
+            "features.system.host.terminal.service.subprocess.run",
             return_value=SimpleNamespace(
                 stdout="List of devices attached\n", returncode=0
             ),
@@ -422,18 +422,18 @@ class TerminalSecurityTests(unittest.TestCase):
             ),
         )
         with patch(
-            "features.system.terminal_service.config_manager.load_config",
+            "features.system.host.terminal.service.config_manager.load_config",
             return_value={},
         ), patch(
-            "features.system.terminal_service.config_manager.is_config_host_local",
+            "features.system.host.terminal.service.config_manager.is_config_host_local",
             return_value=True,
         ), patch(
             "features.cluster.get_cluster_service", return_value=cluster,
         ), patch(
-            "features.system.terminal_service.create_local_terminal_channel",
+            "features.system.host.terminal.service.create_local_terminal_channel",
             return_value=channel,
         ), patch(
-            "features.system.terminal_service.subprocess.run",
+            "features.system.host.terminal.service.subprocess.run",
             return_value=SimpleNamespace(
                 stdout="List of devices attached\nBACK-SERIAL\tdevice\n", returncode=0
             ),

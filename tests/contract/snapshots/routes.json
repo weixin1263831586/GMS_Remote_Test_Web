@@ -1845,91 +1845,127 @@
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/artifacts"
+    "path": "/api/gms-update-center/artifacts"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/artifacts/new"
+    "path": "/api/gms-update-center/artifacts/new"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/bulletins"
+    "path": "/api/gms-update-center/bulletins"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/changes"
+    "path": "/api/gms-update-center/changes"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/mainline"
+    "path": "/api/gms-update-center/critical-patches"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/packages"
+    "path": "/api/gms-update-center/critical-patches/gerrit"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/requirements/sections"
+    "path": "/api/gms-update-center/exemptions"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/requirements/table-rows"
+    "path": "/api/gms-update-center/exemptions/summary"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/requirements/version-summary"
+    "path": "/api/gms-update-center/mainline"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/requirements/version-tags"
+    "path": "/api/gms-update-center/packages"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/scan-runs"
+    "path": "/api/gms-update-center/requirements"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/sources"
+    "path": "/api/gms-update-center/requirements/sections"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/summary"
+    "path": "/api/gms-update-center/requirements/table-rows"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/requirements/version-summary"
   },
   {
     "methods": [
       "POST"
     ],
-    "path": "/api/gms-update-monitor/sync"
+    "path": "/api/gms-update-center/scan"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/api/gms-update-monitor/sync/status"
+    "path": "/api/gms-update-center/scan/runs"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/scan/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/scan/status"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/security-patches"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/sources"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/summary"
   },
   {
     "methods": [
@@ -2134,42 +2170,6 @@
       "GET"
     ],
     "path": "/api/knowledgebase/stats"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/mainline-known-issues"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/mainline-known-issues/critical-patches"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/mainline-known-issues/security-patches"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/mainline-known-issues/summary"
-  },
-  {
-    "methods": [
-      "POST"
-    ],
-    "path": "/api/mainline-known-issues/sync"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/api/mainline-known-issues/sync/status"
   },
   {
     "methods": [
@@ -2715,12 +2715,6 @@
       "PUT"
     ],
     "path": "/api/redmine-agent/org-chart"
-  },
-  {
-    "methods": [
-      "POST"
-    ],
-    "path": "/api/redmine-agent/org-chart/import-legacy"
   },
   {
     "methods": [
@@ -3571,13 +3565,13 @@
     "methods": [
       "GET"
     ],
-    "path": "/gms-update-monitor"
+    "path": "/gms-update-center"
   },
   {
     "methods": [
       "GET"
     ],
-    "path": "/gms-update-monitor/page.js"
+    "path": "/gms-update-center/page.js"
   },
   {
     "methods": [
@@ -3590,18 +3584,6 @@
       "GET"
     ],
     "path": "/gms-update-radar/page.js"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/mainline-known-issues"
-  },
-  {
-    "methods": [
-      "GET"
-    ],
-    "path": "/mainline-known-issues/page.js"
   },
   {
     "methods": [

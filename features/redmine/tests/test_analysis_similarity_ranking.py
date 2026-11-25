@@ -6,7 +6,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from features.redmine.analysis_similarity import SimilarityAnalysisMixin
+from features.redmine.analysis.similarity import SimilarityAnalysisMixin
 
 
 class Searcher(SimilarityAnalysisMixin):

@@ -71,5 +71,5 @@ contract axis.
 The sentences above record the contract at the time of this ADR and its
 2026-09-28 addendum. The live prompt, skill reference, and packaging pin
 are `redmine_daily_triage_v32` (`PROMPT_VERSION` in
-`features/redmine/kkagent/analyzer.py`). Do not roll the pin back to v12
+`features/redmine/analysis/kkagent/analyzer.py`). Do not roll the pin back to v12
 or v19.

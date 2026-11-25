@@ -1,19 +1,24 @@
-# Semgrep 扫描范围（语法同 .gitignore）。
-# 生成树与第三方载荷载荷不扫：它们不是手写源码，问题应修在源头。
-plugins/
+# Generated payload: canonical source remains in agent/gms-remote-test/.
+# CodeSearch is independently maintained and must be scanned.
+/plugins/gms-remote-test/
 node_modules/
-dist/
-build/
-.web/
-# 测试自身不扫（测试里的注入/断言是构造证据，不是产品行为）。
-tests/
-features/*/tests/
-agent/gms-remote-test/tests/
-worker_agent/tests/
-# 本地运行时数据（证书/日志/库），不属源码树。
-configs/
-data/
-local/
+/dist/
+/build/
+/.web/
+/actions-runner/
+/.venv/
+/.worktrees/
+# Synthetic test fixtures are not product behavior; tracked-file secret scan remains active.
+/tests/
+/features/*/tests/
+/foundation/tests/
+/agent/gms-remote-test/tests/
+/plugins/codesearch/tests/
+/worker/tests/
+# Local runtime state, not tracked configuration examples.
+/configs/local/
+/configs/secrets/
+/data/
 *.log
-# 第三方前端 vendor 载荷（xterm 等），非手写代码。
-web/static/vendor/
+# Third-party frontend assets.
+/web/static/vendor/

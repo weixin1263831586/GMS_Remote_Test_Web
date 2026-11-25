@@ -4,7 +4,7 @@ import json
 import time
 from unittest.mock import patch
 
-from features.devices.debug_api import review_session
+from features.devices.debug.api import review_session
 from tests.runtime_ui.harness import RuntimeUiHarness
 
 
@@ -17,7 +17,7 @@ class DebugReviewBrowserTests(RuntimeUiHarness):
         state = {"status": "pending", "baseline_source": "upload"}
         mutations = []
         page.on("request", lambda request: mutations.append(request.url) if request.method == "POST" else None)
-        with patch("features.devices.debug_api.service.read"):
+        with patch("features.devices.debug.api.service.read"):
             html = review_session(None, "a" * 32).body.decode()
 
         def handle(route):

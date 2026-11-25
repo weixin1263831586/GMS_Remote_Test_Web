@@ -17,7 +17,7 @@ from features.cluster.config import ClusterConfig
 from features.cluster.repository import ClusterRepository, utc_now
 from features.cluster.service import ClusterService
 from foundation.error_model import register_api_error_handler
-from worker_agent.config import WorkerConfig
+from worker.config import WorkerConfig
 
 
 REPORT_NAME = "2026.08.07_15.56.09.558_3101"
@@ -118,7 +118,7 @@ class ReportCopyApiTests(unittest.TestCase):
 
         self.reports_index.get_reports.side_effect = fake_get_reports
         self.reports_patcher = patch(
-            "features.cluster.transfers_api.test_report_db", self.reports_index
+            "features.cluster.transfers.api.test_report_db", self.reports_index
         )
         self.reports_patcher.start()
         token_file = self.root / "cluster-tokens.json"
@@ -188,7 +188,7 @@ class ReportCopyApiTests(unittest.TestCase):
             )
 
         with patch(
-            "features.cluster.transfers_api._local_worker_config",
+            "features.cluster.transfers.api._local_worker_config",
             side_effect=local_config,
         ):
             response = self.client.post(
@@ -218,7 +218,7 @@ class ReportCopyApiTests(unittest.TestCase):
             )
 
         with patch(
-            "features.cluster.transfers_api._local_worker_config",
+            "features.cluster.transfers.api._local_worker_config",
             side_effect=local_config,
         ):
             response = self.client.post("/api/cluster/suites/report-copies", json={
@@ -292,7 +292,7 @@ class ReportCopyApiTests(unittest.TestCase):
                         suite_roots=[self.root / "local-suites"], data_root=data_root,
                     )
 
-                with patch("features.cluster.transfers_api._local_worker_config", side_effect=local_config):
+                with patch("features.cluster.transfers.api._local_worker_config", side_effect=local_config):
                     created = self.client.post("/api/cluster/suites/report-copies", json={
                         "source_worker_id": self.local_worker, "source_suite_path": str(self.local_tools),
                         "report_name": REPORT_NAME, "target_worker_id": self.local_worker,

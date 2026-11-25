@@ -1,23 +1,4 @@
-"""Agent-facing CLI diagnostics UX.
-
-Covers the friction points from the 2026-09-22 GRF/VBA triage:
-
-- global ``--help``/``-h`` must never leak into a command as a positional
-  argument (``gms-rt-devices-snapshot --help`` used to report
-  ``{"device": "--help"}``);
-- unknown commands get git-style closest-match hints (mirroring the MCP
-  adapter's suggestions);
-- ``gms-rt-devices-diag`` is the agent-safe read-only front door over the
-  same typed-readonly allowlist as MCP ``gms_rt_shell``, with a local audit
-  trail;
-- ``gms-rt-devices-snapshot`` returns a real diagnostic bundle whose failed
-  probes carry per-probe reasons instead of silent nulls;
-- the machine catalog advertises ``output_shape`` so callers do not have to
-  guess each command's ``data`` envelope.
-
-The tests execute the REAL runtime script (same pattern as
-``TestEnrollTomlOnly.test_shell_enroll_rejects_environment_profile_controller_mismatch``).
-"""
+"""CLI help, command suggestions, read-only diagnostics and output contracts."""
 
 from __future__ import annotations
 
@@ -440,11 +421,7 @@ gms-rt-devices-snapshot DIAGDEV
         self.assertTrue(payload["ok"])
         self.assertGreater(len(payload["data"]["commands"]), 0)
 
-    # ------------------------------------------------------------------
-    # Profile resolution resilience (sys2206 triage: a full /tmp used to
-    # zero the profile context via the heredoc temp file and masquerade
-    # as "无法解析 Agent profile")
-    # ------------------------------------------------------------------
+    # Profile resolution without a writable temporary directory.
 
     def test_profile_resolution_does_not_need_writable_tmpdir(self):
         self.env["TMPDIR"] = str(self.root / "no-such-tmpdir")

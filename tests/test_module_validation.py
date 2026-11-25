@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from worker_agent.module_validation import (
+from worker.module_validation import (
     detect_no_matched_modules,
     fuzzy_match_candidates,
     list_suite_modules,
@@ -99,7 +99,7 @@ class FuzzyCandidatesTests(unittest.TestCase):
 
 class FailureEvidenceTests(unittest.TestCase):
     def test_collect_failure_evidence_uploads_artifacts(self):
-        from worker_agent.failure_evidence import collect_failure_evidence
+        from worker.failure_evidence import collect_failure_evidence
 
         with tempfile.TemporaryDirectory() as tmp:
             work_dir = Path(tmp)
@@ -115,7 +115,7 @@ class FailureEvidenceTests(unittest.TestCase):
                 return "snapshot-output\n"
 
             with mock.patch(
-                "worker_agent.failure_evidence._adb", side_effect=fake_adb
+                "worker.failure_evidence._adb", side_effect=fake_adb
             ):
                 result = collect_failure_evidence(
                     "job-1", "attempt-1", ["SERIAL1"], work_dir,
@@ -129,11 +129,11 @@ class FailureEvidenceTests(unittest.TestCase):
             )
 
     def test_collect_failure_evidence_survives_adb_failures(self):
-        from worker_agent.failure_evidence import collect_failure_evidence
+        from worker.failure_evidence import collect_failure_evidence
 
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch(
-                "worker_agent.failure_evidence._adb", return_value=""
+                "worker.failure_evidence._adb", return_value=""
             ):
                 result = collect_failure_evidence(
                     "job-1", "attempt-1", ["SERIAL1"], Path(tmp),

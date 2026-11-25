@@ -9,16 +9,16 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_repository import DailyBriefRepository
-from features.redmine.daily_brief_service import DailyBriefService
-from features.redmine.daily_brief_worker import run_claimed_job
-from features.redmine.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.repository import DailyBriefRepository
+from features.redmine.daily_brief.service import DailyBriefService
+from features.redmine.daily_brief.worker import run_claimed_job
 
 
 def patch_preflight_ok():
     return patch(
-        "features.redmine.daily_brief_service.preflight_gms_auth",
+        "features.redmine.daily_brief.service.preflight_gms_auth",
         AsyncMock(return_value=(True, "")),
     )
 
@@ -31,7 +31,7 @@ def patch_owner_revalidation_pending():
     owner_revalidation_failed，把 completed 压成 failed。
     """
     return patch(
-        "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+        "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
         AsyncMock(return_value={
             "pending": True,
             "assigned_to_name": "张三",
@@ -317,7 +317,7 @@ class OwnerFairnessTests(unittest.TestCase):
     """owner round-robin 游标:字母序靠前的 owner 不得垄断 claim 起点。"""
 
     def test_discovery_excludes_administrator_owner(self):
-        from features.redmine.daily_brief_worker import discover_repositories
+        from features.redmine.daily_brief.worker import discover_repositories
 
         with TemporaryDirectory() as directory:
             data_root = Path(directory)
@@ -325,7 +325,7 @@ class OwnerFairnessTests(unittest.TestCase):
             DailyBriefRepository(root / "gms")
             DailyBriefRepository(root / "ordinary")
             with patch(
-                "features.redmine.daily_brief_worker.is_daily_brief_owner_eligible",
+                "features.redmine.daily_brief.worker.is_daily_brief_owner_eligible",
                 side_effect=lambda owner_id: owner_id != "gms",
             ):
                 repositories = discover_repositories(data_root)
@@ -333,7 +333,7 @@ class OwnerFairnessTests(unittest.TestCase):
         self.assertEqual([item.owner_root.name for item in repositories], ["ordinary"])
 
     def test_cursor_rotates_start_offset_each_round(self):
-        from features.redmine.daily_brief_worker import OwnerFairnessCursor
+        from features.redmine.daily_brief.worker import OwnerFairnessCursor
 
         owners = ["a", "b", "c"]
         cursor = OwnerFairnessCursor()
@@ -349,7 +349,7 @@ class OwnerFairnessTests(unittest.TestCase):
         self.assertEqual(sorted(first), sorted(owners))
 
     def test_cursor_handles_empty_and_single(self):
-        from features.redmine.daily_brief_worker import OwnerFairnessCursor
+        from features.redmine.daily_brief.worker import OwnerFairnessCursor
 
         cursor = OwnerFairnessCursor()
         self.assertEqual(cursor.rotate([]), [])
@@ -367,7 +367,7 @@ class UnexpectedExitConvergenceTests(unittest.TestCase):
         self.worker_id = "conv-worker"
 
     def test_unexpected_exit_requeues_job_not_stuck_running(self):
-        from features.redmine.daily_brief_worker import run_claimed_job
+        from features.redmine.daily_brief.worker import run_claimed_job
 
         self.repository.create_run(DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13", mode="manual", run_id="db_conv"
@@ -384,7 +384,7 @@ class UnexpectedExitConvergenceTests(unittest.TestCase):
         # 为触发 finally 兜底,让 asyncio.wait 自身抛错。
         async def scenario_unexpected():
             with patch(
-                "features.redmine.daily_brief_worker.asyncio.wait",
+                "features.redmine.daily_brief.worker.asyncio.wait",
                 side_effect=RuntimeError("event loop exploded"),
             ):
                 return await run_claimed_job(

@@ -8,7 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
-from features.redmine.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 
 from .test_daily_brief_service import SNAPSHOT, VALID, make_service
 
@@ -23,7 +23,7 @@ class AuthPreflightTests(unittest.TestCase):
         # 默认放行 preflight（编排路径聚焦 token 吊销场景）；各测试方法内
         # 可用 _patch_preflight 覆盖为拦截语义。
         default_ok = patch(
-            "features.redmine.daily_brief_service.preflight_gms_auth",
+            "features.redmine.daily_brief.service.preflight_gms_auth",
             AsyncMock(return_value=(True, "")),
         )
         default_ok.start()
@@ -32,7 +32,7 @@ class AuthPreflightTests(unittest.TestCase):
         # revalidation 才能标 completed（单测必须 mock 该
         # 新契约，否则 owner_revalidation_failed 把 completed 压成 failed）。
         owner_revalidation = patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(return_value={
                 "pending": True,
                 "assigned_to_name": "张三",
@@ -45,7 +45,7 @@ class AuthPreflightTests(unittest.TestCase):
     @staticmethod
     def _patch_preflight(ok: bool, reason: str):
         return patch(
-            "features.redmine.daily_brief_service.preflight_gms_auth",
+            "features.redmine.daily_brief.service.preflight_gms_auth",
             AsyncMock(return_value=(ok, reason)),
         )
 

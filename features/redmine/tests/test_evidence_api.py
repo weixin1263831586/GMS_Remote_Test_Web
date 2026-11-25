@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.redmine import evidence_api, evidence_search_api
+from features.redmine.evidence import api as evidence_api
+from features.redmine.evidence import search_api as evidence_search_api
 
 
 def _make_config_manager(base_url: str):
@@ -46,7 +47,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.directory = TemporaryDirectory()
         self.root = Path(self.directory.name)
 
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
         import features.redmine.users as redmine_users
 
         self.users_patch = patch.object(
@@ -58,7 +59,7 @@ class EvidenceApiTests(unittest.TestCase):
         evidence_store._STORE_CACHE.clear()
 
         # 预置一个 ready 快照（绕过网络，直接写 store + 文件）。
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         self.snapshot = store.create_snapshot(issue_id=648526, download_policy="all")
@@ -136,7 +137,7 @@ class EvidenceApiTests(unittest.TestCase):
     def tearDown(self):
         self.client.close()
         self.users_patch.stop()
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
 
         evidence_store._STORE_CACHE.clear()
         self.directory.cleanup()
@@ -243,7 +244,7 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertIn("artifact", kinds)
 
     def test_search_reports_incomplete_archive_index(self):
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(
@@ -274,7 +275,7 @@ class EvidenceApiTests(unittest.TestCase):
         把 artifact 的 derived_text_path 清空：如果搜索把空候选当 break，
         stored_path 里的独有关键词就会 0 命中。
         """
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         store.update_artifact(self.artifact_id, derived_text_path="")
@@ -288,8 +289,8 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_search_cites_zip_member_with_line(self):
         """zip 内容可检索（端点级）：archive 派生文本命中给出 zip!/member 行级引用。"""
-        from features.redmine.evidence import zip_member_block
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import zip_member_block
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(
@@ -374,7 +375,7 @@ class EvidenceApiTests(unittest.TestCase):
         窗口读满即停的优化在"恰好收尾"时无法区分读完与还有后续，必须
         多探测一个字符；否则客户端按 truncated 翻页只会拿到空窗口。
         """
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(
@@ -408,7 +409,7 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_artifact_text_falls_back_to_gb18030(self):
         """utf-8 失败回退 gb18030（replace），中文日志可读。"""
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(
@@ -437,8 +438,8 @@ class EvidenceApiTests(unittest.TestCase):
     def test_search_covers_zip_members_beyond_one_megabyte(self):
         """回归：v2 成员帧逐成员全文匹配，成员体越过旧
         1MiB 前缀窗口的命中同样可见。"""
-        from features.redmine.evidence import zip_member_block
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import zip_member_block
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(
@@ -527,7 +528,7 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_latest_endpoint_resolves_newest_snapshot_for_issue(self):
         """issue-show 双参数——latest 端点按 issue 解析。"""
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         store.create_snapshot(issue_id=648526, download_policy="none")
@@ -579,18 +580,18 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_create_preflight_blocks_missing_credentials_without_snapshot(self):
         """凭据缺失时建快照前 4xx 快速失败，不留垃圾快照。"""
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         _owner_creds = __import__(
-            "features.redmine.evidence", fromlist=["_OwnerCredentials"]
+            "features.redmine.evidence.service", fromlist=["_OwnerCredentials"]
         )._OwnerCredentials
         before_ids = {
             item["snapshot_id"]
             for item in store.list_snapshots_for_issue(648526, limit=100)
         }
         with patch(
-            "features.redmine.evidence.load_owner_credentials",
+            "features.redmine.evidence.service.load_owner_credentials",
             lambda owner: _owner_creds(),
         ):
             response = self.client.post(
@@ -609,14 +610,14 @@ class EvidenceApiTests(unittest.TestCase):
 
     def test_create_preflight_blocks_missing_base_url_without_snapshot(self):
         """base_url 缺失同样在建快照前 4xx 快速失败。"""
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         before_ids = {
             item["snapshot_id"]
             for item in store.list_snapshots_for_issue(648526, limit=100)
         }
-        with patch("features.redmine.evidence.owner_base_url", lambda owner: ""):
+        with patch("features.redmine.evidence.service.owner_base_url", lambda owner: ""):
             response = self.client.post(
                 "/api/redmine-agent/issues/648526/evidence",
                 json={"download": "none", "refresh": True},
@@ -632,18 +633,18 @@ class EvidenceApiTests(unittest.TestCase):
         )
 
     def test_dry_run_probes_issue_and_does_not_create_snapshot(self):
-        from features.redmine.evidence import _OwnerCredentials
-        from features.redmine.evidence_fetch import EvidenceFetcher
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import _OwnerCredentials
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         before = store.latest_snapshot_for_issue(123456)
         probe = AsyncMock(return_value=None)
         with patch(
-            "features.redmine.evidence.owner_base_url",
+            "features.redmine.evidence.service.owner_base_url",
             lambda owner: "https://redmine.example",
         ), patch(
-            "features.redmine.evidence.load_owner_credentials",
+            "features.redmine.evidence.service.load_owner_credentials",
             lambda owner: _OwnerCredentials(api_key="k"),
         ), patch.object(EvidenceFetcher, "probe_issue", probe):
             response = self.client.post(
@@ -657,15 +658,15 @@ class EvidenceApiTests(unittest.TestCase):
         self.assertEqual(store.latest_snapshot_for_issue(123456), before)
 
     def test_preflight_owner_fetch_returns_base_url_when_configured(self):
-        from features.redmine.evidence import preflight_owner_fetch
+        from features.redmine.evidence.service import preflight_owner_fetch
 
         with patch(
-            "features.redmine.evidence.owner_base_url",
+            "features.redmine.evidence.service.owner_base_url",
             lambda owner: "http://redmine.example/",
         ), patch(
-            "features.redmine.evidence.load_owner_credentials",
+            "features.redmine.evidence.service.load_owner_credentials",
             lambda owner: __import__(
-                "features.redmine.evidence", fromlist=["_OwnerCredentials"]
+                "features.redmine.evidence.service", fromlist=["_OwnerCredentials"]
             )._OwnerCredentials(api_key="k"),
         ):
             self.assertEqual(

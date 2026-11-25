@@ -5,8 +5,8 @@ from threading import Event
 
 import pytest
 
-from features.redmine.daily_brief_models import DailyBriefRun
-from features.redmine.daily_brief_repository import DailyBriefRepository
+from features.redmine.daily_brief.models import DailyBriefRun
+from features.redmine.daily_brief.repository import DailyBriefRepository
 
 
 def test_delete_holds_write_lock_before_active_check(tmp_path, monkeypatch):
@@ -16,6 +16,7 @@ def test_delete_holds_write_lock_before_active_check(tmp_path, monkeypatch):
                                      mode="issue:1", run_id="one", status="completed"))
     checked, finish_delete, trying_enqueue = Event(), Event(), Event()
     connect = deleting._connect
+    closed = Event()
 
     class Connection:
         def __init__(self, conn):
@@ -27,6 +28,10 @@ def test_delete_holds_write_lock_before_active_check(tmp_path, monkeypatch):
 
         def __exit__(self, *args):
             return self.conn.__exit__(*args)
+
+        def close(self):
+            self.conn.close()
+            closed.set()
 
         def execute(self, sql, params=()):
             cursor = self.conn.execute(sql, params)
@@ -57,4 +62,5 @@ def test_delete_holds_write_lock_before_active_check(tmp_path, monkeypatch):
         assert deletion.result(timeout=5) == 1
         with pytest.raises(ValueError, match="not found"):
             queued.result(timeout=5)
+    assert closed.is_set()
     assert queue.get_run("one") is None

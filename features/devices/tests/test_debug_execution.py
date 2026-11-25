@@ -3,8 +3,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.devices import debug_execution
-from features.devices.debug_execution import focused_window
+from features.devices.debug import execution as debug_execution
+from features.devices.debug.execution import focused_window
 from foundation.error_model import ApiError
 
 

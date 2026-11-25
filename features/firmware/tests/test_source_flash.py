@@ -18,6 +18,24 @@ from features.firmware.source_flash import (
 )
 
 
+def test_source_ssh_uses_configured_host_port_and_strict_host_keys():
+    config = MagicMock()
+    config.load_config.return_value = {}
+    config.find_device_host_password.return_value = "fixture"
+    with (
+        patch.object(source_flash.runtime, "config_manager", config),
+        patch("paramiko.SSHClient") as factory,
+        patch.object(source_flash, "configure_strict_host_keys") as strict,
+    ):
+        client = source_flash.open_windows_ssh("tester@source-host:2222")
+    config.find_device_host_password.assert_called_once_with("tester@source-host:2222")
+    assert client is factory.return_value
+    strict.assert_called_once_with(client)
+    client.connect.assert_called_once_with(
+        "source-host", port=2222, username="tester", password="fixture", timeout=15,
+    )
+
+
 def _make_ssh():
     ssh = MagicMock()
     stdout = MagicMock()
@@ -31,16 +49,7 @@ def _make_ssh():
 
 def _emulate_channel(stdout_bytes: bytes, stderr_bytes: bytes = b"",
                      exit_code: int = 0) -> MagicMock:
-    """Build a channel mock that behaves like a REAL paramiko channel
-    under foundation.ssh_executor.run's concurrent drain loop.
-
-    A bare MagicMock makes `recv_ready()` always truthy while `recv()`
-    returns a fresh (len==0) MagicMock: `made_progress` stays true forever,
-    nothing accumulates — the drain loop spins at 100% CPU allocating new
-    mocks until the host runs out of memory. That OOM/hang is exactly the
-    "63% … runner shutdown" the CI used to hit. Real semantics: each ready
-    flag is one-shot and recv() yields the actual bytes.
-    """
+    """Mock a channel with one-shot readiness flags and real byte payloads."""
 
     channel = MagicMock()
     out_pending = [bool(stdout_bytes)]

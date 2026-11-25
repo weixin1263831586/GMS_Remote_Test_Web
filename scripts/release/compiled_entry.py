@@ -30,17 +30,15 @@ REQUIRED_PAGE_ASSETS = (
     "features/devices/ui/page.html",
     "features/gerrit/ui/page.html",
     "features/redmine/ui/page.html",
-    "features/system/mainline_issues/ui/page.html",
-    "features/system/update_monitor/ui/page.html",
-    "features/system/update_radar/ui/page.html",
+    "features/gms/ui/page.html",
+    "features/gms/radar/ui/page.html",
     "features/automation/ui/page.js",
     "features/cluster/ui/page.js",
     "features/devices/ui/page.js",
     "features/gerrit/ui/page.js",
     "features/redmine/ui/page.js",
-    "features/system/mainline_issues/ui/page.js",
-    "features/system/update_monitor/ui/page.js",
-    "features/system/update_radar/ui/page.js",
+    "features/gms/ui/page.js",
+    "features/gms/radar/ui/page.js",
     "web/templates/architecture.html",
     "docs/architecture/platform-topology.mmd",
     "docs/architecture/usbip-topology.mmd",
@@ -48,6 +46,19 @@ REQUIRED_PAGE_ASSETS = (
     "docs/architecture/firmware-topology.mmd",
     "docs/architecture/test-flow-topology.mmd",
     "docs/architecture/agent-analysis-topology.mmd",
+)
+REQUIRED_SOFTWARE_ASSETS = (
+    "scripts/deployment/worker/configure_worker_software.sh",
+    "scripts/deployment/worker/prepare_gms_host_tools.sh",
+    "scripts/native/install_adbproxy_rs.sh",
+    "scripts/native/install_gms_worker_native.sh",
+    "scripts/execution/gms_worker_usbip.sh",
+    "tools/misc.img",
+    "tools/scrcpy-linux-x86_64-v3.3.4.tar.gz",
+    "tools/GMS-Host-Tools/env.sh",
+    "tools/GMS-Host-Tools/verify.sh",
+    "tools/GMS-Host-Tools/README.md",
+    "tools/GMS-Host-Tools/manifest.json",
 )
 REQUIRED_PAGE_ROUTES = (
     "/automation", "/cluster", "/devices-console", "/gerrit-dashboard",
@@ -58,8 +69,8 @@ REQUIRED_PAGE_ROUTES = (
 def _runtime_asset_checks(root: Path) -> dict[str, bool]:
     files = (
         "web/shell/shell.html", "configs/examples/config.example.json",
-        "scripts/run_production_backup.sh",
-        *REQUIRED_PAGE_ASSETS,
+        "scripts/backup/run_production_backup.sh",
+        *REQUIRED_PAGE_ASSETS, *REQUIRED_SOFTWARE_ASSETS,
     )
     checks = {name: (root / name).is_file() and (root / name).stat().st_size > 0
               for name in files}
@@ -258,7 +269,7 @@ def _bootstrap(root: Path, host: str, port: int) -> None:
         example = configs / "examples/config.example.json"
         if not example.is_file():
             raise RuntimeError("missing sanitized config.example.json in compiled release")
-        from scripts.sanitize_release_config import sanitize_product_config
+        from scripts.security.sanitize_release_config import sanitize_product_config
         _save_json(config, sanitize_product_config(_read_json(example)))
 
     run_home = Path.home()
@@ -376,7 +387,7 @@ def worker() -> int:
     from bootstrap.env_loader import load_runtime_env
     load_runtime_env()
     os.environ.setdefault("GMS_WORKER_CONFIG", str(Path(os.environ["GMS_DATA_ROOT"]) / "local-worker/config.json"))
-    from worker_agent.entrypoint import main
+    from worker.entrypoint import main
     main()
     return 0
 
@@ -412,8 +423,8 @@ def smoke() -> int:
     load_runtime_env()
     from bootstrap.application import create_app
     from bootstrap.production_security import validate_production_security_configuration
-    from scripts.gms_backup import _load_key
-    from worker_agent.config import WorkerConfig
+    from scripts.backup.gms_backup import _load_key
+    from worker.config import WorkerConfig
     validate_production_security_configuration()
     app = create_app()
     routes = _validate_smoke_routes(app)
@@ -424,7 +435,7 @@ def smoke() -> int:
 
     from fastapi import Request
 
-    from features.system.agent_package_registry import agent_bootstrap_installer, agent_package_manifest
+    from features.system.agent_package.registry import agent_bootstrap_installer, agent_package_manifest
 
     request = Request({"type": "http", "scheme": "https", "server": ("localhost", 5001),
                        "path": "/", "root_path": "", "headers": []})
@@ -447,7 +458,7 @@ def doctor() -> int:
 
 def main() -> int:
     if len(sys.argv) < 2:
-        print("usage: gms-runtime {init|controller|worker|backup|doctor|smoke}", file=sys.stderr)
+        print("usage: gms-runtime {init|controller|worker|backup|doctor|smoke|extract-zip|configure-host-tools|remote-worker|worker-bundle}", file=sys.stderr)
         return 2
     action = sys.argv[1]
     if action == "init":
@@ -456,10 +467,36 @@ def main() -> int:
         return controller()
     if action == "worker":
         return worker()
+    if action == "remote-worker":
+        if not os.environ.get("GMS_WORKER_CONFIG"):
+            raise RuntimeError("GMS_WORKER_CONFIG is required for a remote Worker")
+        if sys.argv[2:] == ["--check"]:
+            from worker.config import WorkerConfig
+
+            WorkerConfig.load()
+            print("remote Worker configuration validated")
+            return 0
+        if len(sys.argv) != 2:
+            return 2
+        from worker.entrypoint import main as worker_main
+
+        worker_main()
+        return 0
+    if action == "worker-bundle" and len(sys.argv) == 3:
+        destination = Path(sys.argv[2]).resolve()
+        root = release_root()
+        _set_env(root)
+        from bootstrap.env_loader import load_runtime_env
+
+        load_runtime_env()
+        from features.cluster.deployment.api import build_worker_bundle
+
+        build_worker_bundle(root, destination)
+        return 0
     if action == "backup":
         root = release_root()
         _set_env(root)
-        from scripts.gms_backup import main as backup_main
+        from scripts.backup.gms_backup import main as backup_main
         args = sys.argv[2:]
         if args and args[0] in {"create", "restore"}:
             if not any(arg == "--data-root" or arg.startswith("--data-root=") for arg in args):
@@ -467,6 +504,16 @@ def main() -> int:
             if not any(arg == "--config-root" or arg.startswith("--config-root=") for arg in args):
                 args += ["--config-root", str((root / "configs").resolve())]
         return backup_main(args)
+    if action == "extract-zip" and len(sys.argv) == 4:
+        from scripts.deployment.worker.extract_zip_preserve_mode import extract_archive
+
+        extract_archive(Path(sys.argv[2]), Path(sys.argv[3]))
+        return 0
+    if action == "configure-host-tools" and len(sys.argv) == 3:
+        from scripts.deployment.worker.configure_gms_host_tools import configure_bashrc
+
+        configure_bashrc(Path(sys.argv[2]))
+        return 0
     if action == "doctor":
         return doctor()
     if action == "smoke":

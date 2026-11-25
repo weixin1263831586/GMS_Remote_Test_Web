@@ -1,11 +1,11 @@
 import unittest
 
-from features.kkagent import UniversalAIAnalyzer
+from features.reports import ReportFailureAnalyzer
 
 
 class BuildPromptTests(unittest.TestCase):
     def test_json_example_interpolates_emoji_constants(self):
-        prompt = UniversalAIAnalyzer({})._build_prompt(
+        prompt = ReportFailureAnalyzer({})._build_prompt(
             'MyTestClass', 'testMethod', 'AssertionError boom', None, None
         )
 
@@ -16,7 +16,7 @@ class BuildPromptTests(unittest.TestCase):
         self.assertNotIn('EMOJI_CHECK', prompt)
 
     def test_json_example_keeps_literal_braces(self):
-        prompt = UniversalAIAnalyzer({})._build_prompt(
+        prompt = ReportFailureAnalyzer({})._build_prompt(
             'MyTestClass', None, 'AssertionError boom', None, None
         )
 

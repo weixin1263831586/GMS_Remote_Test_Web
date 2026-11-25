@@ -4,10 +4,14 @@ import asyncio
 import base64
 import binascii
 import json
+import os
 import shutil
 import tempfile
 from pathlib import Path
 from typing import Annotated
+
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
 from features.auth import (
     authentication_required,
@@ -15,6 +19,7 @@ from features.auth import (
 )
 from features.users import get_client_display_id_from_request
 from foundation.redaction import redact_sensitive_text
+from foundation.responses import error_response
 
 from .access import (
     can_access_report,
@@ -23,17 +28,8 @@ from .access import (
     report_request_user,
 )
 from .access import principal_has_reports_read as require_permission_reports_read
-from .api_helpers import (
-    APIRouter,
-    JSONResponse,
-    Query,
-    Request,
-    dependencies,
-    error_response,
-    logger,
-    os,
-    test_report_db,
-)
+from .api_helpers import logger
+from .dependencies import dependencies
 from .display import (
     report_client_display_id,
     report_display_name,
@@ -45,6 +41,7 @@ from .downloads import (
     create_remote_report_bundle,
     remove_report_bundle,
 )
+from .repository import test_report_db
 
 
 router = APIRouter()

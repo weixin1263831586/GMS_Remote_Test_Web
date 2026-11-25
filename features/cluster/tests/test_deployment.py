@@ -51,7 +51,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         }
 
     def test_requires_heartbeat_newer_than_completed_installation(self):
-        from features.cluster.deployment_api import deploy_worker
+        from features.cluster.deployment.api import deploy_worker
 
         repository = SimpleNamespace(
             get_worker=MagicMock(
@@ -67,14 +67,14 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
         sleep = AsyncMock()
         with patch(
-            "features.cluster.deployment_api.asyncio.to_thread",
+            "features.cluster.deployment.api.asyncio.to_thread",
             new=AsyncMock(return_value={"success": True, "worker_id": "worker-1"}),
         ), patch(
-            "features.cluster.deployment_api.asyncio.sleep", new=sleep
+            "features.cluster.deployment.api.asyncio.sleep", new=sleep
         ), patch(
-            "features.cluster.deployment_api.service", return_value=cluster
+            "features.cluster.deployment.api.service", return_value=cluster
         ), patch(
-            "features.cluster.deployment_api.utc_now",
+            "features.cluster.deployment.api.utc_now",
             return_value="2026-01-01T00:00:01Z",
         ):
             result = asyncio.run(deploy_worker(self._body()))
@@ -84,7 +84,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         sleep.assert_awaited_once_with(1)
 
     def test_stale_worker_row_does_not_report_deployment_success(self):
-        from features.cluster.deployment_api import deploy_worker
+        from features.cluster.deployment.api import deploy_worker
 
         cluster = SimpleNamespace(
             repository=SimpleNamespace(
@@ -95,14 +95,14 @@ class WorkerDeploymentTests(unittest.TestCase):
             config=SimpleNamespace(worker_registration_timeout_seconds=2),
         )
         with patch(
-            "features.cluster.deployment_api.asyncio.to_thread",
+            "features.cluster.deployment.api.asyncio.to_thread",
             new=AsyncMock(return_value={"success": True, "worker_id": "worker-1"}),
         ), patch(
-            "features.cluster.deployment_api.asyncio.sleep", new=AsyncMock()
+            "features.cluster.deployment.api.asyncio.sleep", new=AsyncMock()
         ), patch(
-            "features.cluster.deployment_api.service", return_value=cluster
+            "features.cluster.deployment.api.service", return_value=cluster
         ), patch(
-            "features.cluster.deployment_api.utc_now",
+            "features.cluster.deployment.api.utc_now",
             return_value="2026-01-01T00:00:01Z",
         ), self.assertRaises(HTTPException) as raised:
             asyncio.run(deploy_worker(self._body()))
@@ -111,7 +111,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertIn("未产生新心跳", raised.exception.detail)
 
     def test_reports_authentication_failure_with_target(self):
-        from features.cluster.deployment_api import deploy_worker
+        from features.cluster.deployment.api import deploy_worker
 
         with patch(
             "features.system.ssh_manager.create_connection",
@@ -128,7 +128,7 @@ class WorkerDeploymentTests(unittest.TestCase):
     def test_installer_expands_quoted_home_relative_suite_root(self):
         script = (
             Path(__file__).resolve().parents[3]
-            / "scripts/install_cluster_worker.sh"
+            / "scripts/deployment/worker/install_cluster_worker.sh"
         )
         source = script.read_text(encoding="utf-8")
         start = source.index('case "${SUITE_ROOT}" in')
@@ -152,7 +152,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertEqual(completed.stdout, "/home/worker/GMS-Suite")
 
     def test_bundled_adbproxy_package_is_valid(self):
-        from features.cluster.deployment_api import _validated_adbproxy_package
+        from features.cluster.deployment.api import _validated_adbproxy_package
 
         project_root = Path(__file__).resolve().parents[3]
         package, checksum = _validated_adbproxy_package(project_root)
@@ -174,7 +174,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
     def test_rejects_tampered_adbproxy_package(self):
-        from features.cluster.deployment_api import _validated_adbproxy_package
+        from features.cluster.deployment.api import _validated_adbproxy_package
 
         with tempfile.TemporaryDirectory() as directory:
             project_root = Path(directory)
@@ -191,20 +191,20 @@ class WorkerDeploymentTests(unittest.TestCase):
                 _validated_adbproxy_package(project_root)
 
     def test_worker_bundle_contains_adbproxy_installer_package(self):
-        from features.cluster.deployment_api import _add_adbproxy_package
+        from features.cluster.deployment.api import _add_adbproxy_package
 
         project_root = Path(__file__).resolve().parents[3]
         with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
             with tarfile.open(archive.name, "w:gz") as bundle:
                 bundle.add(
-                    project_root / "scripts/install_adbproxy_rs.sh",
-                    arcname="scripts/install_adbproxy_rs.sh",
+                    project_root / "scripts/native/install_adbproxy_rs.sh",
+                    arcname="scripts/native/install_adbproxy_rs.sh",
                 )
                 _add_adbproxy_package(bundle, project_root)
             with tarfile.open(archive.name, "r:gz") as bundle:
                 names = set(bundle.getnames())
 
-        self.assertIn("scripts/install_adbproxy_rs.sh", names)
+        self.assertIn("scripts/native/install_adbproxy_rs.sh", names)
         self.assertIn(
             "tools/adbproxy-rs/dist/"
             "adbproxy-rs-linux-x86_64-musl.tar.gz",
@@ -217,7 +217,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
     def test_worker_bundle_contains_all_python_runtime_packages(self):
-        from features.cluster.deployment_bundle import add_worker_python_runtime
+        from features.cluster.deployment.api import add_worker_python_runtime
 
         project_root = Path(__file__).resolve().parents[3]
         with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
@@ -226,13 +226,13 @@ class WorkerDeploymentTests(unittest.TestCase):
             with tarfile.open(archive.name, "r:gz") as bundle:
                 names = set(bundle.getnames())
 
-        self.assertIn("worker_agent/app.py", names)
+        self.assertIn("worker/app.py", names)
         self.assertIn("foundation/__init__.py", names)
-        self.assertIn("foundation/network_quality.py", names)
+        self.assertIn("foundation/networking.py", names)
         self.assertIn("foundation/transport_contract.py", names)
 
         installer = (
-            project_root / "scripts/install_cluster_worker.sh"
+            project_root / "scripts/deployment/worker/install_cluster_worker.sh"
         ).read_text(encoding="utf-8")
         self.assertIn(
             '"${PROJECT_ROOT}/foundation/" "${INSTALL_ROOT}/foundation/"',
@@ -240,7 +240,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         )
 
     def test_worker_bundle_contains_valid_native_runtime(self):
-        from features.cluster.deployment_bundle import add_worker_runtime
+        from features.cluster.deployment.api import add_worker_runtime
 
         project_root = Path(__file__).resolve().parents[3]
         with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
@@ -249,8 +249,8 @@ class WorkerDeploymentTests(unittest.TestCase):
             with tarfile.open(archive.name, "r:gz") as bundle:
                 names = set(bundle.getnames())
 
-        self.assertIn("scripts/install_gms_worker_native.sh", names)
-        self.assertIn("worker_agent/app.py", names)
+        self.assertIn("scripts/native/install_gms_worker_native.sh", names)
+        self.assertIn("worker/app.py", names)
         self.assertIn("foundation/native_tools.py", names)
         for name in (
             "SHA256SUMS",
@@ -259,13 +259,38 @@ class WorkerDeploymentTests(unittest.TestCase):
         ):
             self.assertIn(f"tools/gms-worker-native/dist/x86_64/{name}", names)
 
+    def test_compiled_worker_bundle_has_only_native_members(self):
+        from features.cluster.deployment.api import add_worker_runtime
+        from foundation.native_tools import write_compiled_worker_manifest
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            binary = root / "gms-runtime"
+            binary.write_bytes(b"native executable")
+            binary.chmod(0o755)
+            (root / "libworker.so").write_bytes(b"native library")
+            write_compiled_worker_manifest(root)
+            (root / "configs").mkdir()
+            (root / "configs" / "private.json").write_text("private")
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz") as archive:
+                with (
+                    tarfile.open(archive.name, "w:gz") as bundle,
+                    patch("features.cluster.deployment.api.add_worker_native_runtime"),
+                ):
+                    add_worker_runtime(bundle, root)
+                with tarfile.open(archive.name, "r:gz") as bundle:
+                    self.assertEqual(
+                        set(bundle.getnames()),
+                        {"compiled-runtime/gms-runtime", "compiled-runtime/libworker.so"},
+                    )
+
     def test_worker_native_bundle_rejects_a_tampered_binary(self):
-        from features.cluster.deployment_bundle import add_worker_native_runtime
+        from features.cluster.deployment.api import add_worker_native_runtime
 
         with tempfile.TemporaryDirectory() as directory:
             project_root = Path(directory)
-            scripts = project_root / "scripts"
-            scripts.mkdir()
+            scripts = project_root / "scripts/native"
+            scripts.mkdir(parents=True)
             installer = scripts / "install_gms_worker_native.sh"
             installer.write_text(
                 "#!/bin/bash\n",
@@ -290,7 +315,7 @@ class WorkerDeploymentTests(unittest.TestCase):
 
     def test_adbproxy_installer_uses_the_offline_package(self):
         project_root = Path(__file__).resolve().parents[3]
-        installer = project_root / "scripts/install_adbproxy_rs.sh"
+        installer = project_root / "scripts/native/install_adbproxy_rs.sh"
         installer_source = installer.read_text(encoding="utf-8")
         self.assertNotIn("curl ", installer_source)
         self.assertNotIn("github.com", installer_source)
@@ -314,7 +339,7 @@ class WorkerDeploymentTests(unittest.TestCase):
             for binary_name in ("adb-proxy", "adb-hub", "adb-hubd"):
                 self.assertTrue((install_dir / binary_name).is_file())
 
-    def test_manual_deploy_command_includes_offline_adbproxy_package(self):
+    def test_manual_deploy_command_uses_shared_bundle_builder(self):
         # 2026-09-30 域拆分后部署命令文本位于 management chunk；断言面
         # 覆盖 page.html 声明的全部脚本（concat 等价旧单文件）。
         ui_dir = Path(__file__).resolve().parents[1] / "ui"
@@ -323,14 +348,24 @@ class WorkerDeploymentTests(unittest.TestCase):
             for path in sorted(ui_dir.glob("*.js"))
         )
 
-        self.assertIn("scripts/install_adbproxy_rs.sh", page_js)
-        self.assertIn("tools/adbproxy-rs/dist", page_js)
-        self.assertIn("scripts/install_gms_worker_native.sh", page_js)
-        self.assertIn("tools/gms-worker-native/dist", page_js)
-        self.assertIn("worker_agent foundation", page_js)
+        from features.cluster.deployment.api import WORKER_DEPLOY_FILES
+
+        self.assertIn("bash scripts/deployment/worker/deploy_worker.sh", page_js)
+        self.assertNotIn("rsync -azR", page_js)
+        for relative in (
+            "scripts/native/install_adbproxy_rs.sh",
+            "scripts/deployment/worker/configure_worker_software.sh",
+            "scripts/deployment/worker/prepare_gms_host_tools.sh",
+            "scripts/deployment/worker/configure_gms_host_tools.py",
+            "scripts/deployment/worker/extract_zip_preserve_mode.py",
+            "scripts/execution/fastboot_common.sh",
+            "tools/scrcpy-linux-x86_64-v3.3.4.tar.gz",
+        ):
+            self.assertIn(relative, WORKER_DEPLOY_FILES)
+
 
     def test_source_only_deployment_waits_for_adb_proxy_capability(self):
-        from features.cluster.deployment_api import deploy_adb_proxy_source
+        from features.cluster.deployment.api import deploy_adb_proxy_source
 
         worker_id = "adb-source-192-0-2-10-12345678"
         cluster = SimpleNamespace(
@@ -346,20 +381,20 @@ class WorkerDeploymentTests(unittest.TestCase):
             config=SimpleNamespace(worker_registration_timeout_seconds=1),
         )
         with patch(
-            "features.cluster.deployment_api._adb_proxy_source_worker_id",
+            "features.cluster.deployment.api._adb_proxy_source_worker_id",
             return_value=worker_id,
         ), patch(
-            "features.cluster.deployment_api.asyncio.to_thread",
+            "features.cluster.deployment.api.asyncio.to_thread",
             new=AsyncMock(return_value={
                 "success": True,
                 "worker_id": worker_id,
                 "ssh_host": "user@192.0.2.10",
             }),
         ), patch(
-            "features.cluster.deployment_api.service",
+            "features.cluster.deployment.api.service",
             return_value=cluster,
         ), patch(
-            "features.cluster.deployment_api.utc_now",
+            "features.cluster.deployment.api.utc_now",
             return_value="2026-01-01T00:00:01Z",
         ):
             result = asyncio.run(deploy_adb_proxy_source({
@@ -372,7 +407,7 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertEqual(result["worker_id"], worker_id)
 
     def test_source_only_install_command_passes_token_by_file(self):
-        from features.cluster.deployment_api import (
+        from features.cluster.deployment.api import (
             _adb_proxy_source_install_command,
         )
 
@@ -397,7 +432,7 @@ class WorkerDeploymentTests(unittest.TestCase):
     def test_source_only_installer_is_minimal_and_offline(self):
         script = (
             Path(__file__).resolve().parents[3]
-            / "scripts/install_adb_proxy_source_worker.sh"
+            / "scripts/deployment/worker/install_adb_proxy_source_worker.sh"
         ).read_text(encoding="utf-8")
 
         self.assertIn("install_adbproxy_rs.sh", script)
@@ -412,7 +447,7 @@ class WorkerDeploymentTests(unittest.TestCase):
 
 class DeploymentFailureMappingTests(unittest.TestCase):
     def test_connect_timeout_is_504_without_exception_text(self):
-        from features.cluster.deployment_api import _ssh_connect_error
+        from features.cluster.deployment.api import _ssh_connect_error
 
         raised = _ssh_connect_error(
             TimeoutError("secret-banner"),
@@ -426,7 +461,7 @@ class DeploymentFailureMappingTests(unittest.TestCase):
         self.assertIn("192.0.2.10", raised.detail)
 
     def test_connect_refused_is_502_without_exception_text(self):
-        from features.cluster.deployment_api import _ssh_connect_error
+        from features.cluster.deployment.api import _ssh_connect_error
 
         raised = _ssh_connect_error(
             ConnectionRefusedError(111, "connection refused"),
@@ -439,7 +474,7 @@ class DeploymentFailureMappingTests(unittest.TestCase):
         self.assertNotIn("connection refused", str(raised.detail).lower())
 
     def test_installer_timeout_and_failure_hide_output(self):
-        from features.cluster.deployment_api import _installer_failure
+        from features.cluster.deployment.api import _installer_failure
         from foundation.command_result import CommandResult
 
         timed_out = _installer_failure(CommandResult(
@@ -456,7 +491,7 @@ class DeploymentFailureMappingTests(unittest.TestCase):
         self.assertNotIn("sekret", failed.message)
 
     def test_archive_path_is_not_predictable(self):
-        from features.cluster.deployment_api import _staged_credential_path
+        from features.cluster.deployment.api import _staged_credential_path
 
         first = _staged_credential_path("gms-worker-setup.tar.gz")
         second = _staged_credential_path("gms-worker-setup.tar.gz")
@@ -468,19 +503,19 @@ class DeploymentFailureMappingTests(unittest.TestCase):
 
 class LocalSoftwareReconfigurationTests(unittest.TestCase):
     def setUp(self):
-        import features.cluster.deployment_api as deployment
+        import features.cluster.deployment.api as deployment
 
         with deployment._LOCAL_SOFTWARE_LOCK:
             deployment._LOCAL_SOFTWARE_TASKS.clear()
             deployment._LOCAL_SOFTWARE_ACTIVE_TASK = ""
 
     def test_starts_the_restricted_local_software_unit(self):
-        from features.cluster.deployment_api import _reconfigure_local_software
+        from features.cluster.deployment.api import _reconfigure_local_software
 
         loaded = SimpleNamespace(returncode=0, stdout="loaded\n", stderr="")
         completed = SimpleNamespace(returncode=0, stdout="configured", stderr="")
         with patch(
-            "features.cluster.deployment_api.subprocess.run",
+            "features.cluster.deployment.api.subprocess.run",
             side_effect=[loaded, completed],
         ) as run:
             output = _reconfigure_local_software()
@@ -491,12 +526,12 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         self.assertEqual(command[-2:], ["start", "gms-web-app-local-software.service"])
 
     def test_runs_local_script_when_unit_is_not_installed(self):
-        from features.cluster.deployment_api import _reconfigure_local_software
+        from features.cluster.deployment.api import _reconfigure_local_software
 
         missing = SimpleNamespace(returncode=1, stdout="not-found\n", stderr="")
         completed = SimpleNamespace(returncode=0, stdout="configured", stderr="")
         with patch(
-            "features.cluster.deployment_api.subprocess.run",
+            "features.cluster.deployment.api.subprocess.run",
             side_effect=[missing, completed],
         ) as run:
             output = _reconfigure_local_software()
@@ -504,10 +539,10 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         self.assertEqual(output, "configured")
         command = run.call_args_list[1].args[0]
         self.assertEqual(command[0], "/bin/bash")
-        self.assertTrue(command[1].endswith("configure_local_worker_software.sh"))
+        self.assertTrue(command[1].endswith("configure_worker_software.sh"))
 
     def test_reconfigures_software_when_local_worker_is_idle(self):
-        from features.cluster.deployment_api import (
+        from features.cluster.deployment.api import (
             reconfigure_local_worker_software,
         )
 
@@ -519,12 +554,12 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         )
         thread = MagicMock()
         with patch(
-            "features.cluster.deployment_api.service", return_value=cluster
+            "features.cluster.deployment.api.service", return_value=cluster
         ), patch(
-            "features.cluster.deployment_api._local_worker_has_active_tests",
+            "features.cluster.deployment.api._local_worker_has_active_tests",
             return_value=False,
         ), patch(
-            "features.cluster.deployment_api.threading.Thread",
+            "features.cluster.deployment.api.threading.Thread",
             return_value=thread,
         ):
             result = asyncio.run(reconfigure_local_worker_software())
@@ -535,7 +570,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         thread.start.assert_called_once_with()
 
     def test_rejects_reconfiguration_while_local_test_is_running(self):
-        from features.cluster.deployment_api import (
+        from features.cluster.deployment.api import (
             reconfigure_local_worker_software,
         )
 
@@ -546,9 +581,9 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
             ),
         )
         with patch(
-            "features.cluster.deployment_api.service", return_value=cluster
+            "features.cluster.deployment.api.service", return_value=cluster
         ), patch(
-            "features.cluster.deployment_api._local_worker_has_active_tests",
+            "features.cluster.deployment.api._local_worker_has_active_tests",
             return_value=True,
         ), self.assertRaises(HTTPException) as raised:
             asyncio.run(reconfigure_local_worker_software())
@@ -556,7 +591,7 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
 
     def test_reuses_the_active_software_task(self):
-        import features.cluster.deployment_api as deployment
+        import features.cluster.deployment.api as deployment
 
         cluster = SimpleNamespace(
             config=SimpleNamespace(local_worker_id="ats-worker-controller"),
@@ -595,7 +630,7 @@ class GtsCredentialResolutionTests(unittest.TestCase):
         path.chmod(0o600)
 
     def test_explicit_env_takes_precedence(self):
-        from features.cluster.deployment_api import _resolve_gts_credential
+        from features.cluster.deployment.api import _resolve_gts_credential
 
         with tempfile.TemporaryDirectory() as directory:
             explicit = Path(directory) / "explicit-gts.json"
@@ -608,7 +643,7 @@ class GtsCredentialResolutionTests(unittest.TestCase):
             self.assertEqual(result, explicit.resolve())
 
     def test_missing_env_is_rejected_even_if_repo_file_exists(self):
-        from features.cluster.deployment_api import _resolve_gts_credential
+        from features.cluster.deployment.api import _resolve_gts_credential
 
         with patch.dict("os.environ", {}, clear=False):
             os.environ.pop("GMS_GTS_CREDENTIAL_FILE", None)

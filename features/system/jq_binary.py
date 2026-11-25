@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 JQ_BIN_PATH = os.path.join(PROJECT_ROOT, "tools", "jq-linux-amd64")
 
-# Operators stage this file by hand (scripts/prepare_pinned_jq.sh), so the
+# Operators stage this file by hand (scripts/deployment/prepare_pinned_jq.sh), so the
 # endpoint rejects anything that cannot run on a bare Linux x86-64 host
 # before it is advertised to installers. This catches the classic mistakes:
 # a text/HTML error page saved as jq, a wrong-architecture build, or a

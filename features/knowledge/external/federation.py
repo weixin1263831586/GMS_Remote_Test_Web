@@ -28,7 +28,7 @@ RRF_K = 60
 
 
 def _rrf_document_key(hit: KnowledgeHit) -> tuple[str, str, str]:
-    """Stable logical-document key used to fuse and deduplicate providers."""
+    """Stable logical-document key for cross-provider fusion and deduplication."""
     path = str(hit.source_path or "").strip().replace("\\", "/").casefold()
     title = " ".join(str(hit.title or "").split()).casefold()
     if path:

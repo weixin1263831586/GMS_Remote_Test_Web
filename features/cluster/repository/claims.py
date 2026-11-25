@@ -1,0 +1,250 @@
+"""Unified device-claim helpers shared by Cluster repository workflows."""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import Any
+
+
+class ClusterClaimRepositoryMixin:
+    def force_release_local_aoa_operation(self, device_key: str, local_worker_id: str) -> tuple[bool, str]:
+        """Called only behind the elevated administrator force-release endpoint.
+
+        Same-host AOA validates the shared claim before every USB transfer. Remote
+        executors use Worker-local fences, so their active operations cannot be
+        released here. Jobs, reservations and borrowed claims retain their guards.
+        """
+        claim = self.claims.active_claim(device_key)
+        if not claim:
+            return True, "设备未被占用"
+        source = str(claim.get("source_id") or "")
+        if (claim.get("worker_id") != local_worker_id
+                or claim.get("source_type") != "cluster-device-action"
+                or not source.startswith("operation:")):
+            return False, "该占用不是本机独立回放，请先结束对应任务或预约"
+        command = self.get_command_by_operation(local_worker_id, source.removeprefix("operation:"))
+        payload = (command or {}).get("payload") or {}
+        tokens = payload.get("lease_tokens") or []
+        matching = any(token.get("device_id") == device_key
+                       and token.get("lease_id") == claim["id"]
+                       and token.get("generation") == claim["generation"] for token in tokens)
+        if (not command or command.get("command_type") != "device_action" or command.get("job_id")
+                or payload.get("claim_source_id") != source
+                or payload.get("release_claim_on_terminal") is not True or not matching):
+            return False, "无法确认占用对应的独立操作，请先结束原操作后重试"
+        terminal = {"completed", "failed", "cancelled"}
+        if command["status"] not in terminal:
+            if (command["status"] not in {"queued", "delivered", "accepted", "running"}
+                    or command.get("delivered_at") or command.get("acknowledged_at")):
+                return False, "该回放由 Worker 执行，请先通过回放停止按钮结束操作"
+            if payload.get("action") != "aoa_sequence" or len(payload.get("devices") or []) != 1:
+                return False, "设备仍在执行其他操作，请等待该操作结束"
+            # Persist cancellation before revoking the shared fence. A running
+            # executor observes cancel or fencing loss; late ACKs cannot resurrect
+            # this terminal receipt. Revocation may interrupt input: require review.
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            payload.update(aoa_control_action="cancel",
+                           aoa_control_revision=int(payload.get("aoa_control_revision") or 0) + 1)
+            with self._lock, self.connect() as conn:
+                conn.execute(
+                    """UPDATE cluster_commands SET status='cancelled',payload_json=?,result_json=?,
+                       error=?,updated_at=?,acknowledged_at=? WHERE id=? AND status IN
+                       ('queued','delivered','accepted','running')""",
+                    (json.dumps(payload, separators=(",", ":")),
+                     json.dumps({"success": False, "forced_release": True, "reconcile_required": True}),
+                     "管理员强制终止 AOA 回放；请核对设备当前页面后再操作", now, now, command["id"]),
+                )
+        released = self.claims.release_operation_if_current(
+            device_key, claim["id"], claim["generation"], source)
+        if not released:
+            return False, "设备占用已变化，请刷新后重试"
+        return True, "原回放占用及 USB 端口锁已释放；请核对设备当前页面后再操作"
+
+    def resolve_worker_device(
+        self, worker_id: str, value: str
+    ) -> dict[str, Any] | None:
+        """按 inventory 精确解析设备；serial 可能含 ":"，禁止前缀切分猜测。"""
+        value = str(value or "").strip()
+        if not value:
+            return None
+        for device in self.list_devices(worker_id):
+            if value in {str(device.get("id") or ""), str(device.get("serial") or "")}:
+                return device
+        return None
+
+    def _physical_alias_keys(self, device_key: str) -> list[str]:
+        """Every claim key that routes to the same physical device.
+
+        An ADB-Proxy alias row carries adb_proxy_source_worker_id /
+        adb_proxy_source_serial pointing at the source worker's local-USB
+        row; claiming through either route must contend for the same
+        physical hardware. Returns the requested key itself plus every
+        alias key found in the current inventory.
+        """
+        alias_keys = [device_key]
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT transport, properties_json FROM cluster_worker_devices WHERE id=?",
+                (device_key,),
+            ).fetchone()
+            if row is None:
+                return alias_keys
+            try:
+                properties = json.loads(row["properties_json"] or "{}")
+            except json.JSONDecodeError:
+                properties = {}
+            transport = str(row["transport"] or "")
+            port_worker = device_key.split(":", 1)[0]
+            port_properties = properties
+            if transport == "adb_proxy":
+                source_worker = str(properties.get("adb_proxy_source_worker_id") or "")
+                source_serial = str(properties.get("adb_proxy_source_serial") or "")
+                if source_worker and source_serial:
+                    alias_keys.append(f"{source_worker}:{source_serial}")
+                    source = conn.execute("SELECT properties_json FROM cluster_worker_devices WHERE id=?",
+                                          (f"{source_worker}:{source_serial}",)).fetchone()
+                    port_properties = json.loads(source["properties_json"] or "{}") if source else {}
+                    port_worker = source_worker
+            else:
+                source_serial = device_key.split(":", 1)[1] if ":" in device_key else ""
+                proxy_rows = conn.execute(
+                    "SELECT id, properties_json FROM cluster_worker_devices "
+                    "WHERE transport='adb_proxy'",
+                ).fetchall()
+                for proxy_row in proxy_rows:
+                    try:
+                        proxy_properties = json.loads(proxy_row["properties_json"] or "{}")
+                    except json.JSONDecodeError:
+                        continue
+                    if (
+                        str(proxy_properties.get("adb_proxy_source_worker_id") or "")
+                        == device_key.split(":", 1)[0]
+                        and str(proxy_properties.get("adb_proxy_source_serial") or "")
+                        == source_serial
+                    ):
+                        alias_keys.append(str(proxy_row["id"]))
+            port = str(port_properties.get("usb") or "")
+            if port:
+                alias_keys.append(f"{port_worker}:@usb:{port}")
+        return list(dict.fromkeys(alias_keys))
+
+    def _claim_devices(
+        self, worker_id: str, devices: list[str]
+    ) -> list[dict[str, Any]]:
+        claimed = []
+        values = dict.fromkeys(
+            str(item).strip() for item in devices if str(item).strip()
+        )
+        with self.connect() as conn:
+            for value in values:
+                device_key = (
+                    value if value.startswith(f"{worker_id}:")
+                    else f"{worker_id}:{value}"
+                )
+                # Claim the requested alias AND its physical sibling
+                # keys in the same atomic acquire, so an operation claim on
+                # the source device conflicts with a job on the proxy alias
+                # (and vice versa) instead of letting both run at once.
+                for key in self._physical_alias_keys(device_key):
+                    previous = conn.execute(
+                        """SELECT COALESCE(MAX(generation),0)+1
+                           FROM device_leases WHERE device_id=?""",
+                        (key,),
+                    ).fetchone()[0]
+                    key_worker, _, key_serial = key.partition(":")
+                    claimed.append({
+                        "device_key": key,
+                        "worker_id": key_worker,
+                        "serial": key_serial,
+                        "generation_floor": int(previous or 1),
+                    })
+        return claimed
+
+    def alias_claim_targets(
+        self, worker_id: str, device_id: str
+    ) -> list[dict[str, Any]]:
+        """Read-only public view of :meth:`_claim_devices` for one device.
+
+        Exposed for flows that must know the physical-port/alias key set
+        before acquiring claims (firmware AOA recovery extends the burn's
+        claim to the bound port); callers reach this public method instead
+        of the private helper.
+        """
+        return self._claim_devices(worker_id, [device_id])
+
+    def acquire_device_operation_claim(
+        self,
+        worker_id: str,
+        devices: list[str],
+        *,
+        owner_id: str,
+        source_type: str,
+        source_id: str,
+        ttl_seconds: int = 3600,
+        username: str = "",
+    ) -> list[dict[str, Any]]:
+        acquired, records = self.claims.acquire(
+            self._claim_devices(worker_id, devices),
+            owner_id=owner_id,
+            username=username or owner_id,
+            source_type=source_type,
+            source_id=source_id,
+            ttl_seconds=ttl_seconds,
+        )
+        if not acquired:
+            owner = records[0].get("username") or records[0].get("owner_id")
+            raise ValueError(f"device is already claimed by {owner}")
+        return records
+
+    def renew_job_device_claim(
+        self,
+        job_id: str,
+        owner_id: str,
+        device_ids: list[str],
+    ) -> bool:
+        expected = {str(item) for item in device_ids if str(item)}
+        if not expected:
+            return False
+        source_id = f"job:{job_id}"
+        # 任务占用的物理 claim 集合包含 ADB Proxy alias 的源设备 key
+        # （_claim_devices 建任务时同时占用了 proxy 和源端两个 key）。
+        # 续租必须覆盖全集：只按 device_leases 里的目标 key 续租会让源端
+        # claim 在一个 TTL 后过期，另一用户即可通过本地固件锁入口抢到
+        # 源设备，而 proxy job 的目标 claim 仍然有效。
+        full_keys = set(expected)
+        for device_id in sorted(expected):
+            full_keys.update(self._physical_alias_keys(device_id))
+        records = [
+            self.claims.active_claim(key) for key in sorted(full_keys)
+        ]
+        if any(record is None for record in records):
+            return False
+        if any(
+            record["source_id"] != source_id or record["owner_id"] != owner_id
+            for record in records
+        ):
+            return False
+        # 不带 device_keys 过滤，按 source_id 续租全部活跃行，把历史
+        # alias key 一并续住；行数必须覆盖全集，否则视为 fencing 丢失。
+        renewed = self.claims.renew(
+            source_id, self.claim_lease_ttl_seconds
+        )
+        return renewed >= len(full_keys)
+
+    @staticmethod
+    def claim_fencing_tokens(
+        records: list[dict[str, Any]], attempt_id: str,
+        *, device_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Keep physical-alias claims global; fence only requested execution targets."""
+        return [
+            {
+                "lease_id": record["id"],
+                "device_id": record["device_key"],
+                "generation": record["generation"],
+                "attempt_id": attempt_id,
+            }
+            for record in records
+            if device_ids is None or record["device_key"] in device_ids
+        ]

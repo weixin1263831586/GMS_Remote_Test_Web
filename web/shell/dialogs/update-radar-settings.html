@@ -7,7 +7,7 @@
     <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg></div>
     <div class="modal-body">
 <p class="tech-intro">设置雷达任务、检查时间和通知收件人。</p>
-      <p class="radar-hint">每天按计划全量扫描所选任务。关闭浏览器后仍由平台服务执行，停机错过的计划恢复后补跑一次。</p>
+      <p class="radar-hint">每天按计划全量扫描所选任务。关闭浏览器后仍由平台服务执行，停机错过的计划恢复后补跑一次。开启每日扫描后，每周一和每月1日按相同执行时间自动发送上周及上月快照（无变更也发送）。</p>
       <p id="radar-smtp-status" class="radar-hint">复用系统级 SMTP：在「测试执行 → 系统设置 → 邮件发送方」配置。</p>
       <form id="radar-settings-form">
         <fieldset id="radar-settings-fields" disabled>
@@ -22,7 +22,8 @@
               <label class="radar-check"><input type="checkbox" name="radar-task" value="artifacts" checked>测试套件更新</label>
               <label class="radar-check"><input type="checkbox" name="radar-task" value="bulletins" checked>Critical_Patch</label>
               <label class="radar-check"><input type="checkbox" name="radar-task" value="exemptions" checked>Mainline包豁免项</label>
-            </div><small id="radar-task-count">已选择 6 / 6 项</small>
+              <label class="radar-check"><input type="checkbox" name="radar-task" value="security_patches" checked>安全补丁（CVE）</label>
+            </div><small id="radar-task-count">已选择 7 / 7 项</small>
           </fieldset>
           <label>收件人<textarea id="radar-recipients" placeholder="person@example.com, team@example.com"></textarea><small>逗号、分号或换行分隔，最多 50 人。开启每日扫描前需填写。</small></label>
           <label>发送策略<select id="radar-notify"><option value="changes">仅有变更或扫描失败时发</option><option value="always">每次扫描都发汇总，无更新也发</option></select></label>

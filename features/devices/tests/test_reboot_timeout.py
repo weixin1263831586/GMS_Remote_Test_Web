@@ -2,7 +2,7 @@
 import unittest
 from unittest.mock import patch
 
-from features.devices.adb_ops import reboot_with_runner
+from features.devices.adb.operations import reboot_with_runner
 
 
 class StubRunner:
@@ -63,8 +63,8 @@ class RebootChannelDropTests(unittest.TestCase):
 
     def test_failed_get_state_cannot_confirm_online_even_with_device_text(self):
         runner = StubRunner({"reboot": ("", 0), "get-state": ("device", 255)})
-        with patch("features.devices.adb_ops.time.time", side_effect=[0, 0, 1]), \
-                patch("features.devices.adb_ops.time.sleep"):
+        with patch("features.devices.adb.operations.time.time", side_effect=[0, 0, 1]), \
+                patch("features.devices.adb.operations.time.sleep"):
             result = reboot_with_runner(runner, "serial", wait_for_online=True, wait_timeout=0.5)
         self.assertTrue(result.success)
         self.assertFalse(result.back_online)

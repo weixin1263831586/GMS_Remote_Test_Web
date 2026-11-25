@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 
 from fastapi import Request
 
-from features.system import agent_package_registry as registry
+from features.system.agent_package import registry as registry
 from scripts.release.build_binary_release import _write_agent_module
 
 
@@ -29,7 +29,7 @@ class AgentPackageRegistryErrorTests(unittest.IsolatedAsyncioTestCase):
                 patch.object(registry, "PACKAGE_YAML", Path(directory) / "absent/package.yaml"),
                 patch.object(registry, "AGENT_PACKAGE_DIR", Path(directory) / "absent/plugins"),
                 patch.object(registry, "_manifest_signature", return_value="signed") as sign,
-                patch("features.system.skill_archive_signing.skill_verify_key_b64", return_value="pinned-key"),
+                patch("features.system.agent_package.signing.skill_verify_key_b64", return_value="pinned-key"),
             ):
                 manifest = await registry.agent_package_manifest(request)
                 archive = await registry.agent_package_download(bundled.VERSION, request)

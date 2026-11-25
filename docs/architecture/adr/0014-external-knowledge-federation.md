@@ -42,7 +42,7 @@ separate from the personal knowledge base:
 - **Background only.** Every hit carries `evidence_level: "background"`
   and is consumed for mechanism explanation and as input to verification
   plans. It is never a verified root cause, never enters the evidence
-  ledger (`features/redmine/kkagent/evidence_gate.py` is unchanged), and
+  ledger (`features/redmine/analysis/kkagent/evidence_gate.py` is unchanged), and
   never substitutes for `gms-rt-sdk-*` source forensics.
 - **Evidence priority ladder** (used by diagnosis ranking and prompt
   contracts):

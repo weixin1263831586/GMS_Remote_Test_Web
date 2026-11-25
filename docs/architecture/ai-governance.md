@@ -63,7 +63,7 @@ flowchart TD
 
 ## 2. Failure Identity / Cluster（失败身份层）
 
-`features/redmine/failure_identity.py`。相似检索（`analysis_similarity`，
+`features/redmine/failure_identity.py`。相似检索（`analysis/similarity.py`，
 retrieval score）与关系判定明确分层：score 高 ≠ 同一失败。
 
 ```mermaid
@@ -209,7 +209,7 @@ flowchart TD
     Exec -.-> GateA
     Normal["普通 Python import"] -.-> GateB["test_dependency_rules.py
     跨 feature 只准走 __init__ 公共表面"]
-    Bridge["features/* ↔ worker_agent"] -.-> GateC["test_controller_worker_boundary.py
+    Bridge["features/* ↔ worker"] -.-> GateC["test_controller_worker_boundary.py
     文件 → 精确 module 两级 allowlist（双向 + stale 检查）"]
     All["全部响应出口"] -.-> GateD["test_api_error_semantics.py
     record_internal_error 契约：

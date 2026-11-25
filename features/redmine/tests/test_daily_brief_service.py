@@ -1,6 +1,6 @@
 """DailyBriefService 编排测试（不启动真实 kkagent/Redmine）。
 
-preflight fail-closed 语义（2026-09 收紧）由 kkagent/auth_preflight 的
+preflight fail-closed 语义（2026-09 收紧）由 kkagent/preflight 的
 专项单测覆盖；本文件的编排路径统一把 preflight patch 为通过。
 run_payload 执行视图/脱敏契约见 test_daily_brief_execution_view.py。
 """
@@ -13,18 +13,18 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent.evidence_preflight import EvidencePreflight
 from features.redmine.config import RedmineConfig
-from features.redmine.daily_brief_repository import DailyBriefRepository
-from features.redmine.daily_brief_service import (
+from features.redmine.daily_brief.repository import DailyBriefRepository
+from features.redmine.daily_brief.service import (
     DEFAULT_BRIEF_CONFIG,
     DailyBriefService,
     normalize_daily_brief_config,
 )
-from features.redmine.kkagent import KkAgentAnalysisResult
-from features.redmine.kkagent.evidence_preflight import EvidencePreflight
 
 
-PASS_PREFLIGHT_TARGET = "features.redmine.daily_brief_service.preflight_gms_auth"
+PASS_PREFLIGHT_TARGET = "features.redmine.daily_brief.service.preflight_gms_auth"
 
 
 def patch_preflight_ok():
@@ -144,7 +144,7 @@ class RunLifecycleTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         owner_revalidation = patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(return_value={
                 "pending": True,
                 "assigned_to_name": "张三",
@@ -154,7 +154,7 @@ class RunLifecycleTests(unittest.TestCase):
         owner_revalidation.start()
         self.addCleanup(owner_revalidation.stop)
         evidence_preflight = patch(
-            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief.service.collect_deep_analysis_evidence",
             AsyncMock(return_value=EvidencePreflight()),
         )
         evidence_preflight.start()
@@ -344,7 +344,7 @@ class RunLifecycleTests(unittest.TestCase):
         ), patch.object(
             self.service, "_build_analyzer"
         ) as builder, patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(return_value={
                 "pending": False,
                 "assigned_to_name": "李 煌",
@@ -376,7 +376,7 @@ class RunLifecycleTests(unittest.TestCase):
         with self._patch_snapshot(), patch.object(
             self.service, "_build_analyzer"
         ) as builder, patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(side_effect=RuntimeError("Redmine credentials not configured")),
         ):
             builder.return_value.analyze = fake_analyze
@@ -457,8 +457,8 @@ class RunLifecycleTests(unittest.TestCase):
         self.assertEqual(subjects, {"A", "B"})
 
     def test_deep_analysis_precollects_bound_evidence_before_kkagent(self):
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-        from features.redmine.kkagent.trace import ToolTrace
+        from features.redmine.analysis.kkagent.trace import ToolTrace
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-16", mode="issue:652654",
@@ -477,7 +477,7 @@ class RunLifecycleTests(unittest.TestCase):
         )
         self.evidence_preflight.stop()
         collector = patch(
-            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief.service.collect_deep_analysis_evidence",
             AsyncMock(return_value=evidence),
         )
         collector_mock = collector.start()
@@ -512,8 +512,8 @@ class RunLifecycleTests(unittest.TestCase):
         nightly 复盘的兜底产物）。批量晨报现已默认 diagnostic（与单号分析
         同语义），此分支保留用于历史持久化结果的兼容渲染；profile 未绑定
         时保持跳过。"""
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-        from features.redmine.kkagent.trace import ToolTrace
+        from features.redmine.analysis.kkagent.trace import ToolTrace
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-18", mode="nightly",
@@ -533,7 +533,7 @@ class RunLifecycleTests(unittest.TestCase):
         )
         self.evidence_preflight.stop()
         collector = patch(
-            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief.service.collect_deep_analysis_evidence",
             AsyncMock(return_value=evidence),
         )
         collector_mock = collector.start()
@@ -572,7 +572,7 @@ class RunLifecycleTests(unittest.TestCase):
         统一 setdefault 成 diagnostic（晨报只差在固定时间触发）。"""
         import asyncio
 
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-18", mode="nightly",
@@ -606,7 +606,7 @@ class ReanalyzeMetadataTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         evidence_preflight = patch(
-            "features.redmine.daily_brief_service.collect_deep_analysis_evidence",
+            "features.redmine.daily_brief.service.collect_deep_analysis_evidence",
             AsyncMock(return_value=EvidencePreflight()),
         )
         evidence_preflight.start()
@@ -615,7 +615,7 @@ class ReanalyzeMetadataTests(unittest.TestCase):
     def test_reanalyze_fallback_entry_enriches_local_metadata(self):
         import asyncio
 
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-18", mode="issue:653167",
@@ -666,7 +666,7 @@ class SyncDisplaySubjectsTests(unittest.TestCase):
     def test_sync_updates_display_records_and_mirror(self):
         import asyncio
 
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-18", mode="issue:653167",
@@ -706,7 +706,7 @@ class SyncDisplaySubjectsTests(unittest.TestCase):
         )
 
     def test_sync_survives_redmine_unavailability(self):
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-18", mode="nightly",
@@ -745,7 +745,7 @@ class FrozenSnapshotTests(unittest.TestCase):
         preflight.start()
         self.addCleanup(preflight.stop)
         owner_revalidation = patch(
-            "features.redmine.daily_brief_service.revalidate_issue_pending_for_owner",
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
             AsyncMock(return_value={
                 "pending": True,
                 "assigned_to_name": "张三",
@@ -888,8 +888,8 @@ class DeleteIssueHistoryTests(unittest.TestCase):
         self.service = make_service(Path(self._tmp.name))
 
     def _save_issue_run(self, issue_id=653167):
-        from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-        from features.redmine.daily_brief_repository import new_run_id
+        from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+        from features.redmine.daily_brief.repository import new_run_id
 
         run = DailyBriefRun(
             owner_id="u1", brief_date="2026-09-13",

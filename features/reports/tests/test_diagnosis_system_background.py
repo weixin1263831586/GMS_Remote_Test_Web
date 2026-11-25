@@ -138,12 +138,12 @@ class AndroidApiLevelFromRequestTests(unittest.TestCase):
     """suite_version / android_version → API level 统一转换。"""
 
     def _request(self, **fields):
-        from features.reports.api_models import ReportDiagnosisRequest
+        from features.reports.api_helpers import ReportDiagnosisRequest
 
         return ReportDiagnosisRequest(test_name="t", **fields)
 
     def test_suite_version_major_maps_to_api_level(self):
-        from features.reports.knowledge_ranking import android_api_level_from_request
+        from features.reports.diagnosis_recalls import android_api_level_from_request
 
         for suite, expected in (
             ("16.0_r1", 36), ("android-15", 35), ("14", 34), ("13.0_r7", 33),
@@ -155,13 +155,13 @@ class AndroidApiLevelFromRequestTests(unittest.TestCase):
                 )
 
     def test_android_version_field_used_when_suite_missing(self):
-        from features.reports.knowledge_ranking import android_api_level_from_request
+        from features.reports.diagnosis_recalls import android_api_level_from_request
 
         request = self._request(android_version="16")
         self.assertEqual(android_api_level_from_request(request), 36)
 
     def test_unknown_version_returns_none(self):
-        from features.reports.knowledge_ranking import android_api_level_from_request
+        from features.reports.diagnosis_recalls import android_api_level_from_request
 
         self.assertIsNone(
             android_api_level_from_request(self._request(suite_version="12", android_version=""))
@@ -169,7 +169,7 @@ class AndroidApiLevelFromRequestTests(unittest.TestCase):
         self.assertIsNone(android_api_level_from_request(self._request()))
 
     def test_api_level_maps_back_to_android_major(self):
-        from features.reports.knowledge_ranking import android_version_from_api_level
+        from features.reports.diagnosis_recalls import android_version_from_api_level
 
         self.assertEqual(android_version_from_api_level(37), "17")
         self.assertEqual(android_version_from_api_level(36), "16")

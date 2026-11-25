@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from features.devices import debug_identity as identity
+from features.devices.debug import identity
 from foundation.error_model import ApiError
 
 

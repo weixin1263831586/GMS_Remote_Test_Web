@@ -160,7 +160,7 @@ def _adb_bytes(serial: str, *args: str, timeout: int = 20) -> subprocess.Complet
 def _server_cache_dir() -> Path:
     """scrcpy-server 解包缓存根：Controller data 目录（运行时产物）。"""
     try:
-        from features.devices import deployment_service
+        from .deployment import service as deployment_service
 
         return deployment_service.store().root / "scrcpy-server"
     except Exception:

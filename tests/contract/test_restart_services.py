@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def run_restart(
     tmp_path, layout, service_case, *, legacy_unit=False, clean_cache=False,
-    fresh_certificate=False, server_hostname=None,
+    fresh_certificate=False, server_hostname=None, outdated_services=False,
 ):
     project = tmp_path / "project"
     project.mkdir()
@@ -24,7 +24,7 @@ def run_restart(
     for relative in (
         "bootstrap/env_loader.py", "foundation/config_paths.py",
         "foundation/runtime_settings.py", "foundation/private_config.py",
-        "tools/scripts/deployment/update_systemd_tls.py", "tools/scripts/_common.py",
+        "scripts/deployment/update_systemd_tls.py",
     ):
         target = project / relative
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -36,7 +36,7 @@ def run_restart(
         target = project / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(b"cache fixture")
-    vnc_module = project / "features/system/vnc.py"
+    vnc_module = project / "features/system/host/vnc.py"
     vnc_module.parent.mkdir(parents=True)
     (project / "features/__init__.py").touch()
     (project / "features/system/__init__.py").touch()
@@ -52,16 +52,19 @@ vnc_manager = _VNCManager()
 """.lstrip(),
         encoding="utf-8",
     )
-    certificate_dir = project / ("configs/certs" if layout == "legacy" else "configs/secrets/certs")
+    certificate_dir = project / "configs/secrets/certs"
     certificate_dir.mkdir(parents=True)
     if not fresh_certificate:
         for name in ("gms-local.crt", "gms-local.key"):
             (certificate_dir / name).write_text("fixture certificate", encoding="utf-8")
     if layout != "process_only":
-        relative = "configs/runtime.json" if layout == "legacy" else "configs/local/environment.json"
+        relative = "configs/local/environment.json"
         environment_file = project / relative
         environment_file.parent.mkdir(parents=True, exist_ok=True)
-        environment_file.write_text(json.dumps({"RESTART_FIXTURE": "loaded"}), encoding="utf-8")
+        environment_file.write_text(
+            "{invalid" if service_case == "invalid_environment" else json.dumps({"RESTART_FIXTURE": "loaded"}),
+            encoding="utf-8",
+        )
     if layout == "structured":
         (project / "configs/secrets/environment.json").write_text(
             json.dumps({"RESTART_SECRET_FIXTURE": "private-fixture"}), encoding="utf-8",
@@ -88,6 +91,10 @@ systemctl() {
     printf '%s\n' "$*" >> "$RESTART_CALLS"
     case "$*" in
         'daemon-reload') [[ "$RESTART_CASE" != unit_reload_fails ]] ;;
+        '--user daemon-reload') [[ "$RESTART_CASE" != user_reload_fails ]] ;;
+        'show gms-web-app.service --property=NeedDaemonReload --value')
+            [[ "$RESTART_CASE" == reload_pending ]] && echo yes || echo no
+            ;;
         'show gms-redmine-daily-brief-worker.service --property=LoadState --value')
             [[ "$RESTART_CASE" == missing ]] && echo not-found || echo loaded
             ;;
@@ -120,7 +127,7 @@ nohup() { return 0; }
 script=$1
 layout=$2
 shift 2
-source <(sed 's|^SYSTEMD_UNIT_FILE=.*|SYSTEMD_UNIT_FILE="${GMS_WEB_APP_DIR}/web.service"|' "$script") "$@"
+source <(sed 's|^SYSTEMD_UNIT_DIR=.*|SYSTEMD_UNIT_DIR="${GMS_WEB_APP_DIR}/systemd"|' "$script") "$@"
 [[ "${RESTART_FIXTURE}" == loaded ]]
 if [[ "$layout" == structured ]]; then
     [[ "${RESTART_SECRET_FIXTURE}" == private-fixture ]]
@@ -135,7 +142,9 @@ fi
         "RESTART_CASE": service_case,
         "RESTART_CALLS": str(tmp_path / "service-calls"),
     }
-    unit = project / "web.service"
+    system_units = project / "systemd"
+    system_units.mkdir()
+    unit = system_units / "gms-web-app.service"
     if legacy_unit:
         unit.write_text(
             f"[Service]\nWorkingDirectory={project}\n"
@@ -150,6 +159,27 @@ fi
     user_unit = Path(environment["HOME"]) / ".config/systemd/user/gms-worker-agent.service"
     user_unit.parent.mkdir(parents=True)
     user_unit.touch()
+    if outdated_services:
+        commands = {
+            system_units / "gms-web-app-local-worker.service": '"/custom venv/python" -u -m old.worker --flag',
+            system_units / "gms-redmine-daily-brief.service":
+                "/custom/python -m features.redmine.daily_brief_cli run-nightly",
+            system_units / "gms-redmine-daily-brief-delta.service":
+                "/custom/python -m features.redmine.daily_brief_cli run-delta",
+            system_units / "gms-web-app-local-software.service":
+                f'"{project}/scripts/configure_local_worker_software.sh" "{project}" /custom/home',
+            system_units / "gms-web-app-backup.service": f"{project}/scripts/run_production_backup.sh",
+            user_unit: "/usr/bin/python3 -m old.worker",
+        }
+        for path, command in commands.items():
+            path.write_text(f"[Service]\nExecStart={command}\nEnvironment=KEEP=value\n", encoding="utf-8")
+    if service_case == "worker_runtime_missing":
+        (project / "separate-worker").mkdir()
+        user_unit.write_text(
+            f"[Service]\nWorkingDirectory={project}/separate-worker\n"
+            "ExecStart=/usr/bin/python3 -m old.worker\n",
+            encoding="utf-8",
+        )
     environment.pop("GMS_SKIP_RUNTIME_ENV", None)
     environment.pop("ENV_FILE", None)
     environment.pop("RESTART_FIXTURE", None)
@@ -163,11 +193,12 @@ fi
          *(["--clean-cache"] if clean_cache else [])],
         env=environment, cwd=project, capture_output=True, text=True, timeout=15,
     )
-    calls = Path(environment["RESTART_CALLS"]).read_text().splitlines()
+    calls_path = Path(environment["RESTART_CALLS"])
+    calls = calls_path.read_text().splitlines() if calls_path.exists() else []
     return result, calls, project
 
 
-@pytest.mark.parametrize("layout", ["structured", "legacy", "process_only"])
+@pytest.mark.parametrize("layout", ["structured", "process_only"])
 @pytest.mark.parametrize("service_case", ["success", "missing", "brief_stop_fails", "brief_restart_fails", "brief_inactive", "device_restart_fails", "web_restart_fails"])
 def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
     result, calls, _project = run_restart(tmp_path, layout, service_case)
@@ -200,14 +231,14 @@ def test_restart_reports_actual_worker_outcome(tmp_path, layout, service_case):
 def test_restart_updates_installed_tls_paths_before_stopping_services(tmp_path):
     result, calls, project = run_restart(tmp_path, "structured", "success", legacy_unit=True)
     assert result.returncode == 0, result.stderr
-    unit = project / "web.service"
+    unit = project / "systemd/gms-web-app.service"
     updated = unit.read_text()
     assert f"--ssl-keyfile {project}/configs/secrets/certs/gms-local.key" in updated
     assert f"--ssl-certfile {project}/configs/secrets/certs/gms-local.crt" in updated
     assert "--port 5001" in updated
     assert "Restart=always" in updated
     assert "-m bootstrap.server app:app" in updated
-    backups = list(project.glob("web.service.pre-canonical-tls-*"))
+    backups = list(unit.parent.glob("gms-web-app.service.pre-canonical-tls-*"))
     assert len(backups) == 1
     assert f"{project}/configs/certs/gms-local.key" in backups[0].read_text()
     assert calls.index("daemon-reload") < calls.index("stop gms-redmine-daily-brief-worker.service")
@@ -223,6 +254,49 @@ def test_tls_update_failure_keeps_services_running(tmp_path, service_case):
     assert "服务管理完成" not in result.stdout
 
 
+def test_restart_updates_managed_entrypoints_before_stopping_services(tmp_path):
+    result, calls, project = run_restart(tmp_path, "structured", "success", outdated_services=True)
+    assert result.returncode == 0, result.stderr
+    system_units = project / "systemd"
+    expected = {
+        system_units / "gms-web-app-local-worker.service": '"/custom venv/python" -u -m worker.app --flag',
+        system_units / "gms-redmine-daily-brief.service": "/custom/python -m features.redmine.daily_brief.cli run-nightly",
+        system_units / "gms-redmine-daily-brief-delta.service": "/custom/python -m features.redmine.daily_brief.cli run-delta",
+        system_units / "gms-web-app-local-software.service":
+            f'"{project}/scripts/deployment/worker/configure_worker_software.sh" "{project}" /custom/home',
+        system_units / "gms-web-app-backup.service": f"{project}/scripts/backup/run_production_backup.sh",
+        tmp_path / "home/.config/systemd/user/gms-worker-agent.service": "/usr/bin/python3 -m worker.app",
+    }
+    for path, command in expected.items():
+        assert path.read_text() == f"[Service]\nExecStart={command}\nEnvironment=KEEP=value\n"
+        assert len(list(path.parent.glob(f"{path.name}.pre-canonical-entrypoint-*"))) == 1
+    assert calls.count("daemon-reload") == calls.count("--user daemon-reload") == 1
+    assert calls.index("daemon-reload") < calls.index("stop gms-web-app.service")
+    assert calls.index("--user daemon-reload") < calls.index("stop gms-web-app.service")
+    assert calls.index("health-probe") < calls.index("restart gms-web-app-local-worker.service")
+    assert calls.count("is-active --quiet gms-web-app-local-worker.service") == 2
+
+
+def test_user_daemon_reload_failure_keeps_services_running(tmp_path):
+    result, calls, _ = run_restart(tmp_path, "structured", "user_reload_fails", outdated_services=True)
+    assert result.returncode != 0
+    assert "--user daemon-reload" in calls
+    assert not any(call.startswith(("stop ", "restart ", "--user restart ")) for call in calls)
+
+
+def test_restart_keeps_services_running_if_managed_worker_runtime_is_missing(tmp_path):
+    result, calls, _ = run_restart(tmp_path, "structured", "worker_runtime_missing")
+    assert result.returncode != 0
+    assert "工作目录缺少 worker.app" in result.stderr
+    assert not any(call.startswith(("stop ", "restart ", "--user restart ")) for call in calls)
+
+
+def test_restart_reloads_units_after_an_interrupted_update(tmp_path):
+    result, calls, _ = run_restart(tmp_path, "structured", "reload_pending")
+    assert result.returncode == 0, result.stderr
+    assert calls.index("daemon-reload") < calls.index("stop gms-web-app.service")
+
+
 def test_systemd_path_update_is_dry_run_and_repeatable(tmp_path):
     project = tmp_path / "project with spaces"
     unit = tmp_path / "web.service"
@@ -235,7 +309,7 @@ def test_systemd_path_update_is_dry_run_and_repeatable(tmp_path):
     unit.write_text(original, encoding="utf-8")
     unit.chmod(0o640)
     command = [
-        sys.executable, str(ROOT / "tools/scripts/deployment/update_systemd_tls.py"),
+        sys.executable, str(ROOT / "scripts/deployment/update_systemd_tls.py"),
         "--project-root", str(project), "--unit", str(unit),
     ]
     dry_run = subprocess.run(command, capture_output=True, text=True, timeout=10)
@@ -288,7 +362,7 @@ def test_systemd_protocol_update_preserves_explicit_options(tmp_path):
     original = ("[Service]\nExecStart=/usr/bin/python3 -m uvicorn app:app --http h11 "
                 "--port 5001 --timeout-keep-alive 120\nRestart=always\n")
     unit.write_text(original)
-    command = [sys.executable, str(ROOT / "tools/scripts/deployment/update_systemd_tls.py"),
+    command = [sys.executable, str(ROOT / "scripts/deployment/update_systemd_tls.py"),
                "--project-root", str(tmp_path), "--unit", str(unit)]
     assert subprocess.run(command, capture_output=True, timeout=10).returncode == 3
     assert unit.read_text() == original
@@ -318,3 +392,11 @@ def test_restart_first_boot_certificate_uses_correct_san_type(tmp_path, hostname
         check=True, capture_output=True, text=True, timeout=10,
     ).stdout
     assert expected_san in san
+
+
+def test_restart_invalid_environment_keeps_running_services_untouched(tmp_path):
+    result, calls, _project = run_restart(tmp_path, "structured", "invalid_environment")
+    assert result.returncode != 0
+    assert "运行环境配置读取失败" in result.stderr
+    assert calls == []
+    assert "服务管理完成" not in result.stdout

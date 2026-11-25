@@ -4,9 +4,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import re
 import shlex
+from collections.abc import Callable
 
+import scp
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -16,6 +19,11 @@ from features.test_execution import get_default_suites_path
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 from foundation.ssh_executor import ssh_executor
+from worker.fastboot_workflow import (
+    CommandResult,
+    FastbootPreparer,
+    vendor_partition,
+)
 
 from . import runtime
 from .api_helpers import (
@@ -27,7 +35,6 @@ from .api_helpers import (
 from .api_helpers import (
     resolve_gsi_remote_image as _resolve_gsi_remote_image,
 )
-from .gsi_transport import prepare_gsi_command, upload_gsi_assets
 from .usbip_transport import (
     notify_skipped_devices as _notify_skip,
 )
@@ -400,3 +407,90 @@ def diagnose_gsi_burn_failure(output: str) -> str:
     if meaningful_lines:
         return " ".join(meaningful_lines[-3:])[-600:]
     return "GSI 烧写命令执行失败，未返回有效错误信息；请检查设备连接和 Fastboot 状态。"
+
+
+def upload_gsi_assets(
+    *,
+    ssh,
+    ssh_manager,
+    project_root: str,
+    suite_dir: str,
+) -> tuple[str, str]:
+    """Upload run_GSI_Burn.sh + misc.img to the test host.
+
+    Failures raise typed ApiError so the route maps them by semantics:
+    missing local assets are a deployment dependency problem (503), SCP and
+    chmod failures are remote-infrastructure failures (502).
+    """
+    local_script = os.path.join(project_root, "scripts/execution", "run_GSI_Burn.sh")
+    local_common = os.path.join(project_root, "scripts/execution", "fastboot_common.sh")
+    local_misc = os.path.join(project_root, "tools", "misc.img")
+    if not os.path.exists(local_script):
+        raise ApiError.dependency_unavailable(
+            f"GSI burn script not found: {local_script}"
+        )
+    if not os.path.isfile(local_common):
+        raise ApiError.dependency_unavailable(f"Fastboot helper not found: {local_common}")
+    if not os.path.exists(local_misc):
+        raise ApiError.dependency_unavailable(
+            f"Misc image not found: {local_misc}"
+        )
+
+    remote_script = os.path.join(suite_dir, "run_GSI_Burn.sh")
+    remote_misc = os.path.join(suite_dir, "misc.img")
+    try:
+        with scp.SCPClient(ssh.get_transport()) as client:
+            client.put(local_common, os.path.join(suite_dir, "fastboot_common.sh"))
+            client.put(local_script, remote_script)
+            client.put(local_misc, remote_misc)
+    except Exception as exc:
+        message = record_internal_error(logger, "GSI asset upload", "GSI asset upload failed")
+        raise ApiError.upstream_failure(
+            message, service="scp"
+        ) from exc
+    chmod_result = ssh_manager.execute_command(
+        ssh,
+        f"chmod +x {shlex.quote(remote_script)}",
+    )
+    if not chmod_result.ok:
+        raise ApiError.upstream_failure(
+            chmod_result.stderr or "Failed to make GSI runner executable",
+            service="ssh",
+        )
+    return remote_script, remote_misc
+
+
+def prepare_gsi_command(
+    *,
+    ssh,
+    ssh_manager,
+    remote_script: str,
+    device: str,
+    system_img: str,
+    misc_img: str,
+    vendor_img: str,
+    on_transport_reset: Callable[[str, str], None] | None = None,
+) -> str:
+    def remote_runner(argv: list[str], timeout: int) -> CommandResult:
+        return ssh_manager.execute_command(
+            ssh,
+            shlex.join(argv),
+            timeout=timeout,
+        )
+
+    prepared = FastbootPreparer(
+        remote_runner,
+        on_transport_reset=on_transport_reset,
+    ).prepare_gsi_fastbootd(device)
+    argv = [
+        "env",
+        "GMS_GSI_DEFER_REBOOT=1",
+        remote_script,
+        device,
+        prepared.oem_argument("unlock"),
+        system_img,
+        misc_img,
+    ]
+    if vendor_img:
+        argv.extend([vendor_partition(vendor_img), vendor_img])
+    return shlex.join(argv)

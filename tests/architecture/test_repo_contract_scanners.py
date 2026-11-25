@@ -67,6 +67,21 @@ class StaticAssetReferenceTests(unittest.TestCase):
         self.assertEqual(offenders, [])
 
 
+    def test_literal_script_and_stylesheet_targets_exist(self):
+        # Reverse check: removing an asset must not leave a stale browser entrypoint.
+        pattern = re.compile(
+            r"""(?:src|href)\s*=\s*["'](/static/[A-Za-z0-9/_.-]+\.(?:js|css))(?:[?#][^"']*)?["']"""
+        )
+        offenders = []
+        for base in ('web/shell', 'web/templates', 'features'):
+            for page in (ROOT / base).rglob('*.html'):
+                source = page.read_text(encoding='utf-8')
+                for url in pattern.findall(source):
+                    if not (ROOT / 'web' / url.lstrip('/')).is_file():
+                        offenders.append(f'{page.relative_to(ROOT)} -> {url}')
+        self.assertEqual(offenders, [])
+
+
 class DocsLinkTests(unittest.TestCase):
     """docs/ Markdown 的仓库相对链接必须可解析。"""
 
@@ -138,3 +153,129 @@ class RouteDocsContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+def test_inventory_checks_all_hand_maintained_python_entrypoints(tmp_path, monkeypatch):
+    from tools.scripts.maintenance import audit_repository_inventory as audit
+
+    files = ['app.py', 'conftest.py', 'plugins/codesearch/scripts/mcp_server.py',
+             'tools/scripts/maintenance/repair_audit_chain.py', 'features/example.py',
+             'plugins/gms-remote-test/generated.py']
+    for name in files:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text('def invalid(:\n', encoding='utf-8')
+    sprite = tmp_path / 'ui.svg'
+    sprite.write_text('<svg/>', encoding='utf-8')
+    monkeypatch.setattr(audit, 'ROOT', tmp_path)
+    monkeypatch.setattr(audit, 'SPRITE', sprite)
+    monkeypatch.setattr(audit, 'tracked_files', lambda: files)
+    result = audit.examine()
+    assert result['summary']['critical'] == 5
+    assert {item['path'] for item in result['findings']} == set(files[:-1])
+
+
+def test_inventory_treats_deleted_documentation_targets_as_critical(tmp_path, monkeypatch):
+    from tools.scripts.maintenance import audit_repository_inventory as audit
+
+    doc = tmp_path / 'docs' / 'architecture.md'
+    doc.parent.mkdir()
+    doc.write_text('[removed](../features/removed.py)\n[external](https://example.com)\n', encoding='utf-8')
+    sprite = tmp_path / 'ui.svg'
+    sprite.write_text('<svg/>', encoding='utf-8')
+    monkeypatch.setattr(audit, 'ROOT', tmp_path)
+    monkeypatch.setattr(audit, 'SPRITE', sprite)
+    monkeypatch.setattr(audit, 'tracked_files', lambda: ['docs/architecture.md'])
+    result = audit.examine()
+    assert result['summary']['critical'] == 1
+    assert result['findings'] == [{'kind': 'broken_doc_link', 'path': 'docs/architecture.md',
+                                   'target': '../features/removed.py'}]
+
+
+def test_inventory_detects_removed_absolute_and_relative_imports(tmp_path, monkeypatch):
+    from tools.scripts.maintenance import audit_repository_inventory as audit
+
+    files = {
+        'features/example/__init__.py': 'EXPORTED = 1\n',
+        'features/example/valid.py': 'VALUE = 1\n',
+        'features/example/consumer.py': (
+            'from .valid import VALUE\n'
+            'from .valid import RemovedSymbol\n'
+            'from .removed import OldClass\n'
+            'def deferred():\n'
+            '    import foundation.removed\n'
+            'from . import EXPORTED\n'
+            'from foundation import missing_member\n'
+            'import importlib as loader\n'
+            'loader.import_module("features.example.missing_dynamic")\n'
+            'loader.import_module(".missing_relative", __package__)\n'
+            'loader.import_module(name=".missing_keyword", package="features.example")\n'
+            'loader.import_module(name="features.example.missing_absolute_keyword")\n'
+            'loader.import_module(".valid", __package__)\n'
+            'import external_dependency\n'
+        ),
+        'foundation/__init__.py': '',
+    }
+    for name, source in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(source, encoding='utf-8')
+    sprite = tmp_path / 'ui.svg'
+    sprite.write_text('<svg/>', encoding='utf-8')
+    monkeypatch.setattr(audit, 'ROOT', tmp_path)
+    monkeypatch.setattr(audit, 'SPRITE', sprite)
+    monkeypatch.setattr(audit, 'tracked_files', lambda: sorted(files))
+    result = audit.examine()
+    assert result['summary']['critical'] == 8
+    assert {item['target'] for item in result['findings']} == {
+        'features.example.removed', 'foundation.removed', 'features.example.valid.RemovedSymbol',
+        'foundation.missing_member', 'features.example.missing_dynamic',
+        'features.example.missing_relative', 'features.example.missing_keyword',
+        'features.example.missing_absolute_keyword',
+    }
+
+
+def test_inventory_enforces_shared_source_line_limit(tmp_path, monkeypatch):
+    from tools.scripts.maintenance import audit_repository_inventory as audit
+
+    name = "features/example.py"
+    path = tmp_path / name
+    path.parent.mkdir()
+    path.write_text("# source\n" * (audit.MAX_SOURCE_LINES + 1), encoding="utf-8")
+    sprite = tmp_path / "ui.svg"
+    sprite.write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    monkeypatch.setattr(audit, "SPRITE", sprite)
+    monkeypatch.setattr(audit, "tracked_files", lambda: [name])
+    result = audit.examine()
+    assert result["summary"]["critical"] == 1
+    assert result["source_layout"]["over_limit"][0]["path"] == name
+
+
+def test_source_budget_scans_extended_first_party_formats(tmp_path, monkeypatch):
+    from tests.architecture import _size_ratchet as sizes
+    from tools.scripts.maintenance import audit_repository_inventory as audit
+
+    files = ["features/example.kt", "features/example.SQL",
+             "web/static/js/example.tsx", "web/static/js/example.jsx",
+             "web/static/vendor/bundle.tsx"]
+    for name in files:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("// source\n" * (sizes.MAX_SOURCE_LINES + 1), encoding="utf-8")
+    sprite = tmp_path / "ui.svg"
+    sprite.write_text("<svg/>", encoding="utf-8")
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    monkeypatch.setattr(audit, "SPRITE", sprite)
+    monkeypatch.setattr(audit, "tracked_files", lambda: files)
+    result = audit.examine()
+    assert {item["path"] for item in result["source_layout"]["over_limit"]} == set(files[:-1])
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(sizes, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(sizes.subprocess, "run",
+                        lambda *args, **kwargs: SimpleNamespace(stdout=("\0".join(files) + "\0").encode()))
+    assert {path.relative_to(tmp_path).as_posix() for path in sizes.tracked_source_paths(
+        sizes.BACKEND_SOURCE_SUFFIXES | sizes.FRONTEND_SOURCE_SUFFIXES
+    )} == set(files[:-1])

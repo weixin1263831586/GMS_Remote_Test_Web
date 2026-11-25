@@ -1,7 +1,10 @@
-"""Liveness and cached readiness probes for production operation."""
+"""Operational health probes, health endpoints and authenticated metrics."""
 
 from __future__ import annotations
 
+import asyncio
+import hashlib
+import hmac
 import os
 import shutil
 import sqlite3
@@ -9,11 +12,19 @@ import subprocess
 import threading
 import time
 from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+
+from features.auth import CurrentUser, require_role
+from features.system.metrics import metrics_token, render_metrics
 from foundation.automation_port import get_worker_status
 from foundation.config import settings
+from foundation.product import APPLICATION_VERSION, SERVICE_NAME
+from foundation.security import bearer_token
 
 
 _CACHE_LOCK = threading.Lock()
@@ -224,3 +235,72 @@ def readiness(app: Any, *, force: bool = False) -> dict[str, Any]:
 def reset_health_cache() -> None:
     with _CACHE_LOCK:
         _CACHE.update({"key": None, "expires_at": 0.0, "result": None})
+
+
+router = APIRouter()
+
+
+@router.get('/api/system/health')
+async def health_check():
+    """Compatibility liveness probe; dependency readiness has its own route."""
+    return JSONResponse(content={
+        'status': 'alive',
+        'service': SERVICE_NAME,
+        'version': APPLICATION_VERSION,
+        'timestamp': datetime.now().isoformat(),
+    })
+
+
+@router.get('/api/system/health/live')
+async def liveness_check():
+    return {'status': 'alive', 'timestamp': datetime.now().isoformat()}
+
+
+@router.get('/api/system/health/ready')
+async def readiness_check(request: Request):
+    result = await asyncio.to_thread(readiness, request.app)
+    return JSONResponse(
+        status_code=200 if result['ready'] else 503,
+        content={
+            'status': 'ready' if result['ready'] else 'not_ready',
+            'degraded': bool(result['degraded_checks']),
+            'timestamp': datetime.now().isoformat(),
+        },
+    )
+
+
+@router.get('/api/system/health/details')
+async def health_details(
+    request: Request,
+    _admin: CurrentUser = Depends(require_role('admin')),
+):
+    result = await asyncio.to_thread(readiness, request.app, force=True)
+    return JSONResponse(
+        status_code=200 if result['ready'] else 503,
+        content=result,
+    )
+
+
+@router.get('/metrics', include_in_schema=False)
+async def prometheus_metrics(
+    authorization: str = Header(default='', alias='Authorization'),
+):
+    expected = metrics_token()
+    if not expected:
+        raise HTTPException(status_code=503, detail='GMS_METRICS_TOKEN is required')
+    token = bearer_token(authorization)
+    if (
+        token is None
+        # 摘要后比较：原始串比较在长度不同时常量时间保证不完整（泄露
+        # 令牌长度），与 worker_auth 同口径。
+        or not hmac.compare_digest(
+            hashlib.sha256(token.encode()).digest(),
+            hashlib.sha256(expected.encode()).digest(),
+        )
+    ):
+        raise HTTPException(status_code=401, detail='Invalid metrics credential')
+    return Response(
+        content=await asyncio.to_thread(render_metrics),
+        media_type='text/plain; version=0.0.4; charset=utf-8',
+        headers={'Cache-Control': 'no-store'},
+    )

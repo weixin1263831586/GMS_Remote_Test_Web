@@ -10,9 +10,9 @@ import pytest
 from fastapi import HTTPException
 
 from features.auth import CurrentUser
-from features.devices.adb_proxy_service import ADBProxyService
+from features.devices.adb.proxy_service import ADBProxyService
 from features.devices.models import USBIPDisconnectRequest
-from features.devices.usbip_operations import (
+from features.devices.usbip.operations import (
     USBIPOperationGate,
     serialize_usbip_operation,
 )
@@ -221,15 +221,15 @@ async def test_local_usbip_partial_disconnect_preserves_sibling_assignment_and_s
         integrations.runtime.get_runtime(), "resolve_tailscale_device_host", return_value=(None, None)
     ), patch.object(
         cluster_module, "get_cluster_service", return_value=fake_cluster
-    ), patch("features.devices.usbip_disconnect_api.DeviceSSHConnection", DeviceConnection
-    ), patch("features.devices.usbip_disconnect_api._detach_ubuntu_usbip_for_devices",
+    ), patch("features.devices.usbip.connection_api.DeviceSSHConnection", DeviceConnection
+    ), patch("features.devices.usbip.connection_api._detach_ubuntu_usbip_for_devices",
         return_value={"detached_ports": ["00"], "remaining_devices": []},
-    ) as detach, patch("features.devices.usbip_disconnect_api._clear_usbip_device_sources", clear_sources
-    ), patch("features.devices.usbip_disconnect_api.notify_device_change", AsyncMock()
-    ), patch("features.devices.usbip_disconnect_api.acquire_device_operation_claim",
+    ) as detach, patch("features.devices.usbip.connection_api._clear_usbip_device_sources", clear_sources
+    ), patch("features.devices.usbip.connection_api.notify_device_change", AsyncMock()
+    ), patch("features.devices.usbip.connection_api.acquire_device_operation_claim",
         return_value=("", [], None),
-    ), patch("features.devices.usbip_disconnect_api.release_device_operation_claim"
-    ), patch("features.devices.usbip_disconnect_api.audit_device_operation"
+    ), patch("features.devices.usbip.connection_api.release_device_operation_claim"
+    ), patch("features.devices.usbip.connection_api.audit_device_operation"
     ), patch("features.devices.reconnect.stop_usbip_reconnect_for_host"):
         response = await integrations.stop_usbip(
             request=_request(),
@@ -275,7 +275,7 @@ def test_partial_disconnect_error_preserves_sibling_source_state():
 
 
 def test_unconfirmed_remote_detach_leaves_assignment_retryable():
-    import features.devices.usbip_assignments as usbip_assignments
+    import features.devices.usbip.assignments as usbip_assignments
 
     device_host = "user@10.0.0.1"
     runtime_config = {

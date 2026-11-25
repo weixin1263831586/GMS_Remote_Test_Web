@@ -1,10 +1,6 @@
 """gms_agent.profile_store — the single source of truth for TOML profiles.
 
-Profile storage/parsing/selection used to be implemented twice
-(mcp_launcher.py 与 gms_agent.package_manager.py 各自维护 PROFILE_ROOT、
-TOML 解析与 profile 选择)。本模块现在是唯一的 profile 存储实现（ADR 0003，
-docs/architecture/adr/0003-agent-profile-store.md）；launcher、package
-lifecycle、SDK 与 doctor 全部只经由它读写 profile。
+Launcher、package lifecycle、SDK 与 doctor 共用此 TOML profile 存储（ADR 0003）。
 
 Fail-closed 选择契约（多 Controller 编译服务器的 Agent 路由保证，ADR 0003）:
     0 profiles  → resolve_profile() 返回 None

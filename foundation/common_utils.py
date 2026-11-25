@@ -3,6 +3,8 @@ import logging
 import re
 import socket
 
+from foundation.ssh import decode_ssh_output
+
 
 logger = logging.getLogger(__name__)
 
@@ -18,15 +20,7 @@ def strip_ansi_codes(text: str) -> str:
 class CommonUtils:
     """通用工具类"""
 
-    @staticmethod
-    def decode_ssh_output(data: bytes) -> str:
-        """Decode SSH output, trying UTF-8 first then GBK for Windows hosts."""
-        for encoding in ('utf-8', 'gbk', 'latin-1'):
-            try:
-                return data.decode(encoding)
-            except UnicodeDecodeError:
-                continue
-        return data.decode('utf-8', errors='replace')
+    decode_ssh_output = staticmethod(decode_ssh_output)
 
     @classmethod
     def get_local_ip(cls) -> str | None:

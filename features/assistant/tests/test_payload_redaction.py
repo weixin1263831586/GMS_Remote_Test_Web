@@ -1,7 +1,7 @@
 import json
 
 from features.assistant import api
-from features.assistant.payloads import session_payload
+from features.assistant.session_log import session_payload
 from foundation.security_audit import SecurityAuditLogger
 
 

@@ -1,4 +1,4 @@
-"""org_chart / case_extractor / reply_drafter 修复回归。"""
+"""组织花名册、案例提取与回复草拟契约。"""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 from features.redmine import org_chart
 from features.redmine import users as redmine_users
-from features.redmine.case_extractor import RedmineCaseExtractor
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
-from features.redmine.reply_drafter import (
+from features.redmine.cases.case_extractor import RedmineCaseExtractor
+from features.redmine.knowledge.repository import RedmineKnowledgeDB
+from features.redmine.reply.drafter import (
     DEFAULT_OWNER_REPLY_NAMES,
     ReplyDrafter,
     load_owner_reply_names,
@@ -121,7 +121,7 @@ class ReplyDrafterAuditFixTests(unittest.TestCase):
         drafter = ReplyDrafter(self.db, owner_reply_names=["李 四"])
         excerpt = "### 李四(FAE)\n步骤A\n### 黄超群\n旧专家回复"
         self.assertIn("步骤A", drafter._extract_owner_reply(excerpt))
-        # 名单未包含的姓名不再作为锚点。
+        # 仅名单内姓名作为锚点。
         self.assertNotIn("旧专家回复", drafter._extract_owner_reply(excerpt))
 
     def test_empty_names_extract_nothing(self):

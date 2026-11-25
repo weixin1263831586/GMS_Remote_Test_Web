@@ -7,8 +7,8 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.devices import operations_api
-from features.devices.claim_release import force_release_device_lock
+from features.devices.operations import api as operations_api
+from features.devices.operations.api import force_release_device_lock
 from foundation.device_locks import DeviceLockManager
 
 
@@ -65,25 +65,21 @@ def test_success_returns_existing_result_envelope(client, monkeypatch):
 
 
 def test_wrapper_routes_only_local_device_action_to_cluster(monkeypatch):
-    from features.devices import claim_release
-
     locks = DeviceLockManager(local_worker_id="local")
     locks.lock_device("ABC", "alice", source_type="cluster-device-action", source_id="operation:aoa")
     release = Mock(return_value=(True, "已释放"))
     service = SimpleNamespace(config=SimpleNamespace(local_worker_id="local"),
                               repository=SimpleNamespace(force_release_local_aoa_operation=release))
-    monkeypatch.setattr(claim_release, "device_lock_manager", locks)
-    monkeypatch.setattr(claim_release, "get_cluster_service", lambda: service)
+    monkeypatch.setattr(operations_api, "device_lock_manager", locks)
+    monkeypatch.setattr(operations_api, "get_cluster_service", lambda: service)
     assert force_release_device_lock("local:ABC")[0]
     release.assert_called_once_with("local:ABC", "local")
 
 
 def test_wrapper_never_falls_back_to_force_unlock_when_cluster_is_unavailable(monkeypatch):
-    from features.devices import claim_release
-
     locks = DeviceLockManager(local_worker_id="local")
     locks.lock_device("ABC", "alice", source_type="cluster-device-action", source_id="operation:aoa")
-    monkeypatch.setattr(claim_release, "device_lock_manager", locks)
-    monkeypatch.setattr(claim_release, "get_cluster_service", Mock(side_effect=RuntimeError("not configured")))
+    monkeypatch.setattr(operations_api, "device_lock_manager", locks)
+    monkeypatch.setattr(operations_api, "get_cluster_service", Mock(side_effect=RuntimeError("not configured")))
     assert not force_release_device_lock("ABC")[0]
     assert locks.get_lock_status("ABC") is not None

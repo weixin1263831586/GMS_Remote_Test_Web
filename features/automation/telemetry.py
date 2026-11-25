@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from features.automation.artifact_progress import artifact_download_progress
+from features.automation.artifacts import artifact_download_progress
 
 
 def run_progress(run: dict, cluster) -> dict:

@@ -13,11 +13,12 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from features.auth import get_authenticated_user
+from foundation.private_config import atomic_write_json
 from foundation.responses import error_response, success_response
 
 from . import runtime
 from .clients import get_client_id_from_request
-from .storage_paths import atomic_write_json, owner_storage_key
+from .storage_paths import owner_storage_key
 
 
 router = APIRouter()

@@ -8,7 +8,7 @@
 
 ```
 systemd timer 每分钟检查一次（Persistent=true；按 owner trigger_time 筛选）
-  → python -m features.redmine.daily_brief_cli run-nightly
+  → python -m features.redmine.daily_brief.cli run-nightly
   → DailyBriefService（owner-aware 编排）
       → build_daily_triage_snapshot()   ← 唯一事实来源：get_workload_statistics()
       → 冻结快照（counts + issues + SHA256 fingerprint）
@@ -35,20 +35,20 @@ Web 手动触发 → SQLite 持久 job 队列 → 独立 daily_brief_worker
 
 | 文件 | 职责 |
 | --- | --- |
-| `features/redmine/daily_brief_models.py` | Run/Issue 数据模型、schema 校验、优先级规则 |
-| `features/redmine/daily_brief_repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
+| `features/redmine/daily_brief/models.py` | Run/Issue 数据模型、schema 校验、优先级规则 |
+| `features/redmine/daily_brief/repository.py` | per-owner SQLite（runs/issues，幂等唯一索引） |
 | `features/redmine/ai_execution_ledger.py` | AI 逻辑调用账本（receipt：pending→received→completed/failed/unknown，防重复发送） |
 | `features/redmine/failure_identity.py` | 失败确定性身份（共用 RedmineCaseExtractor 事实；clusterable 门禁；同用例不同根因不合 Cluster） |
-| `features/redmine/daily_brief_snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
-| `features/redmine/daily_brief_service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
-| `features/redmine/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |
-| `features/redmine/daily_brief_api.py` | REST API（triage/run/config/latest/refresh/analyze-issue/事件时间线等） |
-| `features/redmine/daily_brief_worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
+| `features/redmine/daily_brief/snapshot.py` | triage 快照（去重/bucket/fingerprint/delta） |
+| `features/redmine/daily_brief/service.py` | 编排：幂等 run、并发控制、失败隔离、聚合 |
+| `features/redmine/analysis/kkagent/` | stream-json 进程、轨迹、schema 与 runtime evidence gate、同会话修复 |
+| `features/redmine/daily_brief/api.py` | REST API（triage/run/config/latest/refresh/analyze-issue/事件时间线等） |
+| `features/redmine/daily_brief/worker.py` | Web 入队任务的独立 Worker、租约与优雅停止 |
 | `bootstrap/run_daily_brief_worker.py` | systemd Worker 启动入口，先加载部署环境与密钥，再导入分析模块 |
-| `features/redmine/daily_brief_analysis_events.py` | 分析进度事件存储（脱敏白名单摘要、增量轮询） |
-| `features/redmine/daily_brief_cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
+| `features/redmine/daily_brief/analysis_events.py` | 分析进度事件存储（脱敏白名单摘要、增量轮询） |
+| `features/redmine/daily_brief/cli.py` | systemd 入口（run-nightly/run-delta/doctor） |
 | `agent/gms-remote-test/skill/references/redmine-daily-triage.md` | Agent 分析规范（skill，批量晨报与单条深度分析同工作流） |
-| `deploy/systemd/gms-redmine-daily-brief*` | timer/service 单元 |
+| `scripts/deployment/systemd/gms-redmine-daily-brief*` | timer/service 单元 |
 
 ## 单一事实来源
 
@@ -164,18 +164,14 @@ Agent 侧 CLI/MCP：`gms-rt-redmine-triage` / `gms_rt_redmine_triage`
 ## 启用与部署
 
 1. Web UI 设置页保存 Redmine 地址与凭据（human-only）；
-2. 确认 kkagent 在 PATH 且本地模型可用（`daily_brief_cli doctor`）；
+2. 确认 kkagent 在 PATH 且所选模型已在统一模型目录中启用（`python -m features.redmine.daily_brief.cli doctor`）；
 3. 安装 timer：
 
 ```bash
-sudo cp deploy/systemd/gms-redmine-daily-brief*.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now gms-redmine-daily-brief-worker.service
-sudo systemctl enable --now gms-redmine-daily-brief.timer
-sudo systemctl enable --now gms-redmine-daily-brief-delta.timer   # 可选
+bash scripts/deployment/install_daily_brief_systemd.sh
 ```
 
-手动试跑：`python -m features.redmine.daily_brief_cli run-nightly --owner <id>`
+手动试跑：`python -m features.redmine.daily_brief.cli run-nightly --owner <id>`
 
 ## 安全边界
 
@@ -241,7 +237,7 @@ SSE/WebSocket）：
 
 ```
 kkagent --output-format stream-json
-    → consume_line(on_event=…)            features/redmine/kkagent/trace.py
+    → consume_line(on_event=…)            features/redmine/analysis/kkagent/trace.py
     → ProgressTap（tool_call/tool_result 归一化）  kkagent/progress_tap.py
     → AnalysisProgressRecorder（脱敏/白名单摘要）  daily_brief_analysis_events.py
     → redmine_daily_brief_analysis_events 表（per-owner SQLite）
@@ -313,17 +309,12 @@ Controller 校验报告 SHA-256、段落全覆盖、真实成功的证据 ID、�
 复核使用同一个模型会话，仍可能有共同盲点。详见 ADR 0036。
 
 
-### 2026-11-20 生产晨报复盘后的准确性门禁
+### 诊断准确性门禁
 
-11 月 20 日现场只读审计显示 6 条 nightly 工单中 2 条生成报告、4 条
-`evidence_gate_failed`；两份报告的 `evidence_quality` 均为 `partial`，
-`analysis_review.passed` 不代表根因已验证。这是一次历史快照，不是平台
-长期准确率，更不能用 `confidence` 作为事实正确率。
-
-本分支新增的正确性约束：
+`analysis_review.passed` 不代表根因已验证，`confidence` 不代表事实准确率。
 
 - `/history/search?resolved_only=true` 对本地和远端均实施已解决状态过滤；
-  远端 subject 搜索默认不再固定 `fae`，覆盖该 Redmine 账号可见的项目。
+  远端 subject 搜索覆盖该 Redmine 账号可见的项目。
   只命中同一模块/标题不等于相同失败断言。
 - 失败分析仍保持 `failed`，不发布未通过的报告；页面执行读模型可从
   **已经持久化的工具轨迹**展示取证覆盖情况，但明确区别于正式通过的
@@ -332,15 +323,12 @@ Controller 校验报告 SHA-256、段落全覆盖、真实成功的证据 ID、�
   原因/责任确认只能引用匹配测试模块的源码证据；源版本确认只能以
   可复现的测试套件版本或实际 Git commit 完成，`HEAD`/`main`
   等动态标签不构成已验证的目标代码身份。
-- 旧 RedmineAgent 文档保留较早 journal 的原始 ID/时间与预览索引，
-  最新 15 条仍详细展示；旧版索引不是全文替代，原始证据优先从
-  Redmine/冻结证据快照读取。
-- 旧文本附件读取失败标记 `parsed=false`；无法按 UTF-8 解码的字节用
-  U+FFFD 显式标示并记录替换次数，不再静默丢失。
-- `ui-redmine-diagnosis-regression.yml` 在当前 UI 分支上运行相关 pytest
+- Journal 索引包含较早记录的原始 ID、时间与预览；最新 15 条详细展示。
+  原始证据优先从 Redmine 或冻结证据快照读取。
+- 文本附件读取失败标记 `parsed=false`；无法按 UTF-8 解码的字节用
+  U+FFFD 显式标示并记录替换次数。
+- `ui-redmine-diagnosis-regression.yml` 运行相关 pytest
   回归；`audit-daily-brief-kkagent-20261120.yml` 允许手动指定日期在指定
   Runner 上只读检查持久化元数据，不导出客户正文、附件或凭据。
 
-**未替代的实机验证**：这些源码修复在分支 CI 中通过后，仍需先部署至
-隔离/预发布环境，再用同一版 SDK 源、相同 GMS 套件、相同设备和原始日志
-复核具体根因。不能把已运行的 11 月 20 日历史报告重标为已验证。
+**实机验证**：在隔离或预发布环境使用匹配的 SDK 源、GMS 套件、设备和原始日志复核具体根因。CI 通过不代表具体根因已验证。

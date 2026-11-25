@@ -4,9 +4,8 @@ from urllib.parse import parse_qs
 
 import pytest
 
-from features.assistant.execution_result import ToolResult
-from features.assistant.report_access import bind_report_access
-from features.assistant.response import generate
+from features.assistant.report_query import bind_report_access
+from features.assistant.response import ToolResult, generate
 
 
 def test_native_result_uses_the_existing_suite_browser_route_and_escaped_parameters():

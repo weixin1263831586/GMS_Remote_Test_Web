@@ -5,7 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.devices import adb_forward_api as api
+from features.devices.adb import api
 
 
 @pytest.mark.parametrize('action', ['start', 'stop'])

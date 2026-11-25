@@ -2,9 +2,8 @@
 
 分层（本包内各文件，均为仓库依赖方向的叶子）：
 
-- ``parsing``    纯函数：地址拆分/校验、MIME 头折叠清洗；
 - ``config``     ``resolve_email_config`` 合并规则与 SMTP 密码读取；
-- ``message``    MIME 报文与信封组装（附件白名单）；
+- ``message``    地址拆分/校验、MIME 头清洗、报文与信封组装（附件白名单）；
 - ``transport``  唯一 ``smtplib`` 使用点，错误映射为面向用户的文案；
 - ``store``      发件台账（email_outbox.sqlite3，每封邮件一行，可追溯）；
 - ``service``    本文件：发送管线与对外契约。
@@ -26,8 +25,12 @@ from features.email.config import (
     load_email_config,
     resolve_email_config,
 )
-from features.email.message import build_mime_message
-from features.email.parsing import normalize_email_addresses, safe_header_text, split_emails
+from features.email.message import (
+    build_mime_message,
+    normalize_email_addresses,
+    safe_header_text,
+    split_emails,
+)
 from features.email.store import get_email_outbox_store
 from features.email.transport import SmtpSettings, smtp_deliver
 

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.redmine.daily_brief_service import DEFAULT_BRIEF_CONFIG, normalize_daily_brief_config
+from features.redmine.daily_brief.service import DEFAULT_BRIEF_CONFIG, normalize_daily_brief_config
 from features.redmine.tests.test_daily_brief_service import make_service
 
 
@@ -51,7 +51,7 @@ class CrashRecoveryTests(unittest.TestCase):
     def test_start_run_recovers_interrupted(self):
         from datetime import datetime, timedelta
 
-        from features.redmine.daily_brief_models import DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefRun
 
         # brief_date 必须避开"今天"：恢复把 stale run 标记 failed 后，
         # start_run 会按产品逻辑复用【当天】的 nightly run 并重置为
@@ -71,7 +71,7 @@ class CrashRecoveryTests(unittest.TestCase):
 
 
     def test_old_running_job_is_not_interrupted_by_age(self):
-        from features.redmine.daily_brief_models import DailyBriefRun
+        from features.redmine.daily_brief.models import DailyBriefRun
 
         run = DailyBriefRun(owner_id='u1', brief_date='2020-01-01', mode='manual',
                             run_id='old-live', status='analyzing', started_at='2020-01-01T00:00:00')

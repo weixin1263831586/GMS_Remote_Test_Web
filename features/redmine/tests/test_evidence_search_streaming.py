@@ -6,9 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.redmine import evidence_search_api as api
-from features.redmine.evidence import zip_member_block
-from features.redmine.evidence_store import EvidenceStore
+from features.redmine.evidence import search_api as api
+from features.redmine.evidence.service import zip_member_block
+from features.redmine.evidence.store import EvidenceStore
 
 
 class BatchEvidenceSearchTests(unittest.TestCase):

@@ -24,9 +24,13 @@ indent_size = 4
 # HTML/CSS: 4空格缩进
 indent_size = 4
 
-[*.{json,yaml,yml,toml}]
+[*.{json,yaml,yml}]
 # 配置文件: 2空格缩进
 indent_size = 2
+
+[*.toml]
+# 与 pyproject.toml 的数组缩进保持一致
+indent_size = 4
 
 [*.md]
 # Markdown: 保持原样，不修剪尾随空格

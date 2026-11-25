@@ -26,7 +26,15 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 from gms_agent import profile_store
-from gms_agent.runtime_processes import running_runtimes
+from gms_agent.http_transport import open_request
+from gms_agent.installation_health import (
+    _controller_url_valid,
+    _host_environment_status,
+    _token_file_status,
+    build_doctor_report,
+    mcp_registration_status,
+    running_runtimes,
+)
 
 
 # SCRIPT_DIR in the module context = the runtime/ directory (parent of the
@@ -270,23 +278,8 @@ def http_get(
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
 
-    class _NoRedirects(urllib.request.HTTPRedirectHandler):
-        # urllib follows redirects by default, which lets
-        # a same-origin endpoint bounce the package fetch to another host.
-        # Registry downloads must never leave the pinned origin.
-        def redirect_request(self, req, fp, code, msg, headers, newurl):
-            return None
-
-    if isinstance(context, ssl.SSLContext):
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPSHandler(context=context), _NoRedirects()
-        )
-        open_fn = opener.open
-    else:
-        opener = urllib.request.build_opener(_NoRedirects())
-        open_fn = opener.open
     request = urllib.request.Request(url, headers={"User-Agent": "gms-agent-installer"})
-    with open_fn(request, timeout=timeout) as response:
+    with open_request(request, timeout=timeout, context=context) as response:
         return response.read(), dict(response.headers)
 
 
@@ -558,7 +551,7 @@ def normalize_package_tree(source_root: Path) -> Path:
             target_dir.mkdir()
             shutil.copy2(manifests / "codex.plugin.json", target_dir / "plugin.json")
     # Deliberately NOT copied: docs/, tests/, package.yaml, GENERATED.md —
-    # the canonical distribution tree (agent_package_builder layout) carries
+    # the canonical distribution tree (agent_package builder layout) carries
     # only scripts/ + skills/ + tests/ + root manifests, and keeping the
     # normalized tree byte-comparable to the registry zip is what makes the
     # package_tree_sha256 identity checks (versions/<v>/ immutability) agree
@@ -786,166 +779,8 @@ def configured_clients() -> list[str]:
     return found
 
 
-def _controller_url_valid(value: str) -> bool:
-    """Validate a Controller base URL without making a network request."""
-
-    try:
-        parsed = urllib.parse.urlsplit(value)
-        _ = parsed.port
-    except ValueError:
-        return False
-    hostname = parsed.hostname or ""
-    return bool(
-        parsed.scheme in {"http", "https"}
-        and hostname
-        and not parsed.username
-        and not parsed.password
-        and not parsed.query
-        and not parsed.fragment
-        and parsed.path in {"", "/"}
-        and re.fullmatch(r"[A-Za-z0-9.:-]+", hostname)
-    )
-
-
-def _token_file_status(value: str) -> dict[str, object]:
-    """Return token-file metadata without reading or exposing the token."""
-
-    path = Path(value).expanduser() if value else None
-    present = bool(path and path.is_file())
-    mode = stat.S_IMODE(path.stat().st_mode) if present and path else None
-    owner_ok = bool(present and path and path.stat().st_uid == os.geteuid())
-    return {
-        "configured": bool(value),
-        "present": present,
-        "mode_ok": mode == 0o600,
-        "owner_ok": owner_ok,
-        "path": str(path) if path else "",
-    }
-
-
-_LAUNCHER_MARKER = "mcp_launcher.py"
-
-
-def _launcher_from_args(args: list) -> str:
-    """Return the mcp_launcher.py path inside an MCP args list ("")."""
-    for item in args:
-        text = str(item)
-        if _LAUNCHER_MARKER in text:
-            return text
-    return ""
-
-
-def _launcher_from_toml_block(text: str, marker: str) -> str:
-    """Extract the mcp_launcher.py path from one [mcp_servers.*] block."""
-
-    block = re.search(
-        r"(?ms)^" + re.escape(marker) + r"\]\s*(?P<body>.*?)(?=^\[|\Z)", text
-    )
-    if block is None:
-        return ""
-    args_match = re.search(r"(?m)^args\s*=\s*\[(.*?)\]", block.group("body"), re.S)
-    if args_match is None:
-        return ""
-    # TOML basic strings use "..."; literal strings use '...'. Only the
-    # launcher path is extracted — no full TOML parse needed here.
-    items = [
-        value
-        for pair in re.findall(r'"([^"]*)"|\'([^\']*)\'', args_match.group(1))
-        for value in pair
-        if value
-    ]
-    return _launcher_from_args(items)
-
-
 def _mcp_registration_status(client: str) -> dict[str, object]:
-    """Inspect the client's GMS MCP registration marker and launchability.
-
-    ``registered`` only says a registration block exists; ``launchable``
-    says the referenced mcp_launcher.py payload is really on disk (#654649
-    nightly 复盘：config.toml 注册块残留而 ~/.kkagent/plugins/local/
-    gms-remote-test payload 被清空，kkagent 每个会话都起不来 gms MCP
-    server，四条晨报分析全部 evidence_gate_failed）。doctor 必须两者都查，
-    否则文本残留会误报 healthy。
-    """
-
-    launcher = ""
-    if client == "kimi":
-        path = client_skill_root(client).parent / "mcp.json"
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            block = (payload.get("mcpServers") or {}).get("gms") or {}
-            args = block.get("args") or []
-            registered = any(_LAUNCHER_MARKER in str(item) for item in args)
-            launcher = _launcher_from_args(args)
-        except (OSError, ValueError, AttributeError):
-            registered = False
-    else:
-        path = client_skill_root(client).parent / "config.toml"
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
-            text = ""
-        marker = (
-            "[mcp_servers.gms]" if client == "kkagent"
-            else "[mcp_servers.gms_remote_test]"
-        )
-        registered = marker in text and _LAUNCHER_MARKER in text
-        launcher = _launcher_from_toml_block(text, marker.rstrip("]"))
-        if client == "codex" and not registered:
-            # Codex native plugins own their MCP registration through the
-            # plugin manifest, so no standalone [mcp_servers.*] block is
-            # expected. Recognize an enabled personal/team marketplace entry.
-            plugin_block = re.search(
-                r'(?ms)^\[plugins\."gms-remote-test@[^"\n]+"\]\s*'
-                r"(?P<body>.*?)(?=^\[|\Z)",
-                text,
-            )
-            registered = bool(
-                plugin_block
-                and re.search(
-                    r"(?m)^enabled\s*=\s*true\s*$", plugin_block.group("body")
-                )
-            )
-            # The launcher lives inside the plugin payload managed by the
-            # host client; doctor cannot verify it from here.
-            launcher = ""
-    launchable = True
-    if registered and launcher:
-        launchable = Path(launcher).expanduser().is_file()
-    return {
-        "registered": registered,
-        "config_path": str(path),
-        "launchable": launchable,
-        "launcher_path": launcher,
-    }
-
-
-def _host_environment_status() -> dict[str, object]:
-    """Probe the filesystem basics the installed CLI depends on at runtime.
-
-    The shell CLI writes its Bearer header through mktemp under TMPDIR, and
-    full or read-only filesystems have historically surfaced as misleading
-    downstream failures (e.g. "无法解析 Agent profile") instead of an
-    obvious ENOSPC. Keep this secret-free and cheap: one probe file plus a
-    statvfs sample.
-    """
-
-    tmpdir = Path(os.environ.get("TMPDIR", "/tmp"))
-    state: dict[str, object] = {"tmpdir": str(tmpdir), "tmpdir_writable": False}
-    try:
-        probe = tmpdir / f".gms-agent-doctor-{os.getpid()}"
-        probe.write_text("", encoding="utf-8")
-        probe.unlink()
-        state["tmpdir_writable"] = True
-    except OSError:
-        pass
-    try:
-        usage = shutil.disk_usage(tmpdir)
-        state["disk_free_gb"] = round(usage.free / 1024**3, 2)
-        state["disk_total_gb"] = round(usage.total / 1024**3, 2)
-    except OSError:
-        pass
-    return state
+    return mcp_registration_status(client, client_skill_root)
 
 
 def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
@@ -967,146 +802,12 @@ def doctor_report(client: str = "auto", profile: str = "") -> dict[str, object]:
     installed = installed_version() or ""
     running = runtime_version()
     current_cli = cli_version_in(CURRENT_LINK) or ""
-    report_clients: list[dict[str, object]] = []
-    actions: list[str] = []
-
-    for client_name in clients:
-        candidates = profile_candidates(client_name)
-        selected = None
-        if profile:
-            candidate = profile_store.profile_path(profile)
-            if candidate in candidates:
-                selected = candidate
-        elif len(candidates) == 1:
-            selected = candidates[0]
-
-        profile_state: dict[str, object] = {
-            "count": len(candidates),
-            "names": [path.stem for path in candidates],
-            "selected": selected.stem if selected else "",
-            "valid": False,
-        }
-        token_state = _token_file_status("")
-        tls_verify_disabled = False
-        if selected:
-            flat = load_profile(selected.stem)
-            server = flat.get("url", "")
-            ca_cert = flat.get("ca_cert", "")
-            # 安装期 GMS_INSTALL_INSECURE=1 会被持久化为 insecure=true 并
-            # 放大为运行期常态（launcher 映射 GMS_CURL_INSECURE=1）。doctor
-            # 把该状态作为醒目字段输出，生产部署清单可据此拒绝。
-            tls_verify_disabled = flat.get("insecure", "") == "true"
-            token_state = _token_file_status(flat.get("token_file", ""))
-            controller_valid = _controller_url_valid(server)
-            profile_state.update(
-                {
-                    "controller": server,
-                    "controller_url_valid": controller_valid,
-                    "ca_configured": bool(ca_cert),
-                    "ca_present": bool(ca_cert and Path(ca_cert).is_file()),
-                    "tls_verify_disabled": tls_verify_disabled,
-                    "valid": bool(controller_valid),
-                }
-            )
-            if not controller_valid:
-                actions.append(
-                    f"replace the invalid Controller URL in profile {selected.stem}"
-                )
-            if ca_cert and not Path(ca_cert).is_file():
-                actions.append(f"restore the Controller CA file for {client_name}")
-            if tls_verify_disabled:
-                actions.append(
-                    f"profile {selected.stem} runs with TLS verification "
-                    "disabled (insecure=true): configure GMS_CURL_CA_CERT and "
-                    "re-run gms-agent install — throwaway environments only"
-                )
-        elif len(candidates) > 1:
-            actions.append(
-                f"select one {client_name} profile explicitly with GMS_RT_PROFILE"
-            )
-        else:
-            actions.append(f"install/configure the {client_name} profile")
-
-        if not token_state["present"]:
-            actions.append(f"enroll an Agent Service Token for {client_name}")
-        elif not token_state["mode_ok"] or not token_state["owner_ok"]:
-            actions.append(f"fix Agent Service Token ownership/mode for {client_name}")
-
-        mcp_state = _mcp_registration_status(client_name)
-        if not mcp_state["registered"]:
-            actions.append(f"reconcile the {client_name} MCP registration")
-        elif not mcp_state["launchable"]:
-            actions.append(
-                f"restore the installed runtime and reconcile the {client_name} "
-                "MCP registration — the registered launcher is missing: "
-                f"{mcp_state['launcher_path']} (run python "
-                "tools/scripts/agent/sync_package.py . in the repo, then "
-                f"gms-agent install --client {client_name})"
-            )
-        skill_path = client_skill_root(client_name) / "gms-remote-test"
-        if not (skill_path / "SKILL.md").is_file():
-            actions.append(f"install the {client_name} Skill payload")
-        report_clients.append(
-            {
-                "client": client_name,
-                "skill_present": (skill_path / "SKILL.md").is_file(),
-                "skill_path": str(skill_path),
-                "profile": profile_state,
-                "token": token_state,
-                "mcp": mcp_state,
-            }
-        )
-
-    host_env = _host_environment_status()
-    if not host_env.get("tmpdir_writable"):
-        actions.append(
-            f"free space or fix permissions for TMPDIR ({host_env['tmpdir']}) — "
-            "the shell CLI needs it for Bearer header temp files"
-        )
-
-    versions_consistent = bool(installed and installed == current_cli == running)
-    if not versions_consistent:
-        actions.append("install/activate one complete package version")
-    processes = running_runtimes(VERSIONS_DIR)
-    warnings = [
-        f"MCP PID {item['pid']} still runs {item['version']}; the resident server follows "
-        f"`current` on its next idle request (version_guard), or restart the client to "
-        f"load {installed} right now"
-        for item in processes if item["version"] != installed
-    ]
-    unique_actions = list(dict.fromkeys(actions))
-    installation_healthy = versions_consistent and bool(host_env.get("tmpdir_writable"))
-    registered_clients_healthy = (
-        all(
-            bool(item["skill_present"])
-            and bool(item["profile"]["valid"])
-            and bool(item["token"]["present"])
-            and bool(item["token"]["mode_ok"])
-            and bool(item["token"]["owner_ok"])
-            and bool(item["mcp"]["registered"])
-            and item["mcp"].get("launchable") is True
-            for item in report_clients
-        )
+    return build_doctor_report(
+        clients, profile, installed=installed, running=running, current_cli=current_cli,
+        runtime_root=RUNTIME_ROOT, versions_dir=VERSIONS_DIR,
+        client_skill_root=client_skill_root, registration_status=_mcp_registration_status,
+        host_environment_status=_host_environment_status, running_runtimes=running_runtimes,
     )
-    return {
-        "ok": installation_healthy and registered_clients_healthy,
-        "installation_healthy": installation_healthy,
-        "registered_clients_healthy": registered_clients_healthy,
-        "all_mcp_sessions_current": not warnings,
-        "reconnect_required": bool(warnings),
-        "versions": {
-            "running": running,
-            "installed": installed or None,
-            "current_cli": current_cli or None,
-            "consistent": versions_consistent,
-        },
-        "runtime_root": str(RUNTIME_ROOT),
-        "host_environment": host_env,
-        "clients": report_clients,
-        "actions": unique_actions,
-        "mcp_processes": processes,
-        "warnings": warnings,
-    }
 
 
 def install_skill(client: str, runtime_dir: Path) -> Path:
@@ -1122,13 +823,7 @@ def kkagent_plugin_registry() -> Path:
 
 
 def register_kkagent_plugin(target: Path) -> None:
-    """Register the copied payload in ~/.kkagent/plugins/installed.json.
-
-    kkagent discovers local plugins through the registry
-    file, not by directory presence. install_plugin_for_kkagent used to stop
-    at copying the payload, so `--client kkagent` installs were invisible to
-    the host. Mirrors plugins/gms-remote-test/scripts/install_local.sh.
-    """
+    """Register the plugin in ~/.kkagent/plugins/installed.json for discovery."""
     registry = kkagent_plugin_registry()
     version = ""
     manifest = target / "kk.plugin.json"
@@ -1190,7 +885,7 @@ def register_kkagent_plugin(target: Path) -> None:
 def install_plugin_for_kkagent(runtime_dir: Path) -> None:
     """Register the bundled plugin payload under ~/.kkagent/plugins/local.
 
-    Canonical layout (agent_package_builder.py): the manifests sit at the
+    Canonical layout (agent_package/builder.py): the manifests sit at the
     package ROOT (versions/<v>/kk.plugin.json) — the package root IS the
     plugin payload. Legacy double-wrapped layouts are probed as fallback.
     """
@@ -1959,12 +1654,7 @@ def write_enrollment_token(
     - else (zero or ambiguous) → write nothing and return [] — the caller
       must not guess which Controller a one-shot code belongs to.
 
-    cmd_enroll used to derive the profile from the legacy
-    <client>.env store only, so a TOML-only host crashed with
-    FileNotFoundError AFTER the one-shot code had already been redeemed
-    server-side — the token was lost with the code. Profile resolution now
-    goes through the TOML store only (gms_agent.profile_store); the legacy
-    env store no longer exists, so a TOML-only host cannot regress.
+    Resolve profiles through the TOML store only.
     """
     state_dir = profile_store.STATE_DIR
     state_dir.mkdir(parents=True, exist_ok=True)
@@ -2040,8 +1730,6 @@ def cmd_enroll(args: argparse.Namespace) -> int:
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
     try:
-        from gms_agent.http_transport import open_request
-
         with open_request(request, timeout=60, context=context) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
@@ -2231,9 +1919,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     print(f"Runtime root: {RUNTIME_ROOT}")
     print(f"Detected:     {', '.join(detect_clients()) or '(none)'}")
     for client in configured_clients():
-        # Report the EXACT ambiguity instead of silently displaying the
-        # first sorted profile's token state (first-item display used to
-        # mask a multi-Controller host as "configured + token OK").
+        # Report ambiguous profile selection without guessing token state.
         candidates = profile_store.profile_candidates(client)
         if len(candidates) == 1:
             flat = load_profile(candidates[0].stem)

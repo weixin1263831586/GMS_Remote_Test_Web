@@ -61,9 +61,7 @@ def extract_archive_local_with_progress(
         if name.endswith("-tradefed"):
             ensure_tradefed_executable(path)
 
-    # Dispatch by CONTENT, never by filename: a tarball renamed payload.rar
-    # used to reach the raw `tar -xf` branch below and bypass the
-    # member-count / byte-budget / symlink policy entirely .
+    # Detect archive content to enforce member, size and symlink limits.
     fmt = sniff_archive_format(archive_path)
     if fmt == "zip":
         with zipfile.ZipFile(archive_path, "r") as archive:

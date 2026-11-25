@@ -1,9 +1,4 @@
-"""Regression tests for the 2026-10-09 full-code-audit P1 fixes.
-
-覆盖：硬编码附件清单移除（含 per-owner base_url 传递）、_start 的
-check-then-act 竞态、assignee 快照批量抓取的单条容错、主库连接的
-WAL/busy_timeout 规约。
-"""
+"""Redmine attachment, task concurrency, assignee and database contracts."""
 
 from __future__ import annotations
 
@@ -41,7 +36,7 @@ class AttachmentLinkTests(unittest.TestCase):
             ["https://owner.example/attachments/download/9/"],
         )
 
-        # 缺附件元数据的工单（含曾硬编码的 598972）不得伪造附件清单。
+        # 缺附件元数据的工单不得伪造附件清单。
         empty = _attachment_links_for_issue(
             {"issue_id": 598972, "attachments_json": []},
             base_url="https://owner.example",

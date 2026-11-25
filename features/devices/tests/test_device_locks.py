@@ -2,6 +2,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class DeviceLockManagerTests(unittest.TestCase):
@@ -89,6 +90,36 @@ class DeviceLockManagerTests(unittest.TestCase):
         success, _message = locks.force_unlock_device("SERIAL-1")
         self.assertTrue(success)
         self.assertIsNone(locks.get_lock_status("SERIAL-1"))
+
+
+    def test_force_unlock_cannot_release_successor_or_transferred_claim(self):
+        from features.devices.locks import DeviceLockManager
+
+        for transfer in (False, True):
+            with self.subTest(transfer=transfer):
+                locks = DeviceLockManager()
+                self.assertTrue(locks.lock_device("SERIAL-1", "alice", "Alice")[0])
+                original = locks.registry.force_release
+                source = locks.get_lock_status("SERIAL-1")["source_id"]
+
+                def change_claim(device_key, *, transfer=transfer, locks=locks,
+                                 source=source, original=original, **kwargs):
+                    if transfer:
+                        self.assertEqual(locks.registry.transfer(
+                            source, "job:next",
+                            source_type="cluster-job", ttl_seconds=60,
+                        ), 1)
+                    else:
+                        locks.registry.release(source)
+                        self.assertTrue(locks.lock_devices(
+                            ["SERIAL-1"], "bob", "Bob",
+                            source_id="job:next", source_type="cluster-job",
+                        )[0])
+                    return original(device_key, **kwargs)
+
+                with patch.object(locks.registry, "force_release", side_effect=change_claim):
+                    self.assertFalse(locks.force_unlock_device("SERIAL-1")[0])
+                self.assertEqual(locks.get_lock_status("SERIAL-1")["source_id"], "job:next")
 
 
 if __name__ == "__main__":

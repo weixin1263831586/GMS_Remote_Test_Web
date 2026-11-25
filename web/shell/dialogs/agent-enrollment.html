@@ -121,11 +121,11 @@
                     </label>
                 </div></section>
                 <section class="tech-section sdk-source-section"><h3 class="tech-section-title"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg>连接凭据与版本</h3><div class="agent-access-form-grid agent-sdk-ssh-only" id="agent-sdk-add-cred-row">
-                    <label class="agent-access-field" id="agent-sdk-add-password-field">
-                        <span>SSH 口令（可选）</span>
-                        <input id="agent-sdk-add-password" class="combo-box" type="password" maxlength="128" placeholder="服务器未配置口令时填写" autocomplete="new-password">
+                    <div class="agent-access-field" id="agent-sdk-add-password-field">
+                        <label for="agent-sdk-add-password">SSH 口令（可选）</label>
+                        <span class="password-input-wrap"><input id="agent-sdk-add-password" class="combo-box" type="password" maxlength="128" placeholder="服务器未配置口令时填写" autocomplete="new-password"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="agent-sdk-add-password" aria-label="显示密码" title="显示密码"></button></span>
                         <small>加密存储，仅用于只读检索。</small>
-                    </label>
+                    </div>
                     <label class="agent-access-field">
                         <span>默认 revision（可选）</span>
                         <input id="agent-sdk-add-revision" class="combo-box mono" maxlength="128" placeholder="本机默认 main / 编译服务器默认 HEAD">
@@ -217,10 +217,10 @@
                         <span>源备注（可选）</span>
                         <input id="agent-sdk-edit-label" class="combo-box" maxlength="120" placeholder="便于区分不同 SDK 来源">
                     </label>
-                    <label class="agent-access-field agent-sdk-edit-ssh-only">
-                        <span>更换 SSH 口令（可选）</span>
-                        <input id="agent-sdk-edit-password" class="combo-box" type="password" maxlength="128" autocomplete="new-password" placeholder="留空保留原有凭据">
-                    </label>
+                    <div class="agent-access-field agent-sdk-edit-ssh-only">
+                        <label for="agent-sdk-edit-password">更换 SSH 口令（可选）</label>
+                        <span class="password-input-wrap"><input id="agent-sdk-edit-password" class="combo-box" type="password" maxlength="128" autocomplete="new-password" placeholder="留空保留原有凭据"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="agent-sdk-edit-password" aria-label="显示密码" title="显示密码"></button></span>
+                    </div>
                 </div>
             </form>
             <p class="agent-access-form-hint sdk-edit-hint">仅修改版本、revision 等元数据不会重新连接服务器；修改目录、连接目标或口令时，保存前会重新校验。源 ID 保持不变，远端源码不会被修改。</p>

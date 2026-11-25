@@ -93,10 +93,6 @@ class BurnErrorSemanticsTests(unittest.TestCase):
             release_firmware_devices=fake_release_firmware_devices,
             project_root=".",
             firmware_share_store=None,
-            apk_max_tasks=20,
-            apk_max_file_size=500 * 1024 * 1024,
-            apk_max_source_file_size=2 * 1024 * 1024,
-            apk_upload_dir=self.runtime_directory.name,
         )
         app = FastAPI()
 

@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock, patch
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-import features.redmine.daily_brief_api as daily_brief_api
-import features.redmine.daily_brief_repository as brief_repo
+import features.redmine.daily_brief.api as daily_brief_api
+import features.redmine.daily_brief.repository as brief_repo
 from features.auth import CurrentUser
-from features.redmine.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 
 
 VALID = {
@@ -325,7 +325,7 @@ class DailyBriefApiTests(unittest.TestCase):
     def test_single_issue_owner_ineligibility_uses_api_error_envelope(self):
         """资格错误必须走统一错误信封（HTTP 403），不得包进 success 响应。"""
         with patch(
-            "features.redmine.daily_brief_service.is_daily_brief_owner_eligible",
+            "features.redmine.daily_brief.service.is_daily_brief_owner_eligible",
             return_value=False,
         ):
             response = self.client.post(
@@ -353,11 +353,11 @@ class DailyBriefApiTests(unittest.TestCase):
         self.assertEqual(payload['issues'][0]['issue_id'], 647338)
 
     def test_single_issue_worker_analyzes_without_snapshot_scan(self):
-        from features.redmine.daily_brief_worker import _execute_job
+        from features.redmine.daily_brief.worker import _execute_job
 
         queued = self.client.post('/api/redmine-agent/daily-brief/analyze-issue', json={'issue_id': 647338}).json()['data']
         repo = brief_repo.owner_daily_brief_repository('owner-a')
-        with patch('features.redmine.daily_brief_service.preflight_gms_auth', AsyncMock(return_value=(True, ''))):
+        with patch('features.redmine.daily_brief.service.preflight_gms_auth', AsyncMock(return_value=(True, ''))):
             asyncio.run(_execute_job(repo, repo.get_job(queued['job_id']), lambda owner: daily_brief_api.DailyBriefService(owner)))
         self.triage_mock.assert_not_awaited()
         self.assertEqual(repo.get_issue(queued['run_id'], 647338).status, 'completed')
@@ -384,7 +384,7 @@ class DailyBriefApiTests(unittest.TestCase):
         import requests
         from redminelib.exceptions import BaseRedmineError
 
-        from features.redmine.daily_brief_snapshot import DailyBriefIdentityError
+        from features.redmine.daily_brief.snapshot import DailyBriefIdentityError
 
         cases = (
             (DailyBriefIdentityError("owner secret-id"), 503, "DEPENDENCY_UNAVAILABLE"),

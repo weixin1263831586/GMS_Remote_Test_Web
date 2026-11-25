@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.daily_brief_case_fact import build_case_fact_from_brief
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.case_fact import build_case_fact_from_brief
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 
 
 def _run() -> DailyBriefRun:

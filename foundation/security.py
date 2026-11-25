@@ -24,7 +24,7 @@ def is_safe_device_id(value: str | None) -> bool:
     ``;``/``$()``/backticks would be a remote command-injection vector, so any
     id that is not a strict alphanumeric serial must be rejected upstream.
     """
-    return bool(value) and _DEVICE_ID_PATTERN.match(str(value)) is not None
+    return bool(value) and _DEVICE_ID_PATTERN.fullmatch(str(value)) is not None
 
 
 def bearer_token(authorization: str | None) -> str | None:

@@ -57,24 +57,11 @@
   line-height: 1;
   margin-right: 2px;
 }
-/* Fixed 75px device-action buttons clipped longer semantic labels such as
-   'USB/IP 接入' once icon artwork and its inset were added. Size from content
-   and wrap at the existing flex container boundary, not inside the button. */
-#page-test :is(.adb-button-frame, .vnc-button-frame) .btn-xxs {
-  width: auto;
-  min-width: 75px;
-  max-width: 100%;
-  flex: 0 0 auto;
-  padding-inline: 8px;
-}
-/* On the test console, all ten ADB actions belong to ONE toolbar row.
-   Emoji plus the original 75px minimum used to push the final item onto
-   a second line at the 1792px reference viewport. Preserve the colored
-   glyphs and labels; reclaim only excess button/icon spacing instead.
-   When the column is truly too narrow, scroll horizontally (not wrap or
-   truncate action labels). The extra .middle-row specificity must beat
-   the later other-workspaces.css shared button padding/gap declarations. */
-#page-test.page-ui-rework .middle-row .adb-button-frame {
+/* 设备动作按钮唯一定宽处：ADB 10 个 + VNC 7 个一律 80px 等宽。
+   图标紧贴文字（gap 与图标 margin 归零、横向 padding 3px）——可用内容 72px，
+   17 个标签实测均不溢出；'USB/IP 接入' 需 83.8px 故用短名 'USB/IP'。
+   容器放不下时横向滚动，不换行、不截断。宽度只在下面这一条规则里定义。 */
+#page-test.page-ui-rework .middle-row :is(.adb-button-frame, .vnc-button-frame) {
   flex-wrap: nowrap;
   gap: 3px;
   min-width: 0;
@@ -84,51 +71,44 @@
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
 }
-#page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs {
-  width: auto;
-  min-width: 0;
-  max-width: none;
-  flex: 0 0 auto;
-  padding: 4px 6px;
-
+#page-test.page-ui-rework .middle-row :is(.adb-button-frame, .vnc-button-frame) .btn-xxs {
+  width: 80px;
+  min-width: 80px;
+  max-width: 80px;
+  flex: 0 0 80px;
+  min-height: 29px;
+  padding: 4px 3px;
+  gap: 0;
   white-space: nowrap;
 }
-#page-test.page-ui-rework .adb-button-frame .test-action-icon {
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) .btn-xxs > :is(.test-action-icon, .reboot-icon, svg.ui-icon) {
+  margin-right: 0;
+}
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) .test-action-icon {
   width: 1.15em;
   height: 1.15em;
-  margin-right: 2px;
-
 }
-#page-test.page-ui-rework .adb-button-frame button > svg.ui-icon {
+#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) button > svg.ui-icon {
   width: 1.08em;
   height: 1.08em;
   padding: 1px;
-  margin-right: 3px;
 }
 @media (min-width: 1200px) and (max-width: 1599.98px) {
-    #page-test.page-ui-rework .middle-row .adb-button-frame { gap: 2px; }
-    #page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs {
-        padding: 4px 4px;
-    }
-    #page-test.page-ui-rework .middle-row .adb-button-frame .test-action-icon {
+    #page-test.page-ui-rework .middle-row :is(.adb-button-frame, .vnc-button-frame) { gap: 2px; }
+    #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) .test-action-icon {
         width: 1.05em;
         height: 1.05em;
-        margin-right: 1px;
     }
-    #page-test.page-ui-rework .middle-row .adb-button-frame button > svg.ui-icon {
+    #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) button > svg.ui-icon {
         width: 1em;
         height: 1em;
-        margin-right: 2px;
     }
 }
-
 @media (min-width: 1200px) and (max-width: 1299.98px) {
-    #page-test.page-ui-rework .middle-row .adb-button-frame { gap: 1px; }
-    #page-test.page-ui-rework .middle-row .adb-button-frame .btn-xxs { padding: 4px 2px; }
-    #page-test.page-ui-rework .middle-row .adb-button-frame .test-action-icon {
+    #page-test.page-ui-rework .middle-row :is(.adb-button-frame, .vnc-button-frame) { gap: 1px; }
+    #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame) .test-action-icon {
         width: 0.9em;
         height: 0.9em;
-        margin-right: 0;
     }
 }
 

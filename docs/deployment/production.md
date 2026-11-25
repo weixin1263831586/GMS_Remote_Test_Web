@@ -21,7 +21,7 @@ GMS_RELEASE_SIGNING_KEY=<GPG key ID> ./install.sh package \
   --dist-dir dist --package-name gms-web-app --version <version>
 ```
 
-打包会输出 `.tar.gz` 及配套的 `.sha256`、`.sig` 文件。打包过程使用 `scripts/sanitize_release_config.py` 清除本机凭证与部署身份，并执行 `scripts/verify_release_tree.py` 校验发布树。目标电脑部署：
+打包会输出 `.tar.gz` 及配套的 `.sha256`、`.sig` 文件。打包过程使用 `scripts/security/sanitize_release_config.py` 清除本机凭证与部署身份，并执行 `scripts/security/verify_release_tree.py` 校验发布树。目标电脑部署：
 
 ```bash
 sha256sum -c <archive>.sha256
@@ -59,7 +59,7 @@ limit_concurrency  = 500
 | 服务 | 说明 |
 | --- | --- |
 | `gms-web-app.service` | Controller 主服务，通过 `bootstrap.server` 启动 Uvicorn，监听 `0.0.0.0:<端口>` 并加载 HTTPS 证书 |
-| `gms-web-app-local-worker.service` | 本地 Worker Agent（`python -m worker_agent.app`），依赖主服务 |
+| `gms-web-app-local-worker.service` | 本地 Worker Agent（`python -m worker.app`），依赖主服务 |
 | `gms-web-app-local-software.service` | oneshot 服务，重新配置本地 Worker 软件 |
 | `gms-web-app-backup.service` / `.timer` | 每日 02:30（随机延迟 45 分钟内）执行加密备份 |
 
@@ -99,9 +99,11 @@ sudo journalctl -u gms-web-app -f
 `restart_services.sh` 是仓库根目录的服务管理脚本，执行流程：
 
 1. 通过 `bootstrap.env_loader` 加载运行环境变量（与 `app.py` 相同的优先级）。
-   启动前准备 HTTPS 证书，将已安装 systemd 服务的旧证书参数更新到当前证书目录，
-   并将 `python -m uvicorn` 更新为兼容 CLI 的 `python -m bootstrap.server`。
-   更新会保留原服务文件备份，仅在 unit 有改动时执行 `daemon-reload`，需要时由 sudo 在操作者终端提权。
+   环境配置读取或校验失败时立即退出，不停止现有服务。
+   停止服务前准备 HTTPS 证书，并更新已安装的 Controller、Worker、晨报定时任务、工具安装和备份服务入口。
+   更新保留 unit 中的启动参数、运行身份和环境设置。仅在 unit 需要重新载入时执行 `daemon-reload`，
+   系统级修改按需由 sudo 在操作者终端提权。需要更新入口的 Worker 或晨报 unit 若缺少当前模块，
+   重启会在停止服务前退出，需先部署该工作目录。
 2. 默认保留 Python 字节码缓存，避免全仓扫描和重复冷启动。显式传入 `--clean-cache`
    时，单次遍历项目源码目录清理 `__pycache__`、`.pyc`、`.pyo`、`.pytest_cache`，
    跳过运行数据、配置、虚拟环境和第三方工具目录。
@@ -111,7 +113,7 @@ sudo journalctl -u gms-web-app -f
 6. 启动新服务：优先通过 systemd 重启 `gms-web-app.service`；unit 不存在时回退为 `nohup` 直接启动 Uvicorn，日志写入 `fastapi.log`、PID 写入 `fastapi.pid`。
 7. 健康检查：立即探测 `https://localhost:<端口>/api/system/health/live`，失败后间隔 1 秒重试，
    总时限约 60 秒，单次请求上限 2 秒。脚本显示配置准备、六个阶段和整体的耗时。
-8. 若存在用户级 Worker unit（`~/.config/systemd/user/gms-worker-agent.service`），重启本地 Worker Agent。
+8. 重启已安装的晨报 Worker、已启用或正在运行的系统级设备 Worker，以及已安装的用户级设备 Worker。
 
 ```bash
 ./restart_services.sh

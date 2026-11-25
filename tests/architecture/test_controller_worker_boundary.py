@@ -1,87 +1,87 @@
-"""Controller <-> worker_agent import boundary gate (AGENTS.md hard rule).
+"""Controller <-> worker import boundary gate (AGENTS.md hard rule).
 
-``features/`` must not reach into ``worker_agent/`` implementation except for
+``features/`` must not reach into ``worker/`` implementation except for
 the audited same-host bridge surfaces listed below (ADR 0004: Controller and
 Worker interact across the SSH execution boundary; these modules are the
 documented same-host exceptions).  The allowlist is two-dimensional and
-shrink-only: each features/ file names the *exact* ``worker_agent.*`` modules
+shrink-only: each features/ file names the *exact* ``worker.*`` modules
 it may import — adding another worker module to an already-allowlisted file
 still fails here until the set is extended deliberately in review.  Shrinking
 (sinking shared logic into ``foundation/``) is the intended direction.
 
-The reverse direction is also exact: ``worker_agent`` must not import
+The reverse direction is also exact: ``worker`` must not import
 ``features/`` at all.  The shared device-action spec contract lives in
 ``foundation/device_action_spec.py`` precisely so it ships with the Worker
 bundle (``features/`` is not part of the remote Worker deployment).
 """
 
 import ast
+import subprocess
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# features/ file -> exact worker_agent modules it may import.  Any worker
+# features/ file -> exact worker modules it may import.  Any worker
 # module outside a file's set is a violation even when the file itself is
 # allowlisted (prevents silent boundary creep inside trusted files).
 ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     # Same-host bridge: the documented exception in AGENTS.md.
     "features/cluster/local_bridge.py": {
-        "worker_agent.adb_proxy",
-        "worker_agent.inventory",
-        "worker_agent.process_inventory",
-        "worker_agent.suite_actions",
-        "worker_agent.suite_detection",
+        "worker.adb_proxy",
+        "worker.inventory",
+        "worker.process_inventory",
+        "worker.suite_actions",
     },
     # Cluster suite transfer/execution surfaces (worker-role execution).
     "features/cluster/api.py": {
-        "worker_agent.adb_proxy",
-        "worker_agent.config",
-        "worker_agent.device_actions",
-        "worker_agent.inventory",
+        "worker.adb_proxy",
+        "worker.config",
+        "worker.device_actions",
+        "worker.inventory",
     },
-    "features/cluster/deployment_api.py": {
-        "worker_agent.process_inventory",
+    "features/cluster/deployment/api.py": {
+        "worker.process_inventory",
     },
-    "features/cluster/device_actions_api.py": {
-        # 同主机桥接面（同 deployment_api.py 先例）：AOA 回放派发前
+    "features/cluster/device_operations/api.py": {
+        # 同主机桥接面（同 deployment/api.py 先例）：AOA 回放派发前
         # 判定本机是否可抑制 adb daemon（ Tradefed 任务/ADB Proxy 导入
         # 检查，见 _local_aoa_adb_suppression_allowed）。
-        "worker_agent.adb_proxy",
-        "worker_agent.inventory",
-        "worker_agent.process_inventory",
+        "worker.adb_proxy",
+        "worker.inventory",
+        "worker.process_inventory",
     },
-    "features/cluster/transfer_ingest_api.py": {
-        "worker_agent.android_inspection",
+    "features/cluster/transfers/ingest.py": {
+        "worker.android_inspection",
     },
-    "features/cluster/transfers_api.py": {
-        "worker_agent.config",
-        "worker_agent.inventory",
+    "features/cluster/transfers/api.py": {
+        "worker.config",
+        "worker.inventory",
     },
     # adb proxy + fastboot workflow execution surfaces.
-    "features/devices/adb_proxy_security.py": {
-        "worker_agent.adb_proxy",
+    "features/devices/adb/proxy_security.py": {
+        "worker.adb_proxy",
     },
-    "features/devices/adb_proxy_service.py": {
-        "worker_agent.adb_proxy",
+    "features/devices/adb/proxy_service.py": {
+        "worker.adb_proxy",
     },
     "features/devices/api.py": {
-        "worker_agent.adb_proxy",
+        "worker.adb_proxy",
     },
     "features/devices/bootloader_api.py": {
-        "worker_agent.adb_proxy",
-        "worker_agent.fastboot_workflow",
+        "worker.adb_proxy",
+        "worker.fastboot_workflow",
     },
     "features/firmware/api_helpers.py": {
-        "worker_agent.adb_proxy",
+        "worker.adb_proxy",
     },
-    "features/firmware/gsi_transport.py": {
-        "worker_agent.fastboot_workflow",
+    "features/firmware/gsi_burn.py": {
+        "worker.fastboot_workflow",
     },
 }
 
-# worker_agent file -> exact features/ modules it may import.  Empty by
+# worker file -> exact features/ modules it may import.  Empty by
 # design: shared contracts (e.g. the device-action spec) live in foundation/,
 # which is part of the remote Worker bundle, features/ is not.
 ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {}
@@ -99,7 +99,7 @@ def imported_modules(path: Path) -> set[str]:
 
 
 def worker_modules(modules: set[str]) -> set[str]:
-    return {name for name in modules if name.split(".")[0] == "worker_agent"}
+    return {name for name in modules if name.split(".")[0] == "worker"}
 
 
 def feature_modules(modules: set[str]) -> set[str]:
@@ -115,7 +115,7 @@ def _iter_source_files(package: str):
 
 
 class ControllerWorkerBoundaryTests(unittest.TestCase):
-    def test_features_import_worker_agent_only_via_allowlist(self):
+    def test_features_import_worker_only_via_allowlist(self):
         offenders = []
         for relative, path in _iter_source_files("features"):
             imported = worker_modules(imported_modules(path))
@@ -124,7 +124,7 @@ class ControllerWorkerBoundaryTests(unittest.TestCase):
             allowed = ALLOWED_FEATURE_WORKER_IMPORTS.get(relative)
             if allowed is None:
                 offenders.append(
-                    f"{relative}: file not allowlisted to import worker_agent"
+                    f"{relative}: file not allowlisted to import worker"
                 )
                 continue
             unexpected = imported - allowed
@@ -136,15 +136,15 @@ class ControllerWorkerBoundaryTests(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "features/ must import only its exact allowlisted worker_agent "
+            "features/ must import only its exact allowlisted worker "
             "modules; extend ALLOWED_FEATURE_WORKER_IMPORTS in "
             "tests/architecture/test_controller_worker_boundary.py only after "
             "review (preferred: sink shared logic into foundation/).",
         )
 
-    def test_worker_agent_imports_features_only_via_allowlist(self):
+    def test_worker_imports_features_only_via_allowlist(self):
         offenders = []
-        for relative, path in _iter_source_files("worker_agent"):
+        for relative, path in _iter_source_files("worker"):
             imported = feature_modules(imported_modules(path))
             if not imported:
                 continue
@@ -163,7 +163,7 @@ class ControllerWorkerBoundaryTests(unittest.TestCase):
         self.assertEqual(
             offenders,
             [],
-            "worker_agent/ must not import features/; shared contracts "
+            "worker/ must not import features/; shared contracts "
             "belong in foundation/ (which ships with the Worker bundle).",
         )
 
@@ -193,6 +193,21 @@ class ControllerWorkerBoundaryTests(unittest.TestCase):
             "allowlist entries must match real imports; delete stale entries "
             "to keep the boundary shrink-only.",
         )
+
+
+    def test_retired_worker_package_references(self):
+        retired = "worker" + "_agent"
+        self.assertFalse((ROOT / retired / "__init__.py").exists())
+        self.assertTrue((ROOT / "worker" / "__init__.py").is_file())
+        # Scan every tracked text file, including configuration and docs.
+        # No migration or compatibility exceptions are permitted.
+        result = subprocess.run(
+            ["git", "grep", "-I", "-n", "-F", retired, "--"],
+            cwd=ROOT, capture_output=True, text=True, check=False,
+        )
+        self.assertIn(result.returncode, (0, 1), result.stderr)
+        self.assertEqual(result.stdout, "", "Retired Worker package references remain")
+
 
 
 if __name__ == "__main__":  # pragma: no cover

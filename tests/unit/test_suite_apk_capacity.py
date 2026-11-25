@@ -12,9 +12,9 @@ from unittest.mock import MagicMock
 import pytest
 from starlette.requests import Request
 
+from features.apk import service as apk
+from features.apk.store import ApkTaskStore
 from features.auth import CurrentUser
-from features.firmware import apk
-from features.firmware.apk_store import ApkTaskStore
 from features.test_execution import suites_api
 from features.test_execution.models import SuiteApkAnalyzeRequest
 

@@ -11,6 +11,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -20,8 +21,8 @@ from foundation.config_paths import (
     static_config_path,
     user_tools_path,
 )
-from foundation.config_persistence import ConfigPersistenceMixin
 from foundation.networking import is_local_host
+from foundation.private_config import write_private_json
 from foundation.runtime_config_store import RuntimeConfigStore
 from foundation.runtime_settings import RuntimeSettings
 
@@ -77,7 +78,7 @@ DEFAULT_WIFI_PASSWORD = ""
 PLACEHOLDER_PATTERN = re.compile(r'\$\{([^}]+)\}')
 
 
-class ConfigManager(ConfigPersistenceMixin):
+class ConfigManager:
     """Reads/writes static + runtime config with a short TTL cache to cut disk I/O."""
 
     def __init__(
@@ -229,7 +230,7 @@ class ConfigManager(ConfigPersistenceMixin):
         return redmine_config
 
     def get_redmine_base_url(self, config: dict[str, Any] = None) -> str:
-        """Return the configured Redmine base_url, falling back to DEFAULT_REDMINE_BASE_URL (no exception)."""
+        """Return the configured Redmine base_url, or an empty string if unavailable."""
         try:
             redmine_config = (config if config is not None else self.load_config()).get("redmine") or {}
         except Exception:
@@ -248,8 +249,7 @@ class ConfigManager(ConfigPersistenceMixin):
     def _load_static_config(self) -> dict[str, Any]:
         """Load and validate the static config from disk (placeholders expanded).
 
-        Falls back to configs/examples/config.example.json (or the legacy flat
-        template path) when the deployment-local
+        Falls back to the grouped configs/examples/config.example.json template.
         configs/config.json does not exist (fresh checkout / CI)."""
         path = self.config_path
         if not os.path.isfile(path):
@@ -314,7 +314,7 @@ class ConfigManager(ConfigPersistenceMixin):
         elif isinstance(value, str):
             # 递归处理嵌套占位符，最多 3 层嵌套
             for _ in range(3):
-                if '${' not in value:
+                if not isinstance(value, str) or '${' not in value:
                     break
                 new_value = self._replace_single_placeholder(value, config)
                 if new_value == value:
@@ -333,7 +333,7 @@ class ConfigManager(ConfigPersistenceMixin):
             # 内置占位符：${PROJECT_ROOT} 展开为当前部署树根目录，
             # 配置文件随 checkout/部署目录迁移时无需手工改绝对路径。
             if var_expr == 'PROJECT_ROOT':
-                return PROJECT_ROOT
+                return str(self.project_root)
             if ':' in var_expr:
                 var_name, default_val = var_expr.split(':', 1)
                 if var_name in os.environ:
@@ -380,8 +380,7 @@ class ConfigManager(ConfigPersistenceMixin):
         """加载运行时配置。
 
         运行时配置保存安装脚本写入的部署身份和用户操作产生的数据（规范
-        位置为 runtime store 分片，平铺 configs/config_runtime.json 仅作
-        legacy 回退），覆盖随源码携带的静态默认值（config.json）。
+        位置为 runtime store 分片），覆盖随源码携带的静态默认值（config.json）。
         """
         if self._uses_runtime_store():
             try:
@@ -411,6 +410,88 @@ class ConfigManager(ConfigPersistenceMixin):
         if self._uses_runtime_store():
             return self._runtime_store.stamp()
         return os.path.getmtime(self.runtime_config_path)
+
+    def save_config(self, config: dict[str, Any]) -> bool:
+        return self._write_config_json(self.config_path, config, 'config')
+
+    def save_runtime_config(self, runtime_config: dict[str, Any]) -> bool:
+        return self._write_runtime_config_file(dict(runtime_config or {}))
+
+    def save_runtime(self, updates: dict[str, Any]) -> bool:
+        return self.update_runtime_config(updates)
+
+    def save_client_host(self, client_ip: str, username: str) -> bool:
+        """Merge a single detected host without replaying credential snapshots."""
+        with self._runtime_write_lock, self._runtime_transaction():
+            runtime = self._load_runtime_config() or {}
+            hosts = dict(runtime.get('client_hosts') or {})
+            hosts[client_ip] = username
+            return self.update_runtime_config({'client_hosts': hosts})
+
+    def update_runtime_config(
+        self,
+        updates: dict[str, Any],
+        *,
+        remove_keys: set[str] | None = None,
+    ) -> bool:
+        """Atomically merge selected top-level runtime keys."""
+        try:
+            with self._runtime_write_lock, self._runtime_transaction():
+                runtime = self._load_runtime_config() or {}
+                runtime.update(dict(updates or {}))
+                for key in remove_keys or set():
+                    runtime.pop(key, None)
+                return self._write_runtime_config_file(
+                    runtime,
+                    preserve_redmine_auth=False,
+                )
+        except Exception as exc:
+            logger.error('Error updating runtime config: %s', exc)
+            return False
+
+    def _write_runtime_config_file(
+        self,
+        runtime_config: dict[str, Any],
+        preserve_redmine_auth: bool = True,
+    ) -> bool:
+        payload = dict(runtime_config or {})
+        with self._runtime_write_lock, self._runtime_transaction():
+            if preserve_redmine_auth and 'redmine_auth' not in payload:
+                existing = self._load_runtime_config()
+                if existing and 'redmine_auth' in existing:
+                    payload['redmine_auth'] = existing['redmine_auth']
+            if self._uses_runtime_store():
+                try:
+                    self._runtime_store.write(payload)
+                    self.invalidate_cache()
+                    return True
+                except Exception as exc:
+                    logger.error('Error writing partitioned runtime config: %s', type(exc).__name__)
+                    return False
+            return self._write_config_json(
+                self.runtime_config_path,
+                payload,
+                'runtime config',
+            )
+
+    def _write_config_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        label: str,
+    ) -> bool:
+        try:
+            with self._runtime_write_lock:
+                write_private_json(Path(path), payload)
+            logger.info('Saved %s to %s', label, path)
+            self.invalidate_cache()
+            return True
+        except Exception as exc:
+            logger.error('Error writing %s: %s', label, exc)
+            return False
+
+    def _runtime_transaction(self):
+        return self._runtime_store.locked() if self._uses_runtime_store() else nullcontext()
 
     def get_runtime_config(self) -> dict[str, Any]:
         """Public read-only access to the runtime configuration."""
@@ -446,7 +527,7 @@ class ConfigManager(ConfigPersistenceMixin):
         只在 runtime 维护、静态配置不持有的区段），否则从合并后的 load_config 取。
         """
         try:
-            with self._runtime_write_lock:
+            with self._runtime_write_lock, self._runtime_transaction():
                 runtime = self._load_runtime_config() or {}
                 current = (
                     (runtime.get(key) if merge_from_runtime else None)
@@ -622,7 +703,7 @@ class ConfigManager(ConfigPersistenceMixin):
         if not username or not hostname or not password:
             return False
 
-        with self._runtime_write_lock:
+        with self._runtime_write_lock, self._runtime_transaction():
             runtime = self._load_runtime_config() or {}
             credentials = runtime.get('client_ssh_credentials') or []
             if not isinstance(credentials, list):
@@ -675,7 +756,7 @@ class ConfigManager(ConfigPersistenceMixin):
         if not username or not hostname:
             return False
 
-        with self._runtime_write_lock:
+        with self._runtime_write_lock, self._runtime_transaction():
             runtime = self._load_runtime_config() or {}
             credentials = runtime.get('client_ssh_credentials') or []
             if not isinstance(credentials, list):
@@ -708,7 +789,7 @@ class ConfigManager(ConfigPersistenceMixin):
 
             encrypted_password = encrypt_secret(password)
 
-            with self._runtime_write_lock:
+            with self._runtime_write_lock, self._runtime_transaction():
                 runtime = self._load_runtime_config() or {}
                 runtime['redmine_auth'] = {
                     'username': username,
@@ -724,7 +805,7 @@ class ConfigManager(ConfigPersistenceMixin):
             return False
 
     def load_redmine_credentials(self) -> dict[str, str] | None:
-        """从运行时配置加载并解密 Redmine 凭证（runtime store 凭证分片，legacy 平铺文件回退）。"""
+        """从运行时配置加载并解密 Redmine 凭证（runtime store 凭证分片或显式用户配置）。"""
         try:
             runtime = self._load_runtime_config()
             if not runtime:

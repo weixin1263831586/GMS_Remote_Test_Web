@@ -1,0 +1,352 @@
+"""Android resource config explorer router.
+
+Exposes the "配置资源查看器" tool: list framework (or any package) config
+resources with their APK default value and, optionally, the overlay-effective
+value. The UI is embedded in the device-config modal; these /api endpoints are
+consumed by that modal (no standalone page or sidebar entry).
+"""
+
+import asyncio
+import logging
+import os
+import uuid
+from collections.abc import Callable
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Query, Request
+from pydantic import BaseModel
+
+from features.users import owner_id_from_request
+from foundation.config import APK_MAX_FILE_SIZE, APK_UPLOAD_DIR
+from foundation.error_model import ApiError, record_internal_error
+from foundation.errors import handle_api_errors
+from foundation.responses import error_response, success_response
+
+from ..locks import device_lock_manager
+from ..support import device_fencing_owner_id
+from .config_explorer import (
+    device_file_size,
+    explore,
+    list_all_packages,
+    list_devices,
+    list_features,
+    list_packages,
+    list_packages_with_path,
+    list_props,
+    pull_device_file,
+)
+
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+_generate_help_or_continue: Callable[[bool, str, str], Any] | None = None
+_create_apk_task_fn: Callable[[str, str, str, str], Any] | None = None
+_normalize_apk_filename_fn: Callable[[str], str] | None = None
+_safe_join_fn: Callable[[str, str], str] | None = None
+_cleanup_files_fn: Callable[[list[str]], Any] | None = None
+
+
+def configure_config_explorer_dependencies(
+    *,
+    generate_help_or_continue: Callable[[bool, str, str], Any],
+    create_apk_task: Callable[[str, str, str, str], Any],
+    normalize_apk_filename: Callable[[str], str],
+    safe_join: Callable[[str, str], str],
+    cleanup_files: Callable[[list[str]], Any],
+) -> None:
+    global _generate_help_or_continue
+    global _create_apk_task_fn
+    global _normalize_apk_filename_fn
+    global _safe_join_fn
+    global _cleanup_files_fn
+
+    _generate_help_or_continue = generate_help_or_continue
+    _create_apk_task_fn = create_apk_task
+    _normalize_apk_filename_fn = normalize_apk_filename
+    _safe_join_fn = safe_join
+    _cleanup_files_fn = cleanup_files
+
+
+def _help_or_continue(help: bool, method: str, path: str):
+    if _generate_help_or_continue is None:
+        return None
+    return _generate_help_or_continue(help, method, path)
+
+
+def _decompile_dependencies_ready() -> bool:
+    return all(
+        dep is not None
+        for dep in (
+            _create_apk_task_fn,
+            _normalize_apk_filename_fn,
+            _safe_join_fn,
+            _cleanup_files_fn,
+        )
+    )
+
+
+def _readable_device(request: Request, device_id: str) -> str:
+    selected = str(device_id or "").strip()
+    if not selected:
+        online = [
+            str(item.get("serial") or "")
+            for item in list_devices()
+            if item.get("state") == "device" and item.get("serial")
+        ]
+        if len(online) != 1:
+            raise HTTPException(
+                400, "device_id is required when zero or multiple devices are online"
+            )
+        selected = online[0]
+    claim = device_lock_manager.get_lock_status(selected)
+    # 锁记的是资源所有者（ADR 0010）。Agent 的 actor id 与登记账号不同，
+    # 用 actor id 比较会把自己持有的设备判成他人占用。
+    owner_id = device_fencing_owner_id(request)
+    if claim and claim.get("client_id") != owner_id:
+        raise HTTPException(409, "device is reserved by another active operation")
+    return selected
+
+
+@router.get("/api/config-explorer/devices")
+@handle_api_errors
+async def api_list_devices(request: Request, help: bool = Query(False)):
+    """List adb devices available for config exploration."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/devices")
+    if resp:
+        return resp
+    devices = await asyncio.to_thread(list_devices)
+    return success_response(data={"devices": devices}, message="Success")
+
+
+@router.get("/api/config-explorer/packages")
+@handle_api_errors
+async def api_list_packages(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """List packages that typically carry config_* resources."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/packages")
+    if resp:
+        return resp
+    packages = await asyncio.to_thread(
+        lambda: list_packages(_readable_device(request, device_id))
+    )
+    return success_response(data={"packages": packages}, message="Success")
+
+
+@router.get("/api/config-explorer/packages/all")
+@handle_api_errors
+async def api_list_all_packages(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """List ALL packages on the device (pm list packages) for the package picker."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/packages/all")
+    if resp:
+        return resp
+    packages = await asyncio.to_thread(
+        lambda: list_all_packages(_readable_device(request, device_id))
+    )
+    return success_response(
+        data={"packages": packages, "count": len(packages)}, message="Success"
+    )
+
+
+@router.get("/api/config-explorer/packages-with-path")
+@handle_api_errors
+async def api_list_packages_with_path(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``pm list packages -f`` → [{path, package}] (device info: packages tab)."""
+    resp = _help_or_continue(
+        help, "GET", "/api/config-explorer/packages-with-path"
+    )
+    if resp:
+        return resp
+    rows = await asyncio.to_thread(
+        lambda: list_packages_with_path(_readable_device(request, device_id))
+    )
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer/features")
+@handle_api_errors
+async def api_list_features(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``pm list features`` → [{name, version?}] (device info: features tab)."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/features")
+    if resp:
+        return resp
+    rows = await asyncio.to_thread(
+        lambda: list_features(_readable_device(request, device_id))
+    )
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer/props")
+@handle_api_errors
+async def api_list_props(
+    request: Request,
+    device_id: str = Query("", description="adb serial; empty = default device"),
+    help: bool = Query(False),
+):
+    """``getprop`` → [{name, value}] (device info: props tab)."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer/props")
+    if resp:
+        return resp
+    rows = await asyncio.to_thread(
+        lambda: list_props(_readable_device(request, device_id))
+    )
+    return success_response(data={"rows": rows, "count": len(rows)}, message="Success")
+
+
+@router.get("/api/config-explorer")
+@handle_api_errors
+async def api_explore(
+    request: Request,
+    package: str = Query("android", description="包名，如 android"),
+    device_id: str = Query("", description="adb serial；为空时用默认设备"),
+    name: str = Query("", description="资源名子串过滤（忽略大小写）"),
+    type: str = Query("", description="类型过滤：bool/integer/string/dimen/array"),
+    config_only: bool = Query(True, description="只显示 config_* 资源"),
+    with_effective: bool = Query(
+        False, description="同时计算 overlay 生效值（每资源一次 adb 调用，并发执行）"
+    ),
+    effective_limit: int = Query(
+        0, description="生效值查询上限；0=不限（计算全部）。仅在 with_effective 时生效"
+    ),
+    help: bool = Query(False),
+):
+    """List config resources of a package with default (+optional effective) values."""
+    resp = _help_or_continue(help, "GET", "/api/config-explorer")
+    if resp:
+        return resp
+
+    try:
+        result = await asyncio.to_thread(
+            lambda: explore(
+                package=package or "android",
+                device_id=_readable_device(request, device_id),
+                name_filter=name or None,
+                type_filter=type or None,
+                config_only=config_only,
+                with_effective=with_effective,
+                effective_limit=effective_limit,
+            )
+        )
+    except ValueError as e:
+        # 包名白名单拒绝：文案为固定提示，不回显原始输入。
+        return error_response(str(e), status_code=400)
+    except RuntimeError as e:
+        # explore() 的领域错误文案（设备离线/包不存在/工具失败）由本模块生成，
+        # 面向客户端是安全的；其余未知异常不得回显 str(e)。
+        logger.error(f"config-explorer explore failed: {e}")
+        return error_response(str(e), status_code=400)
+    except Exception:
+        message = record_internal_error(logger, "查询配置资源", "config-explorer explore error")
+        return error_response(message, status_code=500)
+
+    return success_response(
+        data={
+            "package": result.package,
+            "apk_path": result.apk_path,
+            "total": result.total,
+            "overlayed_count": result.overlayed_count,
+            "resources": result.resources,
+        },
+        message="Success",
+    )
+
+
+class DecompileRequest(BaseModel):
+    device_id: str = ""
+    path: str
+
+
+@router.post("/api/config-explorer/decompile")
+@handle_api_errors
+async def decompile_device_apk(req: DecompileRequest, request: Request):
+    """Pull an on-device APK/JAR and register it as an APK-analysis task.
+
+    The file is pulled into the APK upload dir (so the existing APK-analysis
+    pipeline can decompile it), then a task is created. Returns ``task_id`` /
+    ``filename`` / ``size``; the frontend then switches to the APK-analysis
+    page and starts the analysis (same flow as suite→APK).
+    """
+    if not _decompile_dependencies_ready():
+        return error_response(
+            "APK 分析依赖未初始化",
+            status_code=503,
+            code="DEPENDENCY_UNAVAILABLE",
+        )
+    if not req.path.strip():
+        return error_response("缺少 APK 路径", status_code=400)
+    on_device_path = req.path.strip()
+    if not on_device_path.lower().endswith((".apk", ".jar")):
+        return error_response("仅支持拉取 .apk / .jar 后缀的文件", status_code=400)
+
+    device_id = _readable_device(request, req.device_id)
+    owner_id = owner_id_from_request(request)
+    # 传输前用设备端大小封顶，超限文件不产生任何传输流量；拉取后仍复查。
+    try:
+        remote_size = await asyncio.to_thread(device_file_size, device_id, on_device_path)
+    except RuntimeError:
+        logger.error("decompile size probe failed for %s", on_device_path)
+        return error_response("无法读取设备端文件大小，请确认路径有效", status_code=400)
+    if remote_size > APK_MAX_FILE_SIZE:
+        return error_response(
+            f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400
+        )
+
+    assert _normalize_apk_filename_fn is not None
+    assert _safe_join_fn is not None
+    assert _cleanup_files_fn is not None
+    assert _create_apk_task_fn is not None
+    filename = _normalize_apk_filename_fn(os.path.basename(on_device_path))
+    task_id = str(uuid.uuid4())
+    task_dir = _safe_join_fn(APK_UPLOAD_DIR, task_id)
+    apk_path = _safe_join_fn(task_dir, filename)
+    os.makedirs(task_dir)
+    registered = False
+    try:
+        try:
+            await asyncio.to_thread(pull_device_file, device_id, on_device_path, apk_path)
+            size = os.path.getsize(apk_path)
+        except (RuntimeError, FileNotFoundError) as exc:
+            record_internal_error(logger, "拉取 APK", "decompile pull failed")
+            if "timed out" in str(exc).lower():
+                return ApiError.dependency_timeout("拉取 APK 超时").to_response()
+            return ApiError.upstream_failure("拉取 APK 失败", service="adb").to_response()
+        if size > APK_MAX_FILE_SIZE:
+            return error_response(f"文件过大，上限 {APK_MAX_FILE_SIZE // (1024 * 1024)}MB", status_code=400)
+
+        try:
+            _create_apk_task_fn(task_id, apk_path, filename, owner_id)
+        except ValueError as exc:
+            return error_response(str(exc), status_code=429)
+        registered = True
+    finally:
+        if not registered:
+            _cleanup_files_fn([apk_path])
+            try:
+                os.rmdir(task_dir)
+            except OSError:
+                logger.warning("Could not remove failed APK staging directory", exc_info=True)
+    return success_response(
+        data={
+            "task_id": task_id,
+            "filename": filename,
+            "size": size,
+            "source_path": on_device_path,
+        },
+        message="Success",
+    )

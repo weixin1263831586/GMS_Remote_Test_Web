@@ -227,17 +227,18 @@ package_web_app() {
             --exclude '*.pid' \
             --exclude 'local.diff' \
             --exclude 'scripts_local/' \
+             --exclude '/tools/scripts/maintenance/repair_audit_chain.py' \
             --exclude 'tests/' \
             --exclude '*/tests/' \
             "${PROJECT_DIR}/" "${package_root}/"
         mkdir -p "${package_root}/data"
-        python3 "${PROJECT_DIR}/scripts/sanitize_release_config.py" \
+        python3 "${PROJECT_DIR}/scripts/security/sanitize_release_config.py" \
             "${package_root}/configs/local/config.json" \
             "${package_root}/configs/local/automation_profiles.json" \
             "${package_root}/configs/local/build_servers.json" \
             "${package_root}/configs/local/cluster.json" \
             "${package_root}/plugins/codesearch/config/config.json"
-        python3 "${PROJECT_DIR}/scripts/verify_release_tree.py" "${package_root}"
+        python3 "${PROJECT_DIR}/scripts/security/verify_release_tree.py" "${package_root}"
         tar -czf "${archive}" -C "${stage}" "${root_name}"
     )
 
@@ -329,6 +330,7 @@ copy_project() {
             --exclude '/tools/GMS-Host-Tools/platform-tools-gms-linux.zip' \
             --exclude 'plugins/codesearch/config/config.json' \
             --exclude 'scripts_local/' \
+             --exclude '/tools/scripts/maintenance/repair_audit_chain.py' \
             --exclude 'tests/' \
             --exclude '*/tests/' \
             "${PROJECT_DIR}/" "${INSTALL_DIR}/"
@@ -688,9 +690,9 @@ PY
 setup_suite_dir() {
     local suite_dir="${RUN_HOME}/GMS-Suite"
     sudo -H -u "${RUN_USER}" mkdir -p "${suite_dir}" "${suite_dir}/tmp"
-    for file in run_GMS_Test_Auto.sh run_GSI_Burn.sh run_Device_Lock.sh; do
-        if [[ -f "${INSTALL_DIR}/scripts/${file}" ]]; then
-            sudo install -o "${RUN_USER}" -g "${RUN_GROUP}" -m 0755 "${INSTALL_DIR}/scripts/${file}" "${suite_dir}/${file}"
+    for file in run_GMS_Test_Auto.sh run_GSI_Burn.sh run_Device_Lock.sh fastboot_common.sh; do
+        if [[ -f "${INSTALL_DIR}/scripts/execution/${file}" ]]; then
+            sudo install -o "${RUN_USER}" -g "${RUN_GROUP}" -m 0755 "${INSTALL_DIR}/scripts/execution/${file}" "${suite_dir}/${file}"
         fi
     done
     for file in upgrade_tool misc.img; do
@@ -728,7 +730,7 @@ configure_networkmanager_policy() {
         warn "未检测到 NetworkManager，跳过 VPN 后台控制授权"
         return
     fi
-    sudo bash "${INSTALL_DIR}/scripts/install_networkmanager_policy.sh" \
+    sudo bash "${INSTALL_DIR}/scripts/deployment/install_networkmanager_policy.sh" \
         "${RUN_USER}" "${SERVICE_NAME}"
 }
 
@@ -811,7 +813,7 @@ Environment=GMS_WORKER_CONFIG=${INSTALL_DIR}/data/local-worker/config.json
 Environment=GMS_ADB_PROXY_BIN_DIR=${RUN_HOME}/.local/bin
 Environment=GMS_ADB_PROXY_STATE_ROOT=${RUN_HOME}/.local/state/gms-adbproxy
 Environment=PYTHONPYCACHEPREFIX=${INSTALL_DIR}/data/pycache-worker
-ExecStart=${INSTALL_DIR}/.venv/bin/python -m worker_agent.app
+ExecStart=${INSTALL_DIR}/.venv/bin/python -m worker.app
 Restart=on-failure
 RestartSec=5
 KillMode=process
@@ -855,7 +857,7 @@ User=${RUN_USER}
 Group=${RUN_GROUP}
 WorkingDirectory=${INSTALL_DIR}
 Environment=HOME=${RUN_HOME}
-ExecStart=${INSTALL_DIR}/scripts/configure_local_worker_software.sh ${INSTALL_DIR} ${RUN_HOME}
+ExecStart=${INSTALL_DIR}/scripts/deployment/worker/configure_worker_software.sh ${INSTALL_DIR} ${RUN_HOME}
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
@@ -863,7 +865,7 @@ ProtectSystem=full
 EOF
     sudo install -o root -g root -m 0644 "${tmp}" "${service_file}"
     rm -f "${tmp}"
-    sudo chmod 0755 "${INSTALL_DIR}/scripts/configure_local_worker_software.sh"
+    sudo chmod 0755 "${INSTALL_DIR}/scripts/deployment/worker/configure_worker_software.sh"
     sudo systemctl daemon-reload
 }
 
@@ -896,8 +898,8 @@ PY
         rm -f "${tmp}"
     fi
     sudo chmod 0600 "${BACKUP_KEY_FILE}"
-    sudo chmod 0755 "${INSTALL_DIR}/scripts/gms_backup.py" \
-        "${INSTALL_DIR}/scripts/run_production_backup.sh"
+    sudo chmod 0755 "${INSTALL_DIR}/scripts/backup/gms_backup.py" \
+        "${INSTALL_DIR}/scripts/backup/run_production_backup.sh"
 
     tmp="$(mktemp)"
     cat > "${tmp}" <<EOF
@@ -916,7 +918,7 @@ Environment=GMS_BACKUP_KEY_FILE=${BACKUP_KEY_FILE}
 Environment=GMS_BACKUP_KEEP=14
 Environment=GMS_CONTROLLER_SERVICE=${SERVICE_NAME}.service
 Environment=GMS_LOCAL_WORKER_SERVICE=${worker_service}
-ExecStart=${INSTALL_DIR}/scripts/run_production_backup.sh
+ExecStart=${INSTALL_DIR}/scripts/backup/run_production_backup.sh
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
@@ -1006,14 +1008,8 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 sys.path.insert(0, str(root))
-from scripts.migrate_config_layout import migrate
-from scripts.sanitize_release_config import sanitize_file
+from scripts.security.sanitize_release_config import sanitize_file
 
-if any((root / 'configs' / name).exists() for name in (
-    'config.json', 'runtime.json', 'config_runtime.json', 'cluster.json',
-    'worker_tokens.json', 'build_servers.json', 'automation_profiles.json',
-)):
-    migrate(root, apply=True)
 for name in ('config.json', 'cluster.json', 'build_servers.json', 'automation_profiles.json'):
     target = root / 'configs/local' / name
     if not target.exists():

@@ -1,8 +1,4 @@
-"""Reference-fidelity invariants for dialogs based on e6f16a49.
-
-These tests intentionally verify business hook preservation and markup composition,
-not pixel equality. The latter requires the Chromium screenshot gallery.
-"""
+"""Dialog markup and business-hook contracts; visual fidelity requires Chromium."""
 from html.parser import HTMLParser
 from pathlib import Path
 

@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from features.redmine import daily_brief_session as session_module
+from features.redmine.daily_brief import session as session_module
 
 
 class SessionTranscriptTests(unittest.TestCase):

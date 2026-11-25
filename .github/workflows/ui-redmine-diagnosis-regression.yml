@@ -37,9 +37,9 @@ jobs:
       - name: Compile changed Python modules
         run: |
           python -m py_compile features/redmine/history_search.py features/redmine/client.py \
-            features/redmine/analysis_similarity.py features/redmine/analysis_attachments.py \
-            features/redmine/analysis_reporting.py features/redmine/daily_brief_report.py \
-            features/redmine/kkagent/claim_review.py
+            features/redmine/analysis/similarity.py features/redmine/analysis/attachments.py \
+            features/redmine/analysis/reporting.py features/redmine/daily_brief/report.py \
+            features/redmine/analysis/kkagent/claim_review.py
       - name: Redmine history, evidence and native review regressions
         env:
           GMS_SKIP_RUNTIME_ENV: "1"
@@ -53,16 +53,16 @@ jobs:
             features/redmine/tests/test_repository_search.py \
             features/redmine/tests/test_daily_brief_execution_view.py \
             features/redmine/tests/test_daily_brief_review_regressions.py \
-            features/redmine/tests/kkagent/test_claim_review.py \
-            features/redmine/tests/kkagent/test_evidence_gate.py
+            features/redmine/tests/analysis/kkagent/test_claim_review.py \
+            features/redmine/tests/analysis/kkagent/test_evidence_gate.py
 
       - name: Full Redmine and SDK source-provider regression
         env:
           GMS_SKIP_RUNTIME_ENV: "1"
         run: |
           python -m pytest -q features/redmine/tests \
-            features/system/tests/test_source_provider.py \
-            features/system/tests/test_source_provider_boundaries.py \
-            features/system/tests/test_source_repo_rank.py \
-            features/system/tests/test_source_ssh_git.py \
-            features/system/tests/test_source_git_search.py
+            features/sdk/tests/test_source_provider.py \
+            features/sdk/tests/test_source_provider_boundaries.py \
+            features/sdk/tests/test_source_repo_rank.py \
+            features/sdk/tests/test_source_ssh_git.py \
+            features/sdk/tests/test_source_git_search.py

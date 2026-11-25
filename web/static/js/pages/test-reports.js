@@ -343,16 +343,6 @@ function displayTestReports(reports) {
 
     const fragment = document.createDocumentFragment();
 
-    // 测试类型颜色映射（定义在循环外，避免重复创建）
-    const typeColors = {
-        'CTS': '#3B82F6',
-        'GTS': '#10B981',
-        'GTS-INTERACTIVE': '#2DD4BF',
-        'STS': '#F59E0B',
-        'VTS': '#8B5CF6',
-        'XTS': '#EC4899',
-    };
-
     reports.forEach(report => {
         const testType = String(report.test_type || '-');
         const displayClient = report.display_client_id || report.client_name || report.user || report.client_id || '-';
@@ -364,8 +354,6 @@ function displayTestReports(reports) {
         const workerId = report.worker_id || workspaceLocalWorkerId() || '-';
 
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
-
-        const typeColor = typeColors[testType] || 'var(--text-secondary)';
 
         const tr = document.createElement('tr');
         tr.style.borderBottom = '1px solid var(--border-color)';
@@ -384,7 +372,7 @@ function displayTestReports(reports) {
 
         tr.innerHTML = `
             <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(displayClient)}</td>
-            <td class="reports-type-cell" style="padding: 4px 6px; text-align: center; color: ${typeColor};">${escapeHtml(testType)}</td>
+            <td class="reports-type-cell" data-type="${suiteTypeColorKey(testType)}" style="padding: 4px 6px; text-align: center;">${escapeHtml(testType)}</td>
             <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
             <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(workerId)}</td>
             <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>

@@ -3,7 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from features.cluster import _port_device_action_request
-from features.devices import aoa_api
+from features.devices import get_aoa_router
 from foundation import cluster_port
 from tests.aoa_fixtures import verified_mapping
 
@@ -17,7 +17,7 @@ class AoaMappingDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
         worker = self.repo.get_worker("worker-246")
         self.repo.register_worker({**worker, "worker_id": "worker-246", "capabilities": {
             **worker["capabilities"], "aoa_affine_mapping_v2": True}})
-        self.client.app.include_router(aoa_api.router)
+        self.client.app.include_router(get_aoa_router())
         self.repo.heartbeat("worker-246", {"devices": [{"serial": "ABC", "state": "available",
             "transport": "local_usb", "properties": {"usb": "1-2", "aoa_context": self.mapping["context"]}}]})
         self.port = patch.object(cluster_port, "_device_action_request", _port_device_action_request)
@@ -25,7 +25,7 @@ class AoaMappingDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
         self.addCleanup(self.port.stop)
 
     def test_recover_preserves_both_mappings_through_real_model_and_receipt(self):
-        with patch("features.cluster.device_actions_api.threading.Thread"):
+        with patch("features.cluster.device_operations.api.threading.Thread"):
             response = self.client.post("/api/devices/aoa/recover", json={
                 "worker_id": "worker-246", "device": "ABC", "commands": ["click 180 320"],
                 "device_context": self.mapping["context"],
@@ -45,7 +45,7 @@ class AoaMappingDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
         assert self.client.post("/api/cluster/devices/actions", json=body).status_code == 422
 
     def test_recover_ignores_client_context_and_uses_selected_worker_inventory(self):
-        with patch("features.cluster.device_actions_api.threading.Thread"):
+        with patch("features.cluster.device_operations.api.threading.Thread"):
             response = self.client.post("/api/devices/aoa/recover", json={
                 "worker_id": "worker-246", "device": "ABC", "commands": ["click 180 320"],
                 "device_context": {"model": "spoofed", "fingerprint": "wrong"},

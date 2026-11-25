@@ -26,6 +26,7 @@ Redmine 单号/晨报分析）各提供一个适配器把自己已有的分析�
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 
@@ -61,16 +62,25 @@ def _clean_str(value: Any, limit: int = _MAX_TEXT) -> str:
     return text.strip()[:limit]
 
 
+def _section_items(items: Any) -> list | tuple:
+    """Accept JSON arrays or a single text/object, never iterate scalar characters or keys."""
+    if isinstance(items, (list, tuple)):
+        return items
+    if isinstance(items, (str, dict)):
+        return (items,)
+    return ()
+
+
 def normalize_recommended_actions(items: Any) -> list[dict[str, Any]]:
     """归一化建议行动：dict 形状取 action/step/reason，字符串视为单步建议。"""
     actions: list[dict[str, Any]] = []
-    for item in items or []:
+    for item in _section_items(items):
         if isinstance(item, dict):
             action = _clean_str(item.get("action") or item.get("title") or item.get("suggestion"))
             reason = _clean_str(item.get("reason"))
             try:
                 step = max(1, int(item.get("step") or len(actions) + 1))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 step = len(actions) + 1
         else:
             action = _clean_str(item)
@@ -91,7 +101,7 @@ def normalize_evidence_entries(items: Any) -> list[dict[str, Any]]:
     四键；未知键丢弃，字符串条目整体视为 fact。
     """
     entries: list[dict[str, Any]] = []
-    for item in items or []:
+    for item in _section_items(items):
         if isinstance(item, dict):
             entry = {
                 "kind": _clean_str(item.get("kind"), 64),
@@ -155,7 +165,7 @@ def _normalize_section(item: dict[str, Any]) -> dict[str, Any] | None:
     try:
         start_line = int(raw.get("start_line") or 0)
         end_line = int(raw.get("end_line") or 0)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if start_line <= 0 or end_line < start_line:
         return None
@@ -180,7 +190,7 @@ def normalize_background_entries(items: Any) -> list[dict[str, Any]]:
     不进入 conclusion。
     """
     entries: list[dict[str, Any]] = []
-    for item in items or []:
+    for item in _section_items(items):
         if not isinstance(item, dict):
             continue
         title = _clean_str(item.get("title") or item.get("heading") or item.get("name"))
@@ -211,7 +221,7 @@ def normalize_similar_cases(items: Any) -> list[dict[str, Any]]:
     从检索分数直接升级。
     """
     entries: list[dict[str, Any]] = []
-    for item in items or []:
+    for item in _section_items(items):
         if not isinstance(item, dict):
             continue
         case_id = item.get("issue_id", item.get("id"))
@@ -249,7 +259,7 @@ def build_conclusion(
     if status not in CONCLUSION_STATUSES:
         status = "unknown"
     missing: list[str] = []
-    for item in missing_information or ():
+    for item in _section_items(missing_information):
         text = _clean_str(item)
         if text:
             missing.append(text)
@@ -257,7 +267,11 @@ def build_conclusion(
         "summary": _clean_str(summary),
         "root_cause": _clean_str(root_cause),
         "status": status,
-        "confidence": confidence if isinstance(confidence, (int, float)) and not isinstance(confidence, bool) else None,
+        "confidence": confidence if (
+            isinstance(confidence, (int, float))
+            and not isinstance(confidence, bool)
+            and (not isinstance(confidence, float) or math.isfinite(confidence))
+        ) else None,
         "risk": _clean_str(risk, 16),
         "missing_information": missing,
         "provider": provider or {},
@@ -274,17 +288,17 @@ def build_failure_cluster_stub(
     的已知同簇成员；没有指纹时整节为 ``None``。检索召回的相似案例**不得**
     计入 members——那是 SIMILAR_SYMPTOM 级候选，合并需过 relation judge。
     """
-    if not identity or identity.get("clusterable") is False:
+    if not isinstance(identity, dict) or identity.get("clusterable") is False:
         return None
     fingerprint = _clean_str(identity.get("fingerprint"), 128)
     if not fingerprint:
         return None
-    members = list(related_members or [])
+    members = list(related_members) if isinstance(related_members, (list, tuple)) else []
     return {
         "fingerprint": fingerprint,
         "member_count": 1 + len(members),
         "members": members,
-        "aggregated": bool(related_members),
+        "aggregated": bool(members),
     }
 
 

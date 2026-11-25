@@ -6,7 +6,7 @@ import pytest
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from features.assistant.executor_formatting import format_payload
+from features.assistant.response import format_payload
 from features.assistant.route_invocation import call_router_function
 
 

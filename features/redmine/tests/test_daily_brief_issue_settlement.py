@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from features.redmine.daily_brief_models import DailyBriefIssue
-from features.redmine.daily_brief_repository import DailyBriefRepository
+from features.redmine.daily_brief.models import DailyBriefIssue
+from features.redmine.daily_brief.repository import DailyBriefRepository
 
 
 @pytest.fixture

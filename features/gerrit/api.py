@@ -18,6 +18,7 @@ from features.gerrit.config import (
     add_gerrit_department_profile,
     add_gerrit_personal_profile,
     assign_owner_to_gerrit_department,
+    config_manager,
     filter_gerrit_changes_by_created_date,
     remove_owner_from_gerrit_department,
     select_gerrit_department_profile,
@@ -33,7 +34,6 @@ from features.gerrit.service import (
     _select_profile,
     query_gerrit_dual_mode,
 )
-from features.gerrit.settings import config_manager
 from features.redmine import load_redmine_user_map_for_owner
 from features.users import owner_id_from_request
 from foundation.error_model import ApiError

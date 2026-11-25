@@ -275,7 +275,7 @@ class SecurityAuditLogger:
         if self._cache_mtime == mtime and self._cache_records:
             return self._cache_records, self._cache_stats
 
-        with self._lock:
+        with self._lock, self._cross_process_lock(False):
             lines = self._tail_lines(self.max_read_lines)
 
         records: list[dict[str, Any]] = []
@@ -410,6 +410,10 @@ class SecurityAuditLogger:
         lines = raw.splitlines()
         if not lines:
             return
+        # Never authenticate previously invalid data by re-signing it during rotation.
+        result = self._verify_records(lines)
+        if not result['valid']:
+            raise RuntimeError(f"cannot rotate invalid audit chain at line {result['line']}: {result['error']}")
 
         kept: list[dict[str, Any]] = []
         kept_bytes = 0
@@ -466,30 +470,33 @@ class SecurityAuditLogger:
 
     def verify_chain(self) -> dict[str, Any]:
         """Verify that every record belongs to one uninterrupted signed chain."""
-        if not os.path.exists(self.log_path):
-            return {'valid': True, 'signed_records': 0, 'legacy_records': 0}
+        with self._lock, self._cross_process_lock(False):
+            if not os.path.exists(self.log_path):
+                return {'valid': True, 'signed_records': 0, 'legacy_records': 0}
+            with open(self.log_path, 'rb') as handle:
+                return self._verify_records(handle)
+
+    def _verify_records(self, lines) -> dict[str, Any]:
+        """Verify records from a snapshot while the caller holds the file lock."""
         previous = 'GENESIS'
         signed_records = 0
-        with self._lock, self._cross_process_lock(False), open(self.log_path, encoding='utf-8') as handle:
-            for line_number, line in enumerate(handle, start=1):
-                try:
-                    record = json.loads(line)
-                except json.JSONDecodeError:
-                    return {'valid': False, 'line': line_number, 'error': 'invalid JSON'}
-                expected_hash = str(record.get('record_hash') or '')
-                if not expected_hash:
-                    return {
-                        'valid': False,
-                        'line': line_number,
-                        'error': 'unsigned audit record',
-                    }
-                if str(record.get('previous_hash') or '') != previous:
-                    return {'valid': False, 'line': line_number, 'error': 'previous hash mismatch'}
-                actual_hash = self._record_hash(record)
-                if not hmac.compare_digest(expected_hash, actual_hash):
-                    return {'valid': False, 'line': line_number, 'error': 'record HMAC mismatch'}
-                previous = expected_hash
-                signed_records += 1
+        for line_number, line in enumerate(lines, start=1):
+            try:
+                record = json.loads(line)
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                return {'valid': False, 'line': line_number, 'error': 'invalid JSON'}
+            if not isinstance(record, dict):
+                return {'valid': False, 'line': line_number, 'error': 'invalid audit record'}
+            expected_hash = record.get('record_hash')
+            if not isinstance(expected_hash, str) or not expected_hash:
+                return {'valid': False, 'line': line_number, 'error': 'unsigned audit record'}
+            if record.get('previous_hash') != previous:
+                return {'valid': False, 'line': line_number, 'error': 'previous hash mismatch'}
+            actual_hash = self._record_hash(record)
+            if not re.fullmatch(r'[0-9a-f]{64}', expected_hash) or not hmac.compare_digest(expected_hash, actual_hash):
+                return {'valid': False, 'line': line_number, 'error': 'record HMAC mismatch'}
+            previous = expected_hash
+            signed_records += 1
         return {
             'valid': True,
             'signed_records': signed_records,
@@ -536,6 +543,7 @@ class SecurityAuditLogger:
         query_lower = (query or '').strip().lower()
         records: list[dict[str, Any]] = []
         skipped = 0
+        has_more = False
         # 缓存记录已按时间倒序，直接在内存中过滤。
         for record in cached_records:
             record_source = record.get('source') or 'unknown'
@@ -556,22 +564,24 @@ class SecurityAuditLogger:
             if skipped < offset:
                 skipped += 1
                 continue
-            if len(records) < limit:
-                records.append(self.compact_record(record))
+            if len(records) == limit:
+                has_more = True
+                break
+            records.append(self.compact_record(record))
 
         return {
             'records': records,
             'stats': stats,
             'offset': offset,
             'limit': limit,
-            'has_more': len(records) == limit,
+            'has_more': has_more,
         }
 
     def get_event(self, event_id: str) -> dict[str, Any] | None:
         if not event_id or not os.path.exists(self.log_path):
             return None
 
-        with self._lock:
+        with self._lock, self._cross_process_lock(False):
             lines = self._tail_lines(self.max_read_lines)
 
         for raw_line in reversed(lines):

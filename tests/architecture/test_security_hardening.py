@@ -290,8 +290,8 @@ class TestWorkerSqliteHardening(unittest.TestCase):
     """Verify Worker SQLite connection uses WAL and busy_timeout."""
 
     def test_worker_connect_sets_wal_and_busy_timeout(self):
-        from worker_agent.config import WorkerConfig
-        from worker_agent.runtime import WorkerRuntime
+        from worker.config import WorkerConfig
+        from worker.runtime import WorkerRuntime
 
         with tempfile.TemporaryDirectory() as tmp:
             runtime = WorkerRuntime(WorkerConfig(

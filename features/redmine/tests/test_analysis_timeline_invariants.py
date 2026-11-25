@@ -13,10 +13,10 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, Mock, patch
 
-from features.redmine.daily_brief_analysis_events import (
+from features.redmine.daily_brief.analysis_events import (
     event_store_for_repository,
 )
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 from features.redmine.tests.test_daily_brief_service import make_service
 
 
@@ -75,7 +75,7 @@ class AnalysisTimelineInvariantTests(unittest.TestCase):
         ledger.begin.return_value = {"duplicate": False, "receipt_id": "rcp_early"}
         self.service._ai_ledger = ledger
         with patch(
-            "features.redmine.daily_brief_service.precollect_deep_evidence",
+            "features.redmine.daily_brief.service.precollect_deep_evidence",
             AsyncMock(side_effect=asyncio.CancelledError()),
         ), self.assertRaises(asyncio.CancelledError):
             asyncio.run(self.service._analyze_one(

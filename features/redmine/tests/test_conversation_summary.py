@@ -5,13 +5,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from features.redmine import daily_brief_service
-from features.redmine.kkagent import KkAgentAnalysisResult
-from features.redmine.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFallback
-from features.redmine.kkagent.mcp_health import McpHealthProbe
-from features.redmine.kkagent.native_summary import native_summary_result
-from features.redmine.tests.kkagent.review_support import review_trace
-from features.redmine.tests.kkagent.test_native_summary import ENTRY, complete_trace, final_trace
+from features.redmine.analysis.kkagent import KkAgentAnalysisResult
+from features.redmine.analysis.kkagent.analyzer import KkAgentRedmineAnalyzer, _StreamFallback
+from features.redmine.analysis.kkagent.native_summary import native_summary_result
+from features.redmine.analysis.kkagent.preflight import McpHealthProbe
+from features.redmine.daily_brief import service as daily_brief_service
+from features.redmine.tests.analysis.kkagent.review_support import review_trace
+from features.redmine.tests.analysis.kkagent.test_native_summary import ENTRY, complete_trace, final_trace
 from features.redmine.tests.test_daily_brief_service import make_service
 
 
@@ -58,7 +58,7 @@ async def test_summary_completes_without_a_format_repair(monkeypatch):
     stream = AsyncMock(side_effect=[(complete_trace(report=SUMMARY), _StreamFallback(), False),
                                    (review_trace(SUMMARY), _StreamFallback(), False)])
     monkeypatch.setattr(analyzer, "_run_stream", stream)
-    monkeypatch.setattr("features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+    monkeypatch.setattr("features.redmine.analysis.kkagent.analyzer.probe_kkagent_mcp_health",
                         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
     result = await analyzer.analyze(SUMMARY_ENTRY)
     assert result.ok, result.error
@@ -78,7 +78,7 @@ async def test_summary_repairs_do_not_restore_report_headings(monkeypatch):
         (review_trace(SUMMARY), _StreamFallback(), False),
     ])
     monkeypatch.setattr(analyzer, "_run_stream", stream)
-    monkeypatch.setattr("features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+    monkeypatch.setattr("features.redmine.analysis.kkagent.analyzer.probe_kkagent_mcp_health",
                         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
     result = await analyzer.analyze(SUMMARY_ENTRY)
     assert result.ok, result.error
@@ -97,7 +97,7 @@ async def test_summary_still_fails_when_required_evidence_is_missing(monkeypatch
         (final_trace(report=SUMMARY), _StreamFallback(), False) for _ in range(3)
     ])
     monkeypatch.setattr(analyzer, "_run_stream", stream)
-    monkeypatch.setattr("features.redmine.kkagent.analyzer.probe_kkagent_mcp_health",
+    monkeypatch.setattr("features.redmine.analysis.kkagent.analyzer.probe_kkagent_mcp_health",
                         AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)))
     result = await analyzer.analyze(SUMMARY_ENTRY)
     assert not result.ok

@@ -145,7 +145,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         assertNotIn 钉死），徽标读错字段名会让三态在唯一消费 UI 上全部
         退化为灰色"未验证"且测试不可见（全局审查 P0）。
         """
-        page = read_text("web/static/js/pages/report-analysis-diagnosis.js")
+        page = read_text("web/static/js/pages/report-failure-workbench.js")
         self.assertNotIn("v.verified", page)
         self.assertIn("evidence_level", page)
         self.assertIn("path_matched", page)
@@ -238,8 +238,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_system_status_pages_use_consistent_chinese_loading_copy(self):
         for path in (
-            "features/system/mainline_issues/ui/page.html",
-            "features/system/update_monitor/ui/page.html",
+            "features/gms/ui/page.html",
         ):
             with self.subTest(path=path):
                 text = read_text(path)
@@ -312,8 +311,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             Path("features/cluster/ui"),
             Path("features/devices/ui"),
             Path("features/gerrit/ui"),
-            Path("features/system/mainline_issues/ui"),
-            Path("features/system/update_monitor/ui"),
+            Path("features/gms/ui"),
         ):
             sources.extend(
                 read_text(str(p))
@@ -346,17 +344,10 @@ class FrontendIntegrityTests(unittest.TestCase):
                 ],
             ),
             (
-                "update-monitor",
-                [
-                    "features/system/update_monitor/ui/page.html",
-                    "features/system/update_monitor/ui/page.js",
-                ],
-            ),
-            (
                 "mainline",
                 [
-                    "features/system/mainline_issues/ui/page.html",
-                    "features/system/mainline_issues/ui/page.js",
+                    "features/gms/ui/page.html",
+                    "features/gms/ui/page.js",
                 ],
             ),
             (
@@ -471,6 +462,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("identity.includes('@')", api_script)
         self.assertIn("usernameInput.placeholder.includes('正在读取客户端身份')", api_script)
         self.assertIn("此处不使用客户端 SSH 账号", api_script)
+        self.assertIn("请输入该客户端账号的 SSH 密码。", api_script)
         self.assertIn("loginHost !== String(result.client_ip || '')", api_script)
 
     def test_account_switch_modal_keeps_choices_above_concise_help(self):
@@ -1070,11 +1062,11 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn("redmine-agent-notification", main_text)
         self.assertIn("gms-update-monitor-notification", main_text)
 
-        # gerrit/update_monitor 的 notifyUser 随 CSP 前置迁移外置到 page.js。
+        # Gerrit/更新中心的 notifyUser 随 CSP 前置迁移外置到 page.js。
         for path in [
             "features/redmine/ui/page.js",
             "features/gerrit/ui/page.js",
-            "features/system/update_monitor/ui/page.js",
+            "features/gms/ui/page.js",
         ]:
             with self.subTest(path=path):
                 text = read_text(path)
@@ -1084,7 +1076,7 @@ class FrontendIntegrityTests(unittest.TestCase):
                 self.assertNotIn("}, '*')", text)
                 self.assertNotIn("alert(", text)
 
-        bridge = read_text("web/static/js/shell/shell-late-init.js")
+        bridge = read_text("web/static/js/shell/shell-main.js")
         self.assertIn("e.origin !== window.location.origin", bridge)
         self.assertIn("frame.contentWindow === e.source", bridge)
         self.assertNotIn("_sendParentNotification", read_text("features/redmine/ui/page.js"))
@@ -1100,10 +1092,8 @@ class FrontendIntegrityTests(unittest.TestCase):
             "features/redmine/ui/page.js",
             "features/gerrit/ui/page.html",
             "features/gerrit/ui/page.js",
-            "features/system/update_monitor/ui/page.html",
-            "features/system/update_monitor/ui/page.js",
-            "features/system/mainline_issues/ui/page.html",
-            "features/system/mainline_issues/ui/page.js",
+            "features/gms/ui/page.html",
+            "features/gms/ui/page.js",
             "features/automation/ui/page.html",
             "features/automation/ui/page.js",
             *[str(path) for path in Path("web/static/js").glob("*.js")],

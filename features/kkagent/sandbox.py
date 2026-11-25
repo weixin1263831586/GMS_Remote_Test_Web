@@ -1,14 +1,13 @@
 """Per-call kkagent policy: model reasoning only, project tools run in Controller.
 
 引擎侧沙箱（ADR 0034）：受限运行时（空临时工作区 + 私有 config.toml 副本 +
-deny-all 工具策略）与有界流读取。assistant 桥接与 redmine 分析复用同一实现，
+deny-all 工具策略）。assistant 桥接与 redmine 分析复用同一实现，
 不再各自维护。"""
 
 from __future__ import annotations
 
 import asyncio
 import tempfile
-from collections.abc import Callable
 from contextlib import asynccontextmanager
 
 from features.kkagent.config import model_config
@@ -48,25 +47,3 @@ async def restricted_runtime(binary: str, env: dict[str, str]):
             if not result.ok:
                 raise RuntimeError("kkagent 无法应用隔离工具策略，已停止模型调用")
         yield config, _empty_workspace()
-
-
-async def read_bounded(
-    stream: asyncio.StreamReader, limit: int = 2 * 1024**2,
-    *, on_line: Callable[[str], None] | None = None,
-) -> bytes:
-    parts, size = [], 0
-    pending = b""
-    while chunk := await stream.read(65536):
-        size += len(chunk)
-        if size > limit:
-            raise RuntimeError("kkagent 输出超过大小限制")
-        parts.append(chunk)
-        if on_line:
-            pending += chunk
-            lines = pending.split(b"\n")
-            pending = lines.pop()
-            for line in lines:
-                on_line(line.decode("utf-8", errors="replace"))
-    if on_line and pending:
-        on_line(pending.decode("utf-8", errors="replace"))
-    return b"".join(parts)

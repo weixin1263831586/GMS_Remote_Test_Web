@@ -7,7 +7,7 @@ on:
       - '.github/workflows/audit-disk-live-readonly.yml'
       - 'tools/scripts/testing/scan_live_artifacts.py'
       - 'tools/scripts/testing/verify_live_disk_inventory.py'
-      - 'features/system/disk_artifacts.py'
+      - 'features/ops/disk_artifacts.py'
   workflow_dispatch:
 
 permissions:

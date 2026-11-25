@@ -12,17 +12,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.devices import scrcpy_stream
-from features.devices.aoa_api import router as aoa_router
+from features.devices.aoa.api import router as aoa_router
 from features.devices.scrcpy_stream import ScrcpySession, server_jar_path
 from foundation.error_model import register_api_error_handler
 
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
-    monkeypatch.setattr("features.devices.aoa_api._stream_access", lambda *a: "owner-1")
-    monkeypatch.setattr("features.devices.aoa_api.acquire_device_operation_claim",
+    monkeypatch.setattr("features.devices.aoa.api._stream_access", lambda *a: "owner-1")
+    monkeypatch.setattr("features.devices.aoa.api.acquire_device_operation_claim",
                         lambda *a: ("source", [], None))
-    monkeypatch.setattr("features.devices.aoa_api.release_device_operation_claim", lambda *a: None)
+    monkeypatch.setattr("features.devices.aoa.api.release_device_operation_claim", lambda *a: None)
     app = FastAPI()
     register_api_error_handler(app)
     app.include_router(aoa_router)
@@ -326,9 +326,9 @@ def session_calls(state):
 def test_stream_start_stop_routes(client, monkeypatch):
     captured = {}
     monkeypatch.setattr(
-        "features.devices.aoa_api.require_human_principal", _auth)
+        "features.devices.aoa.api.require_human_principal", _auth)
     monkeypatch.setattr(
-        "features.devices.aoa_api.get_local_worker_id", lambda: "local-worker")
+        "features.devices.aoa.api.get_local_worker_id", lambda: "local-worker")
     def fake_start(serial, owner_id):
         assert owner_id == "owner-1"
         captured["start"] = serial
@@ -351,18 +351,18 @@ def test_stream_start_stop_routes(client, monkeypatch):
 
 
 def test_stream_start_rejects_remote_worker(client, monkeypatch):
-    monkeypatch.setattr("features.devices.aoa_api.require_human_principal", _auth)
+    monkeypatch.setattr("features.devices.aoa.api.require_human_principal", _auth)
     monkeypatch.setattr(
-        "features.devices.aoa_api.get_local_worker_id", lambda: "local-worker")
+        "features.devices.aoa.api.get_local_worker_id", lambda: "local-worker")
     response = client.post("/api/devices/aoa/record/stream/ser-1/start",
                            json={"worker_id": "ats-worker-remote"})
     assert response.status_code == 422
 
 
 def test_stream_start_rejects_bad_serial(client, monkeypatch):
-    monkeypatch.setattr("features.devices.aoa_api.require_human_principal", _auth)
+    monkeypatch.setattr("features.devices.aoa.api.require_human_principal", _auth)
     monkeypatch.setattr(
-        "features.devices.aoa_api.get_local_worker_id", lambda: "local-worker")
+        "features.devices.aoa.api.get_local_worker_id", lambda: "local-worker")
     for bad in ("", "../etc", "a/b"):
         response = client.post(f"/api/devices/aoa/record/stream/{bad}/start",
                                json={"worker_id": "local-worker"})
@@ -403,7 +403,7 @@ class FakeSession:
 def test_stream_ws_hello_and_pong(client, monkeypatch):
     fake = FakeSession()
     monkeypatch.setattr(
-        "features.devices.aoa_api.validate_websocket_request",
+        "features.devices.aoa.api.validate_websocket_request",
         lambda websocket: (None, None))
     monkeypatch.setattr(scrcpy_stream, "get_stream", lambda serial: fake)
     with client.websocket_connect("/api/devices/aoa/record/stream/ser-1") as ws:
@@ -416,7 +416,7 @@ def test_stream_ws_hello_and_pong(client, monkeypatch):
 
 def test_stream_ws_closes_without_session(client, monkeypatch):
     monkeypatch.setattr(
-        "features.devices.aoa_api.validate_websocket_request",
+        "features.devices.aoa.api.validate_websocket_request",
         lambda websocket: (None, None))
     monkeypatch.setattr(scrcpy_stream, "get_stream", lambda serial: None)
     with client.websocket_connect("/api/devices/aoa/record/stream/ser-1") as ws:
@@ -431,7 +431,7 @@ def test_stream_ws_closes_without_session(client, monkeypatch):
 ])
 def test_stream_access_rejects_foreign_session_or_exclusive_claim(
         monkeypatch, session_owner, claim_owner, source_type):
-    from features.devices import aoa_api
+    from features.devices.aoa import api as aoa_api
     from foundation.error_model import ApiError
 
     monkeypatch.setattr(aoa_api, "require_human_principal",

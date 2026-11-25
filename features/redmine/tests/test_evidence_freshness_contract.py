@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from features.redmine.evidence_api import _snapshot_fresh
+from features.redmine.evidence.api import _snapshot_fresh
 
 
 @pytest.mark.parametrize("tz", [None, timezone.utc])

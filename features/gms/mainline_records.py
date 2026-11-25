@@ -1,0 +1,414 @@
+#!/usr/bin/env python3
+"""Sync Mainline known issues from Android Partner release notes."""
+
+from __future__ import annotations
+
+import re
+import sqlite3
+
+from .parsers.mainline import FetchedPage, KnownIssue, ReleasePage, SecurityPatch
+
+
+# Mainline 问题类型白名单，供解析、查询和豁免匹配共用。
+MAINLINE_ISSUE_TYPES = ('MTS', 'CTS', 'GTS')
+
+
+def init_db(conn: sqlite3.Connection, *, manage_transaction: bool = True) -> None:
+    # The unified repository owns its migration transaction. Standalone callers
+    # retain the original process-safe initialization contract.
+    if manage_transaction:
+        conn.execute('BEGIN IMMEDIATE')
+    existing_columns = {
+        row[1] for row in conn.execute("PRAGMA table_info('mainline_known_issues')").fetchall()
+    }
+    if existing_columns and 'issue_type' not in existing_columns:
+        conn.execute('ALTER TABLE mainline_known_issues RENAME TO mainline_known_issues_old')
+    elif existing_columns:
+        indexes = conn.execute("PRAGMA index_list('mainline_known_issues')").fetchall()
+        has_global_unique = False
+        for index in indexes:
+            if not index[2]:
+                continue
+            columns = [
+                row[2]
+                for row in conn.execute(f"PRAGMA index_info('{index[1]}')").fetchall()
+            ]
+            if columns == ['product_section', 'issue_type', 'test_module', 'test_case', 'exemption_id', 'android_versions']:
+                has_global_unique = True
+                break
+        if not has_global_unique:
+            conn.execute('ALTER TABLE mainline_known_issues RENAME TO mainline_known_issues_old')
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mainline_known_issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL,
+            source_title TEXT NOT NULL,
+            release_year INTEGER NOT NULL,
+            release_label TEXT NOT NULL,
+            product_section TEXT NOT NULL,
+            issue_type TEXT NOT NULL,
+            android_versions TEXT NOT NULL,
+            category TEXT NOT NULL,
+            test_module TEXT NOT NULL,
+            test_case TEXT NOT NULL,
+            exemption_id TEXT NOT NULL,
+            issue_text TEXT NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            UNIQUE(product_section, issue_type, test_module, test_case, exemption_id, android_versions)
+        )
+        """
+    )
+    old_table_exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='mainline_known_issues_old'"
+    ).fetchone()
+    if old_table_exists and existing_columns and 'issue_type' not in existing_columns:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO mainline_known_issues (
+                source_url, source_title, release_year, release_label, product_section, issue_type,
+                android_versions, category, test_module, test_case, exemption_id,
+                issue_text, first_seen_at, last_seen_at
+            )
+            SELECT
+                source_url, source_title, release_year, release_label, product_section, 'CTS',
+                android_versions, category, test_module, test_case, exemption_id,
+                issue_text, first_seen_at, last_seen_at
+            FROM mainline_known_issues_old
+            """
+        )
+        conn.execute('DROP TABLE mainline_known_issues_old')
+    elif old_table_exists:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO mainline_known_issues (
+                source_url, source_title, release_year, release_label, product_section, issue_type,
+                android_versions, category, test_module, test_case, exemption_id,
+                issue_text, first_seen_at, last_seen_at
+            )
+            SELECT
+                source_url, source_title, release_year, release_label, product_section, issue_type,
+                android_versions, category, test_module, test_case, exemption_id,
+                issue_text, first_seen_at, last_seen_at
+            FROM mainline_known_issues_old
+            ORDER BY id
+            """
+        )
+        conn.execute('DROP TABLE mainline_known_issues_old')
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_mainline_known_issues_lookup
+        ON mainline_known_issues(issue_type, test_module, test_case, exemption_id)
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mainline_release_note_pages (
+            source_url TEXT PRIMARY KEY,
+            release_year INTEGER NOT NULL,
+            release_label TEXT NOT NULL,
+            content_hash TEXT NOT NULL,
+            status_code INTEGER NOT NULL,
+            final_url TEXT NOT NULL,
+            issues_found INTEGER NOT NULL,
+            first_seen_at TEXT NOT NULL,
+            last_scanned_at TEXT NOT NULL,
+            last_changed_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS mainline_security_patches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_url TEXT NOT NULL,
+            source_title TEXT NOT NULL,
+            release_year INTEGER NOT NULL,
+            release_label TEXT NOT NULL,
+            product_section TEXT NOT NULL,
+            cve_id TEXT NOT NULL,
+            mainline_module TEXT NOT NULL DEFAULT '',
+            version_note TEXT NOT NULL DEFAULT '',
+            first_seen_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            UNIQUE(source_url, cve_id, mainline_module)
+        )
+        """
+    )
+    conn.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_mainline_security_patches_cve
+        ON mainline_security_patches(cve_id)
+        """
+    )
+    if manage_transaction:
+        conn.execute('PRAGMA user_version = 1')
+        conn.commit()
+
+
+def get_page_state(conn: sqlite3.Connection, source_url: str) -> sqlite3.Row | None:
+    return conn.execute(
+        """
+        SELECT content_hash, issues_found, first_seen_at, last_scanned_at, last_changed_at
+        FROM mainline_release_note_pages
+        WHERE source_url = ?
+        """,
+        (source_url,),
+    ).fetchone()
+
+
+def load_known_issue_keys(conn: sqlite3.Connection) -> set[tuple[str, str, str, str, str, str]]:
+    return {
+        (row['product_section'], row['issue_type'], row['test_module'], row['test_case'], row['exemption_id'], row['android_versions'])
+        for row in conn.execute(
+            "SELECT product_section,issue_type,test_module,test_case,exemption_id,android_versions FROM mainline_known_issues"
+        )
+    }
+
+
+def upsert_page_state(
+    conn: sqlite3.Connection,
+    page: ReleasePage,
+    fetched: FetchedPage,
+    issues_found: int,
+    timestamp: str,
+    *,
+    changed: bool,
+) -> None:
+    existing = get_page_state(conn, page.url)
+    first_seen_at = existing['first_seen_at'] if existing else timestamp
+    last_changed_at = timestamp if changed or not existing else existing['last_changed_at']
+    conn.execute(
+        """
+        INSERT INTO mainline_release_note_pages (
+            source_url, release_year, release_label, content_hash, status_code, final_url,
+            issues_found, first_seen_at, last_scanned_at, last_changed_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source_url)
+        DO UPDATE SET
+            release_year = excluded.release_year,
+            release_label = excluded.release_label,
+            content_hash = excluded.content_hash,
+            status_code = excluded.status_code,
+            final_url = excluded.final_url,
+            issues_found = excluded.issues_found,
+            last_scanned_at = excluded.last_scanned_at,
+            last_changed_at = excluded.last_changed_at
+        """,
+        (
+            page.url,
+            page.year,
+            page.label,
+            fetched.content_hash,
+            fetched.status_code,
+            fetched.final_url,
+            issues_found,
+            first_seen_at,
+            timestamp,
+            last_changed_at,
+        ),
+    )
+
+
+def upsert_issues(conn: sqlite3.Connection, issues: list[KnownIssue], timestamp: str) -> None:
+    conn.executemany(
+        """
+        INSERT INTO mainline_known_issues (
+            source_url, source_title, release_year, release_label, product_section, issue_type,
+            android_versions, category, test_module, test_case, exemption_id,
+            issue_text, first_seen_at, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(product_section, issue_type, test_module, test_case, exemption_id, android_versions)
+        DO UPDATE SET
+            source_url = excluded.source_url,
+            source_title = excluded.source_title,
+            release_year = excluded.release_year,
+            release_label = excluded.release_label,
+            android_versions = excluded.android_versions,
+            category = excluded.category,
+            issue_text = excluded.issue_text,
+            last_seen_at = excluded.last_seen_at
+        """,
+        [
+            (
+                issue.source_url,
+                issue.source_title,
+                issue.release_year,
+                issue.release_label,
+                issue.product_section,
+                issue.issue_type,
+                issue.android_versions,
+                issue.category,
+                issue.test_module,
+                issue.test_case,
+                issue.exemption_id,
+                issue.issue_text,
+                timestamp,
+                timestamp,
+            )
+            for issue in issues
+        ],
+    )
+
+
+# 安全补丁表返回给诊断和界面的字段。
+_SECURITY_PATCH_COLUMNS = (
+    'cve_id, mainline_module, version_note, product_section, '
+    'release_year, release_label, source_url, source_title, last_seen_at'
+)
+
+
+def replace_page_patches(conn: sqlite3.Connection, source_url: str, patches: list[SecurityPatch], timestamp: str) -> None:
+    conn.execute('DELETE FROM mainline_security_patches WHERE source_url = ?', (source_url,))
+    upsert_security_patches(conn, patches, timestamp)
+
+
+def upsert_security_patches(conn: sqlite3.Connection, patches: list[SecurityPatch], timestamp: str) -> None:
+    conn.executemany(
+        """
+        INSERT INTO mainline_security_patches (
+            source_url, source_title, release_year, release_label, product_section,
+            cve_id, mainline_module, version_note, first_seen_at, last_seen_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(source_url, cve_id, mainline_module)
+        DO UPDATE SET
+            source_title = excluded.source_title,
+            release_year = excluded.release_year,
+            release_label = excluded.release_label,
+            version_note = excluded.version_note,
+            product_section = excluded.product_section,
+            last_seen_at = excluded.last_seen_at
+        """,
+        [
+            (
+                patch.source_url,
+                patch.source_title,
+                patch.release_year,
+                patch.release_label,
+                patch.product_section,
+                patch.cve_id,
+                patch.mainline_module,
+                patch.version_note,
+                timestamp,
+                timestamp,
+            )
+            for patch in patches
+        ],
+    )
+
+
+def query_security_patches_by_cve(
+    conn: sqlite3.Connection,
+    cve_ids: list[str],
+    *,
+    limit: int = 20,
+) -> list[dict]:
+    """按 CVE 号查询安全补丁记录（最新 release 优先）。"""
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for cve in cve_ids or []:
+        match = re.search(r'CVE-\d{4}-\d{4,7}', str(cve), flags=re.IGNORECASE)
+        if not match:
+            continue
+        cve_id = match.group(0).upper()
+        if cve_id not in seen:
+            seen.add(cve_id)
+            normalized.append(cve_id)
+    if not normalized:
+        return []
+    # RC/PRELOAD 标签按字母序不等于时间序：限定条数时新 PRELOAD 须排在旧 RC 前。
+    conn.create_function("mainline_release_date", 1, lambda url: (
+        re.findall(r"\d{4}-\d{2}-\d{2}", str(url or "")) or [""]
+    )[-1])
+    placeholders = ', '.join('?' for _ in normalized)
+    rows = conn.execute(
+        f"""
+        SELECT {_SECURITY_PATCH_COLUMNS}
+        FROM mainline_security_patches
+        WHERE cve_id IN ({placeholders})
+        ORDER BY release_year DESC, mainline_release_date(source_url) DESC, source_url DESC, cve_id, mainline_module
+        LIMIT ?
+        """,
+        (*normalized, limit),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+# 豁免匹配返回给诊断和界面的字段。
+_EXEMPTION_SELECT_COLUMNS = (
+    'exemption_id, issue_type, product_section, test_module, test_case, '
+    'android_versions, category, release_label, issue_text, source_url, last_seen_at'
+)
+
+
+def _strip_test_case_param(test_case: str) -> str:
+    """Drop a trailing parameterization suffix so `Foo#bar[0]` matches `Foo#bar`.
+
+    Mainline release notes list parameterized variants as distinct rows
+    (e.g. ``renderFormContentWhenEnabled[0]``, ``...[1]``). A report failure only
+    carries the method name, so we normalize both sides to the bare method when a
+    precise match fails.
+    """
+    return re.sub(r'\[[^\]]*\]\s*$', '', test_case).strip()
+
+
+def escape_like(value: str) -> str:
+    """Escape LIKE wildcards so user-supplied text is matched literally.
+
+    Shared by the list endpoint's keyword filter and the exemption matcher, so
+    the escape rule (and its ``ESCAPE "\\"`` clause) stays in one place.
+    """
+    return value.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+
+
+def query_exemption_match(
+    conn: sqlite3.Connection,
+    *,
+    test_module: str | None = None,
+    test_case: str | None = None,
+    issue_type: str | None = None,
+    limit: int = 10,
+) -> list[dict]:
+    """按精确用例及参数化方法名匹配 Mainline 豁免记录。"""
+    module = (test_module or '').strip()
+    case = (test_case or '').strip()
+    if not module or not case:
+        return []
+
+    itype = (issue_type or '').strip().upper()
+    if itype not in MAINLINE_ISSUE_TYPES:
+        itype = ''
+
+    def _run(where: str, params: list, *, match_kind: str) -> list[dict]:
+        sql = (
+            f'SELECT {_EXEMPTION_SELECT_COLUMNS} FROM mainline_known_issues '
+            f'WHERE {where} '
+            'ORDER BY release_year DESC, source_url DESC, exemption_id '
+            'LIMIT ?'
+        )
+        rows = conn.execute(sql, [*params, limit]).fetchall()
+        return [{**dict(row), 'match_kind': match_kind} for row in rows]
+
+    type_clause = 'AND issue_type = ?' if itype else ''
+    type_params = [itype] if itype else []
+
+    # 第一轮精确匹配：模块忽略大小写，用例使用基础 FQN。
+    bare_case = _strip_test_case_param(case)
+    where_exact = f'test_module = ? COLLATE NOCASE AND test_case = ? {type_clause}'
+    hits = _run(where_exact, [module, bare_case, *type_params], match_kind='exact')
+    if hits:
+        return hits
+
+    # 第二轮按方法名模糊匹配参数化用例。
+    if '#' in bare_case:
+        cls, method = bare_case.split('#', 1)
+        like = f'{escape_like(cls)}#{escape_like(method)}%'
+        where_fuzzy = f'test_module = ? COLLATE NOCASE AND test_case LIKE ? ESCAPE "\\" {type_clause}'
+        return _run(where_fuzzy, [module, like, *type_params], match_kind='fuzzy')
+
+    return []

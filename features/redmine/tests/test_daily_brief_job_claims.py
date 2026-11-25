@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_repository import DailyBriefRepository, new_run_id
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.repository import DailyBriefRepository, new_run_id
 
 
 class DailyBriefJobClaimTests(unittest.TestCase):

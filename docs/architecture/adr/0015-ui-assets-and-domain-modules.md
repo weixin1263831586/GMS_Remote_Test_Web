@@ -13,8 +13,8 @@ authentication middleware. Asset routes are excluded from OpenAPI.
 The HTML declares classic scripts in dependency order. Shared helpers load
 first, domain implementations follow, and `page.js` performs initialization
 last. Statistics, issue presentation, knowledge, settings, single-issue
-diagnosis and live timelines have separate ownership. Each script stays within
-the default 50 KB frontend budget. Splitting does not add server writes during
+diagnosis and live timelines have separate ownership. First-party frontend files follow the default 2000-line limit; the independent
+startup JavaScript byte budget remains enforced. Splitting does not add server writes during
 page initialization or change the ModalManager visibility boundary.
 
 Previously published resource URLs remain allowlisted compatibility entries.

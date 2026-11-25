@@ -1,0 +1,44 @@
+name: Update center source reconciliation (read-only by default)
+on:
+  workflow_dispatch:
+    inputs:
+      full_scan:
+        description: Explicitly run both production full scans before reconciliation
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  reconcile:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 30
+    steps:
+      - name: Verify dedicated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Compare source records (aggregate only)
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          FULL_SCAN: ${{ github.event_name == 'workflow_dispatch' && inputs.full_scan && '1' || '0' }}
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/source-audit.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          args=()
+          if [ "$FULL_SCAN" = '1' ]; then args+=(--full-scan); fi
+          python3 -B -m tools.scripts.testing.audit_update_center_sources "${args[@]}" 2>"$scratch/error" | grep --line-buffered '^SOURCE_AUDIT='

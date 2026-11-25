@@ -1,8 +1,7 @@
 import asyncio
 from unittest.mock import MagicMock, patch
 
-from features.system.ssh import SSHManager
-from features.system.ssh_async import SSHAsyncManager
+from features.system.host.ssh import SSHAsyncManager, SSHManager
 
 
 def test_failed_health_probe_closes_both_channel_and_client():
@@ -102,8 +101,8 @@ def test_key_auth_falls_back_to_agent_and_default_keys_when_configured_key_is_mi
     client = MagicMock()
 
     with (
-        patch('features.system.ssh.paramiko.SSHClient', return_value=client),
-        patch('features.system.ssh.configure_strict_host_keys'),
+        patch('features.system.host.ssh.paramiko.SSHClient', return_value=client),
+        patch('features.system.host.ssh.configure_strict_host_keys'),
         patch.object(manager, '_load_ssh_key', return_value=None),
     ):
         result = manager.create_connection({
@@ -132,13 +131,31 @@ def test_async_connections_are_scoped_by_username():
     first = MagicMock()
     second = MagicMock()
 
-    with patch('features.system.ssh_async.paramiko.SSHClient', side_effect=[first, second]):
+    with patch('features.system.host.ssh.paramiko.SSHClient', side_effect=[first, second]):
         alice = asyncio.run(manager.connect('host-a', 'alice', 'pw-a'))
         bob = asyncio.run(manager.connect('host-a', 'bob', 'pw-b'))
 
     assert alice is first
     assert bob is second
     assert len(manager.connections) == 2
+
+
+def test_async_connections_normalize_embedded_ports_and_close_exact_target():
+    manager = SSHAsyncManager()
+    first, second = MagicMock(), MagicMock()
+
+    with patch('features.system.host.ssh.paramiko.SSHClient', side_effect=[first, second]):
+        assert asyncio.run(manager.connect('host-a:2222', 'alice', 'pw')) is first
+        assert asyncio.run(manager.connect('host-a', 'alice', 'pw', port=2222)) is first
+        assert asyncio.run(manager.connect('host-a', 'alice', 'pw')) is second
+
+    assert first.connect.call_args.kwargs['hostname'] == 'host-a'
+    assert first.connect.call_args.kwargs['port'] == 2222
+    assert second.connect.call_args.kwargs['port'] == 22
+    manager.close('host-a:2222')
+    first.close.assert_called_once_with()
+    second.close.assert_not_called()
+    assert set(manager.connections) == {('host-a', 22, 'alice')}
 
 
 def test_stream_reading_uses_stderr_api_for_stderr():
@@ -234,7 +251,7 @@ def test_stream_reading_uses_stdout_api_for_stdout():
 def test_simple_exec_drains_output_before_exit_status():
     """P1 回归：大输出时先 recv_exit_status 可能永久等待（Paramiko
     官方警告），必须先 drain stdout/stderr 再取退出码。"""
-    import features.system.ssh_async as mod
+    import features.system.host.ssh as mod
 
     calls = []
 
@@ -321,3 +338,37 @@ def test_pool_health_check_is_bounded_when_exit_status_never_arrives():
     # Health-check deadline (~3s) must be honoured, not infinite.
     assert elapsed < 10
     pooled.close.assert_called_once_with()
+
+
+def test_pool_explicit_port_matches_connection_creation_and_isolates_targets():
+    manager = SSHManager(pool_size=2)
+    client = MagicMock()
+    client.exec_command.return_value = (MagicMock(), MagicMock(), MagicMock())
+    client.exec_command.return_value[1].channel.recv_exit_status.return_value = 0
+    config = {'host': 'host-a:22', 'port': 2222, 'username': 'tester', 'password': 'secret'}
+    with (
+        patch('features.system.host.ssh.paramiko.SSHClient', return_value=client),
+        patch('features.system.host.ssh.configure_strict_host_keys'),
+    ):
+        assert manager.create_connection(config) is client
+    assert client._gms_pool_identity == ('host-a', '2222', 'tester')
+    assert client.connect.call_args.kwargs['port'] == 2222
+    manager.return_connection(client)
+    with patch.object(manager, 'create_connection') as create:
+        assert manager.get_connection(config) is client
+        create.assert_not_called()
+    manager.return_connection(client)
+    with patch.object(manager, 'create_connection', return_value=None):
+        assert manager.get_connection({**config, 'port': 2223}) is None
+    client.close.assert_called_once()
+
+
+def test_pool_does_not_reuse_different_username():
+    manager = SSHManager(pool_size=2)
+    client = MagicMock()
+    client._gms_pool_identity = ('host-a', '2222', 'tester')
+    manager.return_connection(client)
+    with patch.object(manager, 'create_connection', return_value=None):
+        assert manager.get_connection({'host': 'host-a:2222', 'username': 'other'}) is None
+    client.close.assert_called_once()
+    client.exec_command.assert_not_called()

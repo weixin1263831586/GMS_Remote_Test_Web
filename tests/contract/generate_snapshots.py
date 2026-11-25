@@ -34,7 +34,7 @@ def _static_example_shape_source() -> dict:
     The test copies the example into an isolated project root and loads it
     through ConfigManager (placeholder expansion + AI-config validation),
     so the snapshot must run the identical path — never the deployment's
-    own configs/config.json.
+    own configs/local/config.json.
     """
     import shutil
     import tempfile
@@ -45,10 +45,10 @@ def _static_example_shape_source() -> dict:
     with tempfile.TemporaryDirectory() as directory:
         project_root = Path(directory)
         configs = project_root / "configs"
-        configs.mkdir()
+        (configs / "local").mkdir(parents=True)
         (project_root / "foundation").mkdir()
         shutil.copy2(
-            config_manager.config_fallback_path, configs / "config.json"
+            config_manager.config_fallback_path, configs / "local/config.json"
         )
         isolated = ConfigManager(project_root=project_root)
         return isolated.load_config(force_reload=True)

@@ -749,16 +749,16 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
         page_errors = []
         page.on("pageerror", lambda exc: page_errors.append(str(exc)))
         try:
-            page.goto(f"{self.base_url}/gms-update-monitor", wait_until="domcontentloaded")
+            page.goto(f"{self.base_url}/gms-update-center", wait_until="domcontentloaded")
             page.wait_for_selector("button")
-            for tab_name in ["changes", "artifacts", "packages", "requirements"]:
+            for tab_name in ["changes", "artifacts", "packages", "requirements", "mainline", "exemptions", "patch", "critical"]:
                 page.evaluate("tab => setTab(tab)", tab_name)
                 expect(page.locator(f'button[data-tab="{tab_name}"]')).to_have_class(re.compile(r"active"))
                 page.evaluate("reload(true)")
                 page.evaluate("page(1)")
                 page.evaluate("page(-1)")
 
-            page.goto(f"{self.base_url}/mainline-known-issues", wait_until="domcontentloaded")
+            page.goto(f"{self.base_url}/gms-update-center?tab=exemptions", wait_until="domcontentloaded")
             page.wait_for_selector("button")
             page.evaluate("reload(true)")
             page.evaluate("page(1)")

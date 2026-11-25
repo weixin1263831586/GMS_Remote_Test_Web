@@ -1,0 +1,83 @@
+"""Owner-bound controls and durable debug input for persisted AOA playback."""
+from __future__ import annotations
+
+from foundation.aoa_profile import parse_profile_commands, required_hid_channels
+from foundation.error_model import ApiError
+
+from ..api import _require_cluster_enabled, service
+
+
+async def control_aoa_playback(control_id: str, worker_id: str, owner_id: str, action: str) -> dict:
+    cluster = service()
+    _require_cluster_enabled(remote=worker_id != cluster.config.local_worker_id)
+    command, revision = cluster.repository.request_aoa_playback_control(
+        worker_id, control_id, owner_id, action)
+    if not command:
+        raise ApiError.not_found("playback operation not found or already finished")
+    action = command["payload"]["aoa_control_action"]
+    if worker_id != cluster.config.local_worker_id:
+        cluster.repository.create_command({
+            "worker_id": worker_id, "command_type": "aoa_playback_control",
+            "operation_id": f"{command['id']}:control:{revision}",
+            "payload": {"control_id": control_id, "action": action,
+                        "revision": revision, "owner_id": owner_id,
+                        "target_command_id": command["id"]},
+        })
+    return {"success": True, "accepted": True, "action": action,
+            "command_id": command["id"], "control_revision": revision}
+
+
+def prepare_debug_request(repository, body, payload, devices, owner_id, *, is_local):
+    if (not is_local or body.action != "aoa_sequence" or len(devices) != 1
+            or body.automation_run_id or body.wait_adb_seconds
+            or body.aoa_hid_session_mode != "continuous"
+            or body.playback_control_id != body.aoa_debug_session_id
+            or not body.aoa_debug_request_id):
+        raise ApiError.conflict("保持 HID 的单条调试仅支持本机 Worker、连续连接和单台设备")
+    try:
+        selected = parse_profile_commands([body.aoa_debug_command])
+        frozen = parse_profile_commands(body.aoa_commands)
+    except ValueError as exc:
+        raise ApiError.invalid_semantics(str(exc)) from exc
+    operation_id = f"aoa-debug:{body.aoa_debug_session_id}"
+    existing = repository.get_command_by_operation(body.worker_id, operation_id)
+    if existing:
+        current = existing.get("payload") or {}
+        if current.get("owner_id") != owner_id:
+            raise ApiError.not_found("AOA debug session not found")
+        for key in ("aoa_hid_touch_mode", "aoa_hid_settle_seconds", "aoa_hid_session_mode",
+                    "aoa_touch_mapping", "aoa_source_touch_mapping", "aoa_mapping_policy"):
+            if current.get(key) != payload.get(key):
+                raise ApiError.conflict("调试会话的输入模式已固定，请结束调试后重新连接")
+        if current.get("devices") != devices:
+            raise ApiError.conflict("调试会话已绑定其他设备")
+        frozen = parse_profile_commands(current["aoa_commands"])
+    if not required_hid_channels(selected).issubset(required_hid_channels(frozen)):
+        raise ApiError.conflict("此命令需要新的 HID 通道，请结束调试后重新连接")
+    if existing:
+        from .execution import fenced_local_payload
+
+        try:
+            fenced_local_payload(repository, existing["payload"])
+        except RuntimeError as exc:
+            raise ApiError.conflict(str(exc)) from exc
+        sequence = repository.enqueue_aoa_debug_command(
+            existing["id"], owner_id, body.aoa_debug_request_id, body.aoa_debug_command)
+        return operation_id, {"success": True, "accepted": True, "command_id": existing["id"],
+                              "debug_sequence": sequence, "operation_timeout_seconds": 960}
+    payload["aoa_debug_queue"] = [{"sequence": 1, "request_id": body.aoa_debug_request_id,
+                                   "command": body.aoa_debug_command}]
+    return operation_id, None
+
+
+def debug_command_source(repository, command_id):
+    cursor = 0
+
+    def read(*, close=False):
+        nonlocal cursor
+        entry = repository.read_aoa_debug_command(command_id, cursor, close=close)
+        if entry:
+            cursor = entry["sequence"]
+        return entry
+
+    return read

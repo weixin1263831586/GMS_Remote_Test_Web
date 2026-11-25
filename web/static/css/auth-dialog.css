@@ -13,6 +13,11 @@
     padding: 0;
 }
 
+#auth-gate.setup-mode > form.auth-panel {
+    width: min(440px, 100%);
+    max-width: min(440px, 100%);
+}
+
 #auth-gate > #auth-sshd-guide {
     width: min(620px, 100%);
     max-width: min(620px, 100%);
@@ -75,9 +80,81 @@
     --auth-label-width: 76px;
 }
 
-#auth-gate .auth-bootstrap-field > .auth-help {
-    flex-basis: 100%;
-    margin-left: 0;
+/* Align the compact setup inputs with the token field. */
+#auth-gate.setup-mode .auth-field {
+    --auth-label-width: 76px;
+    padding-block: var(--ui-spacing-sm);
+    margin-bottom: var(--ui-spacing-sm);
+}
+
+#auth-gate .auth-bootstrap-help {
+    min-width: 0;
+    padding: var(--ui-spacing-sm);
+    margin-bottom: var(--ui-spacing-sm);
+    border: 1px solid var(--tech-edge-soft);
+    border-radius: 9px;
+    background: var(--tech-panel);
+}
+
+#auth-gate .auth-bootstrap-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: var(--ui-spacing-sm);
+    color: var(--text-primary);
+}
+
+#auth-gate .auth-bootstrap-help summary {
+    padding: 2px var(--ui-spacing-sm);
+    border-radius: 5px;
+    background: var(--tech-control);
+    color: var(--primary-light);
+    cursor: pointer;
+}
+
+#auth-gate .auth-bootstrap-instructions {
+    margin-top: var(--ui-spacing-sm);
+}
+
+#auth-gate .auth-bootstrap-command {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing-sm);
+    margin-block: var(--ui-spacing-sm);
+}
+
+#auth-gate .auth-bootstrap-command-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: var(--ui-control-height);
+    box-sizing: border-box;
+    padding-inline: var(--ui-spacing-sm);
+    border: 1px solid var(--tech-edge-soft);
+    border-radius: 7px;
+    background: var(--darker-bg);
+}
+
+#auth-gate :is(.auth-bootstrap-hint, .auth-bootstrap-command-field) > .ui-icon {
+    flex: none;
+    color: var(--primary-light);
+}
+
+#auth-gate .auth-bootstrap-command-text {
+    flex: 1 1 0;
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+}
+
+#auth-gate .auth-bootstrap-command > button {
+    flex: 0 0 auto;
+    white-space: nowrap;
 }
 
 #auth-gate .auth-message {
@@ -97,10 +174,8 @@
     background: color-mix(in srgb, var(--danger-color) 8%, var(--tech-panel));
 }
 
-#auth-gate.setup-mode .auth-message {
-    color: var(--text-secondary);
-    border-left-color: var(--primary-color);
-    background: var(--tech-panel);
+#auth-gate .auth-help[hidden] {
+    display: none;
 }
 
 #auth-gate .auth-ssh-warning {

@@ -88,14 +88,14 @@ class DependencyRuleTests(unittest.TestCase):
 
     def test_new_code_does_not_import_old_packages(self):
         offenders = []
-        for base in ('bootstrap', 'foundation', 'features', 'workflows'):
+        for base in ('bootstrap', 'foundation', 'features', 'worker'):
             for path in (ROOT / base).rglob('*.py'):
                 relative = str(path.relative_to(ROOT))
                 bad = sorted(
                     name
                     for name in imports(path)
-                    if name in {'core', 'routers', 'modules'}
-                    or name.startswith(('core.', 'routers.', 'modules.'))
+                    if name in {'core', 'routers', 'modules', 'workflows', 'scripts_local'}
+                    or name.startswith(('core.', 'routers.', 'modules.', 'workflows.', 'scripts_local.'))
                 )
                 if bad:
                     offenders.append((relative, bad))
@@ -110,7 +110,7 @@ class DependencyRuleTests(unittest.TestCase):
         underscore and re-export it from the feature package.
         """
         offenders = []
-        for base in ('features', 'bootstrap', 'workflows'):
+        for base in ('features', 'bootstrap'):
             for path in (ROOT / base).rglob('*.py'):
                 relative = str(path.relative_to(ROOT))
                 if '/tests/' in relative or '__pycache__' in relative:

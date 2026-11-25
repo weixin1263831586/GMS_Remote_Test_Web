@@ -17,6 +17,8 @@ Controller（校验请求/profile）与 Worker（生成 USB 控制传输报文�
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 
@@ -157,14 +159,11 @@ _KEY_USAGES: dict[str, int] = {
     "6": 0x23, "7": 0x24, "8": 0x25, "9": 0x26, "0": 0x27,
     "enter": 0x28, "tab": 0x2B, "space": 0x2C, "-": 0x2D, ".": 0x37,
     "right": 0x4F, "left": 0x50, "down": 0x51, "up": 0x52,
-    "@": 0x1F, "_": 0x2D, "+": 0x1E,
+    "@": 0x1F, "_": 0x2D, "+": 0x1E,  # shifted usages
 }
 for _usage, _letter in zip(range(0x04, 0x1E), "abcdefghijklmnopqrstuvwxyz"):
     _KEY_USAGES[_letter] = _usage
     _KEY_USAGES[_letter.upper()] = _usage  # 大写 = SHIFT 修饰（大小写敏感键）
-_KEY_USAGES["@"] = 0x1F  # 官方：SHIFT+0x1F
-_KEY_USAGES["_"] = 0x2D  # SHIFT+0x2D
-_KEY_USAGES["+"] = 0x1E  # SHIFT+0x1E
 _SHIFTED = {"@", "_", "+"} | set("ABCDEFGHIJKLMNOPQRSTUVWXYZ")
 
 # TV/STB 遥控语义别名（dpad_*/ok 归一为基础方向键与 enter）
@@ -225,14 +224,16 @@ def parse_profile_commands(commands: list[str] | tuple[str, ...]) -> list[AoaCom
     总时长、sleep 单步与 write 长度上限，保证单次 device_action 在
     Controller 等待窗口内可完成。
     """
-    if not commands:
-        raise ValueError("AOA profile is empty")
+    if not isinstance(commands, (list, tuple)) or not commands:
+        raise ValueError("AOA profile is empty or is not a command list")
     if len(commands) > MAX_PROFILE_COMMANDS:
         raise ValueError(f"AOA profile exceeds {MAX_PROFILE_COMMANDS} commands")
     parsed: list[AoaCommand] = []
     total_runtime_ms = 0
     for line in commands:
-        text = str(line or "").strip()
+        if not isinstance(line, str):
+            raise ValueError("AOA profile commands must be strings")
+        text = line.strip()
         if not text:
             continue
         head, _, rest = text.partition(" ")
@@ -313,6 +314,8 @@ def _parse_key_combo(args: list[str], text: str) -> tuple[tuple[int, int], ...]:
         modifier = MODIFIER_SHIFT if name in _SHIFTED else 0
         if not 0 < count <= 32:
             raise ValueError(f"AOA key repeat count out of range: {count}")
+        if (len(keys) + count) * 120 + 1_000 > MAX_TOTAL_RUNTIME_MS:
+            raise ValueError("AOA key sequence exceeds runtime budget")
         keys.extend([(modifier, usage)] * count)
     return tuple(keys)
 
@@ -428,7 +431,7 @@ def parse_record_input_action(raw: dict) -> dict:
 
     def integer(name: str, minimum: int, maximum: int, default=None) -> int:
         value = raw.get(name, default)
-        if isinstance(value, bool):
+        if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
             raise ValueError(f"record input {name} must be an integer")
         try:
             parsed = int(value)
@@ -478,7 +481,7 @@ def parse_record_input_action(raw: dict) -> dict:
             raise ValueError(f"record input {name} must be numeric")
         try:
             scale = float(raw[name])
-        except (TypeError, ValueError) as exc:
+        except (TypeError, ValueError, OverflowError) as exc:
             raise ValueError(f"record input {name} must be numeric") from exc
         if not 0.05 <= scale <= 100:
             raise ValueError(f"record input {name} is out of range")
@@ -587,8 +590,8 @@ def parse_record_steps(steps: list) -> list[dict]:
     回放安全：所有步骤都会产出等价的 AOA 命令（launch/am start 之类
     依赖 ADB 的动作被禁止），保证录制的 Profile 在 user 固件上可回放。
     """
-    if not steps:
-        raise ValueError("AOA record steps are empty")
+    if not isinstance(steps, (list, tuple)) or not steps:
+        raise ValueError("AOA record steps are empty or are not a list")
     if len(steps) > MAX_RECORD_STEPS:
         raise ValueError(f"AOA record exceeds {MAX_RECORD_STEPS} steps")
     normalized: list[dict] = []
@@ -628,9 +631,11 @@ def _record_int(raw: dict, key: str, default: int, low: int, high: int, index: i
     value = raw.get(key)
     if value is None:
         return default
+    if isinstance(value, bool) or (isinstance(value, float) and not value.is_integer()):
+        raise ValueError(f"record step {index}: {key} must be an integer")
     try:
         number = int(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"record step {index}: {key} must be an integer") from exc
     if not low <= number <= high:
         raise ValueError(f"record step {index}: {key} out of range {low}..{high}")
@@ -642,9 +647,11 @@ def _record_float(raw: dict, key: str, default: float, low: float, high: float,
     value = raw.get(key)
     if value is None:
         return default
+    if isinstance(value, bool):
+        raise ValueError(f"record step {index}: {key} must be a number")
     try:
         number = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"record step {index}: {key} must be a number") from exc
     if not low <= number <= high:
         raise ValueError(f"record step {index}: {key} out of range {low}..{high}")
@@ -684,3 +691,27 @@ PRESET_JOURNEYS: dict[str, list[dict]] = {
          "find": {"any_text": ["USB 调试", "USB debugging"]}},
     ],
 }
+
+
+# Descriptive metadata is bounded independently of executable command syntax.
+MAX_COMMENT_LENGTH = 240
+MAX_COMMENTS_BYTES = 65536
+
+
+def validate_command_comments(comments, command_count):
+    if (not isinstance(comments, list) or len(comments) != command_count
+            or len(comments) > MAX_PROFILE_COMMANDS):
+        raise ValueError("命令注释必须与 commands 逐条对应")
+    if any(not isinstance(value, str) or len(value) > MAX_COMMENT_LENGTH for value in comments):
+        raise ValueError(f"每条命令注释必须是最多 {MAX_COMMENT_LENGTH} 字的文本")
+    try:
+        size = len(json.dumps(comments, ensure_ascii=False).encode())
+    except UnicodeEncodeError as exc:
+        raise ValueError("命令注释包含无效 Unicode 文本") from exc
+    if size > MAX_COMMENTS_BYTES:
+        raise ValueError("命令注释总大小不能超过 64 KiB")
+
+
+def commands_digest(commands: list[str]) -> str:
+    """Canonical digest of the frozen command list across Controller and Worker."""
+    return hashlib.sha256(json.dumps(commands, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()

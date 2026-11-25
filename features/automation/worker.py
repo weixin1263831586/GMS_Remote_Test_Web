@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -14,6 +15,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from foundation.config import config_manager
+from foundation.test_execution_options import validate_execution_options
 
 
 logger = logging.getLogger(__name__)
@@ -87,6 +89,55 @@ def _age_seconds(value: str) -> float | None:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def run_options(run: dict) -> dict:
+    try:
+        value = json.loads(run.get('test_plan_json') or '{}')
+        return validate_execution_options(value if isinstance(value, dict) else {})
+    except (ValueError, TypeError):
+        return validate_execution_options({})
+
+
+def elapsed(value: str) -> float | None:
+    try:
+        started = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        return (datetime.now(timezone.utc) - started.replace(tzinfo=started.tzinfo or timezone.utc)).total_seconds()
+    except (ValueError, AttributeError):
+        return None
+
+
+def enforce_extra_timeouts(service, cfg: dict) -> int:
+    cancelled = 0
+    for run in service.list_runs(limit=500):
+        options = run_options(run)
+        reason = ''
+        if run['status'] == 'queued' and options['queue_timeout_seconds']:
+            age = elapsed(max(run.get('created_at') or '', run.get('not_before') or ''))
+            if age is not None and age > options['queue_timeout_seconds']:
+                reason = 'Run queue timeout exceeded'
+        elif run['status'] == 'test_running' and options['output_idle_timeout_seconds'] and run.get('cluster_job_id'):
+            from features.cluster import get_cluster_service
+
+            try:
+                repo = get_cluster_service().repository
+                job = repo.get_job(run['cluster_job_id'])
+                if not job or job.get('current_attempt_id') != run.get('attempt_id') or job.get('owner_id') != run.get('created_by'):
+                    continue
+                last = repo.job_last_output_at(job['id'], run['attempt_id'])
+                if not last:
+                    # Start measuring at test acceptance, rather than firmware/build time.
+                    last = next((event['created_at'] for event in service.list_events(run['id'])
+                                 if event.get('stage') == 'test_running'), '')
+                age = elapsed(last)
+                if age is not None and age > options['output_idle_timeout_seconds']:
+                    reason = 'Test output idle timeout exceeded'
+            except (RuntimeError, AttributeError):
+                continue
+        if reason:
+            service.orchestrator(cfg['executor']).cancel_run(run['id'], reason=reason, cleanup=True)
+            cancelled += 1
+    return cancelled
 
 
 def stale_sweep_once(
@@ -176,8 +227,6 @@ def sweep_waiting_device_timeouts(
     timeout = cfg["waiting_device_timeout_seconds"]
     cancelled = 0
     for run in auto_svc.list_runs(status="waiting_device", limit=100):
-        from .execution_policy import run_options
-
         timeout = run_options(run)['queue_timeout_seconds'] or cfg['waiting_device_timeout_seconds']
         # 从 waiting_device 状态进入事件开始计时，不受轮询刷新影响
         entered_at = ""
@@ -248,8 +297,6 @@ def sweep_active_stage_timeouts(
     )
     for stage, timeout, reason in stages:
         for run in auto_svc.list_runs(status=stage, limit=500):
-            from .execution_policy import run_options
-
             effective_timeout = (run_options(run)['execution_timeout_seconds'] if stage == 'test_running' else 0) or timeout
             age = _stage_entry_age_seconds(auto_svc, run, stage)
             if age is None or age <= effective_timeout:
@@ -326,8 +373,6 @@ def run_maintenance_sync(
         stage_timeouts = sweep_active_stage_timeouts(cfg, automation_service=auto_svc)
     except Exception:
         logger.exception("[AutomationWorker] active-stage timeout sweep failed")
-    from .execution_policy import enforce_extra_timeouts
-
     try:
         enforce_extra_timeouts(auto_svc, cfg)
     except Exception:

@@ -51,12 +51,7 @@ def _desired_env(
     env = {
         "GMS_REMOTE_TEST_SERVER": server_url,
         "GMS_RT_PROFILE": profile,
-        # Pin the client identity in the registered env —
-        # mcp_launcher.py used to fall back to the kimi→codex→kkagent probe
-        # when GMS_AGENT_CLIENT was absent, so a Codex registration on a
-        # multi-client host loaded the Kimi profile (wrong Controller URL
-        # and identity). The launcher now also honors GMS_RT_PROFILE's
-        # `client =` field, but the explicit pin is authoritative.
+        # The registered client identity is authoritative for profile selection.
         "GMS_AGENT_CLIENT": client,
         "GMS_AUTH_TOKEN_FILE": token_file,
         # 注册进客户端配置的 MCP 环境必须显式声明

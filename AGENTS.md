@@ -5,7 +5,7 @@
 - `features/`: FastAPI domain routes, services, repositories, and tests.
 - `foundation/`: shared configuration, responses, security, and persistence.
 - `web/`: browser shell and static frontend.
-- `worker_agent/`: Worker-side execution and Controller communication.
+- `worker/`: Worker-side execution and Controller communication.
 - `agent/gms-remote-test/`: hand-maintained CLI, MCP, Skill, manifests, and
   package lifecycle source.
 - `plugins/gms-remote-test/`: generated plugin payload. Do not hand-edit it;
@@ -42,7 +42,7 @@
 - Cluster execution uses the authenticated Worker command queue: Workers
   register, heartbeat, poll commands and ACK over HTTP(S) with a Worker Token
   and session/generation fencing (ADR 0001). Host operations that use SSH
-  cross the audited SSH executor (ADR 0004). `worker_agent/` imports inside
+  cross the audited SSH executor (ADR 0004). `worker/` imports inside
   `features/` stay confined to the
   worker-role execution surfaces and the same-host bridge modules and
   must not spread; enforced by
@@ -67,15 +67,14 @@
   workspaces, and the browser for native `<dialog>` prompts. Never double-write
   `style.display` beside the relevant controller. Assistant resources stay under
   `/gms-assistant/...` (root-level proxy paths are deprecation shims).
-- Docs policy: source comments must not reference review-round or audit
-  numbers that do not exist as documents; cite real ADRs under
-  `docs/architecture/adr/`. Architecture decisions land in that directory.
-- Canonical configuration paths: runtime config lives in
-  `configs/local/` and secrets in `configs/secrets/`. Flat root paths
-  (`configs/cluster.json`, `configs/config.json`, `configs/runtime.json`,
-  `configs/worker_tokens.json`, …) are legacy compatibility only — they
-  may appear in migration/backup/restore code and compatibility docs,
-  never in new UI strings, error messages, or normal-path docs.
+- Comments, docstrings, script help and current guides describe current behavior,
+  responsibilities, constraints and usage. Omit change history, review rounds,
+  screenshots, retired designs and redundant code narration. Preserve security,
+  protocol and concurrency invariants; cite ADRs only when they clarify a constraint.
+  Keep decision records and required provenance in their dedicated documents.
+- Canonical configuration paths: deployment configuration lives in
+  `configs/local/`, secrets in `configs/secrets/`, and runtime preferences in
+  the configured data root. Use `foundation/config_paths.py`.
 - SQLite schema migration must be process-safe: hold a `BEGIN IMMEDIATE`
   write lock (or use a versioned `PRAGMA user_version` scheme) before
   reading schema and running `ALTER TABLE`; migrations must stay
@@ -96,17 +95,24 @@
   ad-hoc command chains for environment verification.
 - Do not edit: `plugins/gms-remote-test/**` (generated),
   `tests/contract/snapshots/**` (regenerate deliberately),
-  `tests/architecture/test_file_size_rules.py` budgets except to shrink
-  them after a real split (the 1200-line default is owner-set policy;
-  never raise ceilings without a reviewed waiver), and everything under
+  `tests/architecture/test_file_size_rules.py` and frontend line budgets
+  except for owner-approved policy changes (the default is 2000 lines;
+  split by cohesive responsibilities, not arbitrary line targets), and everything under
   local `configs/` and `data/`.
 
 ## Verification
 
 - Python: targeted Ruff plus pytest for the owning feature.
 - Shell: `bash -n` and the CLI contract tests.
-- Agent package: source tests and generated-plugin tests in separate pytest
-  processes, followed by `tools/scripts/agent/release.py --check`.
+- Agent package: `make agent-test` runs source and generated-plugin tests in
+  separate pytest processes with package-local conftest discovery, followed by
+  the release version contract.
+  `make agent-check` also runs the tracked-file secret scan; CI runs that scan
+  in its independent security job. `make agent-sync-check` verifies the
+  generated payload against the Git index, including new untracked files.
+- Standalone CodeSearch: `make codesearch-check` (separate pytest process).
+- Default `pytest` covers tests, features, foundation and worker; Agent source,
+  generated plugin and CodeSearch are intentionally separate suites.
 - Frontend: syntax checks and repeated-navigation behavior.
 
 See `agent/gms-remote-test/skill/references/project-map.md` for detailed

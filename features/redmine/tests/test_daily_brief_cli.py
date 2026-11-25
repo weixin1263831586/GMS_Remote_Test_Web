@@ -5,7 +5,7 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.redmine import daily_brief_cli
+from features.redmine.daily_brief import cli as daily_brief_cli
 
 
 def test_scheduled_owner_selection_uses_each_mode_trigger_time():
@@ -34,7 +34,7 @@ def test_scheduled_owner_selection_uses_each_mode_trigger_time():
         }
         with patch("foundation.config.settings", SimpleNamespace(data_root=data_root)), patch.object(
             daily_brief_cli, "_owner_service", side_effect=lambda owner_id: services[owner_id]
-        ), patch("features.redmine.daily_brief_owner_policy.is_daily_brief_owner_eligible", return_value=True):
+        ), patch("features.redmine.daily_brief.owner_policy.is_daily_brief_owner_eligible", return_value=True):
             assert daily_brief_cli._enabled_owner_ids(trigger_time="00:00") == [
                 "delta-disabled", "midnight",
             ]

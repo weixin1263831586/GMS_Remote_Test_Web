@@ -21,9 +21,9 @@ from features.redmine.tests.test_evidence_pipeline import (
 
 class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
     def test_zip_attachment_gets_searchable_derived_text(self):
-        from features.redmine.evidence import EvidenceFetcher, split_zip_derived_text
-        from features.redmine.evidence_search_api import _collect_zip_member_matches
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.search_api import _collect_zip_member_matches
+        from features.redmine.evidence.service import EvidenceFetcher, split_zip_derived_text
+        from features.redmine.evidence.store import owner_evidence_store
 
         logcat = (
             "get_ad_selection_data bind ok\n"
@@ -91,8 +91,8 @@ class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertEqual(entry["zip_member"], "logs/logcat.txt")
 
     def test_all_zip_members_are_indexed_beyond_old_count_and_size_limits(self):
-        from features.redmine.evidence import EvidenceFetcher, snapshot_completeness
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import EvidenceFetcher, snapshot_completeness
+        from features.redmine.evidence.store import owner_evidence_store
 
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w") as zf:
@@ -130,7 +130,7 @@ class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
                 "SELECT derived_text_path FROM redmine_evidence_artifacts WHERE artifact_id = ?",
                 (archive["artifact_id"],),
             ).fetchone()[0]
-        from features.redmine.evidence import split_zip_derived_text
+        from features.redmine.evidence.service import split_zip_derived_text
         members = dict(split_zip_derived_text(store.resolve_internal(relative).read_text()))
         self.assertEqual(len(members), 56)
         self.assertIn("lmkd killed target", members["DULOMV~V.TXT"])

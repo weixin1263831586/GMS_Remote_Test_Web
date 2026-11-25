@@ -1,5 +1,3 @@
-// Automation page runs chunk; loaded by page.html in dependency order.
-
 async function loadRuns() {
     const view = activeWorkflowPane === 'reports' ? 'reports' : 'runs';
     const state = atsHistoryViews[view];
@@ -212,4 +210,52 @@ function jumpToAgentConversation(runId) {
         gerrit_patchset: run?.gerrit_patchset || '',
     });
     window.GmsEmbeddedWorkspace?.navigate('agent', {origin_page: 'automation'});
+}
+
+async function retryRun(runId) {
+    if (atsRuns.find(run => run.id === runId)?.permissions?.can_manage !== true) {
+        toast('仅运行创建者或管理员可操作');
+        return;
+    }
+    try {
+        const message = '将使用原配置重新执行整条流水线，包含已配置的构建、烧写和测试。新运行会保留来源记录。是否继续？';
+        const confirmed = typeof window.parent.showConfirmDialog === 'function'
+            ? await window.parent.showConfirmDialog('重跑流水线', message)
+            : await GmsDialogs.confirm('重跑流水线', message);
+        if (!confirmed) return;
+        const run = await api(`/api/automation/runs/${encodeURIComponent(runId)}/retry`, {method: 'POST'});
+        resetRunHistoryPage('runs');
+        setStatusFilter('', {load: false});
+        switchWorkflowPane('runs', {load: false});
+        toast(`已创建流水线重跑 ${run.id}`);
+        await loadRuns();
+        await loadEvents(run.id);
+    } catch (err) { toast(err.message); }
+}
+
+async function cancelRun(runId) {
+    if (atsRuns.find(run => run.id === runId)?.permissions?.can_manage !== true) {
+        toast('仅运行创建者或管理员可操作');
+        return;
+    }
+    try {
+        const run = await api(`/api/automation/runs/${encodeURIComponent(runId)}/cancel`, {method: 'POST'});
+        toast(`已取消 ${run.id}`);
+        await loadRuns();
+        await loadEvents(run.id);
+    } catch (err) { toast(err.message); }
+}
+
+async function releaseRunReservation(runId) {
+    const run = atsRuns.find(item => item.id === runId);
+    if (run?.permissions?.can_manage !== true || run.status !== 'completed') {
+        toast('仅运行创建者或管理员可释放已完成运行的预约');
+        return;
+    }
+    try {
+        await api(`/api/automation/runs/${encodeURIComponent(runId)}/release-reservation`, {method: 'POST'});
+        toast('设备预约已释放');
+        await loadRuns();
+        if (selectedRunId === runId) await loadEvents(runId);
+    } catch (error) { toast(error.message); }
 }

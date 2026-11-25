@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
-from features.devices.host_inventory import register_devices_port
+from features.devices import register_devices_port
 from features.devices.locks import devices_display_name_resolver
 from features.email import (
     configure_attachment_resolver,
@@ -18,13 +18,23 @@ from features.redmine import (
 from features.redmine.agent import RedmineAgent
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.service import RedmineService
-from features.reports import ReportAnalyzer
+from features.reports import ReportAnalyzer, ReportFailureAnalyzer
 from foundation.config import ConfigManager, RuntimeSettings, settings
 from foundation.device_locks import configure_display_name_resolver
 
 
 def _universal_analyzer_factory(config=None):
-    """统一网关分析器工厂：注入 reports 源码检索 provider（避免依赖环）。"""
+    """Shared text-generation and provider gateway factory."""
+    if config is None:
+        from foundation.config import config_manager
+
+        config = config_manager.get_ai_config()
+
+    return UniversalAIAnalyzer(config)
+
+
+def _report_failure_analyzer_factory(config=None):
+    """Report diagnosis with an injected Android source search provider."""
     if config is None:
         from foundation.config import config_manager
 
@@ -36,21 +46,21 @@ def _universal_analyzer_factory(config=None):
         except Exception:
             return []
 
-    return UniversalAIAnalyzer(config, source_search=_codesearch_source_search)
+    return ReportFailureAnalyzer(config, source_search=_codesearch_source_search)
 
 
 def _wire_sdk_source_rank_hints() -> None:
     """把 android-internals wiki 命中转成 SDK 子仓排序提示（ADR 0014 闭环）。
 
     wiki 的 ``source_anchors``（repo/path）与机制章节名是强相关子仓的
-    先验信号；经 ``features.system.source_repo_rank`` 注入，只影响
+    先验信号；经 ``features.sdk.source_repo_rank`` 注入，只影响
     ssh_git 全库检索的**排序**，不改变任何证据判定语义（wiki 保持
     background 级）。federated_search 自身永不抛异常；这里再兜一层，
     保证排序信号故障不可能阻塞 SDK 检索。
     """
     try:
         from features.knowledge.external import federated_search
-        from features.system.source_repo_rank import (
+        from features.sdk import (
             configure_codesearch_hints,
             configure_knowledge_hints,
         )
@@ -133,6 +143,13 @@ def _wire_cross_feature_services() -> None:
     register_cluster_port()
     register_worker_status_port()
     register_devices_port()
+    from features.gerrit import gerrit_config_manager, query_gerrit_dual_mode
+    from features.gms.mainline_queries import configure_gerrit_match_access
+
+    configure_gerrit_match_access(
+        config_provider=lambda owner: gerrit_config_manager.for_owner(owner).get_gerrit_dashboard_config(),
+        query_provider=query_gerrit_dual_mode,
+    )
     _wire_sdk_source_rank_hints()
     from features.ops import register_ops_ports
 

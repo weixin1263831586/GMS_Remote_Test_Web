@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import foundation.cluster_port as cluster_port
-from features.devices import usbip_status_reconcile
+from features.devices.usbip import status_reconcile as usbip_status_reconcile
 
 
 def _assignment(

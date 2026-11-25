@@ -1,6 +1,6 @@
 """Failure Identity / Cluster：确定性失败身份层（失败身份与关系分层）。
 
-现有 ``analysis_similarity`` 回答的是"值不值得拿出来比较"（retrieval
+现有 ``analysis/similarity.py`` 回答的是"值不值得拿出来比较"（retrieval
 score：同用例/同模块/关键词/Jaccard + AI 语义分）。长期问题是 retrieval 高分 ≠ 同一失败：**同一个 CTS testcase 完全可能
 设备 A = overlay 错、设备 B = framework API 行为变化、设备 C = 环境
 问题**，不能因为 testcase 相同就合并 Cluster。
@@ -175,7 +175,7 @@ def failure_identity(
 ) -> dict[str, Any]:
     """从失败列表构造确定性身份。
 
-    ``failures`` 行形状与 ``analysis_similarity`` 一致：
+    ``failures`` 行形状与 ``analysis/similarity.py`` 一致：
     ``{"module": ..., "name": ..., "reason": ...}``。
 
     ``device_class`` 必须是设备**类**（SoC/product/形态）；``device_serial``

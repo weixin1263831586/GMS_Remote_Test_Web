@@ -16,7 +16,7 @@ from types import SimpleNamespace
 import pytest
 from cryptography.fernet import Fernet
 
-from features.system.skill_archive_signing import (
+from features.system.agent_package.signing import (
     SIGNING_KEY_ENV,
     sign_skill_archive,
     skill_verify_key_b64,

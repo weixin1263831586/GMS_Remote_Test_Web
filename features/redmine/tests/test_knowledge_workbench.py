@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
-from features.redmine.knowledge_service import RedmineKnowledgeService
+from features.redmine.knowledge.repository import RedmineKnowledgeDB
+from features.redmine.knowledge.service import RedmineKnowledgeService
 
 
 class _IssueRepo:

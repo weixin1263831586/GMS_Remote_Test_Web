@@ -186,19 +186,15 @@ def ui_source_groups() -> dict[str, list[Path]]:
             ROOT / 'features/gerrit/ui/page.html',
             *page_script_paths('features/gerrit/ui/page.html'),
         ],
-        'gms-update-monitor': [
-            ROOT / 'features/system/update_monitor/ui/page.html',
-            ROOT / 'features/system/update_monitor/ui/page.js',
-        ],
         'gms-update-radar': [
-            ROOT / 'features/system/update_radar/ui/page.html',
-            ROOT / 'features/system/update_radar/ui/page.js',
+            ROOT / 'features/gms/radar/ui/page.html',
+            ROOT / 'features/gms/radar/ui/page.js',
             ROOT / 'web/shell/dialogs/update-radar-settings.html',
             ROOT / 'web/static/js/update-radar-settings.js',
         ],
-        'mainline-known-issues': [
-            ROOT / 'features/system/mainline_issues/ui/page.html',
-            ROOT / 'features/system/mainline_issues/ui/page.js',
+        'gms-update-center': [
+            ROOT / 'features/gms/ui/page.html',
+            ROOT / 'features/gms/ui/page.js',
         ],
         'automation': (
             sorted(automation_ui.glob('*.*'))

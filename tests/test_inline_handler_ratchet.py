@@ -40,8 +40,7 @@ EMBEDDED_BASELINE: dict[str, int] = {
     "features/automation/ui/page.html": 47,
     "features/gerrit/ui/page.html": 39,
     "features/automation/ui/page.js": 16,
-    "features/system/update_monitor/ui/page.html": 11,
-    "features/system/mainline_issues/ui/page.html": 3,
+    "features/gms/ui/page.html": 3,
     "features/cluster/ui/page.js": 2,
     "features/cluster/ui/page.html": 1,
 }

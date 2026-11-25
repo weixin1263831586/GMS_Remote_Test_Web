@@ -93,6 +93,6 @@ def definitions():
                 "源码源", "Android源码", "源码检索",
             ],
             "is_readonly": True, "is_dangerous": False, "requires_confirm": False,
-            "executor_ref": "features.system:list_sdk_sources", "response_type": "list",
+            "executor_ref": "features.sdk:list_sdk_sources", "response_type": "list",
         },
     ]

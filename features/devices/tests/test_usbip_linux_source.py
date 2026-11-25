@@ -9,7 +9,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.devices import usbip, usbip_flash, usbip_linux_source
+from features.devices.usbip import flash as usbip_flash
+from features.devices.usbip import linux_source as usbip_linux_source
+from features.devices.usbip import manager as usbip
 from foundation.command_result import CommandResult
 
 
@@ -913,7 +915,7 @@ class AutoBindUbuntuTests(unittest.TestCase):
 
 class SourceOsCacheTests(unittest.TestCase):
     def test_record_and_lookup_source_os(self):
-        from features.devices import usbip_persistence
+        from features.devices.usbip import persistence as usbip_persistence
 
         config_manager = MagicMock()
         state: dict = {}

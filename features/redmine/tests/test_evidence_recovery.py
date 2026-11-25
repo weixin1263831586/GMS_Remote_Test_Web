@@ -2,12 +2,12 @@
 
 from pathlib import Path
 
-from features.redmine.evidence import (
+from features.redmine.evidence.service import (
     _ACTIVE_FETCH_SNAPSHOTS,
     reconcile_interrupted_fetches,
     wait_for_snapshot,
 )
-from features.redmine.evidence_store import EvidenceStore
+from features.redmine.evidence.store import EvidenceStore
 
 
 def _make_intermediate(owner_root: Path) -> str:
@@ -48,7 +48,7 @@ def test_active_fetch_untouched_and_interrupted_is_terminal(tmp_path, monkeypatc
 
     store = EvidenceStore(owner_root)
     monkeypatch.setattr(
-        "features.redmine.evidence.owner_evidence_store",
+        "features.redmine.evidence.service.owner_evidence_store",
         lambda _owner: store,
     )
     store.update_snapshot(active_id, status="interrupted")

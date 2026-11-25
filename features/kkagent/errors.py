@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import signal
-from typing import Any
 
 
 # ANSI 转义序列（颜色/光标控制/回车）：kkagent 的 stderr 日志即使设了
@@ -12,22 +11,6 @@ from typing import Any
 ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\r")
 
 STDERR_SUMMARY_LIMIT = 500
-
-_TEXTUAL_GMS_CALL_RE = re.compile(
-    r"\bgms_rt_[A-Za-z0-9_]+\s*<arg_key>[^<>]+</arg_key>\s*<arg_value>"
-    r"|\bmcp__[A-Za-z0-9_]+__gms_rt_[A-Za-z0-9_]+\s*"
-    r"<arg_key>[^<>]+</arg_key>\s*<arg_value>"
-)
-
-
-def has_textual_gms_tool_call(message: Any) -> bool:
-    """Recognize leaked tool syntax without executing it or trusting its arguments."""
-    if not isinstance(message, str):
-        return False
-    # Quoted examples in a diagnostic report are ordinary evidence text.
-    visible = re.sub(r"```.*?```|`[^`\n]*`", "", message, flags=re.DOTALL)
-    return bool(_TEXTUAL_GMS_CALL_RE.search(visible))
-
 
 # kkagent stderr 日志里的 RFC3339 时间戳(2026-09-13T10:31:49.070374Z)
 # 对 UI 展示不友好:入库前统一转成 "2026-09-13 10:31:49.070"。
@@ -155,8 +138,11 @@ def classify_failure(
     *,
     envelope_subtype: str = "",
     max_turns: int = 0,
+    settings_context: str = "分析",
 ) -> tuple[str, str]:
     """非零退出的 error_type / 可读错误归类。
+
+    settings_context 由调用方指定界面名称；引擎不依赖具体业务页面。
 
     LLM 流式超时是根因时优先归类（kkagent 0.4.x 对长上下文请求有
     300s 硬编码单请求超时，超时后 step 重试耗尽会连带 turn 预算用尽
@@ -180,7 +166,7 @@ def classify_failure(
     if llm_stream_timeout(stderr_text):
         return "llm_timeout", (
             "模型服务流式响应超时（大上下文请求超过服务端/客户端"
-            "时限）。将自动重试一次；若反复出现请在晨报设置中"
+            f"时限）。将自动重试一次；若反复出现请在{settings_context}设置中"
             "换用更快的模型（如 glm-5.3-flash）。\n"
             + (summary or f"exit {exit_code}")
         )
@@ -188,14 +174,13 @@ def classify_failure(
         if max_turns > 0:
             head = (
                 f"kkagent 未在 {max_turns} 步预算内完成分析"
-                "（可在晨报设置中调大步数上限后重试）。"
+                f"（可在{settings_context}设置中调大步数上限后重试）。"
             )
         else:
-            # 晨报侧未设限制（max_turns=0）时仍收到 turn-limit 信封，
-            # 说明是 kkagent 内部（如子任务）预算或 CLI 默认值——
-            # 不是用户可调的晨报设置，文案不得误导。
+            # 调用方未设限制仍收到 turn-limit 信封，表示引擎内部预算
+            # 或 CLI 默认值，不是调用方可调的上限。
             head = (
-                "kkagent 内部步数预算耗尽（晨报侧未限制步数）。"
+                f"kkagent 内部步数预算耗尽（{settings_context}侧未限制步数）。"
                 "若上游服务当时拥堵，实为拥堵的连带表象。"
             )
         return "max_turns", head + "\n" + (summary or f"exit {exit_code}")

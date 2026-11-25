@@ -11,7 +11,6 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
-from features.build.config import BuildConfigRepository
 from features.build.executor import (
     BuildExecutionError,
     LocalBuildBackend,
@@ -29,7 +28,7 @@ from features.build.models import (
     BuildJobCreateRequest,
     utc_now_iso,
 )
-from features.build.repository import BuildStore
+from features.build.repository import BuildConfigRepository, BuildStore
 from features.build.runtime_passwords import RuntimePasswordStore
 
 

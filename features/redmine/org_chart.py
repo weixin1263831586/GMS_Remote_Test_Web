@@ -3,9 +3,7 @@
 方案 2 拆分（替代「整份 user_map 按 owner 复制」）：
 
 - **全局组织架构**（部门 + 成员花名册）是全组共享的事实：人人读同一份，
-  写仅限管理员。canonical 路径 ``configs/local/redmine_org_chart.json``，
-  旧部署的扁平 ``configs/redmine_user_map.json`` 作为读兼容回退
-  （``_prefer_existing``）。
+  写仅限管理员。存储路径 ``configs/local/redmine_org_chart.json``。
 - **per-owner overlay**（自我绑定 + 个人别名）沿用原 owner 文件路径
   ``data/redmine/by_user/<owner>/redmine_user_map.json``，但语义收窄为
   ``{"me": <member_id>|null, "aliases": {"<member_id>": ["别名"...]}}``。
@@ -25,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
-from foundation.config_paths import _prefer_existing, config_root
+from foundation.config_paths import config_root
 
 from .users import owner_user_map_path
 
@@ -38,7 +36,6 @@ __all__ = [
     "load_redmine_user_map_for_owner",
     "load_user_map_payload_for_owner",
     "load_user_overlay",
-    "org_chart_is_legacy_path",
     "org_chart_path",
     "save_org_payload",
     "save_user_map_payload_for_owner",
@@ -49,20 +46,12 @@ __all__ = [
 ]
 
 ORG_CHART_FILENAME = "redmine_org_chart.json"
-_LEGACY_ORG_FILENAME = "redmine_user_map.json"
 
 
 def org_chart_path(project_root: Path | str | None = None) -> Path:
-    """全局组织架构路径；canonical 缺失时回退读旧扁平 user_map。"""
+    """Return the shared organization chart path."""
     root = Path(project_root) if project_root else Path(settings.project_root)
-    canonical = config_root(root) / "local" / ORG_CHART_FILENAME
-    legacy = config_root(root) / _LEGACY_ORG_FILENAME
-    return _prefer_existing(canonical, legacy)
-
-
-def org_chart_is_legacy_path() -> bool:
-    """当前生效的组织架构文件是否还是旧扁平 user_map（待导入）。"""
-    return org_chart_path().name == _LEGACY_ORG_FILENAME
+    return config_root(root) / "local" / ORG_CHART_FILENAME
 
 
 def _empty_payload() -> dict[str, Any]:

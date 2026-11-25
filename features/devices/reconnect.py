@@ -10,17 +10,17 @@ from typing import Any
 
 from . import runtime
 from .manager import device_manager, has_blocked_adb_process
-from .usbip import find_device_host_password, usbip_manager
-from .usbip_flash import resolve_usbip_flash_routes
-from .usbip_operations import usbip_operation_gate
-from .usbip_persistence import migrate_local_usbip_busid
-from .usbip_support import (
+from .usbip.flash import resolve_usbip_flash_routes
+from .usbip.manager import find_device_host_password, usbip_manager
+from .usbip.operations import usbip_operation_gate
+from .usbip.persistence import migrate_local_usbip_busid
+from .usbip.support import (
     _invalidate_device_cache,
     _known_usbip_sources,
     _local_worker_id,
     _normalize_host,
 )
-from .usbip_transport_probe import probe_existing_local_usbip_transport
+from .usbip.transport_probe import probe_existing_local_usbip_transport
 
 
 logger = logging.getLogger(__name__)

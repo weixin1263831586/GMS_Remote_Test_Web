@@ -15,11 +15,11 @@ from foundation.error_model import ApiError, record_internal_error
 from foundation.networking import is_local_host
 
 from . import runtime
+from .inventory.management import local_management_inventory
 from .locks import device_lock_manager
-from .management_inventory import local_management_inventory
 from .manager import device_manager, has_blocked_adb_process
 from .support import SSHConnection, device_fencing_owner_id
-from .usbip_transaction import USBIP_PORT_COMMAND
+from .usbip.transaction import USBIP_PORT_COMMAND
 from .utils import DeviceUtils
 
 
@@ -33,7 +33,7 @@ def known_usbip_device_ids() -> set:
 
 def known_usbip_sources() -> dict[str, dict[str, Any]]:
     """Return persisted, in-memory, and currently attached USB/IP sources."""
-    from .usbip import usbip_manager
+    from .usbip.manager import usbip_manager
 
     sources: dict[str, dict[str, Any]] = {}
     runtime_sources = (runtime.config_manager.get_runtime_config() or {}).get(
@@ -124,7 +124,7 @@ def _clear_usbip_source_record(
     device_id: str,
     sources: dict[str, dict[str, Any]],
 ) -> None:
-    from .usbip import usbip_manager
+    from .usbip.manager import usbip_manager
 
     with runtime.global_state.usbip_devices_source_lock:
         runtime.global_state.usbip_devices_source.pop(device_id, None)
@@ -225,7 +225,7 @@ def _local_adb_proxy_sources(device_ids: list[str]) -> dict[str, dict[str, str]]
 
     local_worker_id = get_local_worker_id()
     try:
-        from .adb_proxy_service import adb_proxy_service
+        from .adb.proxy_service import adb_proxy_service
 
         assignments = adb_proxy_service.assignments().values()
     except Exception as exc:

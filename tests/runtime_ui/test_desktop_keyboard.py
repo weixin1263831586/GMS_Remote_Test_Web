@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from features.system.desktop import novnc_asset_override
+from features.system.host.desktop import novnc_asset_override
 from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 

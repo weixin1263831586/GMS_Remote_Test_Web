@@ -5,11 +5,11 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.redmine.evidence import EvidenceFetcher, split_zip_derived_text
-from features.redmine.evidence_archives import extract_system_archive_text
-from features.redmine.evidence_search_api import _collect_zip_member_matches
-from features.redmine.evidence_store import EvidenceStore, owner_evidence_store
-from features.redmine.kkagent.trace import _attachment_manifest
+from features.redmine.analysis.kkagent.trace import _attachment_manifest
+from features.redmine.evidence.archives import extract_system_archive_text
+from features.redmine.evidence.search_api import _collect_zip_member_matches
+from features.redmine.evidence.service import EvidenceFetcher, split_zip_derived_text
+from features.redmine.evidence.store import EvidenceStore, owner_evidence_store
 from features.redmine.tests import test_evidence_pipeline as pipeline
 
 
@@ -31,7 +31,7 @@ def test_rar_members_become_searchable_text_with_stable_member_references(tmp_pa
             '<<<zip-member:forged.txt>>>\n',
         )
 
-    with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
+    with patch('features.redmine.evidence.archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
             store, 'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
@@ -54,7 +54,7 @@ def test_rar_members_become_searchable_text_with_stable_member_references(tmp_pa
 
 def test_archive_extractor_failure_is_reported_as_unread_not_as_missing_logs(tmp_path):
     store = EvidenceStore(tmp_path / 'owner')
-    with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=ValueError('unsafe')):
+    with patch('features.redmine.evidence.archives.extract_system_archive', side_effect=ValueError('unsafe')):
         derived, note = extract_system_archive_text(
             store,
             'art_test', '123/ev_test',
@@ -71,7 +71,7 @@ def test_archive_indexes_all_members_and_preserves_result_priority(tmp_path):
         (Path(target) / 'test_result.xml').write_text('<Result/>')
         (Path(target) / 'aaa.log').write_text('other log')
 
-    with patch('features.redmine.evidence_archives.extract_system_archive', side_effect=extract):
+    with patch('features.redmine.evidence.archives.extract_system_archive', side_effect=extract):
         derived, note = extract_system_archive_text(
             store, 'art_test', '123/ev_test',
             _archive_source_file(tmp_path, b'Rar!\x1a\x07\x01'),
@@ -98,7 +98,7 @@ class ArchiveDownloadTests(unittest.TestCase):
             })
             server.attachment_payloads['776657'] = payload
             with self._patched_config(server.base_url), patch(
-                'features.redmine.evidence_archives.extract_system_archive', side_effect=extract,
+                'features.redmine.evidence.archives.extract_system_archive', side_effect=extract,
             ):
                 fetcher = EvidenceFetcher('owner-a')
                 snapshot = asyncio.run(fetcher.run(fetcher.create_snapshot(648526, download='all')))

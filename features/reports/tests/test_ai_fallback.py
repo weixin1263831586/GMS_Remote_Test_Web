@@ -5,11 +5,11 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from features.reports import analysis_api, api_helpers
-from features.reports.api_helpers import AnalysisMode
-from features.reports.diagnosis_quality import (
+from features.reports.ai_diagnosis import (
     calibrate_ai_result,
     public_provider_error,
 )
+from features.reports.api_helpers import AnalysisMode
 
 
 class ReportAiFallbackTests(unittest.TestCase):

@@ -1,6 +1,6 @@
-"""MIME 报文构建：把已通过管线校验的字段组装成可发送的邮件。
+"""邮件地址与报文：纯函数校验、MIME 报文和信封组装。
 
-只做「组装」，不做「决策」：收件人/主题合法性在 service 管线校验，
+地址校验与报文构建共用头字段处理；发送决策仍在 service 管线，
 SMTP 连接策略在 transport。附件遵循白名单（``allowed_attachment_roots``
 下的普通文件才可发送），单个附件失败降级为 missing/blocked 清单，
 不阻断整体发送（历史行为，测试有覆盖）。
@@ -10,17 +10,62 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from email.encoders import encode_base64
 from email.mime.base import MIMEBase
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from pathlib import Path
-
-from features.email.parsing import safe_header_text
+from typing import Any
 
 
 logger = logging.getLogger(__name__)
+
+
+_SAFE_ADDRESS_RE = re.compile(r'[^\s,;<>"@]+@[^\s,;<>"@]+')
+
+
+def split_emails(email_input: str | list[str] | None) -> list[str]:
+    """将输入（字符串或列表）转换为干净的邮件地址列表。
+
+    支持逗号、分号分隔；递归处理列表内的混合分隔符。来自 rk-email send_email.py。
+    """
+    if not email_input:
+        return []
+
+    if isinstance(email_input, list):
+        # 递归处理列表中的每一项，防止项内含有逗号
+        result: list[str] = []
+        for item in email_input:
+            result.extend(split_emails(item))
+        return result
+
+    raw_list = email_input.replace(';', ',').split(',')
+    return [e.strip() for e in raw_list if e.strip()]
+
+
+def normalize_email_addresses(
+    email_input: str | list[str] | None,
+) -> list[str] | None:
+    """Split and validate envelope/header addresses; ``None`` means invalid."""
+    if email_input is None:
+        return []
+    if not isinstance(email_input, (str, list)):
+        return None
+    if isinstance(email_input, list) and not all(
+        isinstance(item, str) for item in email_input
+    ):
+        return None
+    addresses = split_emails(email_input)
+    if any(not _SAFE_ADDRESS_RE.fullmatch(address) for address in addresses):
+        return None
+    return addresses
+
+
+def safe_header_text(value: Any) -> str:
+    """Collapse CR/LF and other folding whitespace before MIME headers."""
+    return ' '.join(str(value or '').split())
 
 
 def resolve_allowed_attachment(

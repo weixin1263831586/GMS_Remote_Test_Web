@@ -7,7 +7,7 @@ from .api import (
     redmine_service,
     resolve_owner_names,
 )
-from .case_extractor import RedmineCaseExtractor
+from .cases.case_extractor import RedmineCaseExtractor
 from .client import RedmineClient
 from .config import config_manager
 from .failure_identity import failure_identity
@@ -39,20 +39,20 @@ async def get_workload_statistics(*args, **kwargs):
 
 
 async def analyze_issue_for_assistant(*args, **kwargs):
-    from .assistant_analysis import analyze_issue_for_assistant as implementation
+    from .daily_brief.api import analyze_issue_for_assistant as implementation
 
     return await implementation(*args, **kwargs)
 
 
 async def get_analysis_for_assistant(*args, **kwargs):
-    from .assistant_analysis import get_analysis_for_assistant as implementation
+    from .daily_brief.api import get_analysis_for_assistant as implementation
 
     return await implementation(*args, **kwargs)
 
 
 async def get_analysis_events_for_assistant(*args, **kwargs):
     """Public Redmine facade for owner-checked analysis progress events."""
-    from .daily_brief_api import get_issue_analysis_events as implementation
+    from .daily_brief.api import get_issue_analysis_events as implementation
 
     return await implementation(*args, **kwargs)
 

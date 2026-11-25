@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from features.redmine.api import _enrich_issue_for_display
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
+from features.redmine.knowledge.repository import RedmineKnowledgeDB
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.service import RedmineService
 

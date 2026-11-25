@@ -13,9 +13,9 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.reports import TestReportDB as ReportRepository
 from features.reports import files_api
-from worker_agent.config import WorkerConfig
-from worker_agent.suite_actions import execute_suite_action
-from worker_agent.tests.test_report_summaries import make_result
+from worker.config import WorkerConfig
+from worker.suite_actions import execute_suite_action
+from worker.tests.test_report_summaries import make_result
 
 
 @pytest.fixture

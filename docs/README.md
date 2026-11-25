@@ -1,13 +1,12 @@
 # GMS Remote Test 文档
 
-这里维护当前实现的使用与部署说明。根 [README](../README.md)提供产品概览；
-架构取舍及被替代的决策保留在 ADR，历史测试数字不作为当前能力承诺。
+这里维护当前使用、部署与架构说明。产品概览见根 [README](../README.md)。
 
 ## 使用与运维
 
 | 主题 | 入口 | 范围 |
 | --- | --- | --- |
-| Controller 部署 | [快速安装](deployment/quick-install.md) | [生产服务](deployment/production.md)、[配置与迁移](deployment/configuration.md)、[Worker](deployment/worker.md)、[排障](deployment/troubleshooting.md) |
+| Controller 部署 | [快速安装](deployment/quick-install.md) | [生产服务](deployment/production.md)、[配置](deployment/configuration.md)、[Worker](deployment/worker.md)、[排障](deployment/troubleshooting.md) |
 | GMS ATS | [运行管理](automation.md) | 创建、测试计划、团队可读权限、追踪、重跑、设备预约释放 |
 | GMS更新雷达 | [监听与通知](gms-update-radar.md) | 每日全量扫描、六项任务选择、差异记录和邮件汇总 |
 | AOA 工作台 | [用户指南](aoa/user-guide.md) | 命令编辑、回放、调试、类别认证和语义模板 |
@@ -36,4 +35,4 @@
 - Agent 包的手工维护源位于 `agent/gms-remote-test/`；插件副本通过 sync 工具生成。
   安装包使用说明与开发源码流程分别维护，生成路径见 [Agent 概览](agent/overview.md)。
 - 新 ADR 加入索引；决策被替代时保留原决策和后继指针，操作指南只介绍当前行为。
-- 文档不记录本机库存、临时截图或无提交/证据锚点的“本次测试数”，也不把模拟回归当真机验收。
+- 现行指南只说明当前行为、操作、必要约束与验收方法；不记录临时截图、评审过程、历史测试数字或旧方案对比。架构决策与必要来源记录单独维护。

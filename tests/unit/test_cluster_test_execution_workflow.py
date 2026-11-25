@@ -1,8 +1,8 @@
-"""workflows.start_cluster_test execution-unification tests.
+"""Cluster start_cluster_test execution-unification tests.
 
 The workflow must derive argv from the shared ExecutionSpec builder instead
 of assembling its own command string; a second assembler would drift from
-features/cluster/execution_spec.py and let the automation path bypass spec
+features/cluster/jobs/execution_spec.py and let the automation path bypass spec
 validation.
 """
 
@@ -16,7 +16,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.cluster import ClusterRepository
-from workflows.cluster_test_execution import start_cluster_test
+from features.cluster.jobs.cluster_test_execution import start_cluster_test
 
 
 def _repository(tmp: Path, tools_path: str = "/srv/GMS-Suite/android-cts/tools") -> ClusterRepository:
@@ -70,7 +70,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
         }.items():
             with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
                 repository = _repository(Path(directory))
-                with patch("workflows.cluster_test_execution.get_cluster_service") as get_service:
+                with patch("features.cluster.jobs.cluster_test_execution.get_cluster_service") as get_service:
                     get_service.return_value = SimpleNamespace(repository=repository)
                     first = start_cluster_test(_request(automation_run_id="op-legacy"), "alice")
                     self.assertEqual(first.status_code, 200, first.body)
@@ -88,7 +88,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
     def test_busy_submission_preserves_error_code_and_retry_hint(self):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
-            with patch("workflows.cluster_test_execution.get_cluster_service") as get_service:
+            with patch("features.cluster.jobs.cluster_test_execution.get_cluster_service") as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 with repository.job_request_guard("alice", "op-busy"):
                     result = start_cluster_test(_request(automation_run_id="op-busy"), "alice")
@@ -102,7 +102,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with (
-                patch("workflows.cluster_test_execution.get_cluster_service")
+                patch("features.cluster.jobs.cluster_test_execution.get_cluster_service")
                 as get_service,
             ):
                 get_service.return_value = SimpleNamespace(
@@ -138,7 +138,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(
                     repository=repository
@@ -168,7 +168,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
             _tools, tools_path = self._suite_with_testcases(directory)
             repository = _repository(Path(directory), tools_path=tools_path)
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(
                     repository=repository
@@ -207,7 +207,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
             _tools, tools_path = self._suite_with_testcases(directory)
             repository = _repository(Path(directory), tools_path=tools_path)
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(
                     repository=repository
@@ -242,7 +242,7 @@ class StartClusterTestArgvUnificationTests(unittest.TestCase):
             _tools, tools_path = self._suite_with_testcases(directory)
             repository = _repository(Path(directory), tools_path=tools_path)
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(
                     repository=repository
@@ -288,7 +288,7 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 first = start_cluster_test(
@@ -322,7 +322,7 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 first = start_cluster_test(
@@ -350,7 +350,7 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 barrier = threading.Barrier(4, timeout=30)
@@ -381,7 +381,7 @@ class StartClusterTestOperationIdempotencyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 first = start_cluster_test(
@@ -423,7 +423,7 @@ class StartClusterTestTransportPolicyTests(unittest.TestCase):
                 }],
             })
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 result = start_cluster_test(
@@ -444,7 +444,7 @@ class StartClusterTestDispatchCompensationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 def failing_create_command(data, **kwargs):
@@ -483,7 +483,7 @@ class StartClusterTestDispatchRecoveryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             repository = _repository(Path(directory))
             with patch(
-                "workflows.cluster_test_execution.get_cluster_service"
+                "features.cluster.jobs.cluster_test_execution.get_cluster_service"
             ) as get_service:
                 get_service.return_value = SimpleNamespace(repository=repository)
                 first = start_cluster_test(

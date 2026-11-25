@@ -12,6 +12,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.testclient import TestClient
 
+from features.apk import api as apk_api
+from features.apk import runtime as apk_runtime
 from features.auth import CurrentUser
 from features.firmware import (
     api,
@@ -93,6 +95,9 @@ class FirmwareApiTests(unittest.TestCase):
             release_firmware_devices=fake_release_firmware_devices,
             project_root=".",
             firmware_share_store=None,
+        )
+        apk_runtime.configure_runtime(
+            global_state=runtime.global_state,
             apk_max_tasks=20,
             apk_max_file_size=500 * 1024 * 1024,
             apk_max_source_file_size=2 * 1024 * 1024,
@@ -108,6 +113,7 @@ class FirmwareApiTests(unittest.TestCase):
             return await call_next(request)
 
         app.include_router(api.router)
+        app.include_router(apk_api.router)
         self.client = TestClient(app)
 
     def tearDown(self):

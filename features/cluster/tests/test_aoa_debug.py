@@ -4,8 +4,8 @@ from dataclasses import replace
 from unittest.mock import patch
 
 from features.cluster import api as cluster_api
-from features.cluster.aoa_debug import debug_command_source
-from features.cluster.device_action_operations import execute_local_operation
+from features.cluster.device_operations.aoa_playback import debug_command_source
+from features.cluster.device_operations.execution import execute_local_operation
 from foundation.error_model import ApiError
 
 from .api_hardening_fixture import ClusterApiHardeningFixture
@@ -19,7 +19,7 @@ class AoaDebugTests(ClusterApiHardeningFixture, unittest.TestCase):
             "aoa_commands": ["click 180 525", "back"], "playback_control_id": "dbg-test",
             "aoa_debug_session_id": "dbg-test", "aoa_debug_request_id": "first", "aoa_debug_command": "click 180 525"}
         # Exercise admission/receipt persistence without sending physical inputs.
-        self.thread_patch = patch("features.cluster.device_actions_api.threading.Thread")
+        self.thread_patch = patch("features.cluster.device_operations.api.threading.Thread")
         self.thread = self.thread_patch.start()
         self.addCleanup(self.thread_patch.stop)
 

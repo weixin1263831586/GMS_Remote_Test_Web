@@ -8,9 +8,9 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.redmine import knowledge_api
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_repository import DailyBriefRepository
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.repository import DailyBriefRepository
+from features.redmine.knowledge import api as knowledge_api
 
 
 # 诊断结果：带 gate（diagnostic 模式）+ 根因结论。

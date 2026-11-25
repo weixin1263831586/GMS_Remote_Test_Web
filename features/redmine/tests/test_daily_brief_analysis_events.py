@@ -18,8 +18,8 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import features.redmine.daily_brief_repository as brief_repo
-from features.redmine.daily_brief_analysis_events import (
+import features.redmine.daily_brief.repository as brief_repo
+from features.redmine.daily_brief.analysis_events import (
     EVENT_TYPES,
     AnalysisProgressRecorder,
     DailyBriefAnalysisEventStore,
@@ -28,7 +28,7 @@ from features.redmine.daily_brief_analysis_events import (
     progress_to_payload,
     scrub_secrets,
 )
-from features.redmine.daily_brief_repository import DailyBriefRepository
+from features.redmine.daily_brief.repository import DailyBriefRepository
 
 
 class AnalysisEventStoreTests(unittest.TestCase):
@@ -219,7 +219,7 @@ class RepositoryEventIntegrationTests(unittest.TestCase):
         self.directory = TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
         patcher = patch(
-            "features.redmine.daily_brief_repository.owner_redmine_root",
+            "features.redmine.daily_brief.repository.owner_redmine_root",
             lambda owner: Path(self.directory.name) / "owners" / str(owner),
         )
         patcher.start()
@@ -229,7 +229,7 @@ class RepositoryEventIntegrationTests(unittest.TestCase):
         self.repository = DailyBriefRepository(Path(self.directory.name) / "owners" / "alice")
 
     def test_event_store_is_bound_per_owner_db(self):
-        from features.redmine.daily_brief_analysis_events import event_store_for_repository
+        from features.redmine.daily_brief.analysis_events import event_store_for_repository
 
         store = event_store_for_repository(self.repository)
         self.assertEqual(store.db_path, self.repository.db_path)
@@ -241,7 +241,7 @@ class RepositoryEventIntegrationTests(unittest.TestCase):
         )
 
     def test_start_analysis_progress_is_never_fatal(self):
-        from features.redmine.daily_brief_analysis_events import start_analysis_progress
+        from features.redmine.daily_brief.analysis_events import start_analysis_progress
 
         service_like = SimpleNamespace(events=None, db_path=self.repository.db_path)
         recorder = start_analysis_progress(service_like, self.repository, 1)

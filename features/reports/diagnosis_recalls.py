@@ -21,12 +21,11 @@ from foundation.config import settings
 from foundation.redaction import redact_sensitive_text
 
 from .api_helpers import ReportDiagnosisRequest, _get_knowledge_base
-from .knowledge_ranking import android_version_from_request, rank_kb_hits
 
 
 logger = logging.getLogger(__name__)
 
-_MAINLINE_DB_PATH = settings.data_root / 'mainline_known_issues.sqlite3'
+_MAINLINE_DB_PATH = settings.data_root / 'gms_update.sqlite3'
 
 BACKGROUND_SOURCE = "android_internals"
 BACKGROUND_LIMIT = 6
@@ -40,15 +39,16 @@ def query_mainline_exemptions(request: ReportDiagnosisRequest) -> list[dict]:
     """
     if not _MAINLINE_DB_PATH.exists():
         return []
-    from features.system import (
-        init_mainline_issues_db,
+    from features.gms import (
         query_mainline_exemption_match,
     )
 
     conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
-        init_mainline_issues_db(conn)
+        from features.gms import init_gms_update_db
+        from foundation.database import ensure_schema
+        ensure_schema(conn, _MAINLINE_DB_PATH, init_gms_update_db)
         # 匹配器负责校验 test_type。
         # (VTS/unknown → ''), so no separate mapping layer is needed here.
         return query_mainline_exemption_match(
@@ -77,17 +77,16 @@ def query_mainline_security_patches(request: ReportDiagnosisRequest) -> list[dic
     )
     if not cve_ids:
         return []
-    from features.system import (
-        init_mainline_issues_db,
-    )
-    from features.system import (
+    from features.gms import (
         query_mainline_security_patches as query_patches,
     )
 
     conn = sqlite3.connect(str(_MAINLINE_DB_PATH))
     conn.row_factory = sqlite3.Row
     try:
-        init_mainline_issues_db(conn)
+        from features.gms import init_gms_update_db
+        from foundation.database import ensure_schema
+        ensure_schema(conn, _MAINLINE_DB_PATH, init_gms_update_db)
         return query_patches(conn, cve_ids, limit=20)
     finally:
         conn.close()
@@ -122,10 +121,7 @@ async def search_knowledge_base(
         kb_query = " ".join(keywords[:5]) or request.test_name or request.error_message[:80]
         if not kb or not kb_query.strip():
             return []
-        # Relevance dimensions extracted from the failure under diagnosis,
-        # used to filter out broad "same-module, wrong-platform/wrong-case"
-        # FTS noise (e.g. an RK3399 Android15 ticket surfacing for an
-        # RK3576 Android16 SearchView failure).
+        # Filter recall by test, module and Android version.
         probe = {
             "test_name": request.test_name or "",
             "module": request.module or "",
@@ -201,7 +197,7 @@ async def search_system_background(
     隔离；这里再兜底一层，保证该通道任何异常都不影响其余召回与 200 响应。
 
     ``android_api_level`` 由调用方从报告上下文统一转换
-    （knowledge_ranking.android_api_level_from_request）并透传，使
+    （android_api_level_from_request）并透传，使
     version-aware rerank 在报告自动诊断这条主入口同样生效。
 
     Wiki→codesearch 串联溯源（ADR 0014 阶段 ②→③→④）在召回后同步执行：
@@ -248,7 +244,6 @@ async def _attach_anchor_verifications(
     """
     try:
         from .anchor_verification import verify_background_anchors
-        from .knowledge_ranking import android_version_from_api_level
 
         # 结构化命中 id：就地写入原条目（浅拷贝会让验证结论写到副本而非
         # 调用方条目）。召回结果就地编号即可保证一一对应（验证在同一线程
@@ -276,3 +271,139 @@ async def _attach_anchor_verifications(
         if items:
             hit["anchor_verifications"] = items
     return results
+
+
+#: Android 大版本 → API level（A13/A14/A15/A16/A17 → 33/34/35/36/37）。
+#: 统一 helper：报告诊断、外部知识 version-aware rerank 共用，不要各入口自行猜。
+_ANDROID_API_BY_MAJOR = {
+    "13": 33,
+    "14": 34,
+    "15": 35,
+    "16": 36,
+    "17": 37,
+}
+_ANDROID_MAJOR_BY_API = {api: major for major, api in _ANDROID_API_BY_MAJOR.items()}
+
+# "android-15" / "Android 16" 形态优先，其次 "16.0_r1" 的前导数字。
+_ANDROID_PREFIX_RE = re.compile(r"android[-_.\s]?(\d{1,2})", re.IGNORECASE)
+_LEADING_MAJOR_RE = re.compile(r"^(\d{1,2})")
+
+
+def _android_major(raw: str) -> str:
+    text = (raw or "").strip()
+    match = _ANDROID_PREFIX_RE.search(text) or _LEADING_MAJOR_RE.match(text)
+    return match.group(1) if match else ""
+
+
+def android_version_from_request(request: ReportDiagnosisRequest) -> str:
+    """Best-effort Android major version from a suite or report context."""
+    for field in ("suite_version", "android_version"):
+        major = _android_major(getattr(request, field, "") or "")
+        if major:
+            return major
+    return ""
+
+
+def android_api_level_from_request(request: ReportDiagnosisRequest) -> int | None:
+    """已知 Android 大版本时返回对应 API level，未知返回 None（跳过版本加权）。"""
+    major = android_version_from_request(request)
+    return _ANDROID_API_BY_MAJOR.get(major)
+
+
+def android_version_from_api_level(api_level: int | None) -> str:
+    """已知 API level 转回 Android 大版本，未知值返回空串。"""
+    try:
+        return _ANDROID_MAJOR_BY_API.get(int(api_level), "")
+    except (TypeError, ValueError):
+        return ""
+
+
+def test_method_and_class(test_name: str) -> tuple[str, str]:
+    """Return method and simple class from ``a.b.C#method`` or ``a.b.C``."""
+    test_name = (test_name or "").strip()
+    method = ""
+    class_name = test_name
+    if "#" in test_name:
+        class_name, method = test_name.split("#", 1)
+    return method.strip(), class_name.rsplit(".", 1)[-1].strip()
+
+
+def rank_kb_hits(hits: list[dict], probe: dict) -> list[dict]:
+    """Filter and re-rank recalled cases against the diagnosed failure."""
+    method, simple_class = test_method_and_class(probe.get("test_name") or "")
+    module = (probe.get("module") or "").strip()
+    probe_android = (probe.get("android_version") or "").strip()
+
+    anchor_platform = ""
+    if method:
+        for hit in hits:
+            if method.lower() in (hit.get("subject") or "").lower():
+                anchor_platform = (hit.get("chip_platform") or "").upper()
+                if anchor_platform:
+                    break
+
+    def score(hit: dict) -> tuple[float, bool]:
+        subject = (hit.get("subject") or "").lower()
+        root = (hit.get("root_cause") or "").lower()
+        searchable = f"{subject} {root}"
+        value = 0.0
+        case_hit = bool(method and method.lower() in searchable)
+        class_hit = bool(simple_class and simple_class.lower() in searchable)
+        if case_hit:
+            value += 100
+        if class_hit:
+            value += 40
+        if module and module.lower() in searchable:
+            value += 15
+        if probe_android:
+            theirs = (hit.get("android_version") or "").strip()
+            if theirs and probe_android in theirs:
+                value += 20
+        if (hit.get("status_name") or "").lower() in (
+            "closed", "confirmed", "已关闭", "已解决", "resolved",
+        ):
+            value += 10
+        if hit.get("source") == "case_facts":
+            value += 15
+        solution = hit.get("solution_summary") or hit.get("root_cause") or ""
+        if len(solution.strip()) >= 40:
+            value += 8
+        platform = (hit.get("chip_platform") or "").upper()
+        keep = not (
+            anchor_platform and platform and platform != anchor_platform
+            and not (case_hit or class_hit)
+        )
+        return value, keep
+
+    scored = []
+    for hit in hits:
+        value, keep = score(hit)
+        if not keep:
+            continue
+        output = dict(hit)
+        output["score"] = round(value, 1)
+        output["similarity_level"] = (
+            "exact" if value >= 100 else "high" if value >= 50
+            else "medium" if value >= 30 else "low"
+        )
+        scored.append((value, output))
+
+    if not scored:
+        return [
+            {**hit, "score": 0.0, "similarity_level": "low"}
+            for hit in hits[:5]
+        ]
+
+    scored.sort(key=lambda item: item[0], reverse=True)
+    ordered = [hit for _, hit in scored]
+    if any(hit["similarity_level"] == "exact" for hit in ordered):
+        precise = [
+            hit for hit in ordered
+            if hit["similarity_level"] in ("exact", "high")
+        ]
+        supporting = [
+            hit for hit in ordered
+            if hit["similarity_level"] not in ("exact", "high")
+        ]
+        return (precise + supporting)[:5]
+    return ordered[:5]

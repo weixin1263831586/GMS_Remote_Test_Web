@@ -39,7 +39,7 @@ PROBES = [
     ("knowledge", "/api/knowledgebase/stats", False),
     ("sdk", "/api/sdk/sources", False),
     ("ops", "/api/ops/status", False),
-    ("gms-monitor", "/api/gms-update-monitor/summary", False),
+    ("gms-monitor", "/api/gms-update-center/summary", False),
     ("gms-radar", "/api/gms-update-radar/status", False),
     ("users", "/api/users/current", False),
     ("users", "/api/device-groups", False),

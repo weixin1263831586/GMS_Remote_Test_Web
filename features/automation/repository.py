@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from features.automation.artifact_progress import artifact_download_progress
+from features.automation.artifacts import artifact_download_progress
 from features.automation.models import (
     TERMINAL_STATUSES,
     utc_now_iso,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -326,6 +327,21 @@ class SecurityBoundaryTests(SecurityBoundaryFixtureTests):
         self.assertIn("samesite=lax", cookie)
         self.assertIn("secure", cookie)
         self.assertNotIn("max-age=", cookie)
+
+    def test_production_auth_and_secure_cookie_defaults_without_overrides(self):
+        """Production defaults must not depend on the test-only auth override."""
+        self.client.close()
+        with patch.dict("os.environ"):
+            os.environ.pop("GMS_AUTH_REQUIRED", None)
+            os.environ.pop("GMS_SECURE_COOKIES", None)
+            self.client = TestClient(create_app(), base_url="https://testserver")
+            self.assertTrue(self.client.app.state.authentication_required)
+            status = self.client.get("/api/auth/status")
+            self.assertEqual(status.status_code, 200)
+            self.assertTrue(status.json()["auth_required"])
+            response = self._setup_admin()
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("secure", response.headers["set-cookie"].lower())
 
     def test_production_rejects_disabled_authentication_or_secure_cookies(self):
         with (

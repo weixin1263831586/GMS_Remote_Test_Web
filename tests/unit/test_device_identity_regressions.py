@@ -18,7 +18,7 @@ from pathlib import Path
 
 from features.cluster.models import ClusterDeviceAction, WorkerRegistration
 from features.cluster.repository import ClusterRepository
-from worker_agent.command_events import CommandEventUploader
+from worker.command_events import CommandEventUploader
 
 
 def _repository(tmp: str) -> ClusterRepository:

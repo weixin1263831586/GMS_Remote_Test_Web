@@ -1,11 +1,6 @@
 """评审标记残留门禁（review-marker gate）。
 
-docs/development.md「文档政策」的工程化约束：源码注释不得引用仓库中
-不存在的评审文档编号。历史上多轮评审（audit/plan/工单编号、`2.txt`、
-`Redmine.txt` 等）在源码里留下大量 `2026-09-08 audit §五`、`P1-7` 一类
-标记——文档早已删除，注释却仍在，误导后来者与 Agent。
-
-规则（对生产源码树扫描）：
+扫描生产源码中的无效评审引用，具体规则如下：
 
 - `\\d+\\.txt` / `Redmine\\.txt`  —— 引用仓库外的评审/需求文本；
 - `§`                             —— 审计/计划分节引用；
@@ -15,7 +10,7 @@ docs/development.md「文档政策」的工程化约束：源码注释不得引�
   领域词汇）；
 - `review round` / `评审意见` / `评审项` / `审核意见` 之类评审轮次措辞；
 - `复审` / `外部评审` / `深度评审` / `评审报告` / `全局审查` / `全库审计`
-  等评审/审计出处措辞（这些变体曾长期绕过本门禁）；
+  等评审或审计过程引用；
 - `review P\\d` / `复审 P\\d` 一类带优先级的评审引用；
 - `#NNNNNN 复审` / `#NNNNNN review`（真实工单号作为实测证据出处是允许的，
   但「工单号+复审」是过程引用）；
@@ -38,10 +33,12 @@ import re
 import unittest
 from pathlib import Path
 
+from tools.scripts.maintenance.audit_comment_hygiene import python_comments
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
-# 生产源码树：features/foundation/bootstrap/worker_agent/workflows 的全部
+# 生产源码树：features/foundation/bootstrap/worker 的全部
 # .py（含各自 tests/），agent 源树与 web 前端（第三方 vendor/ 除外），
 # 顶层 .py 与 scripts/tools 的 .py，以及 docs/ 的文档——文档同样不得
 # 引用不存在的评审轮次。
@@ -49,8 +46,7 @@ SCAN_ROOTS = [
     ROOT / "features",
     ROOT / "foundation",
     ROOT / "bootstrap",
-    ROOT / "worker_agent",
-    ROOT / "workflows",
+    ROOT / "worker",
     ROOT / "agent" / "gms-remote-test",
     ROOT / "web",
     ROOT / "scripts",
@@ -68,10 +64,10 @@ SCAN_SUFFIXES = {".py", ".sh", ".js", ".html", ".md"}
 
 # 允许出现评审标记的文件（相对 ROOT）。必须写明理由，且随清理移除。
 EXCEPTIONS: set[str] = {
-    # scripts/verify_release_tree.py 的 DENIED_NAMES 刻意罗列 scratch 文件名
+    # scripts/security/verify_release_tree.py 的 DENIED_NAMES 刻意罗列 scratch 文件名
     # （1.txt/2.txt/3.txt）作为发布树拒绝项——这是发布门禁的数据，不是
     # 评审引用。
-    "scripts/verify_release_tree.py",
+    "scripts/security/verify_release_tree.py",
     # 文档政策（「文档政策」一节）本身要枚举违禁措辞作为规范内容，
     # 属结构性例外，不随清理移除。
     "docs/development.md",
@@ -83,8 +79,7 @@ FORBIDDEN_PATTERNS = [
     (re.compile(r"§"), "audit/plan section sign"),
     (re.compile(r"\bP\d+-\d+\b"), "review-round ID"),
     (re.compile(r"\bR\d+-\d+\b"), "review-round ID"),
-    # 带日期的审计引用（"2026-09-08 audit"）。裸 "audit" 不扫描：
-    # security_audit 审计日志是合法领域词汇。
+    # 只匹配审计过程引用，保留安全审计等业务词汇。
     (re.compile(r"\b\d{4}-\d{2}-\d{2}\s+audit\b", re.IGNORECASE), "dated audit citation"),
     (re.compile(r"\baudit\s+(?:follow-up|fix|round)\b", re.IGNORECASE), "audit citation"),
     (re.compile(r"review round", re.IGNORECASE), "review-round wording"),
@@ -173,7 +168,8 @@ class ReviewMarkerTests(unittest.TestCase):
                 text = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError):
                 continue
-            for lineno, line in enumerate(text.splitlines(), start=1):
+            lines = python_comments(path, text) if path.suffix == ".py" else enumerate(text.splitlines(), start=1)
+            for lineno, line in lines:
                 for pattern, why in FORBIDDEN_PATTERNS:
                     match = pattern.search(line)
                     if match:

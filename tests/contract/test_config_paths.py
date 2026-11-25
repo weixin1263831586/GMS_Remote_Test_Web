@@ -12,16 +12,16 @@ from foundation.config_paths import (
 
 
 class ConfigPathContractTests(unittest.TestCase):
-    def test_uses_flat_runtime_config_path(self):
+    def test_ignores_flat_runtime_config_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             canonical = root / "configs/config_runtime.json"
             canonical.parent.mkdir(parents=True)
             canonical.write_text("{}", encoding="utf-8")
 
-            self.assertEqual(runtime_config_path(root), canonical)
+            self.assertEqual(runtime_config_path(root), root / "data/settings/preferences.json")
 
-    def test_uses_flat_runtime_environment_path(self):
+    def test_ignores_flat_runtime_environment_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             configured = root / "configs/runtime.json"
@@ -30,29 +30,29 @@ class ConfigPathContractTests(unittest.TestCase):
 
             self.assertEqual(
                 runtime_environment_path(root),
-                root / "configs/runtime.json",
+                root / "configs/local/environment.json",
             )
 
-    def test_uses_primary_automation_profiles_file(self):
+    def test_ignores_flat_automation_profiles_file(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             configured = root / "configs/automation_profiles.json"
             configured.parent.mkdir(parents=True)
             configured.write_text("{}", encoding="utf-8")
 
-            self.assertEqual(automation_profiles_path(root), configured)
+            self.assertEqual(automation_profiles_path(root), root / "configs/local/automation_profiles.json")
 
-    def test_owner_config_path_defaults_to_secrets_and_falls_back_to_data(self):
+    def test_owner_config_path_only_uses_secrets(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             canonical = root / "configs/secrets/redmine/by_user/alice/config_runtime.json"
             legacy = root / "data/redmine/by_user/alice/config_runtime.json"
             # 都缺失 → canonical（写入位置）。
             self.assertEqual(owner_config_path(root, "redmine", "alice"), canonical)
-            # 仅 legacy 存在 → 迁移期回退读 legacy。
+            # 旧位置存在也不改变规范路径。
             legacy.parent.mkdir(parents=True)
             legacy.write_text("{}", encoding="utf-8")
-            self.assertEqual(owner_config_path(root, "redmine", "alice"), legacy)
+            self.assertEqual(owner_config_path(root, "redmine", "alice"), canonical)
             # canonical 出现后优先 canonical。
             canonical.parent.mkdir(parents=True)
             canonical.write_text("{}", encoding="utf-8")

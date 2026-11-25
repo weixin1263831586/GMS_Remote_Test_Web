@@ -24,7 +24,7 @@ __pycache__/
 .pytest_cache/
 
 # 第三方知识库本地 clone：按需用 tools/scripts/setup/update_android_internals_wiki.sh
-# 拉取/更新，不纳入主仓库版本控制（40.txt 重构方案）。
+# 拉取/更新，不纳入主仓库版本控制。
 /tools/android-internals-wiki/
 
 # usbip/adbproxy-rs/jadx：目录只保留可执行工件与目录级 *.provenance.json，

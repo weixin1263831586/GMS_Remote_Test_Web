@@ -59,7 +59,7 @@ async def test_cached_management_inventory_never_becomes_available(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_device_list_returns_router_denial_instead_of_internal_error(monkeypatch):
-    from features.assistant.execution_result import ToolResult
+    from features.assistant.response import ToolResult
 
     executor = ActionExecutor()
     denied = ToolResult(

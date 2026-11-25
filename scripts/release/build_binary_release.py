@@ -31,13 +31,20 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from foundation.native_tools import compiled_worker_members, write_compiled_worker_manifest  # noqa: E402
+from scripts.release.compiled_entry import REQUIRED_SOFTWARE_ASSETS  # noqa: E402
+
+
 RESOURCE_FILES = (
-    "scripts/run_GMS_Test_Auto.sh",
-    "scripts/run_GSI_Burn.sh",
-    "scripts/run_Device_Lock.sh",
-    "scripts/configure_local_worker_software.sh",
-    "scripts/install_cluster_worker.sh",
-    "scripts/run_production_backup.sh",
+    "scripts/execution/run_GMS_Test_Auto.sh",
+    "scripts/execution/run_GSI_Burn.sh",
+    "scripts/execution/run_Device_Lock.sh",
+    "scripts/execution/fastboot_common.sh",
+    "scripts/deployment/worker/install_cluster_worker.sh",
+    "scripts/deployment/worker/deploy_worker.sh",
+    "scripts/deployment/worker/install_adb_proxy_source_worker.sh",
+    *(path for path in REQUIRED_SOFTWARE_ASSETS if path.startswith("scripts/")),
+    "scripts/backup/run_production_backup.sh",
 )
 RUNTIME_ASSETS = (
     "tools/tesseract",
@@ -58,9 +65,8 @@ REQUIRED_UI_PAGES = (
     "features/devices/ui/page.html",
     "features/gerrit/ui/page.html",
     "features/redmine/ui/page.html",
-    "features/system/mainline_issues/ui/page.html",
-    "features/system/update_monitor/ui/page.html",
-    "features/system/update_radar/ui/page.html",
+    "features/gms/ui/page.html",
+    "features/gms/radar/ui/page.html",
 )
 REQUIRED_UI_SCRIPTS = tuple(str(Path(page).with_name("page.js")) for page in REQUIRED_UI_PAGES)
 FORBIDDEN_SOURCE_ENDINGS = (".py", ".pyc", ".pyo", ".pyi", ".map")
@@ -110,7 +116,7 @@ def _copy_allowed(
 def _stage_assets(runtime: Path) -> None:
     for rel in (
         "web/static", "web/shell", "web/templates/architecture.html",
-        "configs/examples", *RESOURCE_FILES, *RUNTIME_ASSETS,
+        "configs/examples", *RESOURCE_FILES, *REQUIRED_SOFTWARE_ASSETS, *RUNTIME_ASSETS,
     ):
         _copy_allowed(ROOT / rel, runtime / rel)
     # These six exact source files are read by /templates/architecture.html.
@@ -130,7 +136,7 @@ def _stage_assets(runtime: Path) -> None:
         "web/static", "web/shell/shell.html", "configs/examples/config.example.json",
         "web/templates/architecture.html",
         *(f"docs/architecture/{name}" for name in ARCHITECTURE_SOURCES),
-        *REQUIRED_UI_PAGES, *REQUIRED_UI_SCRIPTS, *RESOURCE_FILES,
+        *REQUIRED_UI_PAGES, *REQUIRED_UI_SCRIPTS, *RESOURCE_FILES, *REQUIRED_SOFTWARE_ASSETS,
     )
     missing = [name for name in required if not (runtime / name).is_file()
                and not (runtime / name).is_dir()]
@@ -143,7 +149,7 @@ def _stage_assets(runtime: Path) -> None:
 def _production_modules() -> list[str]:
     """Explicit module inventory without accidentally compiling tests or fixtures."""
     modules = []
-    for top in ("bootstrap", "foundation", "features", "worker_agent", "workflows", "scripts"):
+    for top in ("bootstrap", "foundation", "features", "worker", "scripts"):
         for source in (ROOT / top).rglob("*.py"):
             relative = source.relative_to(ROOT)
             if "tests" in relative.parts or "test" in relative.parts or "release" in relative.parts:
@@ -182,7 +188,7 @@ def _write_agent_module(directory: Path) -> Path:
     """Embed the canonical public Agent package without shipping backend sources."""
     # The archive builder itself is stdlib-only. Load that implementation
     # without executing features.system's runtime initialization on the build host.
-    build_package_bytes = runpy.run_path(str(ROOT / "features/system/agent_package_builder.py"))["build_package_bytes"]
+    build_package_bytes = runpy.run_path(str(ROOT / "features/system/agent_package/builder.py"))["build_package_bytes"]
     declaration = (ROOT / "agent/gms-remote-test/package.yaml").read_text(encoding="utf-8")
     match = re.search(r"^version: (\d+\.\d+\.\d+)\s*$", declaration, re.M)
     if match is None:
@@ -229,6 +235,16 @@ def _smoke_compiled_runtime(runtime: Path, temp_root: Path) -> None:
     _run([binary, "init", "--host", "127.0.0.1", "--port", "5001",
           "--no-admin-prompt"], cwd=smoke_root, env=env)
     _run([binary, "smoke"], cwd=smoke_root, env=env)
+    # Exercise the native-only payload independently of Controller assets.
+    remote_root = temp_root / "remote-worker-smoke"
+    for name, source in compiled_worker_members(runtime):
+        target = remote_root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+    worker_env = {**env, "GMS_PROJECT_ROOT": str(remote_root),
+                  "GMS_WORKER_CONFIG": str(smoke_root / "data/local-worker/config.json")}
+    _run([str(remote_root / "gms-runtime"), "remote-worker", "--check"],
+         cwd=remote_root, env=worker_env)
 
 
 def _write_manifest(stage: Path, version: str) -> None:
@@ -269,6 +285,7 @@ def build(args: argparse.Namespace) -> Path:
         stage = temp_root / "gms-web-app"
         runtime = stage / "runtime"
         shutil.copytree(compiled, runtime, symlinks=False)
+        write_compiled_worker_manifest(runtime)
         _stage_assets(runtime)
         shutil.copy2(ROOT / "scripts/release/install_compiled.sh", stage / "install.sh")
         (stage / "install.sh").chmod(0o755)

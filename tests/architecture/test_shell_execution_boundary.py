@@ -24,7 +24,7 @@ ALLOWED_SHELL_TRUE_FILES = {
     "foundation/processes.py",
     "features/build/executor.py",
 }
-SCAN_DIRS = ("features", "foundation", "worker_agent", "workflows", "bootstrap")
+SCAN_DIRS = ("features", "foundation", "worker", "bootstrap")
 # 受控逃生口：确因模板/生成物而无法用 ast 解析的源码文件才登记在此，
 # 默认必须为空——否则损坏文件会静默绕过 shell 边界检查。
 UNPARSEABLE_ALLOWLIST: set[str] = set()

@@ -1,75 +1,66 @@
-"""Reports router - report management, analysis, and knowledge base APIs."""
+"""Report diagnosis and source-analysis shared domain helpers."""
 
 import asyncio
-import json
 import logging
 import os
 import re
-import shutil
 import tarfile
-import tempfile
-from typing import Any
+from collections import OrderedDict
+from enum import Enum
+from typing import Any, ClassVar
 from urllib.parse import urlparse
 
-import aiohttp
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import Request
+from pydantic import BaseModel, Field
 
-from features.redmine import get_redmine_config_for_request
-from features.reports.analyzer import ReportAnalyzer
-from features.reports.repository import test_report_db
-from foundation.archives import UPLOAD_ARCHIVE_EXTENSIONS
-from foundation.config import ConfigManager
-from foundation.responses import error_response, success_response
-from foundation.uploads import (
-    extract_report_name_from_upload,
-    safe_upload_target_path,
-)
-from workflows.report_to_redmine import (
+from features.redmine import (
     COMPILED_REDMINE_ATTACHMENT_PATTERN,
     COMPILED_REDMINE_ISSUE_PATTERN,
-    COMPILED_REPORT_NAME_PATTERN,
-    REDMINE_ISSUE_PATTERN,
-    RedmineClient,
-    create_basic_auth_header,
-    extract_filename_from_content_disposition,
-    extract_redmine_issue_id_from_text,
-    redmine_config_manager,
-    strip_redmine_report_prefix,
+    get_redmine_config_for_request,
 )
+from features.redmine import config_manager as redmine_config_manager
+from features.reports.archive import ReportAnalyzer
+from foundation.archives import UPLOAD_ARCHIVE_EXTENSIONS
+from foundation.config import ConfigManager
+from foundation.uploads import safe_upload_target_path
 
 from .ai_diagnosis import analyze_failure_with_ai
-from .api_models import AnalysisMode, ReportDiagnosisRequest
-from .api_support import (
-    REDMINE_ISSUE_ID_CACHE,
-    REDMINE_ISSUE_ID_CACHE_MAX_SIZE,
-    StackTraceUtils,
-)
 from .dependencies import dependencies
-from .service import test_report_manager
 
 
 logger = logging.getLogger(__name__)
 
+class AnalysisMode(str, Enum):
+    """Report analysis request modes."""
+
+    UPLOAD = "upload"
+    SAVED = "saved"
+    AI = "ai"
+
+
+class ReportDiagnosisRequest(BaseModel):
+    test_name: str
+    error_message: str = ""
+    stack_trace: str = ""
+    report_name: str = ""
+    failure_index: int = 0
+    source_path: str = ""
+    source_code: str = ""
+    test_type: str = ""
+    suite_version: str = ""
+    android_version: str = ""
+    module: str = ""
+    class_names: list[str] = Field(default_factory=list)
+
+
 __all__ = [
     "COMPILED_REDMINE_ATTACHMENT_PATTERN",
     "COMPILED_REDMINE_ISSUE_PATTERN",
-    "COMPILED_REPORT_NAME_PATTERN",
     "REDMINE_ISSUE_ID_CACHE",
     "REDMINE_ISSUE_ID_CACHE_MAX_SIZE",
-    "REDMINE_ISSUE_PATTERN",
-    "APIRouter",
     "AnalysisMode",
-    "File",
-    "Form",
-    "JSONResponse",
-    "Query",
-    "RedmineClient",
-    "ReportAnalyzer",
     "ReportDiagnosisRequest",
-    "Request",
     "StackTraceUtils",
-    "UploadFile",
     "_analyze_report_file",
     "_build_patch_draft",
     "_ensure_uploaded_report_extension",
@@ -83,30 +74,76 @@ __all__ = [
     "_redmine_public_url_hint",
     "_rename_downloaded_report_if_needed",
     "_save_redmine_credentials",
-    "aiohttp",
     "analyze_with_ai",
-    "asyncio",
     "config_manager",
-    "create_basic_auth_header",
-    "dependencies",
-    "error_response",
-    "extract_filename_from_content_disposition",
-    "extract_redmine_issue_id_from_text",
-    "extract_report_name_from_upload",
-    "json",
     "logger",
-    "os",
-    "re",
     "resolve_redmine_knowledge_service",
-    "safe_upload_target_path",
-    "shutil",
-    "strip_redmine_report_prefix",
-    "success_response",
-    "tempfile",
-    "test_report_db",
-    "test_report_manager",
-    "urlparse",
 ]
+
+
+REDMINE_ISSUE_ID_CACHE: OrderedDict[str, str] = OrderedDict()
+REDMINE_ISSUE_ID_CACHE_MAX_SIZE = 1000
+
+
+class StackTraceUtils:
+    EXCLUDED_CLASSES: ClassVar[set[str]] = {
+        "Assert", "TestRunner", "TestCase", "TestUtil", "CtsTestUtil",
+        "Mock", "FrameworkMethod", "Failures",
+    }
+    FAILURE_LOCATION_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
+        re.compile(
+            r"at\s+([a-z][a-z0-9.]*\.[A-Z][\w]*)\.([\w]+)"
+            r"\(([\w.$]+)\.(kt|java):(\d+)\)"
+        ),
+        re.compile(r"\(([\w.$]+)\.(kt|java):(\d+)\)"),
+    ]
+
+    @classmethod
+    def extract_failure_location(
+        cls,
+        stack_trace: str,
+        test_name: str = "",
+    ) -> dict[str, str] | None:
+        if not stack_trace:
+            return None
+        test_class = (test_name.split("#")[0] if "#" in test_name else test_name).strip()
+        candidates: list[tuple[str, str, str, str]] = []
+        for pattern in cls.FAILURE_LOCATION_PATTERNS:
+            for match in pattern.finditer(stack_trace):
+                groups = match.groups()
+                if len(groups) >= 5:
+                    # Pattern 0: full_class, method, file_name, file_type, line
+                    full_class = groups[0]
+                    simple_class = groups[1]
+                    file_name = groups[2]
+                    file_type = groups[3]
+                    line_number = groups[4]
+                    if (
+                        simple_class in cls.EXCLUDED_CLASSES
+                        or file_name in cls.EXCLUDED_CLASSES
+                    ):
+                        continue
+                else:
+                    full_class = ""
+                    file_name, file_type, line_number = groups[:3]
+                candidates.append((full_class, file_name, file_type, line_number))
+
+        # 优先定位实际抛错帧，测试类调用帧仅作为回退。
+        def _is_diagnosed_test(full: str) -> bool:
+            full = full or ""
+            return bool(test_class) and (full == test_class or full.endswith(f".{test_class}"))
+
+        # 首帧属于辅助模块时，优先返回该实际抛错位置。
+        if candidates:
+            top_full, top_file, top_type, top_line = candidates[0]
+            if not _is_diagnosed_test(top_full) or len(candidates) == 1:
+                return {"file_name": top_file, "file_type": top_type, "line_number": top_line}
+            # 测试类首帧之后若有非测试帧，优先返回后者。
+            for full_class, file_name, file_type, line_number in candidates[1:]:
+                if not _is_diagnosed_test(full_class):
+                    return {"file_name": file_name, "file_type": file_type, "line_number": line_number}
+            return {"file_name": top_file, "file_type": top_type, "line_number": top_line}
+        return None
 
 
 class _ReportConfig:
@@ -154,7 +191,7 @@ def _resolve_redmine_knowledge_service(request: Request | None = None):
 def resolve_redmine_knowledge_service(request: Request | None = None):
     """返回认证用户自己的 Redmine 知识服务，不跨用户回退。
 
-    公共面导出（scripts/redmine_seed_ime_cases.py 等组合根经
+    公共面导出（tools/scripts/maintenance/redmine_seed_ime_cases.py 等组合根经
     ``features.reports`` 引用；下划线名保留为内部别名）。"""
     return _resolve_redmine_knowledge_service(request)
 
@@ -567,6 +604,14 @@ def _detected_report_extension(file_path: str, content_type: str = "") -> str:
     return ""
 
 
+def _publish_report_filename(file_path: str, filename: str, new_filename: str, origin: str) -> tuple[str, str]:
+    new_path = safe_upload_target_path(os.path.dirname(file_path), new_filename, allow_nested=False)
+    if os.path.abspath(new_path) != os.path.abspath(file_path):
+        os.replace(file_path, new_path)
+        logger.info("[Report Analysis] Detected %s file type: %s -> %s", origin, filename, new_filename)
+    return new_path, new_filename
+
+
 def _rename_downloaded_report_if_needed(file_path: str, filename: str, content_type: str = "") -> tuple[str, str]:
     """Ensure downloaded reports have an extension the analyzer can route on."""
     current_ext = os.path.splitext(filename or "")[1].lower()
@@ -579,11 +624,7 @@ def _rename_downloaded_report_if_needed(file_path: str, filename: str, content_t
 
     base_name = os.path.splitext(filename or "downloaded_report")[0] or "downloaded_report"
     new_filename = f"{base_name}{detected_ext}"
-    new_path = safe_upload_target_path(os.path.dirname(file_path), new_filename, allow_nested=False)
-    if os.path.abspath(new_path) != os.path.abspath(file_path):
-        os.replace(file_path, new_path)
-        logger.info(f"[Report Analysis] Detected downloaded file type: {filename} -> {new_filename}")
-    return new_path, new_filename
+    return _publish_report_filename(file_path, filename, new_filename, "downloaded")
 
 
 def _ensure_uploaded_report_extension(file_path: str, filename: str, content_type: str = "") -> tuple[str, str]:
@@ -600,8 +641,4 @@ def _ensure_uploaded_report_extension(file_path: str, filename: str, content_typ
     if detected_ext == ".gz" and tarfile.is_tarfile(file_path):
         detected_ext = ".tar.gz"
     new_filename = f"{base_name}{detected_ext}"
-    new_path = safe_upload_target_path(os.path.dirname(file_path), new_filename, allow_nested=False)
-    if os.path.abspath(new_path) != os.path.abspath(file_path):
-        os.replace(file_path, new_path)
-        logger.info("[Report Analysis] Detected uploaded file type: %s -> %s", filename, new_filename)
-    return new_path, new_filename
+    return _publish_report_filename(file_path, filename, new_filename, "uploaded")

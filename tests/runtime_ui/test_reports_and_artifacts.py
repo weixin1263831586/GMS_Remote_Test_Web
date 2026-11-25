@@ -7,6 +7,50 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeReportsAndArtifactsTests(RuntimeUiHarness):
+    def test_suite_type_palette_matches_reports_and_suite_list(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""() => {
+                const types = ['cts', 'vts', 'gts', 'sts', 'apts', 'cts-verifier', 'gts-root', 'gts-interactive', 'xts', 'unknown'];
+                const original = _browserSuitesCache;
+                try {
+                    _browserSuitesCache = types.map(type => ({
+                        test_type: type, version: 'fixture',
+                        tools_path: '/fixture/' + type + '/tools'
+                    }));
+                    renderTestSuiteBrowserList();
+                    displayTestReports(types.map((type, i) => ({
+                        test_type: type.toUpperCase(), timestamp: 'palette-' + i
+                    })));
+                    const badges = [...document.querySelectorAll('#suite-browser-list .suite-type-badge')];
+                    const cells = [...document.querySelectorAll('#reports-table-body .reports-type-cell')];
+                    const colors = nodes => nodes.map(node => getComputedStyle(node).color);
+                    return {
+                        suite: colors(badges),
+                        reports: colors(cells),
+                        reportTypes: cells.map(node => node.textContent),
+                        keys: cells.map(node => node.dataset.type),
+                        rawTypes: cells.map(node => node.closest('tr').dataset.testType)
+                    };
+                } finally {
+                    _browserSuitesCache = original;
+                    renderTestSuiteBrowserList();
+                }
+            }""")
+            self.assertEqual(result["suite"], result["reports"])
+            self.assertEqual(len(set(result["suite"][:5])), 5)
+            self.assertEqual(result["suite"][1:5], [
+                "rgb(137, 183, 255)", "rgb(123, 220, 199)",
+                "rgb(231, 195, 108)", "rgb(230, 165, 212)",
+            ])
+            self.assertEqual(result["suite"][5], result["suite"][1])
+            self.assertEqual(result["suite"][6:8], [result["suite"][2]] * 2)
+            self.assertEqual(result["keys"][5:8], ["cts-v", "gts", "gts"])
+            self.assertEqual(result["rawTypes"], result["reportTypes"])
+        finally:
+            page.close()
+
     def test_gts_interactive_retry_resolves_the_report_suite_from_worker_inventory(self):
         page = self.new_page()
         suite = "/suite/android-gts-14-R2/android-gts/tools"

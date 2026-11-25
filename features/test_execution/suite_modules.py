@@ -6,6 +6,8 @@ import re
 import shlex
 from typing import Any
 
+from foundation.execution_spec import SUITE_MODULE_EXTENSIONS as MODULE_EXTENSIONS
+
 from . import runtime
 from .suite_helpers import get_available_test_suites
 from .suites import (
@@ -18,7 +20,6 @@ from .tradefed import find_tradefed_binary_local
 
 
 DEFAULT_SUITE_TYPES = ("cts", "cts-v", "vts", "gts", "sts")
-MODULE_EXTENSIONS = (".apk", ".jar", ".config", ".xml")
 
 
 def normalize_module_query(query: str) -> str:
@@ -119,12 +120,11 @@ def _scan_suite_modules_local(suite: dict[str, Any], query: str, per_suite_limit
 def _scan_suite_modules_remote(ssh, suite: dict[str, Any], query: str, per_suite_limit: int) -> list[dict[str, Any]]:
     testcases_path = _testcases_path_for_suite(suite)
     query_lower = query.lower()
-    script = r"""
+    script = f"exts = {MODULE_EXTENSIONS!r}\n" + r"""
 import json, os, sys
 root = sys.argv[1]
 query = sys.argv[2].lower()
 limit = int(sys.argv[3])
-exts = ('.apk', '.jar', '.config', '.xml')
 items = []
 def emit():
     sys.stdout.write(json.dumps(items, ensure_ascii=False))
@@ -311,4 +311,88 @@ def search_latest_suite_modules(
         ],
         "modules": results,
         "count": len(results),
+    }
+
+
+_APK_ARTIFACT_EXTENSIONS = (".apk", ".jar")
+
+
+def _module_artifact_files(item: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the APK/JAR entries of a suite-module search result."""
+    return [
+        file_info
+        for file_info in item.get("files") or []
+        if str(file_info.get("file_name") or "").lower().endswith(_APK_ARTIFACT_EXTENSIONS)
+    ]
+
+
+def _pick_suite_module_artifact(payload: dict[str, Any], prefer: str) -> dict[str, Any] | None:
+    """Auto-pick the best APK/JAR artifact from a module search result.
+
+    Ranking: exact module-name match beats substring match, a longer module
+    name beats a shorter one (CtsCameraTestCases over CtsCamera), and the
+    requested artifact extension wins within one module. Ties keep the scan
+    order (CTS before CTS-V/VTS/GTS/STS) so the choice stays deterministic.
+    """
+    prefer_ext = "jar" if str(prefer or "").strip().lower() == "jar" else "apk"
+    normalized_query = str(payload.get("normalized_query") or "").strip().lower()
+    modules = payload.get("modules") or []
+    exact = [item for item in modules if str(item.get("module") or "").lower() == normalized_query]
+    # An exact native/config-only module must never fall through to another
+    # module's APK/JAR. The caller needs the actual native artifact or source.
+    if exact:
+        modules = exact
+    candidates: list[tuple[int, int, dict[str, Any], dict[str, Any]]] = []
+    for item in modules:
+        files = _module_artifact_files(item)
+        if not files:
+            continue
+        chosen = min(
+            files,
+            key=lambda f: (
+                0 if str(f.get("file_name") or "").lower().endswith(f".{prefer_ext}") else 1,
+                len(str(f.get("file_name") or "")),
+            ),
+        )
+        module_name = str(item.get("module") or "")
+        name_lower = module_name.lower()
+        if normalized_query and name_lower == normalized_query:
+            match_score = 2
+        elif normalized_query and normalized_query in name_lower:
+            match_score = 1
+        else:
+            match_score = 0
+        candidates.append((match_score, len(module_name), item, chosen))
+    if not candidates:
+        return None
+    _, _, item, chosen = max(candidates, key=lambda entry: (entry[0], entry[1]))
+
+    def candidate_payload(entry: tuple[int, int, dict[str, Any], dict[str, Any]]) -> dict[str, Any]:
+        _, _, cand_item, cand_file = entry
+        return {
+            "module": str(cand_item.get("module") or ""),
+            "suite_type": cand_item.get("suite_type"),
+            "suite_version": cand_item.get("suite_version"),
+            "file_name": cand_file.get("file_name"),
+            "analyze_suite_path": cand_item.get("suite_path"),
+            "analyze_path": f"testcases/{cand_file.get('relative_path')}",
+        }
+
+    return {
+        "query": payload.get("query"),
+        "prefer": prefer_ext,
+        "module": str(item.get("module") or ""),
+        "suite_type": item.get("suite_type"),
+        "suite_version": item.get("suite_version"),
+        "suite_path": item.get("suite_path"),
+        "file_name": chosen.get("file_name"),
+        # POST /api/test/suites/apk/analyze expects a path relative to the
+        # suite root (the directory that contains testcases/ and tools/).
+        "analyze_suite_path": item.get("suite_path"),
+        "analyze_path": f"testcases/{chosen.get('relative_path')}",
+        "candidates": [
+            candidate_payload(entry)
+            for entry in sorted(candidates, key=lambda e: (e[0], e[1]), reverse=True)[:8]
+        ],
+        "searched_suites": payload.get("searched_suites") or [],
     }

@@ -3,8 +3,8 @@ import inspect
 import unittest
 from unittest.mock import Mock, patch
 
+from features.system.host.terminal.output import start_terminal_output_pump
 from features.system.state import global_state
-from features.system.terminal_output import start_terminal_output_pump
 
 
 class _Channel:
@@ -51,7 +51,7 @@ class TerminalOutputTests(unittest.IsolatedAsyncioTestCase):
         channel = _Channel([b'pending'])
         with global_state.terminal_lock:
             global_state.terminal_ssh_sessions[session_id] = {'channel': channel, 'ssh': None, 'mode': 'local'}
-        with patch('features.system.terminal_output.asyncio.run_coroutine_threadsafe',
+        with patch('features.system.host.terminal.output.asyncio.run_coroutine_threadsafe',
                    side_effect=RuntimeError('Event loop is closed')) as submit:
             thread = start_terminal_output_pump(session_id, _WebSocket(), asyncio.get_running_loop(),
                                                 thread_name='test-terminal-closed-loop', notify_disconnect=True)
@@ -70,7 +70,7 @@ class TerminalOutputTests(unittest.IsolatedAsyncioTestCase):
             global_state.terminal_ssh_sessions[session_id] = {'channel': channel, 'ssh': None, 'mode': 'local'}
         future = Mock()
         future.result.side_effect = TimeoutError('send stalled')
-        with patch('features.system.terminal_output._submit_output', return_value=future):
+        with patch('features.system.host.terminal.output._submit_output', return_value=future):
             thread = start_terminal_output_pump(session_id, _WebSocket(), asyncio.get_running_loop(),
                                                 thread_name='test-terminal-send-timeout')
             await asyncio.to_thread(thread.join, 1)

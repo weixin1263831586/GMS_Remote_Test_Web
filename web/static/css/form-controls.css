@@ -1,38 +1,77 @@
-/* 登录层与管理员验证弹框共用的密码明文/密文切换按钮。 */
+/* Shared password input and reveal action for Shell and embedded workspaces. */
 .password-input-wrap {
     position: relative;
     display: flex;
+    align-items: center;
     flex: 1;
     min-width: 0;
+    max-width: 100%;
 }
 
-.password-input-wrap input[type="text"],
-.password-input-wrap input[type="password"] {
+.password-input-wrap > input:is([type="text"], [type="password"]) {
     width: 100%;
-    padding-right: 40px;
+    box-sizing: border-box;
+    /* Reserve the inline action area even when a dialog sets input padding. */
+    padding-inline-end: calc(var(--ui-control-height) + var(--ui-spacing-sm)) !important;
 }
 
-.password-visibility-toggle {
+/* Edge supplies its own reveal icon on focused password inputs. The shared
+   button below owns visibility, so do not render a second native control. */
+.password-input-wrap > input[type="password"]::-ms-reveal,
+.password-input-secret[type="password"]::-ms-reveal {
+    display: none;
+}
+
+.password-input-wrap > button.password-visibility-toggle {
     position: absolute;
-    right: 4px;
+    inset-inline-end: var(--ui-spacing-xs);
     top: 50%;
     transform: translateY(-50%);
-    width: 28px;
-    height: 26px;
+    width: var(--ui-control-height-small);
+    height: min(var(--ui-control-height-small), calc(100% - 4px));
+    min-width: 0;
+    min-height: 0;
+    box-sizing: border-box;
     padding: 0;
     display: flex;
     align-items: center;
     justify-content: center;
+    appearance: none;
     border: none;
     border-radius: 4px;
     background: transparent;
+    box-shadow: none;
     color: var(--text-secondary);
     cursor: pointer;
 }
 
-.password-visibility-toggle:hover {
+.password-input-wrap > button.password-visibility-toggle:hover {
     color: var(--text-primary);
-    background: var(--border-color);
+    border: none;
+    background: transparent;
+    box-shadow: none;
+}
+
+/* Keep keyboard focus visible inside the icon hit area, without crossing
+   the surrounding input border or changing the input's own focus style. */
+.password-input-wrap > button.password-visibility-toggle:focus-visible,
+:is(.auth-gate, .modal, .modal-backdrop) .modal-content .password-input-wrap > button.password-visibility-toggle:focus-visible {
+    outline: 2px solid var(--primary-light);
+    outline-offset: -2px;
+}
+
+/* Column forms must not stretch the password wrapper vertically. */
+.agent-access-field > .password-input-wrap {
+    flex: 0 1 auto;
+    width: 100%;
+}
+
+/* Preserve the field-card layout when an input becomes a compound control. */
+@media (max-width: 800px) {
+    .tech-dialog .tech-field-card:not(.tech-field-stack) > .password-input-wrap {
+        flex: 1 1 100%;
+        width: 100%;
+    }
 }
 
 .password-visibility-toggle::before {

@@ -1,7 +1,7 @@
 """Annotations persist with their owning command and cannot desynchronize rows."""
 import pytest
 
-from features.devices.aoa_service import AoaProfileStore
+from features.devices.aoa.service import AoaProfileStore
 from foundation.error_model import ApiError
 
 

@@ -222,6 +222,47 @@ class SecurityAuditIntegrityTests(unittest.TestCase):
             self.assertTrue(again["valid"])
 
 
+    def test_rotation_refuses_tampered_history_even_with_valid_head(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"GMS_AUDIT_HMAC_KEY": "a" * 64},
+        ):
+            path = Path(tmp) / "audit.jsonl"
+            audit = SecurityAuditLogger(str(path))
+            audit.log_event({"operation": "first"})
+            audit.log_event({"operation": "second"})
+            lines = path.read_text().splitlines()
+            record = json.loads(lines[0])
+            record["operation"] = "tampered"
+            lines[0] = json.dumps(record)
+            path.write_text("\n".join(lines) + "\n")
+            original = path.read_bytes()
+            audit.MAX_LOG_BYTES = 1
+            with self.assertRaisesRegex(RuntimeError, "cannot rotate invalid audit chain"):
+                audit.log_event({"operation": "third"})
+            self.assertEqual(path.read_bytes(), original)
+            self.assertFalse(audit.verify_chain()["valid"])
+
+    def test_verify_reports_non_object_or_invalid_utf8(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "audit.jsonl"
+            audit = SecurityAuditLogger(str(path))
+            for payload in (b"[]\n", b"\xff\n"):
+                path.write_bytes(payload)
+                result = audit.verify_chain()
+                self.assertFalse(result["valid"])
+                self.assertEqual(result["line"], 1)
+
+    def test_exact_page_boundary_does_not_report_more(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            "os.environ", {"GMS_AUDIT_HMAC_KEY": "a" * 64},
+        ):
+            audit = SecurityAuditLogger(str(Path(tmp) / "audit.jsonl"))
+            for index in range(4):
+                audit.log_event({"operation": f"event-{index}"})
+            self.assertTrue(audit.read_events(limit=2)["has_more"])
+            self.assertFalse(audit.read_events(limit=2, offset=2)["has_more"])
+
+
 class AuditNoisePathTests(unittest.TestCase):
     def test_public_firmware_share_token_is_redacted_from_audit_path(self):
         from features.system.security_audit_utils import sanitize_audit_path

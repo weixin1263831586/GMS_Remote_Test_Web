@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from features.automation.artifact_fetch import open_jenkins_artifact
+from features.automation.artifacts import open_jenkins_artifact
 
 
 def test_cross_origin_redirect_is_not_contacted():
@@ -12,7 +12,7 @@ def test_cross_origin_redirect_is_not_contacted():
     redirected.headers = {'Location': 'http://169.254.169.254/latest/meta-data'}
     with (
         patch(
-            'features.automation.artifact_fetch.requests.get',
+            'features.automation.artifacts.requests.get',
             return_value=redirected,
         ) as get,
         pytest.raises(ValueError, match='outside its configured origin'),
@@ -35,7 +35,7 @@ def test_same_origin_redirect_is_followed_with_auth():
     body = MagicMock(status_code=200)
     body.headers = {}
     with patch(
-        'features.automation.artifact_fetch.requests.get',
+        'features.automation.artifacts.requests.get',
         side_effect=[redirected, body],
     ) as get:
         response = open_jenkins_artifact(

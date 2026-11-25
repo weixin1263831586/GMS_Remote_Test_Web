@@ -10,9 +10,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from features.devices import config_explorer as ce
-from features.devices import config_override as co
-from features.devices.config_override import (
+from features.devices.configuration import config_explorer as ce
+from features.devices.configuration import config_override as co
+from features.devices.configuration.config_override import (
     OverrideEntry,
     OverrideStore,
     _split_array_items,
@@ -496,7 +496,7 @@ class TestApply(unittest.TestCase):
         with patch.object(co, "resolve_symbol_apk", return_value=fw), \
              patch.object(co, "build_overlay_apk", side_effect=fake_build), \
              patch.object(co, "run_local_shell_command", side_effect=matcher), \
-             patch("features.devices.adb_ops.time.sleep", return_value=None):
+             patch("features.devices.adb.operations.time.sleep", return_value=None):
             result = co.apply_overrides("dev", store)
         self.assertTrue(result.success)
         self.assertTrue(result.rebooting)
@@ -525,7 +525,7 @@ class TestApply(unittest.TestCase):
         with patch.object(co, "resolve_symbol_apk", return_value=fake_apk.name), \
              patch.object(co, "build_overlay_apk", return_value=fake_apk.name), \
              patch.object(co, "run_local_shell_command", side_effect=matcher), \
-             patch("features.devices.adb_ops.time.sleep", return_value=None):
+             patch("features.devices.adb.operations.time.sleep", return_value=None):
             result = co.apply_overrides("dev", store)
         self.assertFalse(result.success)
         self.assertEqual(result.stage, "chcon")

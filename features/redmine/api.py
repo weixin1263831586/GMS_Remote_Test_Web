@@ -24,7 +24,7 @@ from features.redmine.dashboard import (
     with_department_profiles_from_users,
 )
 from features.redmine.history_search import search_issue_history as _search_issue_history_service
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
+from features.redmine.knowledge.repository import RedmineKnowledgeDB
 from features.redmine.page import page_router
 from features.redmine.repository import (
     RedmineAgentDB,
@@ -964,7 +964,7 @@ from . import statistics_api as _statistics_api  # noqa: E402
 
 router.include_router(_statistics_api.router)
 
-from . import knowledge_api as _knowledge_api  # noqa: E402
+from .knowledge import api as _knowledge_api  # noqa: E402
 
 
 router.include_router(_knowledge_api.router)

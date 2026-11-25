@@ -244,25 +244,19 @@ function showAuthGate(setupRequired = false) {
     gate.classList.toggle('setup-mode', setupRequired);
     const title = document.getElementById('auth-title');
     const submit = document.getElementById('auth-submit');
-    const displayNameRow = document.getElementById('auth-display-name-row');
     const bootstrapTokenRow = document.getElementById('auth-bootstrap-token-row');
     const bootstrapTokenInput = document.getElementById('auth-bootstrap-token');
+    const bootstrapTokenHelp = document.getElementById('auth-bootstrap-token-help');
     const usernameInput = document.getElementById('auth-username');
     const passwordInput = document.getElementById('auth-password');
-    const displayNameInput = document.getElementById('auth-display-name');
     const usernameHelp = document.getElementById('auth-username-help');
     const passwordHelp = document.getElementById('auth-password-help');
     if (title) title.textContent = setupRequired ? '初始化管理员账户' : '登录';
     if (submit) submit.textContent = setupRequired ? '创建管理员并进入' : '登录';
-    if (displayNameRow) displayNameRow.style.display = setupRequired ? 'flex' : 'none';
-    if (bootstrapTokenRow) {
-        bootstrapTokenRow.style.display = setupRequired && state.authBootstrapTokenRequired !== false
-            ? 'flex'
-            : 'none';
-    }
-    if (bootstrapTokenInput) {
-        bootstrapTokenInput.required = setupRequired && state.authBootstrapTokenRequired !== false;
-    }
+    const needsBootstrapToken = setupRequired && state.authBootstrapTokenRequired !== false;
+    if (bootstrapTokenRow) bootstrapTokenRow.style.display = needsBootstrapToken ? 'flex' : 'none';
+    if (bootstrapTokenHelp) bootstrapTokenHelp.hidden = !needsBootstrapToken;
+    if (bootstrapTokenInput) bootstrapTokenInput.required = needsBootstrapToken;
     if (usernameInput) {
         usernameInput.placeholder = setupRequired ? '管理员账号' : '管理员账号，或正在读取客户端身份…';
         usernameInput.autocomplete = setupRequired ? 'off' : 'username';
@@ -276,21 +270,35 @@ function showAuthGate(setupRequired = false) {
         passwordInput.placeholder = setupRequired ? '管理员密码' : '管理员密码或客户端 SSH 密码';
         passwordInput.autocomplete = setupRequired ? 'new-password' : 'current-password';
     }
-    if (setupRequired && displayNameInput && !displayNameInput.value.trim()) {
-        displayNameInput.value = 'gms';
-    }
+    // Setup already identifies both fields in the title and labels.
+    // Keep the distinct platform/SSH guidance available for normal login.
+    const switchTarget = usernameInput?.dataset.accountSwitchTarget;
     if (usernameHelp) {
-        usernameHelp.textContent = setupRequired
-            ? '创建平台管理员账号；此处不使用客户端 SSH 账号。'
-            : '管理员账号，或 用户名@客户端IP（SSH 账号）。';
+        usernameHelp.hidden = setupRequired;
+        if (!setupRequired) usernameHelp.textContent = switchTarget === 'admin'
+            ? '请输入管理员账号，此处不使用客户端 SSH 账号。'
+            : switchTarget === 'client'
+                ? '当前客户端账号固定为本机身份。'
+                : '管理员账号，或 用户名@客户端IP（SSH 账号）。';
     }
     if (passwordHelp) {
-        passwordHelp.textContent = setupRequired
-            ? '请设置平台管理员密码。'
-            : '管理员用平台密码；客户端用 SSH 密码。';
+        passwordHelp.hidden = setupRequired;
+        if (!setupRequired) passwordHelp.textContent = switchTarget === 'admin'
+            ? '请输入管理员平台密码。'
+            : switchTarget === 'client'
+                ? '请输入该客户端账号的 SSH 密码。'
+                : '管理员用平台密码；客户端用 SSH 密码。';
+    }
+    if (usernameInput) {
+        if (setupRequired) usernameInput.removeAttribute('aria-describedby');
+        else usernameInput.setAttribute('aria-describedby', 'auth-username-help');
+    }
+    if (passwordInput) {
+        if (setupRequired) passwordInput.removeAttribute('aria-describedby');
+        else passwordInput.setAttribute('aria-describedby', 'auth-password-help');
     }
     const message = document.getElementById('auth-message');
-    if (message) message.textContent = setupRequired ? '首次访问需要创建管理员账户。' : '';
+    if (message) message.textContent = '';
     // 所有模式均允许关闭登录层：关闭后以未认证状态继续，受限操作会
     // 再次弹出登录层（而非把用户困在全屏遮罩里）。
     const closeBtn = document.getElementById('auth-close');
@@ -363,6 +371,17 @@ async function prefillAuthUsernameFromClient() {
 function hideAuthGate() {
     const gate = document.getElementById('auth-gate');
     if (gate) gate.style.display = 'none';
+}
+
+async function copyAuthBootstrapCommand(button) {
+    try {
+        const command = button.closest('.auth-bootstrap-command')?.querySelector('.auth-bootstrap-command-text')?.textContent;
+        if (!command) throw new Error('缺少初始化令牌命令');
+        await copyTextToClipboard(command);
+        showToast('获取初始化令牌命令已复制', 'success');
+    } catch (_) {
+        showToast('复制失败，请检查浏览器剪贴板权限后重试', 'error');
+    }
 }
 
 function closeAuthGate() {
@@ -475,7 +494,6 @@ function closeAuthSshdGuide() {
 async function submitAuthForm() {
     const username = document.getElementById('auth-username')?.value.trim() || '';
     const password = document.getElementById('auth-password')?.value || '';
-    const displayName = document.getElementById('auth-display-name')?.value.trim() || '';
     const bootstrapToken = document.getElementById('auth-bootstrap-token')?.value || '';
     const accountSwitchTarget = document.getElementById('auth-username')?.dataset.accountSwitchTarget || '';
     const setupRequired = document.getElementById('auth-gate')?.classList.contains('setup-mode');
@@ -493,7 +511,7 @@ async function submitAuthForm() {
             credentials: 'same-origin',
             headers,
             body: JSON.stringify({
-                username, password, display_name: displayName,
+                username, password, display_name: setupRequired ? username : '',
                 account_switch_target: accountSwitchTarget,
             })
         });
@@ -653,18 +671,12 @@ async function selectClientAccountSwitch(target) {
     state.clientId = null;
     updateLoginAccountDisplay();
     const usernameInput = document.getElementById('auth-username');
-    const usernameHelp = document.getElementById('auth-username-help');
     if (usernameInput) {
         usernameInput.dataset.accountSwitchTarget = target;
         usernameInput.readOnly = target === 'client';
         const adminUsername = String(state.defaultAdminUsername || '').trim();
         usernameInput.value = target === 'client' ? identity : adminUsername;
         usernameInput.placeholder = target === 'client' ? identity : '管理员账号';
-    }
-    if (usernameHelp) {
-        usernameHelp.textContent = target === 'client'
-            ? '当前客户端账号固定为本机身份；请输入该账号的 SSH 密码。'
-            : '请输入管理员账号和平台密码。';
     }
     state.authGateDismissed = false;
     showAuthGate(false);

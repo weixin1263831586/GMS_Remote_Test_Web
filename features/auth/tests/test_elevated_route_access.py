@@ -162,7 +162,7 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         self._elevate()
 
         with patch(
-            "features.cluster.deployment_api.scan_ssh_host_keys",
+            "features.cluster.deployment.api.scan_ssh_host_keys",
             return_value=[{
                 "key_type": "ssh-ed25519",
                 "key_base64": "AAAA",
@@ -189,8 +189,6 @@ class ElevatedRouteAccessTests(unittest.TestCase):
         )
 
     def test_local_software_reconfigure_uses_temporary_admin_elevation(self):
-        from features.cluster import deployment_api as deployment
-
         path = "/api/cluster/workers/local/software/reconfigure"
         self._assert_elevation_required(path, {})
         self._elevate()
@@ -201,17 +199,15 @@ class ElevatedRouteAccessTests(unittest.TestCase):
             ),
         )
         thread = MagicMock()
-        with deployment._LOCAL_SOFTWARE_LOCK:
-            deployment._LOCAL_SOFTWARE_TASKS.clear()
-            deployment._LOCAL_SOFTWARE_ACTIVE_TASK = ""
         with (
-            patch.object(deployment, "service", return_value=cluster),
-            patch.object(
-                deployment,
-                "_local_worker_has_active_tests",
+            patch("features.cluster.deployment.api._LOCAL_SOFTWARE_TASKS", {}),
+            patch("features.cluster.deployment.api._LOCAL_SOFTWARE_ACTIVE_TASK", ""),
+            patch("features.cluster.deployment.api.service", return_value=cluster),
+            patch(
+                "features.cluster.deployment.api._local_worker_has_active_tests",
                 return_value=False,
             ),
-            patch.object(deployment.threading, "Thread", return_value=thread),
+            patch("features.cluster.deployment.api.threading.Thread", return_value=thread),
         ):
             allowed = self.client.post(
                 path,

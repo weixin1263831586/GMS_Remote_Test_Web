@@ -11,6 +11,7 @@ ADR 0026（多点仿射标定与映射策略）的机制层单一真值，Contro
 - **mapping_policy**：标定来源分级，替代裸 ``measured`` 布尔值——
   ``direct_standard``（已验证的 AOSP 直接触摸映射，免逐台标定）、
   ``pointer_calibrated``（旧指针语义 + 实测映射）、
+  ``direct_calibrated``（direct 模式 + 实测校正）、
   ``direct_unverified``（描述符 direct 但未经设备端验证）、
   ``unsupported``（无法确认分类/显示绑定；禁止自动触摸）。
 - **误差验证**：每个采样点保留欧氏残差，输出 RMS 与最大误差；
@@ -19,15 +20,15 @@ ADR 0026（多点仿射标定与映射策略）的机制层单一真值，Contro
   ``convert_commands`` 可以把 Profile 的逻辑坐标经"源映射 → 参考像素 →
   目标映射"重投影，实现一份 Profile 跨分辨率复用。
 
-纯计算模块：无 USB/ADB 依赖，设备侧采集见 ``worker_agent.aoa_actions``，
-持久化见 ``features.devices.aoa_calibrations``。
+纯计算模块：无 USB/ADB 依赖，设备侧采集见 ``worker.aoa_actions``，
+持久化见 ``features.devices.aoa.calibrations``。
 """
 
 from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from foundation.aoa_profile import AOA_TOUCH_MAX_X, AOA_TOUCH_MAX_Y
 
@@ -180,7 +181,7 @@ class TouchMapping:
 
     ``matrix``/``offset`` 描述 HID 逻辑坐标 → 屏幕像素 的正向变换；
     ``samples`` 是标定采样（含单点残差，供误差审计）；``context`` 是
-    ``worker_agent.aoa_calibration.display_context`` 采集的显示环境快照，
+    ``worker.aoa_calibration.display_context`` 采集的显示环境快照，
     作为复用匹配键（model + release + display + rotation + hid_touch_mode）。
     """
 
@@ -295,6 +296,9 @@ class TouchMapping:
             raise ValueError("AOA calibration display context does not match display_pixels")
         if mapping.context.get("hid_touch_mode", mode) != mode:
             raise ValueError("AOA calibration context belongs to another HID mode")
+        if ((mapping.mapping_policy.startswith("direct_") and mode != "direct")
+                or (mapping.mapping_policy == MAPPING_POLICY_POINTER_CALIBRATED and mode != "pointer")):
+            raise ValueError("AOA touch mapping policy belongs to another HID mode")
         if mapping.mapping_policy == MAPPING_POLICY_DIRECT_STANDARD:
             # A fitted affine matrix is a device correction, not evidence of
             # standard InputReader classification/display routing.
@@ -328,7 +332,8 @@ class TouchMapping:
     @property
     def verified(self) -> bool:
         """映射误差在验收门槛内，且策略不是 unsupported。"""
-        if self.mapping_policy == MAPPING_POLICY_UNSUPPORTED:
+        if (self.mapping_policy == MAPPING_POLICY_UNSUPPORTED
+                or not 0 <= self.max_error_px <= MAX_CALIBRATION_ERROR_PX):
             return False
         try:
             training = [s for s in self.samples if not s.get("validation", False)]
@@ -342,7 +347,7 @@ class TouchMapping:
             if any(tuple(s["hid"]) in training_points for s in validation):
                 return False
             return max(self.sample_errors()) <= MAX_CALIBRATION_ERROR_PX
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, OverflowError):
             return False
 
     @property
@@ -366,24 +371,23 @@ def mapping_from_samples(hid_touch_mode: str,
         px, py = a * u + b * v + tx, c * u + d * v + ty
         errors.append(math.hypot(px - x, py - y))
     max_error = max(errors)
-    verified = max_error <= MAX_CALIBRATION_ERROR_PX and len(validation_samples or []) >= 2
     rms = math.sqrt(sum(error * error for error in errors) / len(errors))
     sample_records = [
         {"hid": [int(u), int(v)], "cooked": [round(float(x), 2), round(float(y), 2)],
          "error_px": round(error, 2), "validation": index >= len(samples)}
         for index, (((u, v), (x, y)), error) in enumerate(zip(all_samples, errors))
     ]
-    return TouchMapping(
+    mapping = TouchMapping(
         hid_touch_mode=hid_touch_mode,
         matrix=matrix,
         offset=offset,
-        mapping_policy=policy_for(hid_touch_mode, verified),
         samples=tuple(sample_records),
         rms_error_px=rms,
         max_error_px=max_error,
         context=dict(context or {}),
         display_pixels=display_pixels,
     )
+    return replace(mapping, mapping_policy=policy_for(hid_touch_mode, mapping.verified))
 
 
 def per_axis_mapping(display_width: int, display_height: int,

@@ -40,7 +40,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             db = _db(tmp)
             db.upsert_issue(_issue(1, "张三", journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "请处理"}]))
             db.upsert_issue(_issue(2, "张三", journals=[{"user": "客户", "created_on": "2026-06-12T00:00:00", "notes": "请处理"}]))
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -58,7 +58,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 status_name="HangUp",
                 journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "目前是没有问题了，后续再 closed。"}],
             ))
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -86,7 +86,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -158,7 +158,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -191,7 +191,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -226,7 +226,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                      "notes": "请提供复现步骤与完整日志"},
                 ],
             ))
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -268,7 +268,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 ],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 23, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -377,7 +377,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 journals=[{"user": "客户", "created_on": "2026-06-01T00:00:00", "notes": "请处理"}],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -434,7 +434,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 journals=[{"user": "成 者", "created_on": "2026-07-02T08:26:55", "notes": "黄工，你好。麻烦抽时间帮看下这个问题，感谢。"}],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 7, 7, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -484,7 +484,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 journals=[{"user": "秋雨 电子", "created_on": "2026-06-18T10:11:33", "notes": "是不是关于节电这一块有什么配置不对"}],
             ))
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 30, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -555,7 +555,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 stats_api,
                 "_get_redmine_stats_config",
                 return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
-            ), patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            ), patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat
@@ -630,7 +630,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 stats_api,
                 "_get_redmine_stats_config",
                 return_value={"stale_days": 3, "window_days": 60, "cache_ttl": 600},
-            ), patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            ), patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 # 尚未超过三天：验证普通 waiting_my_reply 也会实时校准，
                 # 不能只刷新 no_reply_3_days。
                 mocked_datetime.now.return_value = datetime(2026, 7, 2, 12, 0, 0)

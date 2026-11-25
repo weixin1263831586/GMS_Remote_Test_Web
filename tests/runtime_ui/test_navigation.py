@@ -357,14 +357,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             page.close()
 
     def test_websites_init_and_migration_never_post_to_server(self):
-        """Page init must not perform mutating network requests.
-
-        Defaults/migration used to call saveCategories() unguarded, which
-        POSTed /api/websites/save on every fresh page load and produced
-        'Failed to fetch' console errors across ten unrelated E2E pages
-        (review finding: Load / Migrate / Persist are local phases; only
-        a real user mutation may Sync).
-        """
+        """Initialization and defaults are local; only user mutations may sync."""
         page = self.new_page()
         save_requests = []
         page.on(
@@ -658,7 +651,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         page = self.new_page()
         try:
             page.goto(
-                f"{self.base_url}/gms-update-monitor",
+                f"{self.base_url}/gms-update-center",
                 wait_until="domcontentloaded",
             )
             page.wait_for_function("typeof setTab === 'function'")
@@ -675,7 +668,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             )
             self.assertEqual(page.evaluate("tab"), "artifacts")
             self.assertEqual(
-                page.evaluate("sessionStorage.getItem('gms_update_monitor_tab')"),
+                page.evaluate("sessionStorage.getItem('gms_update_center_tab')"),
                 "artifacts",
             )
             self.assertIn("tab=artifacts", page.url)

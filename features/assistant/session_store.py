@@ -16,11 +16,12 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
-import os
 import re
 import threading
 from pathlib import Path
 from typing import Any
+
+from foundation.private_config import write_atomic_text
 
 
 _LOCK = threading.Lock()
@@ -189,38 +190,9 @@ def _write_store_unlocked(target: Path, anchors: dict[str, dict[str, Any]]) -> N
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    _atomic_write_json(target, payload)
-
-
-def _atomic_write_json(target: Path, payload: str, *, unique_tmp: bool = False) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
-    suffix = f".{os.getpid()}.tmp" if unique_tmp else ".tmp"
-    tmp_path = target.with_suffix(suffix)
-    # 锚点/记录虽不含明文凭据，但含 owner/client/Job 关联，按受限权限创建。
-    file_descriptor = os.open(
-        tmp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600
-    )
-    try:
-        with os.fdopen(file_descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-    except BaseException:
-        # fdopen 失败时描述符仍打开；已关闭时重复 close 仅报 EBADF。
-        with contextlib.suppress(OSError):
-            os.close(file_descriptor)
-        with contextlib.suppress(OSError):
-            tmp_path.unlink()
-        raise
-    # umask 可能压制 open 的 mode 参数，替换前显式 chmod 确定收敛 0600。
-    os.chmod(tmp_path, 0o600)
-    try:
-        # os.replace 保证原子性；与 security_audit.json 同款写法。
-        os.replace(tmp_path, target)
-    except OSError:
-        with contextlib.suppress(OSError):
-            tmp_path.unlink()
-        raise
+    write_atomic_text(target, payload)
+
 
 
 def save_transcript(session: dict[str, Any], directory: Path | str | None = None) -> None:
@@ -254,7 +226,8 @@ def save_transcript(session: dict[str, Any], directory: Path | str | None = None
     target = (Path(directory) if directory else default_transcripts_dir()) / f"{session_id}.json"
     payload = json.dumps(record, ensure_ascii=False, separators=(",", ":"))
     # 每会话一文件：写入互不共享，原子替换即可，无需文件锁。
-    _atomic_write_json(target, payload, unique_tmp=True)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    write_atomic_text(target, payload)
 
 
 def load_transcripts(directory: Path | str | None = None) -> dict[str, dict[str, Any]]:

@@ -12,12 +12,12 @@ from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from features.redmine.analysis_ai import AiAnalysisMixin
-from features.redmine.analysis_attachments import AttachmentAnalysisMixin
-from features.redmine.analysis_issue import IssueAnalysisMixin
-from features.redmine.analysis_reporting import ReportingAnalysisMixin
-from features.redmine.analysis_resolution import ResolutionAnalysisMixin
-from features.redmine.analysis_similarity import SimilarityAnalysisMixin
+from features.redmine.analysis.ai import AiAnalysisMixin
+from features.redmine.analysis.attachments import AttachmentAnalysisMixin
+from features.redmine.analysis.issue import IssueAnalysisMixin
+from features.redmine.analysis.reporting import ReportingAnalysisMixin
+from features.redmine.analysis.resolution import ResolutionAnalysisMixin
+from features.redmine.analysis.similarity import SimilarityAnalysisMixin
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
 from features.redmine.repository import (

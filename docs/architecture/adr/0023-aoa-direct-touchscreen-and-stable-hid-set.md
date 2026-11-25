@@ -49,4 +49,4 @@ Controller、Worker 与前端需要匹配更新，并开始新的 AOA 会话以�
 - [Linux v6.1 HID 扫描实现](https://github.com/torvalds/linux/blob/v6.1/drivers/hid/hid-core.c)
 - [Linux v6.1 hid-multitouch 实现](https://github.com/torvalds/linux/blob/v6.1/drivers/hid/hid-multitouch.c)
 - [协议与解析实现](../../../foundation/aoa_profile.py)
-- [HID 注册与 USB 会话](../../../worker_agent/aoa_session.py)
+- [HID 注册与 USB 会话](../../../worker/aoa_session.py)

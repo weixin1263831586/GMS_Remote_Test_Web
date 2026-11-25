@@ -11,12 +11,11 @@ from unittest.mock import patch
 
 import pytest
 
-from features.redmine.evidence import split_zip_derived_text
-from features.redmine.evidence_archives import extract_system_archive_text
-from features.redmine.evidence_search_api import _search_all_evidence
-from features.redmine.evidence_store import EvidenceStore
-from features.redmine.evidence_text import derive_text_file
-from features.redmine.evidence_zip import extract_zip_derived_text
+from features.redmine.evidence.archives import extract_system_archive_text, extract_zip_derived_text
+from features.redmine.evidence.search_api import _search_all_evidence
+from features.redmine.evidence.service import split_zip_derived_text
+from features.redmine.evidence.store import EvidenceStore
+from features.redmine.evidence.text import derive_text_file
 
 
 def _archive_artifact(store, snapshot, source):
@@ -144,7 +143,7 @@ def test_legacy_index_search_does_not_stop_at_one_megabyte(tmp_path):
 async def test_download_stream_exceeds_former_256_mib_limit_without_losing_tail(tmp_path):
     import hashlib
 
-    from features.redmine.evidence_fetch import EvidenceFetcher
+    from features.redmine.evidence.fetch import EvidenceFetcher
 
     block = b"x" * (256 * 1024)
     tail = b"lmkd at the end"

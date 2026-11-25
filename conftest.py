@@ -13,8 +13,9 @@ import pytest as _pytest
 
 # 在应用导入前隔离部署环境配置。
 os.environ["GMS_SKIP_RUNTIME_ENV"] = "1"
-os.environ.setdefault("GMS_AUTH_REQUIRED", "false")
-os.environ.setdefault("GMS_ASSISTANT_KKAGENT_ENABLED", "0")
+# Ordinary tests must not inherit operator settings. Security/model tests opt in explicitly.
+os.environ["GMS_AUTH_REQUIRED"] = "false"
+os.environ["GMS_ASSISTANT_KKAGENT_ENABLED"] = "0"
 
 # 生产环境由 bootstrap.dependencies 在启动时注册 cluster port；测试里
 # 不一定经过 create_app()。这里统一注册，使单独运行某个测试文件与

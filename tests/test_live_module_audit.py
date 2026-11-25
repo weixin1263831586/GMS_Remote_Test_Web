@@ -22,3 +22,15 @@ def test_live_verdicts_distinguish_unavailable_and_broken():
     assert verdict(503, False) == "UNAVAILABLE"
     assert verdict(401, True) == "FAIL"
     assert verdict(None, True) == "FAIL"
+
+
+def test_gms_source_audit_entrypoints_import_current_module_owners():
+    from tools.scripts.testing import (
+        audit_critical_fix_live,
+        audit_unified_gms_scan,
+        audit_update_center_sources,
+    )
+
+    assert callable(audit_critical_fix_live.main)
+    assert callable(audit_unified_gms_scan.main)
+    assert callable(audit_update_center_sources.main)

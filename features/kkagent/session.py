@@ -15,8 +15,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from features.kkagent.process import terminate_process_tree
-from features.kkagent.sandbox import read_bounded, restricted_runtime
+from features.kkagent.process import read_bounded, terminate_process_tree
+from features.kkagent.sandbox import restricted_runtime
 
 
 logger = logging.getLogger(__name__)

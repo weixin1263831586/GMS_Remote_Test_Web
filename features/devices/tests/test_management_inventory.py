@@ -10,7 +10,8 @@ import pytest
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.devices import management_api, management_inventory
+from features.devices import management_api
+from features.devices.inventory import management as management_inventory
 from foundation.command_result import CommandResult
 
 

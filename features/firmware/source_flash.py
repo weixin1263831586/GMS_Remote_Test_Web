@@ -9,7 +9,7 @@ Controller 直接自动化。因此采用「文件队列式 Source Agent」：
 
     Controller (Linux)                    Windows 源主机
     ---------------                       --------------
-    1. SFTP 上传固件到        ------->    scripts/windows_source_agent.py
+    1. SFTP 上传固件到        ------->    scripts/execution/windows_source_agent.py
        C:\\gms-flash\\<task>\\            （桌面会话常驻，计划任务 /IT
     2. 投递 <task>.json 任务               自启动，可操作 RKDevTool GUI）
     3. 轮询 <task>.result.json  <------    RKDevTool GUI 自动化烧写
@@ -31,6 +31,7 @@ import re
 import time
 from dataclasses import dataclass
 
+from foundation.networking import parse_host_address, split_host_port
 from foundation.ssh_security import configure_strict_host_keys
 
 from . import runtime
@@ -102,7 +103,8 @@ class SourceFlashReport:
 def open_windows_ssh(device_host: str):
     """Open an SSH session to the Windows source host using stored creds."""
     host = str(device_host or "").strip()
-    username, hostname = host.split("@", 1) if "@" in host else ("", host)
+    username, hostname = parse_host_address(host)
+    hostname, port = split_host_port(hostname)
     config = runtime.config_manager.load_config()
     # 凭据查找走 config_manager（foundation 层，避免跨 feature import）。
     password = (
@@ -121,7 +123,7 @@ def open_windows_ssh(device_host: str):
     configure_strict_host_keys(client)
     try:
         client.connect(
-            hostname, username=username, password=password, timeout=15,
+            hostname, port=port, username=username or "", password=password, timeout=15,
         )
     except Exception as exc:
         raise SourceFlashError(

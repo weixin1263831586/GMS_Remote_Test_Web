@@ -15,15 +15,13 @@ from fastapi.testclient import TestClient
 
 from features.auth import AuthService, CurrentUser
 from features.cluster import ClusterRepository
-from features.devices import (
-    debug_api,
-    debug_execution,
-    debug_identity,
-    debug_service,
-    deployment_api,
-    deployment_service,
-)
-from features.devices.debug_store import DebugStore
+from features.devices.debug import api as debug_api
+from features.devices.debug import execution as debug_execution
+from features.devices.debug import identity as debug_identity
+from features.devices.debug import service as debug_service
+from features.devices.debug.store import DebugStore
+from features.devices.deployment import api as deployment_api
+from features.devices.deployment import service as deployment_service
 from foundation.command_result import CommandResult
 from foundation.error_model import ApiError, register_api_error_handler
 

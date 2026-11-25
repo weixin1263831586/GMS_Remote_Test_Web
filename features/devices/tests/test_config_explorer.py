@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from features.devices import config_explorer
+from features.devices.configuration import config_explorer
 from foundation.command_result import CommandResult
 
 

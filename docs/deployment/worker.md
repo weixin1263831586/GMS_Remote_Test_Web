@@ -8,10 +8,10 @@ profile 和验收统一见 [Agent 安装](../agent/installation.md)。下面的 
 
 ## 集群 Worker 安装
 
-远端 Worker 节点由 `scripts/install_cluster_worker.sh` 安装，可通过集群页面部署，也可以手工执行。脚本用法：
+远端 Worker 节点由 `scripts/deployment/worker/install_cluster_worker.sh` 安装，可通过集群页面部署，也可以手工执行。脚本用法：
 
 ```bash
-bash scripts/install_cluster_worker.sh \
+bash scripts/deployment/worker/install_cluster_worker.sh \
   WORKER_ID CONTROLLER_URL TOKEN CONTROLLER_CERT [SUITE_ROOT] [WORKER_ADDRESS] [GTS_CREDENTIAL_FILE]
 ```
 
@@ -28,20 +28,20 @@ bash scripts/install_cluster_worker.sh \
 1. 安装 Host Tools 到 `~/Software`（`jdk-11`、`platform-tools`、`env.sh` / `verify.sh`），按固定 SHA-256 获取部署工件并解包 scrcpy。
 2. 配置 `~/.bashrc` 的 Host Tools 环境块，安装 adbproxy。
 3. 安装桌面依赖（`x11vnc`、`xvfb`、`novnc`、`websockify`）与 usbip 工具，配置 `/usr/local/libexec/gms-worker-usbip` 与对应 sudoers 规则。
-4. 部署 `worker_agent/`、`foundation/` 与原生工具到 `~/gms-worker-agent`，安装测试启动脚本到 Suite 根目录。
+4. 部署 `worker/`、`foundation/` 与原生工具到 `~/gms-worker-agent`，安装测试启动脚本到 Suite 根目录。
 5. 写入 `~/.config/gms-worker/config.json`、`~/.config/gms-worker/token`（0600）与 `novnc-targets`。
 6. 生成用户级 systemd 服务：`gms-worker-agent`，以及（检测到 noVNC web 根目录时）`gms-worker-xvfb`、`gms-worker-x11vnc`、`gms-worker-novnc`。
 7. `systemctl --user daemon-reload`、`sudo loginctl enable-linger`（保证注销后继续运行），最后启动并显示 `gms-worker-agent` 状态。
 
 ### 通过集群页面部署
 
-Controller 的集群部署流程（`features/cluster/deployment_api.py`）会通过 SSH 完成整个安装：
+Controller 的集群部署流程（`features/cluster/deployment/api.py`）会通过 SSH 完成整个安装：
 
-- 打包 `worker_agent`、`foundation`、安装脚本与 Host Tools，连同 Worker Token、GTS 凭证一起上传到随机化的 `/tmp` 暂存名（`_staged_credential_path`）。Token 与 GTS 文件权限为 0600，并以**文件路径**传给安装脚本——内容不能出现在远端命令 argv 中。
+- 打包 `worker`、`foundation`、安装脚本与 Host Tools，连同 Worker Token、GTS 凭证一起上传到随机化的 `/tmp` 暂存名（`_staged_credential_path`）。Token 与 GTS 文件权限为 0600，并以**文件路径**传给安装脚本——内容不能出现在远端命令 argv 中。
 - 安装结束后按这些路径清理远端临时文件；若部署失败会回滚已持久化的 Worker Token。
 - 需要远程 sudo 时，sudo 密码经 stdin 传入，不写入命令行。
 
-前提：Controller 侧需先构建 adbproxy 与原生工具分发包（`scripts/build_adbproxy_rs.sh`、`scripts/build_gms_worker_native.sh`），否则部署命令会提前报错退出。
+前提：Controller 侧需先构建 adbproxy 与原生工具分发包（`scripts/native/build_adbproxy_rs.sh`、`scripts/native/build_gms_worker_native.sh`），否则部署命令会提前报错退出。
 
 ## Worker 配置与 Token
 
@@ -105,3 +105,11 @@ chmod 600 /path/to/token
 - [生产部署](production.md)
 - [配置体系](configuration.md)
 - [常见部署问题](troubleshooting.md)
+
+### Worker 服务启动
+
+Worker 源码包位于 `worker/`，统一使用 `python -m worker.app` 启动。独立 Worker 使用对应安装脚本部署并重新启动；源码生产安装使用 `install.sh` 生成本地 Worker 的 systemd 服务配置。
+
+### 手动与自动部署统一入口
+
+复制集群页面的单行命令，在 Controller 安装根目录执行 `bash scripts/deployment/worker/deploy_worker.sh WORKER_ID USER@HOST https://CONTROLLER '~/GMS-Suite' 1`。SSH 主机指纹按 OpenSSH 正常校验；Worker Token 通过终端输入，GTS 凭证由 `GMS_GTS_CREDENTIAL_FILE` 指定。两种部署均使用同一个后端离线包构建器，并携带 Controller CA。源码环境分发 Worker 源码包；编译发布环境只分发经清单校验的原生运行时及部署资源，不分发后端 Python 源码。编译版 Worker 要求 Linux x86_64 / Ubuntu 22.04 兼容环境。

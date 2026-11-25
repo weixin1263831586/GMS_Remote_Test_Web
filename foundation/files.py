@@ -1,15 +1,29 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import logging
 import os
 import shutil
 import zipfile
 from math import ceil
-from typing import Any
+from typing import Any, BinaryIO
 
 
 logger = logging.getLogger(__name__)
+
+
+def sha256_stream(source: BinaryIO) -> str:
+    """Digest from the current position without loading an entire file into memory."""
+    digest = hashlib.sha256()
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        digest.update(chunk)
+    return digest.hexdigest()
+
+
+def sha256_file(path: str | os.PathLike[str]) -> str:
+    with open(path, "rb") as source:
+        return sha256_stream(source)
 
 
 def disk_metrics(path: os.PathLike[str]) -> dict[str, float | None]:

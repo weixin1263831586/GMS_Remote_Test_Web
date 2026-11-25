@@ -10,7 +10,7 @@ payload can never inject extra startup behaviour.
 
 Only keys with a real consumer are listed:
 
-- ``GMS_TRANSPORT_REQUIREMENT`` — features/devices/transport_policy.py
+- ``GMS_TRANSPORT_REQUIREMENT`` — features/devices/transport/policy.py
   transport classification.
 - ``GMS_COPY_ROUTE_NETWORK`` / ``GMS_COPY_ROUTE_GATEWAY`` —
   scripts/run_GMS_Test_Auto.sh report-copy return route.
@@ -57,7 +57,7 @@ def filter_job_env(
         if (
             key in ALLOWED_JOB_ENV_KEYS
             and len(value) <= _JOB_ENV_VALUE_MAX_LEN
-            and _JOB_ENV_VALUE_RE.match(value)
+            and _JOB_ENV_VALUE_RE.fullmatch(value)
         ):
             allowed[key] = value
         else:

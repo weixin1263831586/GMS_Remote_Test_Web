@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from worker_agent import adb_proxy
+from worker import adb_proxy
 
 
 class WorkerAdbProxyTests(unittest.TestCase):

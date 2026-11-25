@@ -294,7 +294,7 @@ function promptBuildPassword() {
             <div class="modal-content modal-xs password-dialog tech-dialog tech-dialog--build-password"><svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg><span class="tech-corner-mark tech-corner-mark--tl" aria-hidden="true"></span><span class="tech-corner-mark tech-corner-mark--br" aria-hidden="true"></span>
                 <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 id="build-password-title" class="modal-title">编译服务器 SSH 密码</h2></div></div>
                 <div class="modal-body">
-                    <input id="build-password-input" type="password" autocomplete="current-password" placeholder="请输入密码">
+                    <span class="password-input-wrap"><input id="build-password-input" type="password" autocomplete="current-password" placeholder="请输入密码"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="build-password-input" aria-label="显示密码" title="显示密码"></button></span>
                 </div>
                 <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                     <button type="button" id="build-password-cancel">取消</button>
@@ -318,9 +318,15 @@ function promptBuildPassword() {
         });
         backdrop.querySelector('#build-password-cancel').onclick = () => finish('');
         backdrop.querySelector('#build-password-ok').onclick = () => finish(input.value);
-        input.addEventListener('keydown', event => {
-            if (event.key === 'Enter') finish(input.value);
-            if (event.key === 'Escape') finish('');
+        backdrop.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                event.stopPropagation();
+                finish('');
+            } else if (event.key === 'Enter' && event.target === input) {
+                event.preventDefault();
+                finish(input.value);
+            }
         });
         input.focus();
     });

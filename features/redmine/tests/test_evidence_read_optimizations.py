@@ -22,10 +22,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.redmine import evidence_api, evidence_search_api
-from features.redmine.evidence_search_api import COLLAPSE_GAP_CHARS
-from features.redmine.evidence_text import derive_member_index
-from features.redmine.repository_storage import RepositoryStorageMixin
+from features.redmine.evidence import api as evidence_api
+from features.redmine.evidence import search_api as evidence_search_api
+from features.redmine.evidence.search_api import COLLAPSE_GAP_CHARS
+from features.redmine.evidence.text import derive_member_index
+from features.redmine.repository.storage import RepositoryStorageMixin
 
 
 class _EvidenceOptimizeTests(unittest.TestCase):
@@ -41,7 +42,7 @@ class _EvidenceOptimizeTests(unittest.TestCase):
         self.root = Path(self.directory.name)
         self.addCleanup(self.directory.cleanup)
 
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
         import features.redmine.users as redmine_users
 
         users_patch = unittest.mock.patch.object(
@@ -54,7 +55,7 @@ class _EvidenceOptimizeTests(unittest.TestCase):
         evidence_store._STORE_CACHE.clear()
         self.addCleanup(evidence_store._STORE_CACHE.clear)
 
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         self.snapshot = store.create_snapshot(issue_id=660451, download_policy="all")
@@ -204,7 +205,7 @@ class _EvidenceOptimizeTests(unittest.TestCase):
 
     def test_failures_from_summary_html(self):
 
-        from features.redmine.evidence_api import _failures_from_summary_html
+        from features.redmine.evidence.api import _failures_from_summary_html
 
         html = (
             "<html><body><table>"
@@ -217,7 +218,7 @@ class _EvidenceOptimizeTests(unittest.TestCase):
         self.assertEqual(rows[0]["test"], "android.adservices.foo")
 
     def test_failures_rejects_non_report(self):
-        from features.redmine.evidence_api import _extract_failure_rows
+        from features.redmine.evidence.api import _extract_failure_rows
 
         rows, parser = _extract_failure_rows(
             {"filename": "notes.txt", "kind": "text"},
@@ -229,13 +230,13 @@ class _EvidenceOptimizeTests(unittest.TestCase):
     # ------------------------------------------------- search extras
 
     def _store(self):
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         return owner_evidence_store("owner-a")
 
     def test_search_collapse_folds_and_counts_raw(self):
 
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         artifact = store.create_artifact(

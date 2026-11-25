@@ -28,19 +28,19 @@ from .bootloader_api import (
 from .bootloader_api import (
     unlock_bootloader as unlock_bootloader,
 )
-from .debug_api import router as debug_router
-from .deployment_api import router as deployment_router
+from .debug.api import router as debug_router
+from .deployment.api import router as deployment_router
+from .inventory.management import local_unresponsive_inventory, local_usb_only_inventory
 from .locks import device_lock_manager
 from .management_api import _prune_inactive_usbip_sources, known_usbip_sources
-from .management_inventory import local_unresponsive_inventory, local_usb_only_inventory
 from .manager import device_manager
-from .operations_api import (
+from .operations.api import (
     connect_wifi as connect_wifi,
 )
-from .operations_api import (
+from .operations.api import (
     reboot_devices as reboot_devices,
 )
-from .operations_api import (
+from .operations.api import (
     router as operations_router,
 )
 from .screens_api import show_device_screens as show_device_screens
@@ -137,7 +137,7 @@ async def get_connected_devices(
         )
         if adb_devices:
             try:
-                from worker_agent.adb_proxy import imported_device_for_serial
+                from worker.adb_proxy import imported_device_for_serial
             except ImportError:
                 imported_device_for_serial = None
             inventory = []
@@ -326,7 +326,7 @@ router.include_router(deployment_router)
 router.include_router(debug_router)
 
 # AOA 工作台（user build 烧写后重新打开 USB 调试，ADR 0022）。
-from .aoa_api import router as aoa_router  # noqa: E402
+from .aoa.api import router as aoa_router  # noqa: E402
 
 
 router.include_router(aoa_router)

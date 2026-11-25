@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from features.cluster import _port_device_action_request
-from features.devices import AoaCertificationStore, aoa_api
+from features.devices import AoaCertificationStore, get_aoa_router
 from foundation import cluster_port
 from tests.aoa_semantic_fixtures import reference, semantic_template
 
@@ -30,9 +30,9 @@ class AoaSemanticDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
             **worker["capabilities"], "aoa_semantic_v1": True, "aoa_per_command_v1": True}})
         self.repo.heartbeat("worker-246", {"devices": [{"serial": "ABC", "state": "available", "transport": "local_usb",
             "properties": {"usb": "1-2", "aoa_context": self.context}}]})
-        self.client.app.include_router(aoa_api.router)
-        for target, value in [("features.devices.aoa_semantic_service.certification_store", lambda: self.store),
-                              ("features.devices.aoa_advanced_api.certification_store", lambda: self.store)]:
+        self.client.app.include_router(get_aoa_router())
+        for target, value in [("features.devices.aoa.mapping_service.certification_store", lambda: self.store),
+                              ("features.devices.aoa.api.certification_store", lambda: self.store)]:
             mock = patch(target, value)
             mock.start()
             self.addCleanup(mock.stop)
@@ -46,7 +46,7 @@ class AoaSemanticDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
                              "class_certificate_ids": [self.proof["id"]]}}
 
     def test_reviewed_semantic_plan_survives_real_dispatch(self):
-        with patch("features.cluster.device_actions_api.threading.Thread"):
+        with patch("features.cluster.device_operations.api.threading.Thread"):
             response = self.client.post("/api/devices/aoa/recover", json=self.request_body())
         assert response.status_code == 200, response.text
         payload = self.repo.get_command(response.json()["command_id"])["payload"]
@@ -75,7 +75,7 @@ class AoaSemanticDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
     def test_reference_endpoint_uses_existing_fenced_action_channel(self):
         worker = self.repo.get_worker("worker-246")
         worker["capabilities"]["aoa_record_input_v1"] = True
-        with patch.object(self.repo, "get_worker", return_value=worker), patch("features.cluster.device_actions_api.threading.Thread"):
+        with patch.object(self.repo, "get_worker", return_value=worker), patch("features.cluster.device_operations.api.threading.Thread"):
             response = self.client.post("/api/devices/aoa/certifications/verify", json={"worker_id": "worker-246", "device": "ABC"})
         assert response.status_code == 200, response.text
         payload = self.repo.get_command(response.json()["command_id"])["payload"]
@@ -83,7 +83,7 @@ class AoaSemanticDispatchTests(ClusterApiHardeningFixture, unittest.TestCase):
         assert payload["lease_tokens"] and payload["usb_port_path"] == "1-2"
 
     def test_local_reference_verification_keeps_a_durable_receipt(self):
-        with patch("features.cluster.device_actions_api.service") as service, patch("features.cluster.device_actions_api.threading.Thread"):
+        with patch("features.cluster.device_operations.api.service") as service, patch("features.cluster.device_operations.api.threading.Thread"):
             service.return_value.repository = self.repo
             service.return_value.config.local_worker_id = "worker-246"
             response = self.client.post("/api/devices/aoa/certifications/verify", json={"worker_id": "worker-246", "device": "ABC"})

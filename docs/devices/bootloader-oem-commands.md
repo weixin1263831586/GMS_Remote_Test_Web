@@ -1,13 +1,13 @@
 # 设备 Bootloader 锁定/解锁 oem 命令
 
-本文档定位：描述平台 Bootloader 锁定/解锁与 GSI 烧写使用的 fastboot oem 命令选型——`board:<action>` 与 `at-<action>-vboot` 的判定依据、执行路径差异、失败兜底与恢复行为。判定逻辑实现在 `worker_agent/fastboot_workflow.py` 的 `PreparedFastbootDevice.oem_argument()` 与 `FastbootPreparer.apply_oem_action()`。
+本文档定位：描述平台 Bootloader 锁定/解锁与 GSI 烧写使用的 fastboot oem 命令选型——`board:<action>` 与 `at-<action>-vboot` 的判定依据、执行路径差异、失败兜底与恢复行为。判定逻辑实现在 `worker/fastboot_workflow.py` 的 `PreparedFastbootDevice.oem_argument()` 与 `FastbootPreparer.apply_oem_action()`。
 
 ## 背景（2026-09 锁定事故根因）
 
 commit `641e843` 之前，RK3572 用 `oem board:<action>`、其余平台一律用 `oem at-<action>-vboot`，从未出错；该提交为修复 RK3588 GSI 烧写改为按 `ro.build.version.sdk >= 37` 选 `board:`，并只给 unlock 路径加了 unrecognized 兜底。这引入两层问题：
 
 1. **判据用错**：`ro.build.version.sdk` 是 system 侧（SSI 底座）版本。GRF+SSI 构建（如 RK3562GMS1：A17 SSI 底座 + A14 vendor）的 system 侧同样报 SDK 37，但 uboot 随 **vendor 固件**发布、停留在 A14，只认 `at-lock-vboot`。锁定被误发 `board:lock`。
-2. **失败被吞**：lock 路径无 unrecognized 兜底，`scripts/run_Device_Lock.sh` 以 `set -e` 在第一条命令就退出，设备滞留 fastboot（表现为"无法开机"）；同时 API 层只在脚本退出码为 0 时记录结果，失败被静默丢弃，前端把空 `results` 判为全部成功并提示"设备锁定完成"。
+2. **失败被吞**：lock 路径无 unrecognized 兜底，`scripts/execution/run_Device_Lock.sh` 以 `set -e` 在第一条命令就退出，设备滞留 fastboot（表现为"无法开机"）；同时 API 层只在脚本退出码为 0 时记录结果，失败被静默丢弃，前端把空 `results` 判为全部成功并提示"设备锁定完成"。
 
 ## 判定依据（真机 getprop 实测）
 
@@ -32,16 +32,16 @@ commit `641e843` 之前，RK3572 用 `oem board:<action>`、其余平台一律�
 | 纯 Android 17（如 RK3588GMS7） | `ro.vendor.api_level >= 202604` | `oem board:lock` | `oem board:unlock` | 对应 `at-*-vboot` |
 | GRF+SSI（如 RK3562GMS1）及一切旧 vendor | `ro.vendor.api_level < 202604`（含未知=0） | `oem at-lock-vboot` | `oem at-unlock-vboot` | 对应 `board:*` |
 
-- 常量：`ANDROID_17_VENDOR_API_LEVEL = 202604`（`worker_agent/fastboot_workflow.py`）。
+- 常量：`ANDROID_17_VENDOR_API_LEVEL = 202604`（`worker/fastboot_workflow.py`）。
 - 版本未知（设备已在 fastboot、无 ADB 读取窗口）按旧 vendor 处理，默认 `at-*-vboot`，由 unrecognized 兜底纠正误判。
 
 ## 执行路径对比
 
 | 路径 | 入口 | 解锁命令 | 锁定命令 | unrecognized 兜底 | 后续动作 |
 |---|---|---|---|---|---|
-| **GSI 烧写**（直连） | GSI 烧写 API → `gsi_transport.prepare_gsi_command` | Python 侧执行（`apply_oem_action`） | **不回锁**，烧完保持解锁 | 有 | `reboot fastboot` → 等 fastbootd → 脚本 flash `system`/`misc`（/vendor），`GMS_GSI_DEFER_REBOOT=1` 时由 Python 控制重启 |
+| **GSI 烧写**（直连） | GSI 烧写 API → `gsi_burn.prepare_gsi_command` | Python 侧执行（`apply_oem_action`） | **不回锁**，烧完保持解锁 | 有 | `reboot fastboot` → 等 fastbootd → 脚本 flash `system`/`misc`（/vendor），`GMS_GSI_DEFER_REBOOT=1` 时由 Python 控制重启 |
 | **设备锁定/解锁**（直连） | `/api/devices/bootloader-lock\|unlock` → `bootloader_api._run_bootloader_lock_block` | 同上 | 同上 | 有 | `run_Device_Lock.sh <serial> -`：`reboot fastboot` → 等 fastbootd → `reboot`，再等 ADB device（60s）；失败时尽力 `fastboot reboot` 拉回系统 |
-| **设备锁定/解锁**（集群 Worker） | `/api/cluster/devices/actions` `bootloader_lock/unlock` → `worker_agent/device_actions.py` | 标准 AOSP 命令 `fastboot flashing unlock`（非 oem） | `fastboot flashing lock` | **无** | `adb reboot bootloader` 后直接执行，无平台/版本区分 |
+| **设备锁定/解锁**（集群 Worker） | `/api/cluster/devices/actions` `bootloader_lock/unlock` → `worker/device_actions.py` | 标准 AOSP 命令 `fastboot flashing unlock`（非 oem） | `fastboot flashing lock` | **无** | `adb reboot bootloader` 后直接执行，无平台/版本区分 |
 
 ## uboot 支持性判定手段（四层次）
 
@@ -57,5 +57,5 @@ commit `641e843` 之前，RK3572 用 `oem board:<action>`、其余平台一律�
 ## 失败兜底与恢复
 
 - `apply_oem_action`：仅在应答明确含 `unrecognized` 时以备选命令重试一次；传输类失败按原样抛出（设备可能已接受命令，不盲目重试）。
-- `scripts/run_Device_Lock.sh`：oem 参数为 `-` 时跳过 oem 执行（oem 已在 Python 侧完成），只负责 `reboot fastboot` → 等 fastbootd（`FASTBOOTD_TIMEOUT_SECONDS`，默认 60s）→ `reboot`。
+- `scripts/execution/run_Device_Lock.sh`：oem 参数为 `-` 时跳过 oem 执行（oem 已在 Python 侧完成），只负责 `reboot fastboot` → 等 fastbootd（`FASTBOOTD_TIMEOUT_SECONDS`，默认 60s）→ `reboot`。
 - `bootloader_api._run_bootloader_lock_block`：逐设备记录结果（成功/失败均记录）；脚本失败时尽力执行 `fastboot -s <serial> reboot` 把滞留 fastboot 的设备拉回系统；空 `results` 按失败返回，不得判为成功。

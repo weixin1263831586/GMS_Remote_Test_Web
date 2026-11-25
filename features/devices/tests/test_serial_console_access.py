@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from features.devices import serial_console_access
+from features.devices.serial import access as serial_console_access
 
 
 def test_availability_confidence_distinguishes_present_open_and_output():

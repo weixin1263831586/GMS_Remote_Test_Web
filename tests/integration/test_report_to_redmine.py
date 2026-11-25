@@ -21,7 +21,7 @@ class _Client:
 
 class ReportToRedmineWorkflowTests(unittest.IsolatedAsyncioTestCase):
     async def test_publish_uploads_files_replies_and_closes_client(self):
-        from workflows.report_to_redmine import ReportToRedmineWorkflow
+        from features.redmine.reply.api import ReportToRedmineWorkflow
 
         client = _Client()
         workflow = ReportToRedmineWorkflow(lambda: client)

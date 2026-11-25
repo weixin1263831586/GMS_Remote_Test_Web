@@ -275,3 +275,39 @@ def test_run_stream_closes_channel_on_timeout():
     assert "timed out" in result.stderr
     assert result.timed_out
     assert channel.close_calls == 1
+
+
+class _ContinuousTailChannel(_EndlessOutputChannel):
+    def exit_status_ready(self):
+        return True
+
+    def recv_stderr_ready(self):
+        return True
+
+    def recv_stderr(self, _size):
+        return b"stderr-tail"
+
+
+def test_sync_continuous_tail_is_bounded_and_both_streams_drained():
+    channel = _ContinuousTailChannel()
+    result = SSHExecutor(exit_tail_drain_seconds=0).run(_FakeSSH(channel), "fake", timeout=1)
+    assert result.code == 0
+    assert "stderr-tail" in result.stderr
+    assert channel.close_calls == 1
+
+
+def test_async_continuous_tail_is_bounded_and_both_streams_drained():
+    async def run_case():
+        channel = _ContinuousTailChannel()
+
+        async def log_callback(_line, _level):
+            pass
+
+        result = await SSHExecutor(exit_tail_drain_seconds=0).run_stream(
+            _FakeSSH(channel), "fake", log_callback, timeout=1,
+        )
+        assert result.code == 0
+        assert "stderr-tail" in result.stderr
+        assert channel.close_calls == 1
+
+    asyncio.run(run_case())

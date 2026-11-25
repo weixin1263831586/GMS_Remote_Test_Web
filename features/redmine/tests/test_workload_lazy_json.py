@@ -59,7 +59,7 @@ class WorkloadLazyJsonTests(unittest.TestCase):
                 calls.append(value)
                 return real_loads(value)
 
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime, \
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime, \
                     patch.object(json, "loads", side_effect=counting_loads):
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
@@ -88,7 +88,7 @@ class WorkloadLazyJsonTests(unittest.TestCase):
             db.upsert_issue(_issue(202, "张三", journals=[{
                 "user": "客户", "created_on": "2026-06-12T00:00:00", "notes": "请处理",
             }]))
-            with patch("features.redmine.repository_queries.datetime") as mocked_datetime:
+            with patch("features.redmine.repository.queries.datetime") as mocked_datetime:
                 mocked_datetime.now.return_value = datetime(2026, 6, 13, 12, 0, 0)
                 mocked_datetime.min = datetime.min
                 mocked_datetime.fromisoformat = datetime.fromisoformat

@@ -6,7 +6,7 @@ import re
 
 
 # 语义 AOA 输入误差的绝对安全上限（px）。计划编译（target_point）与
-# Worker 实时执行（worker_agent.aoa_semantics）共用同一来源，禁止
+# Worker 实时执行（worker.aoa_semantics）共用同一来源，禁止
 # 在执行层另行硬编码，保证策略上限可审计、不漂移。
 MAX_SAFE_INPUT_ERROR_PX = 8.0
 

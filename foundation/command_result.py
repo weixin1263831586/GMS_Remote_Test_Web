@@ -4,8 +4,8 @@
 （远程套件下载把 stderr 当退出码比较）。所有执行器统一返回本 dataclass，
 此类 bug 从类型层消失。
 
-``worker_agent.fastboot_workflow.CommandResult`` 与本模块字段语义一致，
-worker_agent 从本模块 re-export 以维持既有 import 路径。
+``worker.fastboot_workflow.CommandResult`` 与本模块字段语义一致，
+worker 从本模块 re-export 以维持既有 import 路径。
 """
 
 from __future__ import annotations

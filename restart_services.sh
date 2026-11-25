@@ -37,14 +37,29 @@ fi
 cd "$PROJECT_DIR"
 
 # Use the same environment precedence and placeholder expansion as app.py.
-while IFS= read -r -d '' key && IFS= read -r -d '' value; do
-    export "$key=$value"
-done < <("${PYTHON_BIN}" -c '
+# Check the producer's exit status before exporting anything or stopping
+# services. Process substitution alone hides a failed Python loader.
+exec {runtime_env_fd}< <("${PYTHON_BIN}" -c '
 import sys
 from bootstrap.env_loader import load_runtime_env
 for key, value in load_runtime_env().items():
     sys.stdout.write(key + "\0" + value + "\0")
 ')
+runtime_env_pid=$!
+mapfile -d '' -t runtime_env <&"$runtime_env_fd"
+exec {runtime_env_fd}<&-
+if ! wait "$runtime_env_pid"; then
+    echo "运行环境配置读取失败，未停止现有服务" >&2
+    exit 1
+fi
+if (( ${#runtime_env[@]} % 2 != 0 )); then
+    echo "运行环境配置输出不完整，未停止现有服务" >&2
+    exit 1
+fi
+for ((i=0; i<${#runtime_env[@]}; i+=2)); do
+    export "${runtime_env[i]}=${runtime_env[i+1]}"
+done
+unset runtime_env runtime_env_pid
 
 CERT_DIR="$("${PYTHON_BIN}" -c 'from foundation.config_paths import certificates_path; print(certificates_path("."))')"
 CERT_KEY="${CERT_DIR}/gms-local.key"
@@ -60,7 +75,9 @@ SERVER_HOSTNAME="${GMS_SERVER_HOSTNAME:-${CONFIGURED_SERVER_HOSTNAME:-127.0.0.1}
 SYSTEMD_SERVICE="gms-web-app.service"
 WORKER_SERVICE="gms-worker-agent"
 DAILY_BRIEF_SERVICE="gms-redmine-daily-brief-worker.service"
-SYSTEMD_UNIT_FILE="/etc/systemd/system/${SYSTEMD_SERVICE}"
+SYSTEMD_UNIT_DIR="/etc/systemd/system"
+SYSTEMD_UNIT_FILE="${SYSTEMD_UNIT_DIR}/${SYSTEMD_SERVICE}"
+LOCAL_WORKER_SERVICE="${SYSTEMD_SERVICE%.service}-local-worker.service"
 WORKER_UNIT_FILE="${HOME}/.config/systemd/user/${WORKER_SERVICE}.service"
 
 fail_service_action() {
@@ -87,27 +104,53 @@ systemctl_admin() {
     fi
 }
 
-update_systemd_tls_paths() {
-    [[ -f "${SYSTEMD_UNIT_FILE}" ]] || return 0
-    local updater="${PROJECT_DIR}/tools/scripts/deployment/update_systemd_tls.py"
+update_systemd_unit() {
+    local unit="$1" entrypoint="$2" scope="${3:-system}"
+    [[ -f "${unit}" ]] || return 0
+    local updater="${PROJECT_DIR}/scripts/deployment/update_systemd_tls.py"
     local -a update_command=(
         "${PYTHON_BIN}" "${updater}" --project-root "${PROJECT_DIR}"
-        --unit "${SYSTEMD_UNIT_FILE}" --cert-dir "${CERT_DIR}"
+        --unit "${unit}" --cert-dir "${CERT_DIR}" --entrypoint "${entrypoint}"
     )
+    local -a manager=(systemctl)
+    [[ "${scope}" != user ]] || manager+=(--user)
     local check_status=0
     "${update_command[@]}" || check_status=$?
     [[ "${check_status}" -eq 0 || "${check_status}" -eq 3 ]] \
-        || fail_service_action "无法检查 systemd HTTPS 证书路径"
+        || fail_service_action "无法检查 systemd 服务配置 (${unit##*/})"
 
     if [[ "${check_status}" -eq 3 ]]; then
-        if [[ "${EUID}" -eq 0 ]]; then
+        if [[ "${scope}" == user || "${EUID}" -eq 0 ]]; then
             "${update_command[@]}" --apply \
-                || fail_service_action "无法更新 systemd HTTPS 证书路径"
+                || fail_service_action "无法更新 systemd 服务配置 (${unit##*/})"
         else
             sudo -- "${update_command[@]}" --apply \
-                || fail_service_action "更新 systemd HTTPS 证书路径需要 sudo 权限"
+                || fail_service_action "无法更新 systemd 服务配置 (${unit##*/})"
         fi
+    elif [[ "$("${manager[@]}" show "${unit##*/}" --property=NeedDaemonReload --value 2>/dev/null || true)" != yes ]]; then
+        return 0
+    fi
+    if [[ "${scope}" == user ]]; then
+        user_units_changed=true
+    else
+        system_units_changed=true
+    fi
+}
+
+update_systemd_units() {
+    local system_units_changed=false user_units_changed=false
+    update_systemd_unit "${SYSTEMD_UNIT_FILE}" controller
+    update_systemd_unit "${SYSTEMD_UNIT_DIR}/${LOCAL_WORKER_SERVICE}" worker
+    update_systemd_unit "${SYSTEMD_UNIT_DIR}/gms-redmine-daily-brief.service" daily-brief
+    update_systemd_unit "${SYSTEMD_UNIT_DIR}/gms-redmine-daily-brief-delta.service" daily-brief
+    update_systemd_unit "${SYSTEMD_UNIT_DIR}/${SYSTEMD_SERVICE%.service}-local-software.service" worker-software
+    update_systemd_unit "${SYSTEMD_UNIT_DIR}/${SYSTEMD_SERVICE%.service}-backup.service" backup
+    update_systemd_unit "${WORKER_UNIT_FILE}" worker user
+    if [[ "${system_units_changed}" == true ]]; then
         systemctl_admin daemon-reload || fail_service_action "无法重新加载 systemd 服务配置"
+    fi
+    if [[ "${user_units_changed}" == true ]]; then
+        systemctl --user daemon-reload || fail_service_action "无法重新加载用户级 systemd 服务配置"
     fi
 }
 
@@ -117,7 +160,7 @@ restart_local_vnc() {
     # the Web UI's display, keyboard, and loopback-binding settings.  The Web
     # service starts VNC during its own startup; force-killing here races with
     # that lifecycle hook and can leave only websockify running.
-    if [[ ! -f "${PROJECT_DIR}/features/system/vnc.py" ]]; then
+    if [[ ! -f "${PROJECT_DIR}/features/system/host/vnc.py" ]]; then
         echo -e "${YELLOW}  ℹ VNC 运行时未随当前部署提供，跳过本地 VNC 重启${NC}"
         return 0
     fi
@@ -131,7 +174,7 @@ restart_local_vnc() {
     local -a vnc_command=(
         "${PYTHON_BIN}" -c '
 import sys
-from features.system.vnc import vnc_manager
+from features.system.host.vnc import vnc_manager
 
 result = vnc_manager._start_local_vnc(force_restart=False)
 message = result.get("message") if result.get("success") else result.get("error")
@@ -149,6 +192,12 @@ raise SystemExit(0 if result.get("success") else 1)
 DAILY_BRIEF_INSTALLED=false
 if [[ "$(systemctl show "${DAILY_BRIEF_SERVICE}" --property=LoadState --value 2>/dev/null || true)" == "loaded" ]]; then
     DAILY_BRIEF_INSTALLED=true
+fi
+RESTART_LOCAL_WORKER=false
+if [[ -f "${SYSTEMD_UNIT_DIR}/${LOCAL_WORKER_SERVICE}" ]] &&
+    { systemctl is-active --quiet "${LOCAL_WORKER_SERVICE}" ||
+      systemctl is-enabled --quiet "${LOCAL_WORKER_SERVICE}"; }; then
+    RESTART_LOCAL_WORKER=true
 fi
 
 ensure_https_cert() {
@@ -209,7 +258,7 @@ echo ""
 
 # Prepare TLS and installed service paths before stopping a working service.
 ensure_https_cert
-update_systemd_tls_paths
+update_systemd_units
 echo -e "${BLUE}配置与证书准备耗时: $((SECONDS - RESTART_STARTED)) 秒${NC}"
 STAGE_STARTED=$SECONDS
 
@@ -217,7 +266,7 @@ STAGE_STARTED=$SECONDS
 echo -e "${YELLOW}[1/6] 准备 Python 缓存...${NC}"
 if [[ "${CLEAN_CACHE}" == "true" ]]; then
     cache_roots=()
-    for cache_root in bootstrap features foundation worker_agent workflows web tests scripts tools/scripts __pycache__ .pytest_cache; do
+    for cache_root in bootstrap features foundation worker web tests scripts tools/scripts __pycache__ .pytest_cache; do
         [[ ! -d "${cache_root}" ]] || cache_roots+=("${cache_root}")
     done
     if (( ${#cache_roots[@]} )); then
@@ -379,6 +428,13 @@ if [[ "${DAILY_BRIEF_INSTALLED}" == "true" ]]; then
     echo -e "${GREEN}  ✓ 晨报 Worker 已重启${NC}"
 else
     echo -e "${YELLOW}  ℹ 晨报 Worker 未安装；单号分析与晨报任务无法在后台执行${NC}"
+fi
+if [[ "${RESTART_LOCAL_WORKER}" == true ]]; then
+    systemctl_admin restart "${LOCAL_WORKER_SERVICE}" \
+        || fail_service_action "无法重启本地设备 Worker (${LOCAL_WORKER_SERVICE})"
+    systemctl is-active --quiet "${LOCAL_WORKER_SERVICE}" \
+        || fail_service_action "本地设备 Worker 未进入 active 状态 (${LOCAL_WORKER_SERVICE})"
+    echo -e "${GREEN}  ✓ 本地设备 Worker 已重启${NC}"
 fi
 if [[ -f "${WORKER_UNIT_FILE}" ]]; then
     echo ""

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.case_extractor import RedmineCaseExtractor
+from features.redmine.cases.case_extractor import RedmineCaseExtractor
 
 
 VBMETA_ISSUE = {

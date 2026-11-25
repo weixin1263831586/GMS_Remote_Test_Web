@@ -12,12 +12,12 @@ from fastapi.testclient import TestClient
 
 from bootstrap.application import create_app
 from features.auth import auth_service
-from features.system.desktop import (
+from features.system.host.desktop import (
     _relay_novnc_websockets,
     _upstream_query_string,
     pin_novnc_host,
 )
-from features.system.novnc_access import novnc_access_service
+from features.system.host.novnc_access import novnc_access_service
 
 
 class NoVNCAccessBoundaryTests(unittest.TestCase):

@@ -21,7 +21,9 @@ from foundation.archives import (
     safe_extract_member_path,
 )
 
-from .analyzer import HostLogParser, TestReport, XMLReportParser
+from .host_parser import HostLogParser
+from .models import TestReport
+from .xml_parser import XMLReportParser
 
 
 logger = logging.getLogger(__name__)

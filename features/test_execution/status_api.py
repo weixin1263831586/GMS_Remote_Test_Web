@@ -187,12 +187,7 @@ async def get_status(
 
 
 def _active_durable_job_for_owner(owner_id: str):
-    """Return the owner's active durable job, or None.
-
-    The legacy log stream used to read only the in-process ``user_state``;
-    durable Worker jobs never write there, so this legacy endpoint streamed
-    nothing (and never signalled completion) for current tests.
-    """
+    """Return the owner's active durable job for log streaming, or None."""
     try:
         # foundation.cluster_port is the composition seam: importing
         # features.cluster from test_execution would create a static
@@ -314,9 +309,7 @@ async def stream_test_logs(request: Request):
                     yield "=== Test complete ===\n"
                     break
 
-                # The legacy fallback used to spin forever when a
-                # finished local run never produced logs; idle_timeout
-                # bounds the wait so consumers are not left hanging.
+                # Terminate the stream when the local run completes, even without logs.
                 if not running:
                     yield "=== Test complete ===\n"
                     break

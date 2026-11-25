@@ -18,7 +18,7 @@ var singleIssueStopRequested = {};
 // 已提交删除请求的 issue：防止轮询重绘期间重复点击/重复请求。
 var singleIssueDeleteRequested = {};
 var SINGLE_ISSUE_ANALYSIS_PAGE_SIZE = 8;
-// run 级终态（与 features/redmine/daily_brief_repository.py 的
+// run 级终态（与 features/redmine/daily_brief/repository.py 的
 // TERMINAL_RUN_STATUSES 同步）：终态 run 的 issue 行不再表示「仍在进行」。
 var ANALYSIS_TERMINAL_STATUSES = ['completed', 'partial', 'failed', 'cancelled'];
 var singleIssueAnalysisHint = '';
@@ -433,7 +433,7 @@ function openSingleIssueAnalysisTimeline(issueId) {
 // 时间线；run 到达终态后原地切换为最终报告/失败状态。只更新弹框 body 的
 // innerHTML，显示控制仍归 ModalManager 单一所有者；轮询循环以
 // getElementById 检测弹框被移除并自行退出（abort + 停止调度）。
-// 过程事件保留天数（与 features/redmine/daily_brief_analysis_events.py 的
+// 过程事件保留天数（与 features/redmine/daily_brief/analysis_events.py 的
 // ANALYSIS_EVENT_RETENTION_DAYS 同步）：终态 run 的完整时间线在该窗口内
 // 可回看，超期由 Worker 启动时清理，前端据此提示「过程已清理」。
 

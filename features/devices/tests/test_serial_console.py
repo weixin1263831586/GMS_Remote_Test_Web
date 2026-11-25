@@ -15,16 +15,16 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from features.devices import serial_console_api
-from features.devices.serial_console import (
+from features.devices.serial import api as serial_console_api
+from features.devices.serial.access import device_serial_availability, visible_ports
+from features.devices.serial.service import (
     SerialConsoleService,
     _port_display_key,
     _tty_natural_key,
     serial_port_identity,
     usb_bus_node,
 )
-from features.devices.serial_console_access import device_serial_availability, visible_ports
-from features.devices.serial_console_storage import BindingStore
+from features.devices.serial.storage import BindingStore
 
 
 class _FakeDevice:

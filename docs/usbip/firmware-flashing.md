@@ -138,13 +138,13 @@ resume watchdog + 按原物理路由 reconnect
 Windows 端无 CLI 烧写工具（RKDevTool 仅 GUI），且 SSH 会话启动的 GUI
 进程没有可见窗口（session 隔离，实测 MainWindowHandle=0），无法从
 Controller 直接自动化。因此采用「文件队列式 Source Agent」
-（`scripts/windows_source_agent.py`，交互桌面会话常驻，计划任务自启动，
+（`scripts/execution/windows_source_agent.py`，交互桌面会话常驻，计划任务自启动，
 可操作 RKDevTool GUI）：
 
 ```text
 Controller (Linux)                    Windows 源主机
 ---------------                       --------------
-1. SFTP 上传固件到        ------->    scripts/windows_source_agent.py
+1. SFTP 上传固件到        ------->    scripts/execution/windows_source_agent.py
    C:\gms-flash\<task>\              （桌面会话常驻，计划任务自启动，
 2. 投递 <task>.json 任务               可操作 RKDevTool GUI）
    到 %USERPROFILE%\gms-flash-queue

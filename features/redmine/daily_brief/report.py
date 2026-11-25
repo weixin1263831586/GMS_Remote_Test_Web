@@ -1,0 +1,560 @@
+"""Summary payload and Markdown rendering for a completed Daily Brief run.
+
+聚合三块「执行结果呈现」职责（原 daily_brief_report /
+daily_brief_execution_view / daily_brief_execution_statistics，单一消费方
+均为 service，按内聚原则并回一处）：run 汇总 + Markdown 渲染、UI 脱敏
+issue payload、AI 执行用量统计。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from typing import Any
+
+from ..users import _now
+from .models import DailyBriefIssue, DailyBriefRun
+from .repository import DailyBriefRepository
+
+
+DEFAULT_MODEL_LABEL = "kkagent 默认模型（未记录具体名称）"
+
+
+def human_review_count(issues: list[DailyBriefIssue]) -> int:
+    """Failed analyses need attention even though they have no final result."""
+    return sum(
+        issue.status == "failed" or (
+            issue.status == "completed" and bool((issue.result or {}).get("needs_human_review"))
+        )
+        for issue in issues
+    )
+
+
+def summarize_daily_brief(
+    repository: DailyBriefRepository,
+    run: DailyBriefRun,
+    snapshot_entries: dict[int, dict[str, Any]],
+) -> DailyBriefRun:
+    """Build and persist the aggregate report after per-issue analysis."""
+    issues = repository.list_issues(run.run_id)
+    completed = [item for item in issues if item.status == "completed"]
+    failed = [item for item in issues if item.status == "failed"]
+    counts = {
+        "total": len(issues),
+        "waiting_my_reply": run.waiting_my_reply_count,
+        "no_reply_3_days": run.no_reply_3_days_count,
+        "completed": len(completed),
+        "failed": len(failed),
+        "needs_human_review": human_review_count(issues),
+        # 执行完成不等于证据闭环；三个质量桶单独汇总，禁止 UI 用
+        # completed 数量冒充“已验证”数量。
+        "evidence_verified": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "verified"
+        ),
+        "evidence_partial": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "partial"
+        ),
+        "evidence_insufficient": sum(
+            1 for item in completed
+            if (item.result or {}).get("evidence_quality") == "insufficient"
+        ),
+    }
+    top = [
+        {
+            "issue_id": item.issue_id,
+            "priority": item.priority,
+            "subject": (
+                (snapshot_entries.get(item.issue_id) or {}).get("subject")
+                or item.subject
+            ),
+            "problem_summary": (item.result or {}).get("problem_summary", ""),
+            "confidence": (item.result or {}).get("confidence"),
+        }
+        for item in sorted(completed, key=lambda value: -value.priority_score)[:5]
+    ]
+    run.report_json = {
+        "brief_date": run.brief_date,
+        "generated_at": _now(),
+        "counts": counts,
+        "top_priorities": top,
+        "snapshot_hash": run.snapshot_hash,
+        "source_sync_status": run.source_sync_status,
+        # 数据质量与执行状态是两个维度：execution status（本 run 的
+        # status 字段）描述 AI 分析；data_quality 描述输入数据可信度。
+        "data_quality": run.data_quality,
+        "last_sync_at": run.last_sync_at,
+        "analysis_backend": run.analysis_backend,
+        "model": run.model_name,
+    }
+    run.report_markdown = render_daily_brief_markdown(run, completed, failed)
+    if failed and not completed:
+        run.status = "failed"
+        run.error = f"{len(failed)} issue analyses failed"
+    elif failed or len(completed) < len(issues):
+        run.status = "partial"
+        run.error = "" if completed else "all issue analyses failed"
+    else:
+        run.status = "completed"
+        run.error = ""
+    run.finished_at = _now()
+    repository.update_run(run)
+    return run
+
+
+def render_daily_brief_markdown(
+    run: DailyBriefRun,
+    completed: list[DailyBriefIssue],
+    failed: list[DailyBriefIssue],
+) -> str:
+    """Render the persisted human-readable Daily Brief report."""
+    lines = [f"# Redmine 每日晨报 {run.brief_date}", ""]
+    counts = run.report_json.get("counts", {})
+    lines.append(
+        f"共 {counts.get('total', 0)} 个待处理（待回复 "
+        f"{counts.get('waiting_my_reply', 0)} / 超 "
+        f"3 天未回复 "
+        f"{counts.get('no_reply_3_days', 0)}），成功分析 "
+        f"{counts.get('completed', 0)}，失败 {counts.get('failed', 0)}。"
+    )
+    if run.source_sync_status in ("sync_failed", "skipped"):
+        lines.append(
+            f"> 注意：快照源同步状态为 {run.source_sync_status}，"
+            "本报告基于本地镜像（数据可能落后于 Redmine）。"
+        )
+    elif run.data_quality == "stale":
+        lines.append(
+            "> 注意：本地数据已超过 24 小时未更新（data_quality=stale），"
+            "结论可能基于过期信息。"
+        )
+    lines.append("")
+    for issue in sorted(completed, key=lambda item: (-item.priority_score, item.issue_id)):
+        result = issue.result or {}
+        lines.append(
+            f"## {issue.priority} #{issue.issue_id} "
+            f"{result.get('problem_summary', '')}"
+        )
+        # native 深度诊断（kkagent_markdown）没有 triage schema 的
+        # customer_request/suggested_solution 字段；按 schema 取值会渲染出
+        # 空行和误导性的"置信度：None"（#653167 复盘）。native 格式只输出
+        # 模式说明 + 详细分析指引。
+        native_summary = result.get("result_format") == "kkagent_markdown"
+        if not native_summary:
+            lines.append(f"- 客户诉求：{result.get('customer_request', '')}")
+            lines.append(f"- 当前阻塞：{result.get('current_blocker') or '未确认'}")
+            lines.append(f"- 建议：{result.get('suggested_solution', '')}")
+        else:
+            lines.append("- 模式：kkagent 深度诊断（无结构化摘要字段）")
+        detailed = str(result.get("detailed_report") or "").strip()
+        if detailed:
+            lines.append("- 详细分析：请在工单详情中查看。")
+        similar = result.get("similar_issues") or []
+        if similar:
+            refs = "；".join(
+                f"#{item.get('issue_id')}（{item.get('similarity', 'related')}）"
+                + (
+                    f"：{item.get('reusable_fix')}"
+                    if item.get("reusable_fix")
+                    else ""
+                )
+                for item in similar
+            )
+            lines.append(f"- 相似工单：{refs}")
+        elif not result.get("history_checked"):
+            lines.append("- 相似工单：未检索（历史库不可用或未执行）")
+        confidence = result.get("confidence")
+        review = "（需人工确认）" if result.get("needs_human_review") else ""
+        if native_summary and confidence is None:
+            lines.append("- 置信度：未提供（见详细分析）")
+        else:
+            label = "规则置信等级（非准确率）" if result.get("confidence_source") == "controller_evidence_gate" or native_summary else "置信度"
+            lines.append(f"- {label}：{confidence}{review}")
+        lines.append("")
+    if failed:
+        lines.append("## 分析失败")
+        lines.extend(f"- #{issue.issue_id}: {issue.error}" for issue in failed)
+    return "\n".join(lines)
+
+
+def _number(value: Any) -> int:
+    try:
+        return max(0, int(value or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+# 轮询/等待类工具按设计就要同参数反复调用（等任务终态），同参重复不算浪费。
+_POLLING_TOOL_MARKERS = ("status", "wait")
+
+
+def _tool_call_signature(tool: dict[str, Any]) -> str:
+    """调用参数指纹（sha256，不落原文）：同单同参 = 真重复调用。
+
+    旧启发式按纯调用次数报警，会把提示词强制的多次**不同参数**取证
+    （如 history_search 的初查 + 补充检索、sdk_read 的多个源码窗口）
+    误报成重复。这里只对参数指纹完全一致的调用计重复；没有参数记录
+    （旧轨迹）无法判定，一律不算。
+    """
+    tool_input = tool.get("tool_input")
+    if not isinstance(tool_input, dict) or not tool_input:
+        return ""
+    try:
+        encoded = json.dumps(
+            tool_input, ensure_ascii=False, sort_keys=True, default=str
+        )
+    except (TypeError, ValueError):
+        return ""
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def summarize_execution_statistics(
+    executions: list[dict[str, Any]],
+    *,
+    fallback_model: str = "",
+) -> dict[str, Any]:
+    """Summarize persisted trace metadata without exposing tool inputs/output.
+
+    ``tool_input`` 只用于计算同参重复指纹，不进入任何返回值。
+    """
+    fallback = str(fallback_model or "").strip() or DEFAULT_MODEL_LABEL
+    tokens = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 0,
+    }
+    timing = {
+        "total_duration_ms": 0,
+        "average_duration_ms": 0,
+        "measured_execution_count": 0,
+    }
+    models: dict[str, dict[str, Any]] = {}
+    tools: dict[str, dict[str, Any]] = {}
+    issue_ids: set[int] = set()
+
+    for execution in executions:
+        if not isinstance(execution, dict):
+            continue
+        issue_id = _number(execution.get("issue_id"))
+        if issue_id:
+            issue_ids.add(issue_id)
+        model_name = str(execution.get("model_name") or fallback).strip() or fallback
+        model = models.setdefault(model_name, {
+            "model_name": model_name,
+            "execution_count": 0,
+            "issue_ids": set(),
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_creation_tokens": 0,
+        })
+        model["execution_count"] += 1
+        if issue_id:
+            model["issue_ids"].add(issue_id)
+
+        duration_keys = ("wall_duration_ms", "duration_ms")
+        if any(key in execution for key in duration_keys):
+            timing["measured_execution_count"] += 1
+            timing["total_duration_ms"] += _number(
+                execution.get("wall_duration_ms") or execution.get("duration_ms")
+            )
+
+        for key in (
+            "input_tokens", "output_tokens", "cache_read_tokens",
+            "cache_creation_tokens",
+        ):
+            value = _number(execution.get(key))
+            tokens[key] += value
+            model[key] += value
+
+        for tool in execution.get("tools") or []:
+            if not isinstance(tool, dict):
+                continue
+            # Controller 侧预检探针（tool_call_id 带 preflight: 前缀）不是
+            # agent 的真实调用，不计入工具用量统计。
+            if str(tool.get("tool_call_id") or "").startswith("preflight:"):
+                continue
+            # kkagent 子进程记录的 MCP 工具名是 mcp__<server>__<tool> 形式
+            # （如 mcp__gms__gms_rt_redmine_issue_fetch）；归一到 CLI 工具名
+            # 后再匹配，否则真实调用会被整体漏计，只剩预检探针的计数。
+            tool_name = str(tool.get("tool_name") or "").strip()
+            if tool_name.startswith("mcp__"):
+                parts = tool_name.split("__", 2)
+                tool_name = parts[2] if len(parts) == 3 else tool_name
+            if not tool_name.startswith("gms_rt_"):
+                continue
+            row = tools.setdefault(tool_name, {
+                "tool_name": tool_name,
+                "call_count": 0,
+                "succeeded_count": 0,
+                "failed_count": 0,
+                "pending_count": 0,
+                "issue_ids": set(),
+                "arg_signatures": set(),
+                "duplicate_call_count": 0,
+            })
+            row["call_count"] += 1
+            if issue_id:
+                row["issue_ids"].add(issue_id)
+            # 重复判定按 (单号, 参数指纹) 作用域：每个单号的分析是独立
+            # 会话、各自完成必做取证，跨单号同参不判重复。
+            signature = _tool_call_signature(tool)
+            if signature:
+                scope_key = (issue_id or 0, signature)
+                if scope_key in row["arg_signatures"]:
+                    row["duplicate_call_count"] += 1
+                else:
+                    row["arg_signatures"].add(scope_key)
+            status = str(tool.get("status") or "").lower()
+            if status == "succeeded" or (
+                not status and not tool.get("is_error")
+                and bool(tool.get("output_sha256"))
+            ):
+                row["succeeded_count"] += 1
+            elif status == "failed" or tool.get("is_error"):
+                row["failed_count"] += 1
+            else:
+                row["pending_count"] += 1
+
+    tokens["total_tokens"] = tokens["input_tokens"] + tokens["output_tokens"]
+    if timing["measured_execution_count"]:
+        timing["average_duration_ms"] = round(
+            timing["total_duration_ms"] / timing["measured_execution_count"]
+        )
+    model_rows = []
+    for model in models.values():
+        row = {key: value for key, value in model.items() if key != "issue_ids"}
+        row["issue_count"] = len(model["issue_ids"])
+        row["total_tokens"] = row["input_tokens"] + row["output_tokens"]
+        model_rows.append(row)
+    model_rows.sort(key=lambda row: (-row["execution_count"], row["model_name"]))
+
+    tool_rows = []
+    recommendations = []
+    for tool in tools.values():
+        row = {
+            key: value for key, value in tool.items()
+            if key not in ("issue_ids", "arg_signatures")
+        }
+        row["issue_count"] = len(tool["issue_ids"])
+        row["failure_rate"] = (
+            round(row["failed_count"] / row["call_count"], 4)
+            if row["call_count"] else 0
+        )
+        tool_rows.append(row)
+        if row["failed_count"]:
+            recommendations.append({
+                "tool_name": row["tool_name"],
+                "kind": "reliability",
+                "message": (
+                    f"{row['failed_count']}/{row['call_count']} 次调用失败；"
+                    "优先补充失败码、参数校验和重试指引。"
+                ),
+            })
+        elif (
+            row["duplicate_call_count"] >= 2
+            and not any(marker in row["tool_name"] for marker in _POLLING_TOOL_MARKERS)
+        ):
+            recommendations.append({
+                "tool_name": row["tool_name"],
+                "kind": "efficiency",
+                "duplicate_call_count": row["duplicate_call_count"],
+                "message": (
+                    f"覆盖 {row['issue_count']} 个单号调用 {row['call_count']} 次，"
+                    f"其中 {row['duplicate_call_count']} 次为同参数重复；"
+                    "评估结果缓存或提示词去重。"
+                ),
+            })
+    tool_rows.sort(key=lambda row: (-row["call_count"], row["tool_name"]))
+    recommendations.sort(key=lambda row: (row["kind"] != "reliability", row["tool_name"]))
+
+    return {
+        "execution_count": len(executions),
+        "issue_count": len(issue_ids),
+        "tokens": tokens,
+        "timing": timing,
+        "models": model_rows,
+        "gms_tool_call_count": sum(row["call_count"] for row in tool_rows),
+        "gms_tools": tool_rows,
+        "tool_improvement_recommendations": recommendations[:8],
+    }
+
+
+def _tool_succeeded(tools: list[Any], name_fragment: str) -> bool:
+    """Accept current traces and the previous persisted trace shape."""
+    for tool in tools:
+        if not isinstance(tool, dict):
+            continue
+        name = str(tool.get("tool_name") or "")
+        has_result = tool.get("status") == "succeeded" or (
+            not tool.get("status")
+            and not tool.get("is_error")
+            and bool(tool.get("output_sha256"))
+        )
+        if has_result and name_fragment in name:
+            return True
+    return False
+
+
+def _tool_status(tools: list[Any], name_fragment: str) -> str:
+    """Return a presentation-safe evidence state from the latest trace."""
+    matched = [
+        tool for tool in tools
+        if isinstance(tool, dict) and name_fragment in str(tool.get("tool_name") or "")
+    ]
+    if not matched:
+        return "not_collected"
+    if any(_tool_succeeded([tool], name_fragment) for tool in matched):
+        return "succeeded"
+    failure_kinds = {
+        str(tool.get("failure_kind") or "") for tool in matched
+        if str(tool.get("failure_kind") or "")
+    }
+    for status in ("service_unavailable", "invalid_request", "device_unavailable"):
+        if status in failure_kinds:
+            return status
+    if any(str(tool.get("status") or "").lower() == "failed" for tool in matched):
+        return "unavailable"
+    return "collecting"
+
+
+def issue_payload(
+    issue: DailyBriefIssue,
+    execution: dict[str, Any] | None = None,
+    execution_statistics: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the browser payload without raw model or tool output."""
+    payload = issue.to_row()
+    payload.pop("raw_response", None)
+    if execution_statistics:
+        payload["ai_statistics"] = execution_statistics
+    # DiagnosisReadModel：canonical 诊断读模型，供
+    # CLI/MCP/Assistant 与 Web 按同一种形状消费；Web 的完整展示字段
+    # （suggested_reply_* 等）仍在原生 result 里。
+    try:
+        from ..diagnosis_read_model import read_model_from_issue_result
+
+        read_model = read_model_from_issue_result(
+            issue.result, issue_id=issue.issue_id,
+            subject=issue.subject, execution=execution,
+        )
+        if read_model is not None:
+            payload["read_model"] = read_model
+    except Exception:
+        # 投影是纯增量展示能力，任何异常都不影响既有 payload 返回。
+        pass
+    if not execution:
+        return payload
+
+    tools = execution.get("tools") or []
+    gate = (issue.result or {}).get("evidence_gate") or {}
+    # Failed attempts have no accepted report/result, but their real tool trace
+    # still proves which evidence was fetched and where the gap occurred.
+    # Reconstruct a *diagnostic* observation from the stored, already bounded
+    # metadata. Do not promote this observation to an accepted evidence gate.
+    attempted_gate: dict[str, Any] = {}
+    observed_source_count = 0
+    observed_reproducible_count = 0
+    if isinstance(execution.get("tools"), list):
+        try:
+            from ..analysis.kkagent.evidence_gate import evaluate_evidence_gate
+            from ..analysis.kkagent.trace import trace_from_summary
+
+            observed = trace_from_summary(execution)
+            observed_source_count = observed.source_evidence_tool_count
+            observed_reproducible_count = observed.reproducible_source_evidence_count
+            if not execution.get("final_ok"):
+                raw_gate = evaluate_evidence_gate(
+                    observed, {"issue_id": issue.issue_id, "subject": issue.subject,
+                               "analysis_mode": "diagnostic"},
+                )
+                attempted_gate = {
+                    key: raw_gate.get(key)
+                    for key in (
+                        "issue_fetched", "journals_checked", "attachments_checked",
+                        "history_checked", "distinct_history_search_count",
+                        "source_evidence_tool_count", "relevant_source_evidence_count",
+                        "reproducible_source_evidence_count", "listed_attachment_count",
+                        "unread_text_artifact_ids", "window_read_only_artifact_ids",
+                    )
+                }
+                # Without an observed attachment manifest, snapshot count is
+                # unknown in a failed attempt. Never turn "zero observed" into
+                # an affirmative claim that all attachments were checked.
+                if not raw_gate.get("attachments_listed"):
+                    attempted_gate["attachments_checked"] = None
+                # Never leak file names/artifact IDs through this compact view.
+                for key in ("unread_text_artifact_ids", "window_read_only_artifact_ids"):
+                    attempted_gate[key + "_count"] = len(attempted_gate.pop(key) or [])
+        except (ValueError, TypeError, AttributeError, KeyError):
+            # Legacy traces can be sparse. Keep the failure stage and tool
+            # counters visible rather than failing the entire UI response.
+            pass
+    failure_stage = str(
+        execution.get("failure_stage") or execution.get("error_type") or ""
+    )
+    final_ok = bool(execution.get("final_ok"))
+    schema_status = (
+        "failed"
+        if failure_stage == "schema_mismatch"
+        else "passed"
+        if final_ok or failure_stage == "evidence_gate_failed"
+        else "unknown"
+    )
+    payload["ai_execution"] = {
+        "session_id": execution.get("session_id") or "",
+        "status": execution.get("status") or "",
+        "failure_stage": failure_stage,
+        "failure_message": execution.get("failure_message") or "",
+        "schema_status": schema_status,
+        "issue_fetched": _tool_succeeded(tools, "redmine_issue_fetch"),
+        "device_evidence_status": (
+            # 终态失败的 execution 里残留 pending 取证 trace 只说明进程在
+            # 取证完成前死亡；"collecting" 仅对仍在运行的 run 有意义，
+            # 否则 UI 会把已结束的 run 永久标成"实机取证中"。
+            "unavailable"
+            if (_tool_status(tools, "gms_rt_devices_snapshot") == "collecting" and not final_ok)
+            else _tool_status(tools, "gms_rt_devices_snapshot")
+        ),
+        "journals_checked": _tool_succeeded(tools, "redmine_journals"),
+        "attachments_checked": (gate or attempted_gate).get("attachments_checked") is True,
+        # A successful sdk_search with zero hits or apk_resolve/analyze is NOT
+        # source-level evidence. Use evidence-bearing calls, not tool names.
+        "source_evidence_checked": (
+            int((gate or attempted_gate).get("relevant_source_evidence_count") or 0) > 0
+            if (gate or attempted_gate) else observed_source_count > 0
+        ),
+        "source_evidence_tool_count": observed_source_count or int(
+            execution.get("source_evidence_tool_count") or 0
+        ),
+        "reproducible_source_evidence_count": observed_reproducible_count,
+        "history_search_count": int(execution.get("history_search_count") or 0),
+        "distinct_history_search_count": int(
+            execution.get("distinct_history_search_count") or 0
+        ),
+        "tool_call_count": int(execution.get("tool_call_count") or 0),
+        "repair_attempts": int(execution.get("repair_attempts") or 0),
+        "duration_ms": int(
+            execution.get("wall_duration_ms")
+            or execution.get("duration_ms")
+            or 0
+        ),
+        "input_tokens": int(execution.get("input_tokens") or 0),
+        "output_tokens": int(execution.get("output_tokens") or 0),
+        "recorded_at": execution.get("recorded_at") or "",
+        "failed_attempt_evidence": attempted_gate,
+        "review_findings_count": len(execution.get("analysis_review_findings") or [])
+        if isinstance(execution.get("analysis_review_findings"), list) else 0,
+    }
+    return payload
+
+
+__all__ = [
+    "DEFAULT_MODEL_LABEL",
+    "issue_payload",
+    "render_daily_brief_markdown",
+    "summarize_daily_brief",
+    "summarize_execution_statistics",
+]

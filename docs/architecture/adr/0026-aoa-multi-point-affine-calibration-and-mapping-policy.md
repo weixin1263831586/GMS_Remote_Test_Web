@@ -69,5 +69,5 @@ Controller、Worker、契约快照同步更新；旧 Profile 不改坐标，新�
 - [Android 兼容性：多显示器输入路由](https://source.android.com/docs/core/interaction/input/touch-devices)
 - [ATS User Builds（官方 AOA 恢复定位）](https://source.android.com/docs/core/tests/development/android-test-station/ats-user-builds)
 - [标定引擎](../../../foundation/aoa_calibration.py)
-- [标定持久化](../../../features/devices/aoa_calibrations.py)
-- [多点探针采集](../../../worker_agent/aoa_actions.py)
+- [标定持久化](../../../features/devices/aoa/calibrations.py)
+- [多点探针采集](../../../worker/aoa_actions.py)

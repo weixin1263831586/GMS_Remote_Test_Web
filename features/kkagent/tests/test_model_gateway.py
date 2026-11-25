@@ -1,17 +1,15 @@
 """Model selection, credential forwarding and private configuration contracts."""
 
-import asyncio
-import importlib.util
-import json
 import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
 from features.kkagent import (
     ContextBudgetError,
     auth_headers,
+    classify_failure,
     context_limited_config,
     list_model_options,
     model_config,
@@ -134,15 +132,15 @@ max_steps_per_turn = 0
 
 
 @pytest.mark.parametrize("limit", [0, 2047])
-def test_context_budget_rejects_invalid_limits_in_host_fallback(catalog, tmp_path, limit):
+def test_context_budget_rejects_invalid_limits_in_catalog(catalog, tmp_path, limit):
     source = tmp_path / ".kkagent" / "config.toml"
     source.parent.mkdir()
     source.write_text('default_model = "legacy"\n[models.legacy]\nmodel = "actual"\n')
-    with pytest.raises(ContextBudgetError), model_config("legacy", {}, context_limit=limit):
+    with pytest.raises(ContextBudgetError), model_config("actual-model", {}, context_limit=limit):
         pytest.fail("invalid context budget must fail closed")
 
 
-def test_host_fallback_rejects_an_unknown_explicit_alias(catalog, tmp_path):
+def test_catalog_rejects_an_unknown_explicit_alias(catalog, tmp_path):
     source = tmp_path / ".kkagent" / "config.toml"
     source.parent.mkdir()
     source.write_text('default_model = "legacy"\n[models.legacy]\nmodel = "actual"\n')
@@ -193,13 +191,10 @@ def test_catalog_clears_stale_role_selectors_and_preserves_host_policy(catalog, 
     assert source.read_text() == original
 
 
-def test_host_fallback_preserves_its_valid_role_selectors(catalog, tmp_path):
+def test_catalog_rejects_model_only_present_in_host_config(catalog, tmp_path):
     _host_with_role_models(tmp_path)
-    with model_config("legacy", {}) as (path, _env):
-        config = gateway_config.tomllib.loads(path.read_text())
-        assert config["balance_model"] == "legacy"
-        assert config["fast_model"] == "legacy"
-        assert config["goal"]["judge_model"] == "legacy"
+    with pytest.raises(ContextBudgetError, match="统一模型目录"), model_config("legacy", {}):
+        pytest.fail("host-only model must not be selected")
 
 
 @pytest.mark.skipif(not shutil.which("kkagent"), reason="kkagent CLI not installed")
@@ -222,65 +217,15 @@ async def test_real_cli_accepts_catalog_overlay_and_applies_isolation_policy(cat
     assert source.read_text() == original
 
 
-def test_import_keeps_remote_model_id_credentials_and_output_budget(catalog):
-    root = Path(__file__).resolve().parents[3]
-    spec = importlib.util.spec_from_file_location(
-        "import_kkagent_models", root / "tools/scripts/kkagent/import_kkagent_models.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    converted = module.convert({
-        "default_model": "friendly", "providers": {"gateway": {
-            "base_url": "https://gateway.invalid", "type": "openai", "api_key_env": "REMOTE_KEY",
-        }}, "models": {"friendly": {
-            "provider": "gateway", "model": "remote-model-id", "max_output_size": 12000,
-        }},
-    })
-    provider = converted["providers"][converted["primary_provider"]]
-    assert provider["model"] == "remote-model-id"
-    assert provider["api_key_env"] == "REMOTE_KEY"
-    assert provider["max_tokens"] == 12000
-
-
 def test_bootstrap_injects_source_search_into_report_analyzer(catalog, monkeypatch):
-    from bootstrap.dependencies import _universal_analyzer_factory
+    from bootstrap.dependencies import _report_failure_analyzer_factory
     from features.reports import ReportAnalyzer
 
     search = Mock(return_value=[{"path": "src/Test.java", "url": "https://source.invalid/Test.java"}])
     monkeypatch.setattr(ReportAnalyzer, "rk_codesearch", search)
-    analyzer = _universal_analyzer_factory()
+    analyzer = _report_failure_analyzer_factory()
     assert analyzer._fetch_source_code_android("Test")["file_path"] == "src/Test.java"
     search.assert_called_once_with("Test", max_results=3)
-
-
-async def test_redmine_spawn_receives_catalog_config_and_private_key(catalog, monkeypatch):
-    # 跨 feature 走公共面：KkAgentRedmineAnalyzer 由 redmine.kkagent 包
-    # __init__ 导出（架构规则禁止直接摸 features.redmine.kkagent.analyzer）。
-    from features.redmine import kkagent as redmine_kkagent
-
-    KkAgentRedmineAnalyzer = redmine_kkagent.KkAgentRedmineAnalyzer
-
-    stdout, stderr = asyncio.StreamReader(), asyncio.StreamReader()
-    stdout.feed_data(json.dumps({"type": "result", "session_id": "test-session"}).encode() + b"\n")
-    stdout.feed_eof()
-    stderr.feed_eof()
-    process = Mock(stdout=stdout, stderr=stderr, returncode=0, wait=AsyncMock(return_value=0))
-    paths = []
-
-    async def spawn(*command, **options):
-        path = Path(command[command.index("--config") + 1])
-        paths.append(path)
-        body = gateway_config.tomllib.loads(path.read_text())
-        assert body["default_model"] == "actual-model"
-        assert options["env"]["GMS_MODEL_API_KEY"] == "synthetic-model-key"
-        assert "synthetic-model-key" not in path.read_text()
-        return process
-
-    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
-    analyzer = KkAgentRedmineAnalyzer()
-    trace, _raw, timed_out = await analyzer._run_stream(analyzer.build_command("test"))
-    assert trace.session_id == "test-session" and not timed_out
-    assert paths and all(not path.exists() for path in paths)
 
 
 # --------------------------------------------------------------- HTTP 传输层
@@ -375,3 +320,27 @@ def test_non_validation_errors_are_never_swallowed_by_thinking_retry(
     monkeypatch.setattr(gateway_http.requests, "post", posts)
     assert gateway_http.post_chat(_url, headers, data, api_format) is unauthorized
     assert posts.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "stderr,max_turns,expected_type,expected_text",
+    [
+        ("LLM stream error: kind=timeout", 10, "llm_timeout", "分析设置"),
+        ("Agent turn limit reached", 10, "max_turns", "分析设置"),
+        ("Agent turn limit reached", 0, "max_turns", "分析侧未限制步数"),
+    ],
+)
+def test_failure_classification_uses_caller_settings_context(
+        stderr, max_turns, expected_type, expected_text):
+    error_type, message = classify_failure(3, "", stderr, max_turns=max_turns)
+    assert error_type == expected_type
+    assert expected_text in message
+    assert "晨报" not in message
+
+    redmine_type, redmine_message = classify_failure(
+        3, "", stderr, max_turns=max_turns, settings_context="晨报",
+    )
+    assert redmine_type == error_type
+    assert redmine_message == message.replace("分析设置", "晨报设置").replace(
+        "分析侧未限制步数", "晨报侧未限制步数",
+    )

@@ -88,7 +88,7 @@ jobs:
             "pytest==9.1.1" "requests==2.34.2"
       - name: Verify concurrent sync exclusions across runner processes
         run: |
-          "$GMS_TEST_PYTHON" -m pytest -q --confcutdir=tests tests/test_process_sync_guard.py tests/test_soak_host_config.py
+          "$GMS_TEST_PYTHON" -m pytest -q --confcutdir=tests tests/unit/test_process_sync_guard.py tests/test_soak_host_config.py
       - name: Observe local ADB devices if this runner hosts ADB
         shell: bash
         run: |

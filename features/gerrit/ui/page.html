@@ -161,7 +161,9 @@
 <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
-<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action">
+<link rel="stylesheet" href="/static/css/form-controls.css?v=20261125-unified-password-control">
+<script src="/static/js/password-controls.js?v=20261125-unified-password-control" defer></script>
 <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261120-type-size-dedup-v1">
 <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261120-type-size-dedup-v1">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-type-size-dedup-v1">
@@ -225,7 +227,7 @@
       <div class="form-grid">
         <div class="field full tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span><label for="settingBaseUrl">REST 地址</label><input id="settingBaseUrl" placeholder="从 config.json 读取"></div>
         <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span><label for="settingRestUser">REST 用户名</label><input id="settingRestUser" placeholder="Gerrit 用户名"></div>
-        <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span><label for="settingRestPass">REST HTTP Password</label><input id="settingRestPass" type="password" placeholder="留空则保留原密码"></div>
+        <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span><label for="settingRestPass">REST HTTP Password</label><span class="password-input-wrap"><input id="settingRestPass" type="password" placeholder="留空则保留原密码"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="settingRestPass" aria-label="显示密码" title="显示密码"></button></span></div>
         <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span><label for="settingSshHost">SSH Host</label><input id="settingSshHost" placeholder="从 config.json 读取"></div>
         <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span><label for="settingSshUser">SSH User</label><input id="settingSshUser" placeholder="SSH 用户名"></div>
         <div class="field tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span><label for="settingSshPort">SSH Port</label><input id="settingSshPort" type="number" placeholder="29418"></div>

@@ -15,6 +15,7 @@ from features.auth import (
     require_human_principal_when_auth_required,
 )
 from features.devices import DeviceSSHConnection
+from features.system.host.ssh import SSHD_INSTALL_GUIDE, ssh_manager
 from features.system.models import VPNConnectRequest
 from features.system.network import (
     _extract_network,
@@ -30,7 +31,6 @@ from features.system.network import (
     parse_vpn_connection_names,
     resolve_vpn_connection_name,
 )
-from features.system.ssh import SSHD_INSTALL_GUIDE, ssh_manager
 from features.users import (
     get_client_display_id_from_request,
     get_client_id_from_request,
@@ -537,7 +537,7 @@ async def connect_vpn(
                     detail = (
                         f'NetworkManager 未授权后台服务用户 {service_user} 控制连接；'
                         '请在测试主机执行：sudo bash '
-                        'scripts/install_networkmanager_policy.sh '
+                        'scripts/deployment/install_networkmanager_policy.sh '
                         f'{service_user} gms-web-app'
                     )
                 elif connect_result.ok:

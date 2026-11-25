@@ -22,7 +22,7 @@ def find_repo_root(start: Path | None = None) -> Path:
     """Walk upwards from *start* until the GMS_Remote_Test_Web root is found.
 
     The root is identified by its structural markers (``pyproject.toml`` plus
-    the ``features``/``worker_agent`` source trees), never by a fixed number
+    the ``features``/``worker`` source trees), never by a fixed number
     of parent hops, so moving a script between ``tools/scripts/<category>/``
     directories cannot break it.
 
@@ -36,7 +36,7 @@ def find_repo_root(start: Path | None = None) -> Path:
         if (
             (candidate / "pyproject.toml").is_file()
             and (candidate / "features").is_dir()
-            and (candidate / "worker_agent").is_dir()
+            and (candidate / "worker").is_dir()
         ):
             return candidate
     raise RuntimeError("GMS_Remote_Test_Web repository root not found")

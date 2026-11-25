@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from features.devices.physical_identity import resolve_physical_device_identity
-from features.devices.usbip_identity import (
+from features.devices.usbip.identity import (
     parse_usbipd_state,
     query_usbipd_busid_instance_ids,
     query_windows_usb_identities,

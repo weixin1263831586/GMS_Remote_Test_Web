@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from features.cluster.device_actions_api import _wait_for_command
+from features.cluster.device_operations.api import _wait_for_command
 
 
 def _failed_repository(result: dict, error: str):

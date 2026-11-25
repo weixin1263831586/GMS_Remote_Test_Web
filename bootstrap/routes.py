@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from fastapi import FastAPI
 
+from bootstrap.dependencies import _report_failure_analyzer_factory
 from bootstrap.dependencies import _universal_analyzer_factory as get_universal_analyzer
 from features import knowledge
+from features.apk import api as apk
+from features.apk.runtime import configure_runtime as configure_apk_runtime
+from features.apk.service import (
+    cleanup_files,
+    create_apk_task,
+    normalize_apk_filename,
+    safe_join,
+)
 from features.assistant import api as assistant
 from features.assistant import config_api as assistant_config
 from features.auth import router as auth_router
@@ -18,67 +27,64 @@ from features.build.repository import BuildStore
 from features.build.service import BuildService
 from features.cluster import api as cluster
 from features.cluster import get_cluster_service
+from features.cluster.jobs.cluster_test_execution import start_cluster_test
 from features.devices import api as devices
-from features.devices import config_explorer_api as device_config_explorer
-from features.devices import config_override_api as device_config_override
 from features.devices import integrations_api as device_integrations
-from features.devices import serial_console_api as device_serial_console
-from features.devices.dependencies import configure_device_dependencies
+from features.devices.configuration import config_explorer_api as device_config_explorer
+from features.devices.configuration import config_override_api as device_config_override
+from features.devices.runtime import configure_device_dependencies
+from features.devices.serial import api as device_serial_console
 from features.devices.support import get_or_create_user_state
 from features.email import api as email
 from features.firmware import api as firmware
-from features.firmware.apk import (
-    cleanup_files,
-    create_apk_task,
-    normalize_apk_filename,
-    safe_join,
+from features.firmware.api_helpers import (
+    lock_firmware_devices,
+    release_firmware_devices,
 )
 from features.firmware.runtime import configure_runtime
 from features.gerrit import api as gerrit_dashboard
+from features.gerrit.config import config_manager as gerrit_config_manager
 from features.gerrit.service import query_gerrit_dual_mode
-from features.gerrit.settings import config_manager as gerrit_config_manager
+from features.gms import api as gms_update_center
+from features.gms.radar import router as gms_update_radar_router
 from features.knowledge.service import set_ask_analyzer_factory
 from features.ops import api as ops
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
-from features.redmine import daily_brief_api as redmine_daily_brief
-from features.redmine import evidence_api as redmine_evidence
-from features.redmine import evidence_search_api as redmine_evidence_search
-from features.redmine import reply_api as redmine_reply
 from features.redmine import users_api as redmine_users_api
 from features.redmine.api import configure_redmine_service
+from features.redmine.daily_brief import api as redmine_daily_brief
 from features.redmine.dashboard import (
     denormalize_redmine_dashboard_config,
     normalize_redmine_dashboard_profiles,
     normalize_redmine_stats_config,
 )
+from features.redmine.evidence import api as redmine_evidence
+from features.redmine.evidence import search_api as redmine_evidence_search
+from features.redmine.reply import api as redmine_reply
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
+from features.sdk import source_api as system_sources
+from features.sdk import source_manage_api as system_source_manage
 from features.system import api as system
-from features.system import assets, audit, desktop, health_api, integrations
-from features.system import notifications_api as notifications
-from features.system import source_api as system_sources
-from features.system import source_manage_api as system_source_manage
-from features.system import terminal_api as terminal
+from features.system import assets, audit, health, integrations, notifications
 from features.system.api import init_templates
 from features.system.api_help import generate_help_or_continue
-from features.system.mainline_issues import api as mainline_known_issues
+from features.system.host import desktop
+from features.system.host.ssh import ssh_async_manager, ssh_manager
+from features.system.host.terminal import api as terminal
 from features.system.notifications import safe_websocket_send, store_notification
-from features.system.ssh import ssh_manager
-from features.system.ssh_async import ssh_async_manager
 from features.system.state import global_state
-from features.system.update_monitor import api as gms_update_monitor
-from features.system.update_radar import router as gms_update_radar_router
 from features.test_execution import api as tests
 from features.test_execution.api import (
     make_empty_suite_target,
     resolve_suite_diagnosis_target,
 )
-from features.test_execution.dependencies import (
+from features.test_execution.runtime import (
     configure_test_execution_dependencies,
 )
-from features.test_execution.suite_task_store import SuiteTaskStore
+from features.test_execution.suite_tasks import SuiteTaskStore
 from features.users import api as users
 from features.users import (
     client_manager,
@@ -106,11 +112,6 @@ from foundation.config import (
 )
 from foundation.files import FileUtils
 from foundation.processes import run_local_shell_command
-from workflows.cluster_test_execution import start_cluster_test
-from workflows.firmware_device import (
-    lock_firmware_devices,
-    release_firmware_devices,
-)
 
 
 # 解耦 seam（test_feature_dependency_cycles）：knowledge.ask() 需要 assistant
@@ -138,14 +139,13 @@ ALL_ROUTERS = [
     device_serial_console.page_router,
     email.router,
     firmware.router,
+    apk.router,
     gerrit_dashboard.router,
     gerrit_dashboard.page_router,
-    gms_update_monitor.router,
-    gms_update_monitor.page_router,
+    gms_update_center.router,
     gms_update_radar_router,
-    health_api.router,
+    health.router,
     integrations.router,
-    mainline_known_issues.router,
     notifications.router,
     ops.router,
     knowledge.router,
@@ -158,7 +158,6 @@ ALL_ROUTERS = [
     redmine_daily_brief.router,
     redmine_credentials.router,
     redmine_apk_import.router,
-    redmine_apk_import.apk_router,
     redmine_reply.router,
     reports.router,
     system.router,
@@ -207,7 +206,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         # SDK 源码 provider：provider 列表只来自部署
         # 配置；result_id 签名密钥从 master secret 派生，重启后仍可验证。
         # 初始化收敛到 initialize_source_runtime（Worker/CLI 同源）。
-        from features.system.source_provider import initialize_source_runtime
+        from features.sdk import initialize_source_runtime
 
         initialize_source_runtime(config_manager.load_config())
         configure_runtime(
@@ -219,18 +218,22 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             generate_help_or_continue=generate_help_or_continue,
             get_client_id_from_request=get_client_id_from_request,
             project_root=PROJECT_ROOT,
-            apk_upload_dir=APK_UPLOAD_DIR,
-            apk_max_tasks=APK_MAX_TASKS,
-            apk_max_file_size=APK_MAX_FILE_SIZE,
-            apk_max_source_file_size=APK_MAX_SOURCE_FILE_SIZE,
-            jadx_path=JADX_PATH,
-            jadx_timeout=JADX_TIMEOUT,
             firmware_transfer_timeout=FIRMWARE_TRANSFER_TIMEOUT,
             gsi_progress_increment=GSI_PROGRESS_INCREMENT,
             gsi_progress_max=GSI_PROGRESS_MAX,
             gsi_progress_poll_interval=GSI_PROGRESS_POLL_INTERVAL,
             lock_firmware_devices=lock_firmware_devices,
             release_firmware_devices=release_firmware_devices,
+        )
+        configure_apk_runtime(
+            config_manager=config_manager,
+            global_state=global_state,
+            apk_upload_dir=APK_UPLOAD_DIR,
+            apk_max_tasks=APK_MAX_TASKS,
+            apk_max_file_size=APK_MAX_FILE_SIZE,
+            apk_max_source_file_size=APK_MAX_SOURCE_FILE_SIZE,
+            jadx_path=JADX_PATH,
+            jadx_timeout=JADX_TIMEOUT,
         )
         configure_device_dependencies(
             ssh_manager=ssh_manager,
@@ -258,7 +261,7 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
         configure_report_dependencies(
             ssh_manager=ssh_manager,
             file_utils=FileUtils,
-            universal_analyzer_factory=get_universal_analyzer,
+            universal_analyzer_factory=_report_failure_analyzer_factory,
             resolve_suite_target=resolve_suite_diagnosis_target,
             make_empty_suite_target=make_empty_suite_target,
         )

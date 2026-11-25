@@ -58,3 +58,28 @@ class SshHostEnrollmentTests(unittest.TestCase):
                     "fingerprint": "SHA256:forged",
                 }],
             )
+
+    def test_rotation_preserves_other_host_aliases(self):
+        old_key = paramiko.RSAKey.generate(1024)
+        new_key = paramiko.RSAKey.generate(1024)
+        completed = subprocess.CompletedProcess(
+            args=[], returncode=0,
+            stdout=f"host.example {new_key.get_name()} {new_key.get_base64()}\n",
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as tmp, patch.dict(
+            os.environ, {"GMS_SSH_KNOWN_HOSTS": str(Path(tmp) / "known_hosts")},
+        ), patch("foundation.ssh_security.subprocess.run", return_value=completed):
+            path = Path(tmp) / "known_hosts"
+            path.write_text(f"host.example,alias.example {old_key.get_name()} {old_key.get_base64()}\n")
+            scanned = scan_ssh_host_keys("host.example")
+            trust_scanned_ssh_host_keys("host.example", 22, scanned, replace=True)
+            keys = paramiko.HostKeys(str(path))
+            self.assertEqual(keys.lookup("host.example")["ssh-rsa"], new_key)
+            self.assertEqual(keys.lookup("alias.example")["ssh-rsa"], old_key)
+
+    def test_scan_rejects_option_like_hostname_before_spawn(self):
+        with patch("foundation.ssh_security.subprocess.run") as run:
+            with self.assertRaises(ValueError):
+                scan_ssh_host_keys("-host")
+            run.assert_not_called()

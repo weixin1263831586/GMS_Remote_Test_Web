@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from features.redmine.analysis_attachments import AttachmentAnalysisMixin
+from features.redmine.analysis.attachments import AttachmentAnalysisMixin
 
 
 class _Parser(AttachmentAnalysisMixin):

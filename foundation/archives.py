@@ -20,11 +20,7 @@ ARCHIVE_EXTENSIONS = (
     '.tar.bz2',
     '.tar',
 )
-# Extensions accepted at upload time (test suites are large; rar/7z travel
-# through the system-extractor path with preflight + post-scan, NOT through
-# `tar -xf`). Extraction dispatch is by CONTENT sniffing, never by filename
-# alone — a tar renamed to .rar used to fall into the raw `tar -xf` path and
-# bypass the member/budget/symlink policy entirely .
+# Accept RAR/7z uploads with preflight and post-scan; dispatch by content, not extension.
 UPLOAD_ARCHIVE_EXTENSIONS = (*ARCHIVE_EXTENSIONS, '.rar', '.7z')
 _SANITIZE_FILENAME_RE = re.compile(r'[^\w\-_.\[\]]')
 _SANITIZE_DIRNAME_RE = re.compile(r'[^A-Za-z0-9._-]+')
@@ -130,9 +126,11 @@ def sniff_archive_format(path: str) -> str:
 
 
 def safe_extract_member_path(base_dir: str, member_name: str) -> str:
+    if os.path.isabs(member_name) or member_name.startswith('\\') or re.match(r'^[A-Za-z]:', member_name):
+        raise ValueError(f'压缩包包含不安全路径: {member_name}')
     target = os.path.abspath(os.path.join(base_dir, member_name))
     base = os.path.abspath(base_dir)
-    if target != base and not target.startswith(base + os.sep):
+    if os.path.commonpath((base, target)) != base:
         raise ValueError(f'压缩包包含不安全路径: {member_name}')
     # A pre-existing symlink inside an extraction directory must not cause
     # an archive member to overwrite files outside that directory.
@@ -153,6 +151,8 @@ def copy_archive_member(
     chunk_size: int = 1024 * 1024,
 ) -> None:
     """Copy one archive member while enforcing a shared expansion budget."""
+    if chunk_size <= 0:
+        raise ValueError('archive copy chunk_size must be positive')
     budget['files'] = budget.get('files', 0) + 1
     if budget['files'] > max_files:
         raise ValueError(f'压缩包文件数量超过限制: {max_files}')
@@ -171,6 +171,10 @@ def strip_common_archive_root(
     if len(top_levels) == 1:
         root = top_levels.pop()
         prefix = root + '/'
+        # Strip only a truly common root. A sibling at archive root may
+        # otherwise overwrite a file of the same name inside that directory.
+        if not all(name == root or name.startswith(prefix) for name in names if name):
+            return '', [(name, name) for name in names]
         return root, [
             (name, name[len(prefix):] if name.startswith(prefix) else name)
             for name in names
@@ -196,7 +200,8 @@ def enforce_post_extraction_safety(base_dir: str) -> None:
         for name in [*dirs, *files]:
             full = os.path.join(root, name)
             try:
-                mode = os.lstat(full).st_mode
+                member_stat = os.lstat(full)
+                mode = member_stat.st_mode
             except OSError as exc:
                 raise ValueError(f'无法检查压缩包成员: {name}') from exc
             if stat.S_ISLNK(mode):
@@ -215,10 +220,7 @@ def enforce_post_extraction_safety(base_dir: str) -> None:
             file_count += 1
             if file_count > MAX_ARCHIVE_FILES:
                 raise ValueError(f'压缩包文件数量超过限制: {MAX_ARCHIVE_FILES}')
-            try:
-                total_bytes += os.lstat(full).st_size
-            except OSError:
-                pass
+            total_bytes += member_stat.st_size
             if total_bytes > MAX_ARCHIVE_EXPANDED_BYTES:
                 raise ValueError(
                     f'压缩包展开大小超过限制: {MAX_ARCHIVE_EXPANDED_BYTES} bytes'
@@ -234,28 +236,46 @@ def _list_7z_members(archive_path: str, timeout: int) -> list[tuple[str, int, bo
         text=True,
         timeout=timeout,
     )
-    details = completed.stdout.partition('----------')[2]
+    # The header before the separator describes the container, not members.
+    # An unrecognized listing cannot prove that extraction is safe.
+    lines = completed.stdout.splitlines()
+    try:
+        separator = lines.index('----------')
+    except ValueError as exc:
+        raise ValueError('压缩包成员清单格式无效') from exc
+    details = lines[separator + 1:]
     members: list[tuple[str, int, bool]] = []
     member_name = ''
-    member_size = 0
+    member_size: int | None = None
+    member_is_directory = False
     member_is_symlink = False
-    for line in [*details.splitlines(), 'Path = ']:
+    for line in [*details, 'Path = ']:
         if line.startswith('Path = '):
             if member_name:
-                members.append((member_name, member_size, member_is_symlink))
-            member_name = line.removeprefix('Path = ').strip()
-            member_size = 0
+                if member_size is None and not member_is_directory:
+                    raise ValueError('压缩包成员缺少展开大小')
+                members.append((member_name, member_size or 0, member_is_symlink))
+            member_name = line.removeprefix('Path = ')
+            member_size = None
+            member_is_directory = False
             member_is_symlink = False
         elif line.startswith('Size = '):
             try:
-                member_size = max(0, int(line.removeprefix('Size = ').strip()))
-            except ValueError:
-                member_size = 0
+                member_size = int(line.removeprefix('Size = ').strip())
+            except ValueError as exc:
+                raise ValueError('压缩包成员展开大小无效') from exc
+            if member_size < 0:
+                raise ValueError('压缩包成员展开大小无效')
+        elif line == 'Folder = +':
+            member_is_directory = True
         elif line.startswith(('Symbolic Link = ', 'Hard Link = ')):
             if line.split(' = ', 1)[1].strip():
                 member_is_symlink = True
         elif line.startswith('Attributes = '):
-            if _POSIX_SYMLINK_MODE_RE.search(line.removeprefix('Attributes = ')):
+            attributes = line.removeprefix('Attributes = ')
+            if attributes.startswith('D') or re.search(r'\bd[-rwxstST]{9}(?=\s|$)', attributes):
+                member_is_directory = True
+            if _POSIX_SYMLINK_MODE_RE.search(attributes):
                 member_is_symlink = True
     return members
 

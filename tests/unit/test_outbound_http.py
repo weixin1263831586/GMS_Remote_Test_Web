@@ -5,8 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
-from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURL
-from foundation.outbound_http import open_outbound
+from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURL, open_outbound
 
 
 def test_pinned_transport_uses_validated_ip_and_preserves_host():

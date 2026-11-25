@@ -1,24 +1,28 @@
 name: Native GMS compiled release smoke
 on:
   push:
-    branches: [main, 'ui/**', 'audit/main-ci-fix-*']
+    branches: [main, 'ui/**', 'audit/main-ci-fix-*', 'audit/mainline-gerrit-match-*']
     paths:
       - '.github/workflows/compiled-release-native-smoke.yml'
       - 'scripts/release/build_binary_release.py'
       - 'scripts/release/compiled_entry.py'
       - 'scripts/release/verify_binary_tree.py'
       - 'scripts/release/install_compiled.sh'
-      - 'scripts/gms_backup.py'
-      - 'scripts/run_production_backup.sh'
-      - 'features/system/agent_package_registry.py'
-      - 'features/system/agent_package_builder.py'
+      - 'scripts/backup/gms_backup.py'
+      - 'scripts/backup/run_production_backup.sh'
+      - 'features/system/agent_package/**'
       - 'agent/gms-remote-test/**'
       - 'plugins/gms-remote-test/**'
-      - 'scripts/install_cluster_worker.sh'
-      - 'scripts/run_GMS_Test_Auto.sh'
-      - 'scripts/run_GSI_Burn.sh'
-      - 'scripts/run_Device_Lock.sh'
-      - 'scripts/configure_local_worker_software.sh'
+      - 'scripts/deployment/worker/install_cluster_worker.sh'
+      - 'scripts/execution/run_GMS_Test_Auto.sh'
+      - 'scripts/execution/run_GSI_Burn.sh'
+      - 'scripts/execution/run_Device_Lock.sh'
+      - 'scripts/execution/fastboot_common.sh'
+      - 'scripts/deployment/worker/deploy_worker.sh'
+      - 'scripts/deployment/worker/install_adb_proxy_source_worker.sh'
+      - 'foundation/native_tools.py'
+      - 'features/cluster/deployment/api.py'
+      - 'scripts/deployment/worker/configure_worker_software.sh'
       - 'requirements.txt'
       - 'foundation/routing_introspection.py'
       - 'features/**/ui/**'

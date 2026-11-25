@@ -13,7 +13,7 @@ ENTRYPOINTS = (
     "features/cluster/ui/page.html",
     "features/devices/ui/page.html",
     "features/automation/ui/page.html",
-    "features/system/update_radar/ui/page.html",
+    "features/gms/radar/ui/page.html",
 )
 ASSETS = (
     "modal-tech-dialogs.css",

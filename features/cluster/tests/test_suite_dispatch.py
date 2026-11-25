@@ -19,7 +19,7 @@ from features.auth import CurrentUser
 from features.cluster import api as cluster_api
 from features.cluster.repository import ClusterRepository
 from features.cluster.service import ClusterService
-from features.cluster.suite_library_api import controller_suite_library
+from features.cluster.transfers.api import controller_suite_library
 
 
 class _ClusterApiTestBase(unittest.TestCase):
@@ -93,7 +93,7 @@ class SuiteDispatchTests(_ClusterApiTestBase):
             for path in paths:
                 path.write_bytes(b"not-a-complete-archive")
             with patch(
-                "features.cluster.suite_library_api.controller_suite_archives",
+                "features.cluster.transfers.api.controller_suite_archives",
                 return_value=paths,
             ):
                 result = controller_suite_library()
@@ -146,7 +146,7 @@ class SuiteDispatchTests(_ClusterApiTestBase):
             data = archive_path.read_bytes()
             archive_path.write_bytes(data[: data.index(b"PK\x05\x06")] or data[:1])
             with patch(
-                "features.cluster.suite_library_api.controller_suite_archives",
+                "features.cluster.transfers.api.controller_suite_archives",
                 return_value=[archive_path],
             ):
                 response = self.client.post(

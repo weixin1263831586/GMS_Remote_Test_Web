@@ -730,9 +730,7 @@ class TestDoctorAndProfiles(EnvSandbox):
         self.assertTrue(env_state["tmpdir_writable"])
         self.assertIn("disk_free_gb", env_state)
 
-        # A full or unwritable TMPDIR must surface as an explicit action:
-        # this is the failure that used to masquerade as
-        # "无法解析 Agent profile" in the shell CLI.
+        # An unwritable TMPDIR must produce an explicit recovery action.
         broken_tmp = self.root / "missing-tmpdir"
         with mock.patch.dict(os.environ, {"TMPDIR": str(broken_tmp)}):
             report = pm.doctor_report("codex", profile)

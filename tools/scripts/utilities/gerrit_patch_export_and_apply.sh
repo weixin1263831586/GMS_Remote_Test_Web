@@ -1,10 +1,9 @@
 #!/bin/bash
 
 # ============ Configuration ============
-# 凭证支持环境覆盖，脚本内的个人默认值仅为本地兜底（避免把个人账号/
-# 内网地址硬编码为不可变更事实）。
-GERRIT_USER="${GERRIT_USER:-chaoqun.huang}"
-GERRIT_HOST="${GERRIT_HOST:-10.10.10.29}"
+# Export requires an explicitly configured Gerrit SSH identity and host.
+GERRIT_USER="${GERRIT_USER:-}"
+GERRIT_HOST="${GERRIT_HOST:-}"
 GERRIT_PORT="${GERRIT_PORT:-29418}"
 # ======================================
 
@@ -144,6 +143,10 @@ _fetch_and_format_patch() {
 export_patches() {
     local topic="$1"
     local output_path="$2"
+    if [[ ! "$GERRIT_USER" =~ ^[a-zA-Z0-9._-]+$ || ! "$GERRIT_HOST" =~ ^[a-zA-Z0-9.-]+$ || "$GERRIT_HOST" == -* || ! "$GERRIT_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$GERRIT_PORT < 1 || 10#$GERRIT_PORT > 65535 )); then
+        echo "Set GERRIT_USER, GERRIT_HOST and optionally GERRIT_PORT before export." >&2
+        return 2
+    fi
     local tmp_file="$output_path/patches.json"
     local android_root
     android_root="$(pwd)"

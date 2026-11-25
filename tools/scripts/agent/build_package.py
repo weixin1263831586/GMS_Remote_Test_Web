@@ -15,7 +15,7 @@ This tool turns the payload into per-client distribution archives:
   dist/gms-remote-test/<version>/kkagent/…zip   (manifests: kk only)
 
 Archive construction is DELEGATED to the canonical builder
-(features/system/agent_package_builder.py) — the exact same code path the
+(features/system/agent_package/builder.py) — the exact same code path the
 Controller registry serves from — so the released zip and the served zip
 are byte-identical by construction.
 
@@ -55,7 +55,7 @@ PLUGIN_DIR = REPO_ROOT / "plugins" / "gms-remote-test"
 PACKAGE_YAML = REPO_ROOT / "agent" / "gms-remote-test" / "package.yaml"
 
 sys.path.insert(0, str(REPO_ROOT))
-from features.system.agent_package_builder import CLIENT_MANIFESTS, build_package_bytes  # noqa: E402
+from features.system.agent_package.builder import CLIENT_MANIFESTS, build_package_bytes  # noqa: E402
 
 
 # The canonical generated plugin payload (synced from

@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from features.automation.artifact_progress import artifact_download_progress, artifact_progress_callback
+from features.automation.artifacts import artifact_download_progress, artifact_progress_callback
 from features.automation.executor_contract import StubAutomationExecutor
 from features.automation.models import AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
@@ -52,7 +52,7 @@ def test_callback_throttles_intermediate_writes_but_flushes_completion(download_
     store, orchestrator = download_run
     store.claim_run("ats_download", orchestrator.claim_owner)
     clock = iter([0, 0.1, 2.1, 2.2])
-    monkeypatch.setattr("features.automation.artifact_progress.time.monotonic", lambda: next(clock))
+    monkeypatch.setattr("features.automation.artifacts.time.monotonic", lambda: next(clock))
     report = artifact_progress_callback(store, "ats_download", orchestrator.claim_owner)
     report(counters(0))
     report(counters(10))

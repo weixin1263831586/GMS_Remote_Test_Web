@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi import HTTPException
 
-from features.cluster.execution_spec import (
+from features.cluster.jobs.execution_spec import (
     build_argv_from_spec,
     canonicalize_execution_spec,
 )

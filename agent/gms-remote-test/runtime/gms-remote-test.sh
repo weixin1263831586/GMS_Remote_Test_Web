@@ -6,7 +6,7 @@ set -o pipefail
 # propagated here (GMS_RT_VERSION) by tools/scripts/agent/release.py.
 # ==============================================================================
 
-GMS_RT_VERSION="0.22.91"
+GMS_RT_VERSION="0.22.96"
 GMS_RT_OUTPUT="${GMS_RT_OUTPUT:-human}"
 GMS_RT_QUIET="${GMS_RT_QUIET:-0}"
 GMS_RT_NON_INTERACTIVE="${GMS_RT_NON_INTERACTIVE:-0}"
@@ -71,11 +71,7 @@ if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
     fi
 fi
 if [ -r "$_gms_runtime_dir/gms_agent/profile_store.py" ]; then
-    # Resolve via `python3 -c`, NOT a heredoc: heredocs need a writable
-    # temp file for the script text, so a full or read-only /tmp used to
-    # zero the context array and masquerade as "无法解析 Agent profile"。
-    # Fields stay NUL-terminated and stream through the <() pipe — a
-    # plain $() would strip the trailing empty fields.
+    # Resolve without a writable TMPDIR; stream NUL-delimited fields to preserve empty values.
     mapfile -d '' -t _gms_profile_context < <(
         PYTHONPATH="$_gms_runtime_dir${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import sys
@@ -209,14 +205,8 @@ CURL_EXIT_CANNOT_CONNECT=7
 CURL_EXIT_OPERATION_TIMEOUT=28
 CURL_EXIT_SSL_CERT=60
 
-# The current backend authenticates API clients with the gms_session cookie.
-# Keep the cookie outside the repository and allow callers to override its path.
-# Multiple agents running under the same Unix user used to share one
-# writable cookie jar with no concurrency protection — concurrent login/
-# logout/parallel requests clobbered each other's sessions.  A profile name
-# (GMS_RT_PROFILE) separates jars per agent; flock serialises writes to the
-# same jar.  Profiles do NOT strengthen server-side auth: a revoked token
-# stays revoked regardless of the local file.
+# Keep profile-specific cookie jars outside the repository; flock serializes writes.
+# Local profiles do not override server-side token revocation.
 GMS_RT_PROFILE="${GMS_RT_PROFILE:-default}"
 GMS_AUTH_COOKIE_JAR="${GMS_AUTH_COOKIE_JAR:-${XDG_STATE_HOME:-${HOME}/.local/state}/gms-remote-test/${GMS_RT_PROFILE}.cookies}"
 # Agent Service Token: when GMS_AUTH_TOKEN_FILE points
@@ -400,11 +390,7 @@ _gms_with_cookie_lock() {
     fi
     if command -v flock >/dev/null 2>&1 && [ -f "$GMS_COOKIE_LOCK_FILE" -o -w "$cookie_dir" ]; then
         (
-            # Failing to take the lock must NOT fall through to the
-            # unprotected command.  `|| true` used to let a lock-starved
-            # process run curl anyway, which is exactly the concurrent
-            # jar clobber the lock exists to prevent.  Exit non-zero from
-            # the subshell so the caller sees a transport failure.
+            # Abort on lock timeout; never access the cookie jar without the lock.
             flock -w 10 200 || {
                 error "认证 Cookie 文件锁等待超时，请等待占用请求完成后重试" >&2
                 exit 99

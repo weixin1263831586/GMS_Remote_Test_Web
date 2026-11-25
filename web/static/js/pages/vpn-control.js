@@ -533,7 +533,7 @@ function updateUsbipButtonStatus(connected) {
         state.usbipConnected = true;
         usbipReconnectWaiting = false;
     } else {
-        btn.innerHTML = GmsUi.testEmoji('📱') + (usbipReconnectWaiting ? ' 等待重连...' : ' USB/IP 接入');
+        btn.innerHTML = GmsUi.testEmoji('📱') + (usbipReconnectWaiting ? ' 等待重连...' : ' USB/IP');
         state.usbipConnected = false;
     }
 }

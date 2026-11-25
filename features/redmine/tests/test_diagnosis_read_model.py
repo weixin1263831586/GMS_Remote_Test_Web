@@ -9,8 +9,8 @@ from __future__ import annotations
 import unittest
 import unittest.mock
 
-from features.redmine.daily_brief_models import DailyBriefIssue
-from features.redmine.daily_brief_report import issue_payload
+from features.redmine.daily_brief.models import DailyBriefIssue
+from features.redmine.daily_brief.report import issue_payload
 from features.redmine.diagnosis_read_model import read_model_from_issue_result
 from foundation.diagnosis_read_model import validate_diagnosis_read_model
 

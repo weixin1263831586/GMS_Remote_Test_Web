@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 
-from features.test_execution.suite_task_store import SuiteTaskStore
+from features.test_execution.suite_tasks import SuiteTaskStore
 
 
 class SuiteTaskStoreTests(unittest.TestCase):

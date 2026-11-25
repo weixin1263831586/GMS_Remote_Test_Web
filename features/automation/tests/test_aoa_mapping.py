@@ -5,8 +5,8 @@ from unittest.mock import Mock
 
 import pytest
 
-from features.automation.aoa_snapshot import freeze_recovery
 from features.automation.executors import HttpAutomationExecutor
+from features.automation.recovery_executor import freeze_recovery
 from tests.aoa_fixtures import firmware_declaration, verified_mapping
 
 from .test_integrations import FakeResponse, FakeSession
@@ -15,7 +15,7 @@ from .test_integrations import FakeResponse, FakeSession
 def prepared_run(monkeypatch, *, target=None):
     source = verified_mapping()
     target = target or source
-    monkeypatch.setattr('features.devices.aoa_mapping_service.calibration_store', lambda: SimpleNamespace(
+    monkeypatch.setattr('features.devices.aoa.mapping_service.calibration_store', lambda: SimpleNamespace(
         find_matching=lambda owner, context: {'mapping': target.to_dict(), 'mapping_policy': target.effective_policy}
         if owner == 'alice' and context == target.context else None))
     plan = {'aoa': {'mode': 'user_build_recovery', 'commands': ['click 180 320'],

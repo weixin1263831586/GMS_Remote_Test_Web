@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from features.assistant.plan_submission import submit_pending_plan_once
+from features.assistant.test_runs import submit_pending_plan_once
 
 
 @pytest.mark.asyncio

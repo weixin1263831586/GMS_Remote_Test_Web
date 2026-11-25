@@ -3,7 +3,7 @@ import copy
 
 import pytest
 
-from features.devices.aoa_calibrations import AoaCalibrationStore
+from features.devices.aoa.calibrations import AoaCalibrationStore
 from foundation.aoa_calibration import context_matches, convert_commands, mapping_options
 from foundation.aoa_recovery_policy import (
     firmware_compatibility,

@@ -1,19 +1,61 @@
-"""Durable AOA dispatch and post-flash verification for ATS runs."""
+"""AOA recovery configuration snapshots, durable dispatch and post-flash verification."""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
 from typing import Any
 
+from foundation import aoa_profile
 from foundation.aoa_calibration import mapping_options
 from foundation.aoa_hid_mode import profile_hid_options
-from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
+from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS, commands_digest
 from foundation.aoa_recovery_policy import (
     firmware_compatibility,
     require_verified_recovery,
     target_firmware_context,
 )
 from foundation.error_model import ApiError
+
+
+def freeze_recovery(plan: dict, owner_id: str) -> None:
+    recovery = plan.get("aoa")
+    if recovery is None:
+        return
+    if not isinstance(recovery, dict):
+        raise ValueError("AOA recovery configuration must be an object")
+    if recovery.get("mode") in (None, "", "off"):
+        return
+    if recovery.get("mode") != "user_build_recovery":
+        raise ValueError("unsupported AOA recovery mode")
+    commands = recovery.get("commands") or []
+    if not isinstance(commands, list) or any(not isinstance(item, str) for item in commands):
+        raise ValueError("AOA recovery commands must be an array of strings")
+    profile = {}
+    if not commands and recovery.get("profile"):
+        from features.devices import profile_store
+
+        profile = next((p for p in profile_store().list_profiles(owner_id, include_all=False)
+                        if p["name"] == recovery["profile"] or p["id"] == recovery["profile"]), {})
+        if not profile:
+            raise ValueError("AOA profile not found in the creating account")
+        commands = profile["commands"]
+    commands = [str(item).strip() for item in commands if str(item).strip()]
+    aoa_profile.parse_profile_commands(commands)
+    profile_hid_options(profile.get("metadata", recovery.get("metadata") or {}))
+    firmware_compatibility(profile.get("metadata", recovery.get("metadata") or {}), commands)
+    raw_wait = recovery.get("wait_adb_seconds", profile.get("wait_adb_seconds", 60))
+    if isinstance(raw_wait, bool) or not isinstance(raw_wait, (str, int)):
+        raise ValueError("AOA recovery wait_adb_seconds must be an integer")
+    wait = int(raw_wait)
+    if not 1 <= wait <= 600:
+        raise ValueError("AOA recovery wait_adb_seconds must be 1..600")
+    recovery.update({
+        "commands": commands, "commands_sha256": commands_digest(commands),
+        "wait_adb_seconds": wait,
+        "profile_id": profile.get("id", ""),
+        "profile_revision": profile.get("revision", ""),
+        "metadata": profile.get("metadata", recovery.get("metadata") or {}),
+    })
 
 
 class RecoveryExecutorMixin:
@@ -143,7 +185,6 @@ class RecoveryExecutorMixin:
         identity = json.loads(run.get("devices_json") or "[]")[0]
         if not identity.get("usb_port_path"):
             return {"success": False, "error": "AOA run has no frozen physical USB identity"}
-        from .aoa_snapshot import commands_digest
 
         commands = [str(item) for item in recovery.get("commands") or []]
         if recovery.get("commands_sha256") != commands_digest(commands):

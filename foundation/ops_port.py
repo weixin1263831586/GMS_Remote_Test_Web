@@ -17,10 +17,12 @@ from typing import Any
 IncidentRecorder = Callable[..., dict[str, Any]]
 AlertSweep = Callable[..., dict[str, int]]
 DiskHygiene = Callable[..., dict[str, Any]]
+DiskInventory = Callable[..., dict[str, Any]]
 
 _incident_recorder: IncidentRecorder | None = None
 _alert_sweep: AlertSweep | None = None
 _disk_hygiene: DiskHygiene | None = None
+_disk_inventory: DiskInventory | None = None
 
 
 def configure_incident_recorder(recorder: IncidentRecorder | None) -> None:
@@ -55,3 +57,15 @@ def run_disk_hygiene(**kwargs: Any) -> dict[str, Any]:
     if _disk_hygiene is None:
         return {"dry_run": False, "freed_bytes": 0, "removed_files": 0}
     return _disk_hygiene(**kwargs)
+
+
+def configure_disk_inventory(inventory: DiskInventory | None) -> None:
+    global _disk_inventory
+    _disk_inventory = inventory
+
+
+def read_disk_inventory(*, refresh: bool = False) -> dict[str, Any]:
+    """Read runtime inventory without exposing cleanup operations."""
+    if _disk_inventory is None:
+        raise RuntimeError("Runtime disk inventory is not configured")
+    return _disk_inventory(refresh=refresh)

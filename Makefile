@@ -1,36 +1,40 @@
-# Agent 包发布与自检一键入口（根 AGENTS.md「Verification」的四步检查链）。
-# 用法：
-#   make agent-check             只读自检：双向 pytest + secrets 扫描 + 版本契约
-#   make agent-release V=X.Y.Z   发布：改版本号（内部自动 sync 生成树）→ 复跑完整自检
-#   make agent-sync-check        幂等验证：sync 后 plugins/ 不得产生 git 漂移
-#   make help                    查看目标列表
-
+# Agent package verification and release entry points.
+# Source and generated tests deliberately use separate pytest processes.
+# Standalone package suites must not load Controller-level conftest fixtures.
 PY ?= python3
+export V
 
-.PHONY: help agent-check agent-release agent-sync-check
+.PHONY: help agent-test agent-check agent-release agent-sync-check codesearch-check
 
 help:
-	@echo "agent-check        双向 pytest + secrets 扫描 + release --check"
-	@echo "agent-release V=X.Y.Z  版本发布（含 sync 与完整自检）"
-	@echo "agent-sync-check   验证 sync_agent_package 幂等（plugins/ 无漂移）"
+	@echo "agent-test         Agent source + generated tests + version contract"
+	@echo "agent-check        agent-test + tracked-file secret scan"
+	@echo "agent-release V=X.Y.Z  version bump, sync and full self-check"
+	@echo "agent-sync-check   sync and reject generated worktree drift"
+	@echo "codesearch-check   standalone CodeSearch plugin tests"
 
-# 四步顺序与独立 pytest 进程为根 AGENTS.md 的硬性要求，勿合并。
-agent-check:
-	$(PY) -m pytest agent/gms-remote-test/tests -q
-	$(PY) -m pytest plugins/gms-remote-test/tests -q
-	$(PY) scripts/check_source_secrets.py .
+agent-test:
+	$(PY) -m pytest --confcutdir=agent/gms-remote-test agent/gms-remote-test/tests -q
+	$(PY) -m pytest --confcutdir=plugins/gms-remote-test plugins/gms-remote-test/tests -q
 	$(PY) tools/scripts/agent/release.py --check
 
-# tools/scripts/agent/release.py --version 内部会调用 tools/scripts/agent/sync_package.py
-# 同步 plugins/ 生成树，这里只负责在其后复跑完整自检确认新版本契约成立。
+agent-check: agent-test
+	$(PY) scripts/security/check_source_secrets.py .
+
+# Release sync is expected to change generated files; do not require a clean
+# worktree here. The separate sync check is for a staged/committed baseline.
 agent-release:
-	@test -n "$(V)" || { echo "用法: make agent-release V=X.Y.Z"; exit 2; }
-	$(PY) tools/scripts/agent/release.py --version $(V)
+	@test -n "$$V" || { echo "Usage: make agent-release V=X.Y.Z"; exit 2; }
+	$(PY) tools/scripts/agent/release.py --version "$$V"
 	$(MAKE) agent-check
 
-# sync 必须幂等：源树未变时重复执行不得改动 plugins/。
-# git diff --exit-code 对比工作区与暂存区；请在 plugins/ 相关改动入暂存区/
-# 提交后运行，否则在途差异会被误报为 sync 漂移。
+# Compare against the index so intentionally staged release changes are allowed.
+# Require all generated files to be tracked; git diff alone misses new files.
 agent-sync-check:
-	$(PY) tools/scripts/agent/sync_package.py
-	@git diff --exit-code -- plugins/ && echo "plugins/ 无漂移：sync 幂等"
+	$(PY) tools/scripts/agent/sync_package.py .
+	git diff --exit-code -- plugins/gms-remote-test/
+	@untracked=$$(git ls-files --others --exclude-standard -- plugins/gms-remote-test/) && test -z "$$untracked"
+	@echo "Generated plugin matches the staged baseline"
+
+codesearch-check:
+	$(PY) -m pytest --confcutdir=plugins/codesearch plugins/codesearch/tests -q

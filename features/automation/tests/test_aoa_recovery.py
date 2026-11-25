@@ -5,10 +5,10 @@ from unittest.mock import Mock
 
 import pytest
 
-from features.automation.aoa_snapshot import freeze_recovery
 from features.automation.executors import HttpAutomationExecutor, StubAutomationExecutor
 from features.automation.models import AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
+from features.automation.recovery_executor import freeze_recovery
 from features.automation.repository import AutomationStore
 
 from .test_integrations import FakeResponse, FakeSession

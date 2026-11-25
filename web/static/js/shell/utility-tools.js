@@ -53,15 +53,15 @@ const UT_BUILTIN_TOOLS = {
             icon: '📦',
             title: 'Mainline包豁免项',
             description: '查看Mainline包豁免项，支持按模块、用例和豁免ID搜索',
-            url: '/mainline-known-issues',
+            url: '/gms-update-center?tab=exemptions',
             action: 'mainline-sync',
             builtin_id: 'mainline-known-issues'
         },
         {
             icon: '🩹',
             title: 'Critical_Patch',
-            description: '查看GMS关键修复补充公告（Critical Fix Supplementary Bulletins），扫描入口在GMS Update Monitor',
-            url: '/mainline-known-issues',
+            description: '查看GMS关键修复补充公告（Critical Fix Supplementary Bulletins），扫描入口在GMS 更新中心',
+            url: '/gms-update-center?tab=critical',
             action: 'gms-update-sync',
             builtin_id: 'gms-bulletins-monitor',
             sync_sources: ['gms_bulletins'],
@@ -71,7 +71,7 @@ const UT_BUILTIN_TOOLS = {
             icon: '✅',
             title: '测试套件更新',
             description: '扫描Android 14+ CTS/VTS/GTS和GMS包更新，默认全量扫描',
-            url: '/gms-update-monitor?tab=artifacts',
+            url: '/gms-update-center?tab=artifacts',
             action: 'gms-update-sync',
             builtin_id: 'gms-update-suite-monitor',
             sync_sources: ['cts_downloads', 'vts_downloads', 'gts_downloads', 'gms_downloads'],
@@ -81,7 +81,7 @@ const UT_BUILTIN_TOOLS = {
             icon: '📦',
             title: 'GMS包更新',
             description: '扫描并查看Android 14+ GMS包更新表格，默认全量扫描',
-            url: '/gms-update-monitor?tab=packages',
+            url: '/gms-update-center?tab=packages',
             action: 'gms-update-sync',
             builtin_id: 'gms-package-monitor',
             sync_sources: ['gms_downloads'],
@@ -91,7 +91,7 @@ const UT_BUILTIN_TOOLS = {
             icon: '🚆',
             title: 'Mainline包更新',
             description: '扫描并查看Mainline PRELOAD包更新表格，默认抓取近12个月',
-            url: '/gms-update-monitor?tab=mainline',
+            url: '/gms-update-center?tab=mainline',
             action: 'gms-update-sync',
             builtin_id: 'gms-mainline-monitor',
             sync_sources: ['mainline_preload'],
@@ -101,7 +101,7 @@ const UT_BUILTIN_TOOLS = {
             icon: '📋',
             title: 'GMS要求',
             description: '扫描GMS认证要求章节和表格更新，默认展示顶层主章节',
-            url: '/gms-update-monitor?tab=requirements',
+            url: '/gms-update-center?tab=requirements',
             action: 'gms-update-sync',
             builtin_id: 'gms-requirements-monitor',
             sync_sources: ['gms_requirements'],
@@ -301,13 +301,13 @@ async function ut_restoreSyncButtonState() {
         const checks = [
             {
                 action: 'mainline-sync',
-                url: '/api/mainline-known-issues/sync/status',
-                parse: data => data.status || {},
+                url: '/api/gms-update-center/scan/status',
+                parse: data => (data.data && data.data.status) || {},
                 poll: (btn) => { ut_mainlineSyncButton = btn; ut_pollMainlineKnownIssuesSync(btn, '触发扫描'); }
             },
             {
                 action: 'gms-update-sync',
-                url: '/api/gms-update-monitor/sync/status',
+                url: '/api/gms-update-center/scan/status',
                 parse: data => (data.data && data.data.status) || {},
                 poll: (btn, tool) => {
                     ut_gmsUpdateSyncButton = btn;
@@ -518,13 +518,13 @@ async function ut_startMainlineKnownIssuesSync(button) {
     ut_mainlineSyncButton = button;
     // 检查 db 是否存在，不存在则直接全量扫描
     try {
-        const resp = await fetch('/api/mainline-known-issues/sync/status');
+        const resp = await fetch('/api/gms-update-center/scan/status');
         const data = await resp.json();
-        if (data.status && data.status.running) {
+        if (data.data?.status?.running) {
             showToast('扫描正在进行中，请稍候', 'warning');
             return;
         }
-        if (!data.status || !data.status.db_exists) {
+        if (!data.data?.status?.db_exists) {
             // db 不存在，弹框提示后直接全量扫描
             showConfirmDialog(
                 '首次扫描提示',
@@ -560,7 +560,7 @@ async function ut_confirmMainlineKnownIssuesSync(mode) {
     button.textContent = '扫描中';
     try {
         const result = await apiCall(
-            '/api/mainline-known-issues/sync?mode=' + encodeURIComponent(mode),
+            '/api/gms-update-center/scan?source=mainline_preload&mode=' + encodeURIComponent(mode),
             'POST'
         );
         if (!result.success) {
@@ -581,10 +581,10 @@ async function ut_pollMainlineKnownIssuesSync(button, originalText, generation =
         generation = ++ut_mainlinePollGeneration;
     }
     try {
-        const response = await fetch('/api/mainline-known-issues/sync/status');
+        const response = await fetch('/api/gms-update-center/scan/status');
         const result = await response.json();
         if (generation !== ut_mainlinePollGeneration) return;
-        const status = result.status || {};
+        const status = (result.data && result.data.status) || {};
         if (status.running) {
             ut_mainlinePollTimer = setTimeout(
                 () => ut_pollMainlineKnownIssuesSync(button, originalText, generation),
@@ -626,7 +626,7 @@ async function ut_startGmsUpdateMonitorSync(button, tool) {
     const syncTitle = (tool && tool.sync_title) || 'GMS/CTS更新';
     const sources = (tool && Array.isArray(tool.sync_sources)) ? tool.sync_sources : [];
     try {
-        const resp = await fetch('/api/gms-update-monitor/sync/status');
+        const resp = await fetch('/api/gms-update-center/scan/status');
         const data = await resp.json();
         const status = (data.data && data.data.status) || {};
         if (status.running) {
@@ -671,7 +671,7 @@ async function ut_confirmGmsUpdateMonitorSync(mode, sources, syncTitle) {
         const params = new URLSearchParams({ mode });
         sources.forEach(source => params.append('source', source));
         const result = await apiCall(
-            '/api/gms-update-monitor/sync?' + params.toString(),
+            '/api/gms-update-center/scan?' + params.toString(),
             'POST'
         );
         if (!result.success) {
@@ -696,7 +696,7 @@ async function ut_pollGmsUpdateMonitorSync(
         generation = ++ut_gmsUpdatePollGeneration;
     }
     try {
-        const response = await fetch('/api/gms-update-monitor/sync/status');
+        const response = await fetch('/api/gms-update-center/scan/status');
         const result = await response.json();
         if (generation !== ut_gmsUpdatePollGeneration) return;
         const status = (result.data && result.data.status) || {};
@@ -754,7 +754,7 @@ async function ut_promptNewSuiteDownloads(sources) {
     try {
         const params = new URLSearchParams({ limit: '20' });
         (Array.isArray(sources) ? sources : []).forEach(source => params.append('source_key', source));
-        const response = await fetch('/api/gms-update-monitor/artifacts/new?' + params.toString());
+        const response = await fetch('/api/gms-update-center/artifacts/new?' + params.toString());
         const result = await response.json();
         const items = result && result.data && Array.isArray(result.data.items) ? result.data.items : [];
         if (!items.length) return;
@@ -1011,7 +1011,7 @@ function ut_saveCategory() {
         icon,
     };
 
-    // Adding a formerly deleted category explicitly re-enables its built-ins.
+    // Adding a deleted category re-enables its built-in tools.
     const wasHidden = ut_getHiddenCategories().has(name);
     ut_setCategoryHidden(name, false);
     if (wasHidden) ut_ensureBuiltInTools();

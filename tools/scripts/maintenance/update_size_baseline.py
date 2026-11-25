@@ -1,24 +1,12 @@
 #!/usr/bin/env python3
-"""Shrink-only size-budget maintenance for the architecture size gates.
+"""Shrink architecture size baselines to current file sizes.
 
-The file-size ratchet (docs/development.md; tests/architecture/_size_ratchet.py) means budgets may only
-SHRINK after a real split: keeping an old peak budget after extracting a
-module re-opens the debt it just closed. Ceilings live in independent
-persisted baselines (``tests/architecture/baselines/*.json``); the ratchet
-gate (``_size_ratchet.assert_no_ceiling_raises``) compares them against the
-previous commit, so raising a ceiling requires a reviewed waiver — an
-automated or sneaky bump can no longer keep the gate green.
-
-This tool tightens every ceiling down to the file's CURRENT size — never up:
-
-    python tools/scripts/maintenance/update_size_baseline.py --shrink-only          # apply
+    python tools/scripts/maintenance/update_size_baseline.py --shrink-only
     python tools/scripts/maintenance/update_size_baseline.py --shrink-only --dry-run
 
-Entries whose file GREW beyond its ceiling are reported but left untouched:
-growth means either a regression the gate must keep failing on, or a
-deliberate raise that needs a waiver entry (reason + expiry) reviewed in the
-commit, not an automated bump. Files missing from the baseline are policed by
-the 1200-line / 50 KB default limits in the owning tests.
+Over-budget entries are reported without raising ceilings. Raising a ceiling
+requires a reviewed waiver with a reason and expiry. Files without a baseline
+entry use the owning test's 2000-line limit.
 """
 
 from __future__ import annotations

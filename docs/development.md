@@ -12,7 +12,7 @@ bootstrap/       应用装配、生命周期、路由注册、生产安全自检
 foundation/      共享基础能力：配置、安全、SSH 执行器、进程边界、上传、
                  秘密、数据库、响应封装、端口（Port）
 features/        按业务域拆分的 routes / services / repositories / tests
-worker_agent/    Worker 侧执行与 Controller 通信
+worker/    Worker 侧执行与 Controller 通信
 agent/gms-remote-test/  手工维护的 CLI / MCP / Skill / 清单 / 包生命周期源码
 plugins/gms-remote-test/ 由 sync 生成的插件载荷（禁止手改）
 web/             浏览器 shell 与静态前端（shell / static / templates）
@@ -32,7 +32,7 @@ scripts/         部署、运维与脱敏脚本
   test_execution、users 等）。路由 handler 保持轻薄，逻辑下沉 service。
 - **Feature 之间不互相 import 对方内部模块**，跨 Feature 协作只能经由对方
   的公开包边界或下沉到 `foundation/` 的共享 Port。
-- `worker_agent/` 负责设备探测、ADB/Fastboot/Tradefed 执行、USB/IP、Artifact
+- `worker/` 负责设备探测、ADB/Fastboot/Tradefed 执行、USB/IP、Artifact
   上传等 Worker 侧工作。Worker 使用带 Token 和 session/generation 的 HTTP(S)
   注册、心跳、轮询命令与 ACK；Controller 将类型化任务写入受授权的命令队列
   （ADR 0001）。需要 SSH 的主机操作统一走审计执行器（ADR 0004）。
@@ -41,7 +41,7 @@ scripts/         部署、运维与脱敏脚本
 
 ```text
 features/            →  foundation/  →  infrastructure
-worker_agent/        →  foundation/
+worker/        →  foundation/
 bootstrap/           →  foundation/ / features/
 ```
 
@@ -55,22 +55,13 @@ bootstrap/           →  foundation/ / features/
 架构门禁是 CI Gate：违反边界的改动在 `pytest tests/architecture` 阶段直接失败。
 常用「棘轮」模式是——历史债务登记为显式预算，预算**只减不增**。
 
-- **文件行数预算**（`test_file_size_rules.py`）：`bootstrap/`、`foundation/`、
-  `features/`、`workflows/` 下**未被登记**的 Python 模块上限 **1200 行**
-  （2026-09 起：默认值放宽是为了避免同功能模块被行数门禁逼得拆分过细，
-  模块内聚优先于行数）；历史超限模块登记在 baselines 中，不得超过各自
-  登记值（债务可缩小、不可增长）。真正拆小文件后应同步收紧预算值，可用
-  `python tools/scripts/maintenance/update_size_baseline.py --shrink-only` 一键把预算降到当前
-  实际行数（只降不升；增长中的文件保持原预算让门禁继续报警）。
-- **前端体积预算**（`test_frontend_size_rules.py`）：扫描 `web/shell/`、
-  `web/static/css/`、`web/static/js/`。未登记文件默认上限 HTML **100 KB**、
-  JS **50 KB**、CSS **50 KB**；历史超限文件登记在 `MIGRATION_BYTE_LIMITS`
-  且只减不增；`web/static/js/*.js` 首屏基础 JS 总量不得超过 **231 KB**。
+- **源码文件行数预算**：Python 与第一方 JS/CSS/HTML 均采用 2000 行上限，按业务内聚性、依赖方向及安全边界组织文件，超限文件按门禁预算管理，不能增加新的超限文件。
+- **前端性能预算**：保留 `web/static/js/*.js` 首屏基础 JS 总量 231 KB 的门禁。行数调整不允许改变字体、字号、间距、弹框、控件高度、路由、交互或视觉规范。第三方压缩资源不纳入第一方行数门禁。
 - **SSH 边界**（`test_no_regression_rules.py`）：`.exec_command(` 只允许出现在
-  `foundation/ssh_executor.py` 与登记的连接健康检查 `features/system/ssh.py`，
+  `foundation/ssh_executor.py` 与登记的连接健康检查 `features/system/host/ssh.py`，
   其余业务模块一律经统一执行层。
 - **shell 边界**（`test_shell_execution_boundary.py`）：AST 扫描
-  `features/`、`foundation/`、`worker_agent/`、`workflows/`、`bootstrap/`，
+  `features/`、`foundation/`、`worker/`、`bootstrap/`，
   `shell=True` / `os.system` / `os.popen` 只允许在 `foundation/processes.py`
   与 `features/build/executor.py`。
 - **路由授权**（`test_route_authorization.py`）：每个 state-changing `/api` 路由
@@ -80,7 +71,7 @@ bootstrap/           →  foundation/ / features/
   等需锁定含上游修复的精确版本）、**个人环境硬编码禁用**（
   `test_no_regression_rules.py` 扫描 `C:\Users\<name>`、`172.16.*` 等）。
 - **Controller/Worker 精确边界**（`test_controller_worker_boundary.py`）：
-  features 文件 → 精确 `worker_agent.*` module 两级 allowlist（双向），
+  features 文件 → 精确 `worker.*` module 两级 allowlist（双向），
   新增文件/新增 worker module 都会失败；僵尸 allowlist 条目一并拦截。
 - **Assistant 动态依赖**（`test_assistant_dynamic_imports.py`）：executor_ref /
   `_fetch_router_json` 字符串通道的目标模块/符号必须存在且公开、feature
@@ -105,6 +96,12 @@ bootstrap/           →  foundation/ / features/
 [architecture/ai-governance.md](architecture/ai-governance.md)。
 
 ## 测试组织
+
+测试按职责归属而非统一平铺：单个 Feature 的业务逻辑与 API 回归留在该域，
+跨域装配、架构与契约、浏览器交互、发布部署和稳定性验证留在根测试树的对应类别。
+同一用例只保留一个实际收集入口；移动用例时同步 CI 的显式路径、导入及 fixture，
+不能用兼容转发测试重复收集。临时截图探针不得进入版本库；有长期回归价值的场景
+应转成带明确断言的 `tests/runtime_ui/` 用例。
 
 - **`features/<domain>/tests/`**：每个业务域的单元/接口测试，只挂载本 Feature
   的依赖。
@@ -182,13 +179,7 @@ python tools/scripts/agent/sync_package.py .
 
 ## 文档政策
 
-- **源码注释不得引用不存在的评审文档编号**：注释里只应引用真实存在的 ADR
-  或文档；不得出现带日期的审计/评审轮次引用（含 `复审`、`外部评审`、
-  `全局审查`、`review P\d`、`#工单号 复审` 等变体；真实工单号 + 实测证据
-  是允许的出处）、审计分节号或评审编号等
-  已废弃标记。该政策由
-  `tests/architecture/test_review_markers.py` 静态强制；清理存量时把引用
-  改为指向真实 ADR（如 `ADR 0006`）或直接描述行为本身。
+- **说明简洁、必要、准确**：代码注释、docstring、脚本说明和现行指南只描述当前职责、行为、输入输出、限制及必要的安全或技术依据。无需复述代码，不记录修改历史、旧方案对比、截图或评审过程。保留必要的规范引用、协议约束、证据出处和工具指令。由 `tests/architecture/test_review_markers.py` 与 `tools/scripts/maintenance/audit_comment_hygiene.py` 检查。
 - **架构决策写入 `docs/architecture/adr/`**，采用 `NNNN-title.md` 命名，按既有
   ADR 的结构（背景 / 决策 / 理由 / 后果）撰写，并在「关联代码」中标明受约束的
   模块与架构测试。

@@ -85,6 +85,21 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertFalse(empty["tradefed"])
         self.assertFalse(empty["gts"])
 
+    def test_shared_suite_inventory_deduplicates_roots_and_preserves_availability(self):
+        from worker.suite_actions import scan_suite_roots
+
+        root = Path(self.temp.name) / "suites"
+        directory = root / "android-gts" / "tools"
+        directory.mkdir(parents=True)
+        launcher = directory / "gts-tradefed"
+        launcher.write_text("#!/bin/sh\n", encoding="utf-8")
+        launcher.chmod(0o755)
+        result = scan_suite_roots([root, root])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["suite_type"], "GTS")
+        self.assertEqual(result[0]["tools_path"], str(directory))
+        self.assertTrue(result[0]["available"])
+
     def test_bridge_heartbeat_updates_devices_and_metrics(self):
         from features.cluster.local_bridge import LocalWorkerBridge
 
@@ -93,7 +108,7 @@ class LocalBridgeTests(unittest.TestCase):
         bridge._register()
         gib = 1024 ** 3
         with patch(
-            "worker_agent.adb_proxy.recover_managed_state",
+            "worker.adb_proxy.recover_managed_state",
             return_value={"recovered": ["target"], "errors": []},
         ) as recover, patch(
             "features.devices.local_proxy_secret",
@@ -133,7 +148,7 @@ class LocalBridgeTests(unittest.TestCase):
         self.assertEqual(worker["connection_generation"], 2)
         self.assertEqual(bridge.connection_generation, 2)
         with patch.object(bridge, "_real_agent_active", return_value=False), patch(
-            "worker_agent.adb_proxy.recover_managed_state",
+            "worker.adb_proxy.recover_managed_state",
             return_value={"recovered": [], "errors": []},
         ), patch(
             "features.devices.local_proxy_secret",

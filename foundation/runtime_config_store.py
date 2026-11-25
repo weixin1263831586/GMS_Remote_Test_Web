@@ -7,7 +7,6 @@ Owner-specific ConfigManager paths retain their existing isolated single file.
 from __future__ import annotations
 
 import copy
-import fcntl
 import logging
 import os
 import threading
@@ -17,6 +16,7 @@ from typing import Any
 
 from foundation.config_paths import runtime_data_root
 from foundation.private_config import read_json_object, write_private_json
+from foundation.process_sync import hold_sync_lock
 
 
 logger = logging.getLogger(__name__)
@@ -112,15 +112,13 @@ class RuntimeConfigStore:
                 yield
                 return
             self.lock_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            descriptor = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o600)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                self._local.active = True
-                self._recover()
-                yield
-            finally:
-                self._local.active = False
-                os.close(descriptor)
+            with hold_sync_lock(self.lock_path):
+                try:
+                    self._local.active = True
+                    self._recover()
+                    yield
+                finally:
+                    self._local.active = False
 
     def _recover(self) -> None:
         if self.journal.exists():

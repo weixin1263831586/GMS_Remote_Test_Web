@@ -1,9 +1,9 @@
 .agent-layout { grid-template-columns: minmax(0, 4fr) minmax(0, 1fr); gap: 12px; }
-/* 参考稿（GMS Agent.png）：会话列表 + 任务对话 + 执行步骤 三栏。 */
+/* 会话、对话和执行步骤三栏。 */
 .agent-layout.agent-layout-with-sessions { grid-template-columns: 200px minmax(0, 4fr) minmax(0, 1fr); }
 .agent-sessions-heading,
 .agent-conversation-heading { display: flex; align-items: center; gap: 8px 12px; height: 48px; padding: 0 16px; border-bottom: 1px solid var(--border-color); }
-/* 固定 48px 单行：不再换行，溢出由各状态 span 自身省略号消化。 */
+/* 状态文字单行溢出省略。 */
 .agent-heading-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px 12px; }
 .agent-conversation-heading .ui-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
 .agent-sessions-heading { padding: 0 14px; gap: 8px; }
@@ -24,11 +24,10 @@
 .agent-session-delete:hover { color: var(--danger-color); background: color-mix(in srgb, var(--danger-color) 10%, transparent); }
 #agent-chat-messages { gap: 18px; padding: 18px 16px; background: var(--card-bg); min-height: 0; }
 .agent-message-row { justify-content: flex-start; align-items: flex-start; gap: 10px; }
-/* 聊天习惯（微信/QQ）：Agent 消息靠左，用户消息靠右且头像位于最外侧；
-   头像在 DOM 中始终居首，row-reverse 让用户头像落到右缘。 */
+/* 头像在 DOM 中居首；用户消息使用 row-reverse 将头像置于右缘。 */
 .agent-message-row.user { flex-direction: row-reverse; justify-content: flex-start; }
 .agent-avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 30px; height: 30px; border: 1px solid var(--border-light); border-radius: 50%; background: var(--lighter-bg); color: var(--primary-light); }
-/* 用户=紫色、Agent=绿色：头像底色与消息气泡同色系，一眼区分两侧。 */
+/* 用户与 Agent 的头像和气泡使用各自的语义色。 */
 .agent-message-row.user .agent-avatar { border-color: transparent; background: var(--primary-gradient); color: var(--text-on-accent); }
 .agent-message-row:not(.user) .agent-avatar { border-color: color-mix(in srgb, var(--success-color) 45%, var(--border-color)); background: color-mix(in srgb, var(--success-color) 16%, var(--lighter-bg)); color: var(--success-color); }
 .agent-message { max-width: calc(100% - 40px); min-width: 0; box-shadow: none; }
@@ -45,7 +44,7 @@
 .agent-send-actions { justify-content: flex-end; }
 .agent-send-actions :is(.btn-primary, .btn-xs) { min-width: 76px; min-height: 32px; padding: 6px 12px; }
 .agent-execute-action { border-color: color-mix(in srgb, var(--success-color) 55%, transparent); color: var(--success-color); }
-/* 头部单行与左栏同构；padding/字号不再覆盖 common-page 基准。 */
+/* 头部继承 common-page 排版。 */
 .agent-run-header { background: var(--card-bg); }
 #agent-steps { min-height: 0; padding: 16px 14px; gap: 12px; }
 .agent-step { --step-color: var(--text-secondary); display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 12px; position: relative; }

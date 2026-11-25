@@ -115,7 +115,7 @@ _PUBLIC_AGENT_PACKAGE_VERSION = re.compile(
 
 # 严格 CSP 作用于全部自研页面（inline 事件处理器已全部迁移到 act-bridge
 # 事件委托，inline <script> 已外置或转为 application/json 数据标签）。
-# 例外：noVNC 上游静态页经 features/system/desktop.py 同源代理返回
+# 例外：noVNC 上游静态页经 features/system/host/desktop.py 同源代理返回
 # （/novnc/... 与 /cluster/novnc/...），vnc.html 自带 inline <script>
 # 且内容随上游版本变化，无法用 hash 白名单，故单独使用放宽 script-src
 # 的 NOVNC_CSP。入口访问控制由 novnc_access grant 把守，代理路径不新增
@@ -473,7 +473,7 @@ def create_app(services: AppServices | None = None) -> FastAPI:
         # act-bridge 事件委托（web/static/js/shell/act-bridge.js），全部
         # inline <script> 外置或转为 application/json 数据标签
         # （gms-runtime-config）。运行时 UI 诊断若需 eval 类断点，走
-        # Playwright bypass_csp 的隔离上下文（tests/test_runtime_ui_smoke.py）。
+        # Playwright bypass_csp 的隔离上下文（tests/runtime_ui/harness.py）。
         # noVNC 上游代理页与套件 HTML 预览分别使用专用策略。
         if _is_novnc_proxied_path(path):
             response.headers['Content-Security-Policy'] = _NOVNC_CSP

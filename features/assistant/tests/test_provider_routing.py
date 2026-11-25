@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch
 
 from features.kkagent import UniversalAIAnalyzer
+from features.reports import ReportFailureAnalyzer
 
 
 class ProviderRoutingTests(unittest.TestCase):
@@ -150,7 +151,7 @@ class ProviderRoutingTests(unittest.TestCase):
         request.assert_called_once()
 
     def test_failure_analysis_prefers_local_then_fails_over(self):
-        analyzer = UniversalAIAnalyzer({
+        analyzer = ReportFailureAnalyzer({
             'enabled': True,
             'primary_provider': 'remote',
             'providers': {
@@ -224,7 +225,7 @@ class ProviderRoutingTests(unittest.TestCase):
         })
 
         with patch(
-            'features.kkagent.analyzer.requests.post',
+            'features.kkagent.http_client.requests.post',
             side_effect=[rejected, accepted],
         ) as post:
             result = analyzer.generate('生成周报', preferred_provider='glm_local')
@@ -258,7 +259,7 @@ class ProviderRoutingTests(unittest.TestCase):
                 return {'error': {'message': 'invalid model'}}
 
         with patch(
-            'features.kkagent.analyzer.requests.post',
+            'features.kkagent.http_client.requests.post',
             return_value=_Response(),
         ) as post:
             result = analyzer.generate('hello', preferred_provider='glm_local')

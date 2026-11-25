@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 import requests
 
-from features.automation.artifact_fetch import open_jenkins_artifact
+from features.automation.artifacts import open_jenkins_artifact
 from features.automation.executor_contract import (
     AutomationExecutor as AutomationExecutor,
 )
@@ -91,7 +91,7 @@ def _cluster_tls_profile() -> tuple[str, str]:
     （restart_services.sh）以 TLS 启动服务，executor 若落到旧的明文
     http://127.0.0.1 默认值，TLS 监听端会在返回任何 HTTP 响应前直接
     断开连接（客户端表现为 RemoteDisconnected）。解析方式与
-    worker_agent 一致：GMS_CONTROLLER_CA / 集群配置里的 controller_url
+    worker 一致：GMS_CONTROLLER_CA / 集群配置里的 controller_url
     与 controller_ca，配置路径同样支持 GMS_CLUSTER_CONFIG 覆盖。
     """
     from foundation.config_paths import cluster_config_path

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.daily_brief_models import (
+from features.redmine.daily_brief.models import (
     DailyBriefIssue,
     DailyBriefRun,
     base_priority_score,
     priority_from_score,
     validate_issue_result,
 )
-from features.redmine.daily_brief_snapshot import (
+from features.redmine.daily_brief.snapshot import (
     brief_date_today,
     detect_delta,
     issue_fingerprint,

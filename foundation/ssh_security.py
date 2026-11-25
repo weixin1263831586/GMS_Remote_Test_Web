@@ -35,7 +35,7 @@ def scan_ssh_host_keys(host: str, port: int = 22) -> list[dict[str, str]]:
     """Scan untrusted SSH keys for explicit out-of-band administrator review."""
     if not host or not (1 <= int(port) <= 65535):
         raise ValueError("invalid SSH host or port")
-    if not all(character.isalnum() or character in ".:_-" for character in host):
+    if host.startswith("-") or not all(character.isalnum() or character in ".:_-" for character in host):
         raise ValueError("invalid SSH hostname")
     try:
         completed = subprocess.run(
@@ -115,6 +115,7 @@ def trust_scanned_ssh_host_keys(
         retained: list[str] = []
         existing: set[tuple[str, str]] = set()
         conflict = False
+        selected_identities = {(item["key_type"], item["public_key"]) for item in selected}
         for line in existing_lines:
             try:
                 entry = paramiko.hostkeys.HostKeyEntry.from_line(line)
@@ -125,12 +126,16 @@ def trust_scanned_ssh_host_keys(
                 continue
             identity = (entry.key.get_name(), entry.key.get_base64())
             existing.add(identity)
-            if identity not in {
-                (item["key_type"], item["public_key"]) for item in selected
-            }:
+            if identity not in selected_identities:
                 conflict = True
             if not replace:
                 retained.append(line)
+            else:
+                # A known_hosts line can share one key across several aliases.
+                # Rotating the selected host must preserve every other alias.
+                remaining = [name for name in entry.hostnames if name != marker]
+                if remaining:
+                    retained.append(",".join(remaining) + " " + line.split(None, 1)[1])
         if conflict and not replace:
             raise ValueError(
                 "SSH host key changed; verify the rotation and retry with replace=true"

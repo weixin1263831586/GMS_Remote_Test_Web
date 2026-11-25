@@ -14,11 +14,10 @@ ENTRYPOINTS = (
     "features/devices/ui/page.html",
     "features/gerrit/ui/page.html",
     "features/redmine/ui/page.html",
-    "features/system/mainline_issues/ui/page.html",
-    "features/system/update_monitor/ui/page.html",
-    "features/system/update_radar/ui/page.html",
-    "features/devices/deployment_api.py",
-    "features/devices/debug_api.py",
+    "features/gms/ui/page.html",
+    "features/gms/radar/ui/page.html",
+    "features/devices/deployment/api.py",
+    "features/devices/debug/api.py",
 )
 
 
@@ -121,11 +120,10 @@ class UiSizingContractTests(unittest.TestCase):
             "features/devices/ui/page.html": 2,
             "features/gerrit/ui/page.html": 3,
             "features/redmine/ui/page.html": 7,
-            "features/system/mainline_issues/ui/page.html": 2,
-            "features/system/update_monitor/ui/page.html": 2,
-            "features/system/update_radar/ui/page.html": 1,
-            "features/devices/deployment_api.py": 1,
-            "features/devices/debug_api.py": 1,
+            "features/gms/ui/page.html": 2,
+            "features/gms/radar/ui/page.html": 1,
+            "features/devices/deployment/api.py": 1,
+            "features/devices/debug/api.py": 1,
             "features/system/gms_assistant_proxy.py": 1,
         }
         # Desktop and terminal are Shell page-content.container roots, so
@@ -191,7 +189,7 @@ class UiSizingContractTests(unittest.TestCase):
                 "--ui-table-row-height-dense", "--ui-touch-target-height",
             ),
             "features/gerrit/ui/page.html": ("--ui-control-height-icon",),
-            "features/system/update_radar/ui/page.html": ("--ui-control-height",),
+            "features/gms/radar/ui/page.html": ("--ui-control-height",),
         }
         for path, roles in role_map.items():
             with self.subTest(path=path):

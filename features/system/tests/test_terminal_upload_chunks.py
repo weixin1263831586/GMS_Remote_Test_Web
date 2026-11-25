@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from features.system import terminal_api
+from features.system.host.terminal import api as terminal_api
 
 
 class TerminalChunkRangeTests(unittest.IsolatedAsyncioTestCase):

@@ -3,7 +3,7 @@ from unittest.mock import patch
 
 import pytest
 
-from features.cluster.device_action_operations import fenced_local_payload
+from features.cluster.device_operations.execution import fenced_local_payload
 
 from .test_unified_device_claims import _repository
 

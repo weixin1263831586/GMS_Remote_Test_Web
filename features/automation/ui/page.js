@@ -1,3 +1,60 @@
+function switchMonitorPane(pane) {
+    switchWorkflowPane(pane);
+}
+
+// 旅程分组：顶部 5 个 Tab，每个 pane 归属一个组；组的 data-workflow
+// 取主 pane 键（其余成员经页首互链进入，分组只影响高亮与导航观感）。
+const AUTOMATION_TAB_GROUPS = Object.freeze({
+    overview: 'overview',
+    create: 'create',
+    plans: 'create',
+    runs: 'runs',
+    events: 'runs',
+    build: 'runs',
+    reports: 'reports',
+    resources: 'resources',
+    ops: 'resources',
+});
+
+function workflowTabGroupPrimary(pane) {
+    return AUTOMATION_TAB_GROUPS[pane] || pane;
+}
+
+function switchWorkflowPane(pane, {persist = true, load = true} = {}) {
+    const target = AUTOMATION_WORKFLOW_PANES.has(pane) ? pane : 'overview';
+    activeWorkflowPane = target;
+    AUTOMATION_WORKFLOW_PANES.forEach(key => {
+        const el = qs(`workflow-pane-${key}`);
+        if (el) {
+            el.classList.toggle('active', key === target);
+            el.setAttribute('aria-hidden', key === target ? 'false' : 'true');
+        }
+    });
+    // 顶部只显示 5 个旅程分组 Tab；pane 落在哪个组就点亮哪个组的 Tab
+    // （组内其它 pane 由页首互链进入，行为与旧 9-Tab 完全一致）。
+    document.querySelectorAll('.workflow-tab').forEach(tab => {
+        const active = workflowTabGroupPrimary(tab.dataset.workflow) === workflowTabGroupPrimary(target);
+        tab.classList.toggle('active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        tab.tabIndex = active ? 0 : -1;
+    });
+    if (persist) {
+        try { window.sessionStorage.setItem(AUTOMATION_WORKFLOW_STORAGE_KEY, target); } catch (_error) {}
+        const url = new URL(window.location.href);
+        if (target === 'overview') url.searchParams.delete('tab');
+        else url.searchParams.set('tab', target);
+        window.history.replaceState({}, '', url.toString());
+    }
+    if (!load) return;
+    if (target === 'overview') loadDashboard().catch(err => toast(err.message));
+    if (target === 'runs' || target === 'reports') {
+        loadRuns().catch(err => toast(err.message));
+    }
+    if (target === 'build') loadBuildJobs().catch(err => toast(err.message));
+    if (target === 'plans') loadTestPlans().catch(err => toast(err.message));
+    if (target === 'resources') loadResourceCatalog().catch(err => toast(err.message));
+}
+
 // Automation page entry chunk; loaded by page.html in dependency order.
 document.addEventListener('keydown', event => {
     if (event.key === 'Escape' && qs('ats-trace-drawer')?.classList.contains('open')) {

@@ -19,15 +19,16 @@ from features.automation.executors import (
     HttpAutomationExecutor,
     StubAutomationExecutor,
 )
-from features.automation.gerrit_trigger import (
-    match_profiles,
-    normalize_gerrit_event,
-    profile_matches_event,
-)
 from features.automation.models import TERMINAL_STATUSES, AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator
 from features.automation.plan_models import RetryPolicy
-from features.automation.profiles import load_profiles, upsert_profile
+from features.automation.profiles import (
+    load_profiles,
+    match_profiles,
+    normalize_gerrit_event,
+    profile_matches_event,
+    upsert_profile,
+)
 from features.automation.repository import AutomationStore
 from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.test_execution_options import matches_device_selector, validate_execution_options
@@ -186,7 +187,7 @@ class AutomationService:
         granted_capabilities = automation_granted_capabilities(
             principal, plan, elevated=elevated
         )
-        from .aoa_snapshot import freeze_recovery
+        from .recovery_executor import freeze_recovery
 
         freeze_recovery(plan, str(created_by or (principal.resource_owner_id if principal else "")))
         self._prepare_cluster_plan(body, plan)
@@ -241,7 +242,7 @@ class AutomationService:
         granted_capabilities = automation_granted_capabilities(
             principal, plan, elevated=elevated
         )
-        from .aoa_snapshot import freeze_recovery
+        from .recovery_executor import freeze_recovery
 
         freeze_recovery(plan, principal.resource_owner_id if principal else "")
         cluster = self._prepare_cluster_plan(body, plan)

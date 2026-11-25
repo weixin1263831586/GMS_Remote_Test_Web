@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.system.vnc import (
+from features.system.host.vnc import (
     NOVNC_WEB_PORT,
     VNC_PORT,
     VNCManager,
@@ -62,7 +62,7 @@ class VNCManagerTests(unittest.TestCase):
         manager = VNCManager()
         manager.ssh_manager = FakeSshManager()
 
-        with patch("features.system.vnc_remote.time.sleep"):
+        with patch("features.system.host.vnc.time.sleep"):
             result = manager._start_remote_vnc(
                 "user@192.168.0.2",
                 password="",
@@ -106,7 +106,7 @@ class VNCManagerTests(unittest.TestCase):
             "load_config",
             return_value={"ubuntu_host": "172.16.14.233"},
         ), patch(
-            "features.system.vnc.is_local_host",
+            "features.system.host.vnc.is_local_host",
             return_value=True,
         ), patch.object(
             manager,
@@ -142,7 +142,7 @@ class VNCManagerTests(unittest.TestCase):
             "load_config",
             return_value={"ubuntu_host": "172.16.14.233"},
         ), patch(
-            "features.system.vnc.is_local_host",
+            "features.system.host.vnc.is_local_host",
             return_value=True,
         ), patch.object(
             manager,
@@ -167,11 +167,11 @@ class VNCManagerTests(unittest.TestCase):
         connection = MagicMock()
         connection.recv.return_value = b"RFB 003.008\n"
         connection.__enter__.return_value = connection
-        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+        with patch("features.system.host.vnc.socket.create_connection", return_value=connection):
             self.assertTrue(VNCManager._is_local_rfb_healthy())
 
         connection.recv.return_value = b""
-        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+        with patch("features.system.host.vnc.socket.create_connection", return_value=connection):
             self.assertFalse(VNCManager._is_local_rfb_healthy())
 
     def test_local_rfb_health_accepts_fragmented_greeting(self):
@@ -179,21 +179,21 @@ class VNCManagerTests(unittest.TestCase):
         connection.recv.side_effect = [b"RF", b"B 003.", b"008\n"]
         connection.__enter__.return_value = connection
 
-        with patch("features.system.vnc.socket.create_connection", return_value=connection):
+        with patch("features.system.host.vnc.socket.create_connection", return_value=connection):
             self.assertTrue(VNCManager._is_local_rfb_healthy())
 
     def test_local_start_restarts_stuck_x11vnc_before_relaunching(self):
         manager = VNCManager()
         with patch.object(manager, "_find_local_novnc_web_dir", return_value="/opt/noVNC"), \
-             patch("features.system.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
+             patch("features.system.host.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
              patch.object(manager, "_has_local_websockify", return_value=True), \
              patch.object(manager, "_is_local_process_running", return_value=True), \
              patch.object(manager, "_is_local_port_listening", return_value=True), \
              patch.object(manager, "_is_local_rfb_healthy", side_effect=[False, True]), \
              patch.object(manager, "_kill_local_processes") as kill_processes, \
-             patch("features.system.vnc.subprocess.run"), \
-             patch("features.system.vnc.start_detached_process"), \
-             patch("features.system.vnc.time.sleep"):
+             patch("features.system.host.vnc.subprocess.run"), \
+             patch("features.system.host.vnc.start_detached_process"), \
+             patch("features.system.host.vnc.time.sleep"):
             result = manager._start_local_vnc()
 
         self.assertTrue(result["success"])
@@ -202,15 +202,15 @@ class VNCManagerTests(unittest.TestCase):
     def test_local_start_restarts_stuck_x11vnc_when_its_socket_backlog_is_full(self):
         manager = VNCManager()
         with patch.object(manager, "_find_local_novnc_web_dir", return_value="/opt/noVNC"), \
-             patch("features.system.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
+             patch("features.system.host.vnc.shutil.which", return_value="/usr/bin/x11vnc"), \
              patch.object(manager, "_has_local_websockify", return_value=True), \
              patch.object(manager, "_is_local_process_running", return_value=True), \
              patch.object(manager, "_is_local_port_listening", side_effect=[False, True, True, True]), \
              patch.object(manager, "_is_local_rfb_healthy", side_effect=[True]), \
              patch.object(manager, "_kill_local_processes") as kill_processes, \
-             patch("features.system.vnc.subprocess.run"), \
-             patch("features.system.vnc.start_detached_process"), \
-             patch("features.system.vnc.time.sleep"):
+             patch("features.system.host.vnc.subprocess.run"), \
+             patch("features.system.host.vnc.start_detached_process"), \
+             patch("features.system.host.vnc.time.sleep"):
             result = manager._start_local_vnc()
 
         self.assertTrue(result["success"])
@@ -223,7 +223,7 @@ class DesktopVncRouteTests(unittest.TestCase):
         from fastapi.testclient import TestClient
 
         from features.auth import CurrentUser, require_elevated_admin
-        from features.system import desktop
+        from features.system.host import desktop
 
         self.desktop = desktop
         app = FastAPI()

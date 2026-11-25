@@ -15,7 +15,7 @@ RUNTIME = ROOT / ("runtime" if (ROOT / "runtime").is_dir() else "scripts")
 sys.path.insert(0, str(RUNTIME))
 import mcp_server  # noqa: E402
 from gms_agent import package_manager as pm  # noqa: E402
-from gms_agent.runtime_processes import running_runtimes  # noqa: E402
+from gms_agent.installation_health import running_runtimes  # noqa: E402
 
 
 def process(proc, pid, *argv):

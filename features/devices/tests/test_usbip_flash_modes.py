@@ -3,13 +3,11 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.devices import (
-    reconnect,
-    usbip_flash,
-    usbip_transport_probe,
-)
+from features.devices import reconnect
 from features.devices.usb import configured_usbip_vid_pids
-from features.devices.usbip import (
+from features.devices.usbip import flash as usbip_flash
+from features.devices.usbip import transport_probe as usbip_transport_probe
+from features.devices.usbip.manager import (
     USBIPManager,
     parse_adb_device_states,
     parse_fastboot_devices,
@@ -64,7 +62,7 @@ abc                                   Android ADB Interface
         )
 
     def test_autobind_policy_match_requires_exact_busid_token(self):
-        from features.devices.usbip_flash import usbipd_policy_line_covers_busid
+        from features.devices.usbip.flash import usbipd_policy_line_covers_busid
 
         policy_output = "p1  Allow AutoBind 1-11\np2  Allow AutoBind 1-1.2\n"
         # "1-1" 不能误命中 "1-11" / "1-1.2" 的既有规则。
@@ -514,7 +512,7 @@ abc                                   Android ADB Interface
         with patch.object(reconnect.runtime.get_runtime(), "config_manager", Config()), \
                 patch.object(reconnect.runtime.get_runtime(), "ssh_manager", ssh_manager), \
                 patch(
-                    "features.devices.usbip_transport_probe.usbip_manager",
+                    "features.devices.usbip.transport_probe.usbip_manager",
                     manager,
                 ), \
                 patch.object(reconnect, "_local_worker_id", return_value="ats-worker-controller"):
@@ -560,7 +558,7 @@ class UsbipAttachVerificationTests(unittest.TestCase):
 
         manager = USBIPManager()
         manager.ssh_manager = FakeSshManager()
-        with patch("features.devices.usbip.time.sleep", return_value=None):
+        with patch("features.devices.usbip.manager.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(
                 object(), "172.16.14.66", ["1-1"]
             )
@@ -658,7 +656,7 @@ class UsbipAttachVerificationTests(unittest.TestCase):
 
 class UsbipAssignmentPruningTests(unittest.TestCase):
     def test_stale_unknown_busid_is_pruned_after_windows_reenumeration(self):
-        import features.devices.usbip_assignments as usbip_assignments
+        import features.devices.usbip.assignments as usbip_assignments
 
         runtime_config = {
             "usbip_cluster_assignments": {

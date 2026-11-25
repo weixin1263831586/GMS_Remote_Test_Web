@@ -164,7 +164,7 @@
 /* Footer and actions: matching solid buttons, not site-wide gradients. */
 /* Prevent legacy standalone-page defaults from leaking a gradient into
    secondary/modal-only actions. Explicit .btn-primary/.primary below wins. */
-:is(.modal, .modal-backdrop) .modal-content button:not(.modal-close):not(.btn-danger):not(.danger):not(.warn) {
+:is(.modal, .modal-backdrop) .modal-content button:not(.modal-close):not(.btn-danger):not(.danger):not(.warn):not(.password-visibility-toggle) {
     background: var(--lighter-bg);
 }
 

@@ -17,10 +17,8 @@ from fastapi.testclient import TestClient
 
 from features.auth import AuthService, CurrentUser
 from features.cluster import ClusterRepository
-from features.devices import deployment_api as api
-from features.devices import deployment_execution as execution
-from features.devices import deployment_service as service
-from features.devices.deployment_store import DeploymentStore
+from features.devices.deployment import api, execution, service
+from features.devices.deployment.store import DeploymentStore
 from foundation.command_result import CommandResult
 from foundation.error_model import ApiError, register_api_error_handler
 
@@ -383,7 +381,7 @@ def test_heartbeat_preserves_live_deployment_beyond_original_deadline(tmp_path):
     repository.start("a" * 32, "owner", "human")
     repository.begin_execution("a" * 32)
     for elapsed in range(60, 1801, 60):
-        with patch("features.devices.deployment_store.time.time", return_value=start + elapsed):
+        with patch("features.devices.deployment.store.time.time", return_value=start + elapsed):
             repository.heartbeat("a" * 32)
             assert DeploymentStore(tmp_path).get("a" * 32, "owner")["status"] == "running"
     with pytest.raises(ApiError):
@@ -567,8 +565,8 @@ def test_calibration_app_deploy_endpoint(environment, monkeypatch):
     """一键部署端点：从 dist/ 固定路径取 APK 走既有审批流；缺产物报 404。"""
     from pathlib import Path
 
-    from features.devices import aoa_api
-    from features.devices import deployment_service as service
+    from features.devices.aoa import api as aoa_api
+    from features.devices.deployment import service
 
     client, _repository, _auth = environment
     client.app.include_router(aoa_api.router)

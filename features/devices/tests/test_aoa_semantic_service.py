@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from features.devices.aoa_certifications import AoaCertificationStore
-from features.devices.aoa_semantic_service import authorize_semantic_options, semantic_options
-from features.devices.aoa_service import AoaProfileStore
+from features.devices.aoa.certifications import AoaCertificationStore
+from features.devices.aoa.mapping_service import authorize_semantic_options, semantic_options
+from features.devices.aoa.service import AoaProfileStore
 from foundation.error_model import ApiError
 from tests.aoa_semantic_fixtures import reference, semantic_template
 
@@ -64,7 +64,7 @@ def test_client_receipts_cannot_impersonate_reference_evidence(tmp_path, mutatio
 def test_resolution_and_dispatch_recheck_active_owned_proof(tmp_path, monkeypatch):
     store = AoaCertificationStore(tmp_path)
     proof = issue(store)
-    monkeypatch.setattr("features.devices.aoa_semantic_service.certification_store", lambda: store)
+    monkeypatch.setattr("features.devices.aoa.mapping_service.certification_store", lambda: store)
     metadata = {"semantic_template": semantic_template(), "class_certificate_ids": [proof["id"]]}
     context = reference()["context"]
     opts = semantic_options(metadata, context, "owner-1", ["click 1 1"])
@@ -81,7 +81,7 @@ def test_resolution_and_dispatch_recheck_active_owned_proof(tmp_path, monkeypatc
 def test_automation_semantics_requires_successful_matching_firmware_receipt(tmp_path, monkeypatch):
     store = AoaCertificationStore(tmp_path)
     proof = issue(store)
-    monkeypatch.setattr("features.devices.aoa_semantic_service.certification_store", lambda: store)
+    monkeypatch.setattr("features.devices.aoa.mapping_service.certification_store", lambda: store)
     opts = semantic_options({"semantic_template": semantic_template(), "class_certificate_ids": [proof["id"]]},
                             reference()["context"], "owner-1", ["click 1 1"])
     opts["aoa_firmware_sha256"] = "a" * 64
@@ -99,7 +99,7 @@ def test_automation_semantics_accepts_usb_only_inventory_with_matching_receipt(t
     只能经 ADB 采集的属性；但清单在场报告的键仍须与冻结计划一致。"""
     store = AoaCertificationStore(tmp_path)
     proof = issue(store)
-    monkeypatch.setattr("features.devices.aoa_semantic_service.certification_store", lambda: store)
+    monkeypatch.setattr("features.devices.aoa.mapping_service.certification_store", lambda: store)
     opts = semantic_options({"semantic_template": semantic_template(), "class_certificate_ids": [proof["id"]]},
                             reference()["context"], "owner-1", ["click 1 1"])
     assert "aoa_firmware_sha256" not in opts  # 无固件声明的语义 Profile 也能凭回执派发
@@ -143,7 +143,7 @@ def test_multiple_displays_require_explicit_target_and_keep_their_own_density(mo
     other["id"] = "external-layout"
     template["layouts"].append(other)
     metadata = {"semantic_template": template, "class_certificate_ids": ["two-displays"]}
-    monkeypatch.setattr("features.devices.aoa_semantic_service.certification_store",
+    monkeypatch.setattr("features.devices.aoa.mapping_service.certification_store",
                         lambda: SimpleNamespace(get=lambda *args: proof))
     with pytest.raises(ValueError, match="unique"):
         semantic_options(metadata, context, "owner-1", ["click 1 1"])

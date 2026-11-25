@@ -28,12 +28,11 @@ from features.auth import (
 )
 from features.devices import ssh_connection_failed_response
 from foundation.error_model import ApiError
-from foundation.errors import handle_api_errors
+from foundation.errors import TaskCapacityError, handle_api_errors
 from foundation.responses import ApiResponse
 
 from . import runtime
 from .models import SuiteApkAnalyzeRequest, SuiteDiagnosisTargetRequest
-from .suite_apk_analysis import register_suite_apk_task
 from .suite_helpers import (
     get_available_test_suites,
     resolve_suite_diagnosis_target,
@@ -46,7 +45,7 @@ from .suite_local_files import (
     run_folder_suffix,
     search_suite_files_local,
 )
-from .suite_modules import search_latest_suite_modules
+from .suite_modules import _pick_suite_module_artifact, search_latest_suite_modules
 from .suite_remote_scripts import (
     SUITE_DIR_CLEANUP_SCRIPT,
     SUITE_DIR_ZIP_SCRIPT,
@@ -747,3 +746,46 @@ async def create_suite_apk_analysis_task(req: SuiteApkAnalyzeRequest, request: R
             with contextlib.suppress(Exception):
                 sftp.close()
         runtime.ssh_manager.return_connection(ssh)
+
+
+def register_suite_apk_task(task_id: str, apk_path: str, filename: str, owner_id: str) -> None:
+    try:
+        runtime.create_apk_task(task_id, apk_path, filename, owner_id)
+    except TaskCapacityError as exc:
+        # Only this rejected request's copy is disposable; existing tasks and
+        # other owners' durable results must stay intact.
+        runtime.cleanup_files([apk_path])
+        with contextlib.suppress(OSError):
+            os.rmdir(os.path.dirname(apk_path))
+        raise ApiError.dependency_unavailable(
+            "当前账号的 APK 分析任务容量已满，请稍后重试，或删除不再需要的分析任务",
+            next_actions=({"action": "在 APK 分析页面检查并删除当前账号不再需要的任务；无可清理任务时联系管理员"},),
+        ) from exc
+
+
+@router.get("/api/test/suites/modules/apk")
+@handle_api_errors
+async def resolve_suite_module_apk_artifact(
+    query: str = Query(..., description="模块关键词，例如 CtsCamera"),
+    suite_types: str = Query("cts,cts-v,vts,gts,sts", description="逗号分隔套件类型，例如 cts,cts-v,vts,gts,sts"),
+    prefer: str = Query("apk", description="优先产物类型：apk 或 jar"),
+    suite_path: str = Query("", description="可选：显式套件根目录（含 testcases/ 的目录，绝对路径），指定后只搜索该套件"),
+):
+    """Resolve a test module keyword to its APK/JAR artifact for decompilation."""
+    config = runtime.config_manager.load_config()
+    types = [item.strip() for item in suite_types.split(",") if item.strip()]
+    payload = await asyncio.to_thread(
+        search_latest_suite_modules, config, query, types, 30, suite_path,
+    )
+    resolved = _pick_suite_module_artifact(payload, prefer)
+    if not resolved:
+        return ApiResponse.error(
+            f"No APK/JAR artifact found for module query: {query}",
+            status_code=404,
+            data={
+                "query": query,
+                "modules": (payload.get("modules") or [])[:10],
+                "searched_suites": payload.get("searched_suites") or [],
+            },
+        )
+    return ApiResponse.success(resolved)

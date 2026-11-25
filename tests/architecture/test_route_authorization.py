@@ -47,7 +47,7 @@ MIGRATION_ALLOWLIST = {
     # admin approved. Fail-closed: unknown/used/expired code → 403.
     ("features/auth/agent_api.py", "/agent-enroll"),
     ("features/automation/api.py", "/gerrit/webhook"),
-    ("features/cluster/transfer_ingest_api.py", "/transfers/{transfer_id}/report-analysis"),
+    ("features/cluster/transfers/ingest.py", "/transfers/{transfer_id}/report-analysis"),
     ("features/devices/api.py", "/api/device-groups/auto"),
 }
 
@@ -249,7 +249,7 @@ def _resolve_imported(
 def _feature_module_index(cache: dict[str, tuple]) -> dict[str, tuple[Path, tuple]]:
     """Index every top-level helper name in features/ -> (module path, entry).
 
-    Built once per test run; used to resolve attribute-style cross-module
+    Built once per test run to resolve attribute-style cross-module
     calls (``helpers._require_transfer_access(...)``) whose receiver is a
     lazily imported module object.
     """
@@ -682,7 +682,7 @@ class OwnerIdentityTaintCheckTests(unittest.TestCase):
 
     def test_business_modules_never_read_raw_principal_id(self):
         offenders = []
-        for base in ("features", "foundation", "bootstrap", "worker_agent"):
+        for base in ("features", "foundation", "bootstrap", "worker"):
             for path in sorted((ROOT / base).rglob("*.py")):
                 relative = str(path.relative_to(ROOT))
                 if "/tests/" in relative or "__pycache__" in relative:

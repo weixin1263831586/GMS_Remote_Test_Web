@@ -1,0 +1,685 @@
+from __future__ import annotations
+
+import json
+import shutil
+import sqlite3
+import threading
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from foundation.device_claims import DeviceClaimRegistry
+
+from ..admission import worker_admission_state
+from ..config import normalize_max_jobs
+from ..jobs.requests import ClusterJobRequestRepositoryMixin
+from . import schema
+from .claims import ClusterClaimRepositoryMixin
+from .commands import ClusterCommandRepositoryMixin
+from .inventory import ClusterInventoryRepositoryMixin
+from .observability import ClusterObservabilityRepositoryMixin
+from .reconciliation import ClusterReconciliationRepositoryMixin
+from .reservations import ClusterReservationRepositoryMixin
+
+
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class ClusterRepository(
+    ClusterJobRequestRepositoryMixin,
+    ClusterReconciliationRepositoryMixin,
+    ClusterObservabilityRepositoryMixin,
+    ClusterClaimRepositoryMixin,
+    ClusterCommandRepositoryMixin,
+    ClusterInventoryRepositoryMixin,
+    ClusterReservationRepositoryMixin,
+):
+    _REQUIRED_TABLES = schema.REQUIRED_TABLES
+
+    def __init__(
+        self,
+        db_path: str | Path,
+        claim_db_path: str | Path | None = None,
+        claim_lease_ttl_seconds: int = 90,
+    ):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if claim_db_path is None:
+            base = self.db_path.parent
+            claim_db_path = (base.parent if base.name == "cluster" else base) / "device_claims.sqlite3"
+        self.claims = DeviceClaimRegistry(claim_db_path)
+        self.claim_lease_ttl_seconds = max(30, int(claim_lease_ttl_seconds))
+        self._lock = threading.RLock()
+        self._init_schema()
+        # Crash split-brain reconciliation (ADR 0011):
+        # idempotent repair of ghost claims / unfenced jobs at startup.
+        self.reconcile_claims()
+
+    def _open_connection(self) -> sqlite3.Connection:
+        # Self-heal parent dir so a runtime data/ clear-out doesn't turn
+        # every cluster request into a 500 ("unable to open database file").
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
+
+    def connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self._init_schema()
+            conn = self._open_connection()
+        return conn
+
+    def _init_schema(self) -> None:
+        with self._lock, self._open_connection() as conn:
+            schema.apply_schema(conn)
+            # Process-safe schema migration: hold the SQLite write lock
+            # across the schema read + ALTER TABLE steps so Web/Worker/CLI
+            # startup passes cannot interleave migrations (see the SQLite
+            # migration rule in AGENTS.md). BEGIN IMMEDIATE must follow
+            # apply_schema(), whose executescript() commits any pending
+            # transaction.
+            conn.execute("BEGIN IMMEDIATE")
+            self._migrate_worker_metrics(conn)
+            schema.migrate_transfers(conn)
+            schema.migrate_device_lease_unique_constraint(conn)
+            schema.migrate_recovery_observability(conn)
+            schema.create_indexes(conn)
+            from ..artifact_retention import initialize_retention_schema
+
+            initialize_retention_schema(conn)
+
+    @staticmethod
+    def _decode(row: sqlite3.Row | None) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        result = dict(row)
+        for column in (
+            "capabilities_json", "properties_json", "payload_json", "result_json",
+            "metadata_json",
+        ):
+            if column in result:
+                key = column.removesuffix("_json")
+                try:
+                    result[key] = json.loads(result.pop(column) or "{}")
+                except json.JSONDecodeError:
+                    result[key] = {}
+        return result
+
+    def delete_job(self, job_id: str) -> bool:
+        with self._lock, self.connect() as conn:
+            row = conn.execute("SELECT status FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
+            if not row or row["status"] not in {"completed", "failed", "cancelled"}:
+                return False
+            # 先收集该 job 的命令 ID 再删命令表，否则子查询恒为空，
+            # cluster_command_events 会永久留下孤儿事件。
+            command_ids = [
+                row["id"]
+                for row in conn.execute(
+                    "SELECT id FROM cluster_commands WHERE job_id=?", (job_id,)
+                ).fetchall()
+            ]
+            upload_ids = [row["id"] for row in conn.execute(
+                "SELECT id FROM cluster_artifact_uploads WHERE job_id=?", (job_id,),
+            ).fetchall()]
+            for table in ("cluster_job_events", "cluster_job_artifacts", "cluster_artifact_uploads", "device_leases",
+                          "cluster_commands", "cluster_job_attempts", "cluster_timeline_events"):
+                conn.execute(f"DELETE FROM {table} WHERE job_id=?", (job_id,))
+            for command_id in command_ids:
+                conn.execute(
+                    "DELETE FROM cluster_command_events WHERE command_id=?",
+                    (command_id,),
+                )
+            conn.execute("DELETE FROM cluster_jobs WHERE id=?", (job_id,))
+            conn.commit()
+            for root_name, name in [("artifacts", job_id), *[("artifact-uploads", item) for item in upload_ids]]:
+                if not name or name in {".", ".."} or Path(name).name != name:
+                    continue
+                target = self.db_path.parent / root_name / name
+                if target.is_symlink():
+                    target.unlink(missing_ok=True)
+                else:
+                    shutil.rmtree(target, ignore_errors=True)
+            return True
+
+    def create_job_with_leases(self, data: dict[str, Any]) -> dict[str, Any]:
+        job_id = f"job-{uuid.uuid4().hex}"
+        worker_id = data["worker_id"]
+        worker = self.get_worker(worker_id)
+        if worker is None:
+            raise ValueError("worker not found")
+        if worker.get("status") not in {"online", "busy"}:
+            raise ValueError("worker is not online")
+        devices = self._claim_devices(worker_id, data.get("devices", []))
+        if not (owner_id := str(data.get("owner_id") or "").strip()):
+            raise ValueError("authenticated owner_id is required")
+        owner_username = str(data.get("owner_username") or "").strip()
+        reservation_id = str(data.get("device_reservation_id") or "")
+        job_source = f"job:{job_id}"
+        reservation_source = f"reservation:{reservation_id}"
+        device_keys = [item["device_key"] for item in devices]
+        transferred = False
+        claim_records: list[dict[str, Any]] = []
+        if reservation_id:
+            reservation = self.get_reservation(reservation_id)
+            if not reservation or reservation.get("status") != "active":
+                raise ValueError("device reservation is missing or expired")
+            if reservation.get("worker_id") != worker_id:
+                raise ValueError("device reservation belongs to another Worker")
+            if reservation.get("owner_id") != owner_id:
+                raise ValueError("device reservation belongs to another owner")
+            automation_run_id = str(data.get("automation_run_id") or "")
+            if automation_run_id and reservation.get("source_id") != automation_run_id:
+                raise ValueError("device reservation belongs to another automation run")
+            # 预约一致性只比较用户请求的设备集合（requested identity）。
+            # device_keys 是 _claim_devices 展开后的物理 fencing 集合，
+            # ADB Proxy 请求会被展开成 {proxy, source_worker:serial}，
+            # 拿它与 reservation.requested（只含 proxy id）严格比较会把
+            # 合法的 proxy 预约永远判成不匹配（requested vs fencing
+            # 两个集合不可混用）；物理 fencing 由下方 claims.transfer
+            # 按展开集合继续保证。
+            requested_keys = {
+                value if value.startswith(f"{worker_id}:") else f"{worker_id}:{value}"
+                for value in (str(item).strip() for item in data.get("devices", []))
+                if value
+            }
+            reservation_devices = {
+                item["id"] for item in reservation.get("devices") or []
+            }
+            if requested_keys != reservation_devices:
+                raise ValueError("test devices do not match the active reservation")
+            transferred = self.claims.transfer(
+                reservation_source,
+                job_source,
+                source_type="cluster-job",
+                ttl_seconds=self.claim_lease_ttl_seconds,
+                owner_id=owner_id,
+                device_keys=device_keys,
+            ) > 0
+            if transferred:
+                claim_records = [
+                    claim for key in device_keys
+                    if (claim := self.claims.active_claim(key)) is not None
+                ]
+        if not transferred:
+            acquired, claim_records = self.claims.acquire(
+                devices,
+                owner_id=owner_id,
+                username=owner_username or owner_id,
+                source_type="cluster-job",
+                source_id=job_source,
+                ttl_seconds=self.claim_lease_ttl_seconds,
+            )
+            if not acquired:
+                owner = claim_records[0].get("username") or claim_records[0].get("owner_id")
+                raise ValueError(f"device is already claimed by {owner}")
+        try:
+            return self._create_job_with_leases_metadata(
+                {**data, "_job_id": job_id, "_claim_records": claim_records}
+            )
+        except Exception:
+            if transferred:
+                restored = self.claims.transfer(
+                    job_source,
+                    reservation_source,
+                    source_type="cluster-reservation",
+                    ttl_seconds=6 * 60 * 60,
+                    owner_id=owner_id,
+                    device_keys=device_keys,
+                )
+                if restored <= 0:
+                    self.claims.release(job_source, status="failed")
+            else:
+                self.claims.release(job_source, status="failed")
+            raise
+
+    @staticmethod
+    def _physical_alias_device_ids(
+        conn: Any,
+        source_worker_id: str,
+        source_serial: str,
+        exclude_device_id: str = "",
+    ) -> list[str]:
+        """All inventory ids that route to the same physical device.
+
+        A device exposed through ADB Proxy carries
+        adb_proxy_source_worker_id/adb_proxy_source_serial in its
+        properties (worker/device_actions.py:251).  Every inventory
+        row with the same proxy metadata — plus the source worker's own
+        local-USB row — is the same physical hardware.
+        """
+        rows = conn.execute(
+            """SELECT id, worker_id, transport, properties_json
+               FROM cluster_worker_devices
+               WHERE transport='adb_proxy'"""
+        ).fetchall()
+        alias_ids: list[str] = []
+        for row in rows:
+            if row["id"] == exclude_device_id:
+                continue
+            try:
+                properties = json.loads(row["properties_json"] or "{}")
+            except json.JSONDecodeError:
+                continue
+            if (
+                str(properties.get("adb_proxy_source_worker_id") or "") == source_worker_id
+                and str(properties.get("adb_proxy_source_serial") or "") == source_serial
+            ):
+                alias_ids.append(row["id"])
+        source_row = conn.execute(
+            "SELECT id FROM cluster_worker_devices WHERE worker_id=? AND serial=?",
+            (source_worker_id, source_serial),
+        ).fetchone()
+        if source_row and source_row["id"] != exclude_device_id:
+            alias_ids.append(source_row["id"])
+        return alias_ids
+
+    def _physical_alias_lease_conflict(
+        self,
+        conn: Any,
+        worker_id: str,
+        device_id: str,
+        device_row: Any,
+    ) -> str:
+        """Return the conflicting alias device_id if the same physical
+        device is already actively leased through another route."""
+        properties = device_row["properties_json"] if not isinstance(
+            device_row, dict
+        ) else json.dumps(device_row.get("properties") or {})
+        try:
+            device_properties = json.loads(properties or "{}")
+        except json.JSONDecodeError:
+            device_properties = {}
+        transport = str(device_row["transport"] if not isinstance(
+            device_row, dict
+        ) else device_row.get("transport") or "")
+        candidates: list[str] = []
+        if transport == "adb_proxy":
+            source_worker_id = str(
+                device_properties.get("adb_proxy_source_worker_id") or ""
+            )
+            source_serial = str(
+                device_properties.get("adb_proxy_source_serial") or ""
+            )
+            if source_worker_id and source_serial:
+                candidates = self._physical_alias_device_ids(
+                    conn, source_worker_id, source_serial,
+                    exclude_device_id=device_id,
+                )
+        else:
+            # Claiming the physical device on its source worker: check
+            # active leases on every proxied alias pointing at it.
+            proxy_rows = conn.execute(
+                """SELECT id, properties_json FROM cluster_worker_devices
+                   WHERE transport='adb_proxy' AND id != ?""",
+                (device_id,),
+            ).fetchall()
+            for row in proxy_rows:
+                try:
+                    properties = json.loads(row["properties_json"] or "{}")
+                except json.JSONDecodeError:
+                    continue
+                if (
+                    str(properties.get("adb_proxy_source_worker_id") or "") == worker_id
+                    and str(properties.get("adb_proxy_source_serial") or "")
+                    == str(device_row["serial"] if not isinstance(
+                        device_row, dict) else device_row.get("serial") or "")
+                ):
+                    candidates.append(row["id"])
+        for alias_id in candidates:
+            row = conn.execute(
+                """SELECT id, job_id, owner_id FROM device_leases
+                   WHERE device_id=? AND status='active'""",
+                (alias_id,),
+            ).fetchone()
+            if row:
+                return f"{alias_id} (job {row['job_id']}, owner {row['owner_id']})"
+        return ""
+
+    def _create_job_with_leases_metadata(self, data: dict[str, Any]) -> dict[str, Any]:
+        now = utc_now()
+        job_id = data["_job_id"]
+        attempt_id = f"attempt-{uuid.uuid4().hex}"
+        lease_ids = []
+        worker_id = data["worker_id"]
+        requested_devices = data.get("devices", [])
+        reservation_id = str(data.get("device_reservation_id") or "")
+        trace_id = str(
+            data.get("trace_id")
+            or data.get("automation_run_id")
+            or f"trace-{uuid.uuid4().hex}"
+        )
+        request_data = {
+            **{key: value for key, value in data.items() if not key.startswith("_")},
+            "trace_id": trace_id,
+        }
+        claim_records = {
+            item["device_key"]: item for item in data.get("_claim_records") or []
+        }
+        with self._lock, self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            self._expire_device_reservations(conn, now)
+            worker = conn.execute("SELECT * FROM cluster_workers WHERE id=?", (worker_id,)).fetchone()
+            if worker is None:
+                raise ValueError("worker not found")
+            # Claim-time re-check consumes the same admission source as the
+            # UI directory and the scheduler (features/cluster/admission.py);
+            # sqlite3.Row supports mapping access but has no .get, hence dict().
+            required_memory_gb = float(data.get("required_memory_gb", 0) or 0)
+            admission = worker_admission_state(
+                dict(worker), required_memory_gb=required_memory_gb
+            )
+            if admission["blocked"]:
+                reasons = ", ".join(admission["reasons"])
+                raise ValueError(f"worker is not admissible ({reasons})")
+            active_rows = conn.execute("""SELECT request_json FROM cluster_jobs
+                WHERE assigned_worker_id=? AND status IN ('assigned','dispatching','running','stopping')""",
+                (worker_id,)).fetchall()
+            if len(active_rows) >= normalize_max_jobs(worker["max_jobs"]):
+                raise ValueError("worker already has the maximum number of active jobs")
+            existing_exclusive = any(
+                bool(json.loads(row["request_json"] or "{}").get("exclusive_host"))
+                for row in active_rows
+            )
+            if existing_exclusive or (data.get("exclusive_host") and
+                                      (active_rows or int(worker["running_jobs"]) > 0)):
+                raise ValueError("a full-suite test requires exclusive use of the worker")
+            reserved_ids: set[str] = set()
+            if reservation_id:
+                reservation_rows = conn.execute(
+                    """SELECT * FROM cluster_device_reservations
+                       WHERE reservation_id=? AND status='active'""",
+                    (reservation_id,),
+                ).fetchall()
+                if not reservation_rows:
+                    raise ValueError("device reservation is missing or expired")
+                if any(row["worker_id"] != worker_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another Worker")
+                source_id = str(data.get("automation_run_id") or "")
+                if source_id and any(row["source_id"] != source_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another automation run")
+                owner_id = str(data.get("owner_id") or "")
+                if owner_id and any(row["owner_id"] != owner_id for row in reservation_rows):
+                    raise ValueError("device reservation belongs to another owner")
+                reserved_ids = {row["device_id"] for row in reservation_rows}
+                normalized_requested = {
+                    str(value) if str(value).startswith(f"{worker_id}:") else f"{worker_id}:{value}"
+                    for value in requested_devices
+                }
+                if normalized_requested != reserved_ids:
+                    raise ValueError("test devices do not match the active reservation")
+            conn.execute("""INSERT INTO cluster_jobs
+                (id,owner_id,source_type,requested_worker_id,assigned_worker_id,
+                 suite_key,suite_path,request_json,status,priority,current_attempt_id,
+                 trace_id,state_version,last_transition_at,created_at,queued_at,
+                 started_at,finished_at,updated_at,error)
+                VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,'','',?,'')""",
+                (job_id, data.get("owner_id", ""), data.get("source_type", "manual"),
+                 worker_id, worker_id, data.get("suite_key", ""), data.get("suite_path", ""),
+                 json.dumps(request_data, separators=(",", ":")), "assigned",
+                 data.get("priority", 100), attempt_id, trace_id, now, now, now, now))
+            if data.get("_idempotency_key"):
+                # The receipt and job commit together, including after a crash.
+                conn.execute(
+                    "INSERT INTO cluster_job_requests(owner_id,request_key,request_hash,job_id) VALUES(?,?,?,?)",
+                    (data["owner_id"], data["_idempotency_key"], data["_request_hash"], job_id),
+                )
+            dispatch_token = uuid.uuid4().hex
+            conn.execute("""INSERT INTO cluster_job_attempts
+                (id,job_id,attempt_number,worker_id,worker_job_id,dispatch_token,
+                 status,result_json,started_at,heartbeat_at,finished_at,error)
+                VALUES(?,?,1,?,'',?,'assigned','{}','','','','')""",
+                (attempt_id, job_id, worker_id, dispatch_token))
+            for raw_id in requested_devices:
+                device_id = raw_id if raw_id.startswith(f"{worker_id}:") else f"{worker_id}:{raw_id}"
+                device = conn.execute(
+                    "SELECT * FROM cluster_worker_devices WHERE id=? AND worker_id=?",
+                    (device_id, worker_id),
+                ).fetchone()
+                if device is None:
+                    raise ValueError(f"device not found on worker: {raw_id}")
+                if device["state"] != "available" and device_id not in reserved_ids:
+                    raise ValueError(f"device is not available: {raw_id}")
+                if conn.execute("SELECT 1 FROM device_leases WHERE device_id=? AND status='active'", (device_id,)).fetchone():
+                    raise ValueError(f"device is already leased: {raw_id}")
+                alias_conflict = self._physical_alias_lease_conflict(
+                    conn, worker_id, device_id, device
+                )
+                if alias_conflict:
+                    raise ValueError(
+                        "device is already claimed through another transport "
+                        f"alias: {alias_conflict}"
+                    )
+                claim = claim_records.get(device_id) or {}
+                lease_id = str(claim.get("id") or f"lease-{uuid.uuid4().hex}")
+                lease_ids.append(lease_id)
+                generation = int(claim.get("generation") or 0)
+                if generation <= 0:
+                    generation = int(conn.execute(
+                        """SELECT COALESCE(MAX(generation),0)+1
+                           FROM device_leases WHERE device_id=?""",
+                        (device_id,),
+                    ).fetchone()[0] or 1)
+                # SQLite computes expiry to keep lease timestamps consistent.
+                conn.execute("""INSERT INTO device_leases
+                    (id,device_id,worker_id,serial,job_id,attempt_id,owner_id,status,
+                     generation,acquired_at,heartbeat_at,expires_at,released_at)
+                    VALUES(?,?,?,?,?,?,?,'active',?,?,?,datetime('now',?),'')""",
+                    (lease_id, device_id, worker_id, device["serial"], job_id, attempt_id,
+                     data.get("owner_id", ""), generation, now, now,
+                     f"+{self.claim_lease_ttl_seconds} seconds"))
+                conn.execute("UPDATE cluster_worker_devices SET state='allocated',updated_at=? WHERE id=?", (now, device_id))
+            if reservation_id:
+                conn.execute(
+                    """UPDATE cluster_device_reservations SET status='converted',released_at=?
+                       WHERE reservation_id=? AND status='active'""",
+                    (now, reservation_id),
+                )
+            self._append_timeline_conn(
+                conn,
+                job_id=job_id,
+                attempt_id=attempt_id,
+                trace_id=trace_id,
+                worker_id=worker_id,
+                event_type="job.created",
+                source="controller",
+                from_state="",
+                to_state="assigned",
+                message="Cluster Job created and device leases acquired",
+                payload={
+                    "device_ids": [
+                        raw if str(raw).startswith(f"{worker_id}:") else f"{worker_id}:{raw}"
+                        for raw in requested_devices
+                    ],
+                    "automation_run_id": data.get("automation_run_id", ""),
+                },
+            )
+        job = self.get_job(job_id) or {}
+        job["lease_ids"] = lease_ids
+        return job
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM cluster_jobs WHERE id=?", (job_id,)).fetchone()
+            if row is None:
+                return None
+            result = dict(row)
+            result["request"] = json.loads(result.pop("request_json") or "{}")
+            attempt = conn.execute("SELECT * FROM cluster_job_attempts WHERE id=?", (result["current_attempt_id"],)).fetchone()
+            result["attempt"] = dict(attempt) if attempt else None
+            if result["attempt"]:
+                result["attempt"]["result"] = json.loads(result["attempt"].pop("result_json") or "{}")
+            result["leases"] = [dict(item) for item in conn.execute("SELECT * FROM device_leases WHERE job_id=?", (job_id,)).fetchall()]
+            return result
+
+    def get_job_by_automation_run(self, automation_run_id: str) -> dict[str, Any] | None:
+        if not automation_run_id:
+            return None
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT id FROM cluster_jobs
+                   WHERE json_extract(request_json, '$.automation_run_id')=?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (automation_run_id,),
+            ).fetchone()
+        return self.get_job(row["id"]) if row else None
+
+    def list_jobs(
+        self,
+        limit: int = 100,
+        owner_id: str = "",
+        include_active: bool = False,
+    ) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            if owner_id and include_active:
+                rows = conn.execute(
+                    """SELECT id FROM cluster_jobs
+                       WHERE owner_id=? OR status NOT IN ('completed','failed','cancelled')
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (owner_id, limit),
+                ).fetchall()
+            elif owner_id:
+                rows = conn.execute(
+                    "SELECT id FROM cluster_jobs WHERE owner_id=? ORDER BY created_at DESC LIMIT ?",
+                    (owner_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id FROM cluster_jobs ORDER BY created_at DESC LIMIT ?", (limit,)
+                ).fetchall()
+        return [job for row in rows if (job := self.get_job(row["id"]))]
+
+    def add_events(self, job_id: str, attempt_id: str, events: list[dict[str, Any]]) -> int:
+        inserted = 0
+        with self.connect() as conn:
+            for event in events:
+                cursor = conn.execute("""INSERT OR IGNORE INTO cluster_job_events
+                    (job_id,attempt_id,sequence,event_type,source,level,message,payload_json,created_at)
+                    VALUES(?,?,?,?,?,?,?,?,?)""", (job_id, attempt_id, event["sequence"],
+                    event.get("event_type", "log"), event.get("source", "worker"),
+                    event.get("level", "info"), event.get("message", ""),
+                    json.dumps(event.get("payload", {}), separators=(",", ":")), utc_now()))
+                inserted += cursor.rowcount
+        return inserted
+
+    def list_events(self, job_id: str, after: int = -1, limit: int = 500) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute("""SELECT * FROM cluster_job_events
+                WHERE job_id=? AND sequence>? ORDER BY sequence LIMIT ?""", (job_id, after, limit)).fetchall()
+        result = []
+        for row in rows:
+            item = dict(row)
+            item["payload"] = json.loads(item.pop("payload_json") or "{}")
+            result.append(item)
+        return result
+
+    def record_artifact(self, data: dict[str, Any]) -> dict[str, Any]:
+        artifact_id = f"artifact-{uuid.uuid4().hex}"
+        with self.connect() as conn:
+            conn.execute("""INSERT INTO cluster_job_artifacts
+                (id,job_id,attempt_id,worker_id,filename,relative_path,artifact_type,
+                 size_bytes,sha256,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(attempt_id,filename) DO UPDATE SET
+                    relative_path=excluded.relative_path,artifact_type=excluded.artifact_type,
+                    size_bytes=excluded.size_bytes,sha256=excluded.sha256,
+                    created_at=excluded.created_at""", (artifact_id, data["job_id"],
+                    data["attempt_id"], data["worker_id"], data["filename"],
+                    data["relative_path"], data.get("artifact_type", "file"),
+                    data["size_bytes"], data["sha256"], utc_now()))
+            row = conn.execute("SELECT * FROM cluster_job_artifacts WHERE attempt_id=? AND filename=?",
+                               (data["attempt_id"], data["filename"])).fetchone()
+        return dict(row)
+
+    def recent_job_progress(self, job_id: str, attempt_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute('''SELECT sequence,payload_json,created_at FROM cluster_job_events
+                WHERE job_id=? AND attempt_id=? AND event_type='module_progress'
+                ORDER BY sequence DESC LIMIT 1000''', (job_id, attempt_id)).fetchall()
+        return [{**dict(row), 'payload': json.loads(row['payload_json'])} for row in reversed(rows)]
+
+    def job_last_output_at(self, job_id: str, attempt_id: str) -> str:
+        with self.connect() as conn:
+            row = conn.execute('''SELECT created_at FROM cluster_job_events
+                WHERE job_id=? AND attempt_id=? AND source IN ('stdout','stderr')
+                ORDER BY sequence DESC LIMIT 1''', (job_id, attempt_id)).fetchone()
+        return str(row['created_at']) if row else ''
+
+    def list_artifacts(self, job_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute(
+                "SELECT * FROM cluster_job_artifacts WHERE job_id=? ORDER BY created_at,filename",
+                (job_id,),
+            ).fetchall()]
+
+    def create_transfer(
+        self,
+        worker_id: str,
+        transfer_type: str = "suite_export",
+        owner_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        transfer_id = f"transfer-{uuid.uuid4().hex}"
+        now = utc_now()
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO cluster_transfers
+                (id,worker_id,transfer_type,owner_id,metadata_json,status,filename,
+                 relative_path,size_bytes,sha256,error,created_at,updated_at,completed_at)
+                VALUES(?,?,?,?,?,'created','','',0,'','',?,?, '')""",
+                (
+                    transfer_id, worker_id, transfer_type, owner_id,
+                    json.dumps(metadata or {}, separators=(",", ":")), now, now,
+                ),
+            )
+        return self.get_transfer(transfer_id) or {}
+
+    def get_transfer(self, transfer_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM cluster_transfers WHERE id=?", (transfer_id,)
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["metadata"] = json.loads(result.pop("metadata_json") or "{}")
+        except json.JSONDecodeError:
+            result["metadata"] = {}
+        return result
+
+    def update_transfer(
+        self,
+        transfer_id: str,
+        **values: Any,
+    ) -> dict[str, Any] | None:
+        allowed = {
+            "status",
+            "filename",
+            "relative_path",
+            "size_bytes",
+            "sha256",
+            "error",
+            "completed_at",
+            "owner_id",
+            "metadata_json",
+        }
+        fields = [(key, value) for key, value in values.items() if key in allowed]
+        if fields:
+            assignments = ",".join(f"{key}=?" for key, _ in fields)
+            with self.connect() as conn:
+                conn.execute(
+                    f"UPDATE cluster_transfers SET {assignments},updated_at=? WHERE id=?",
+                    [value for _, value in fields] + [utc_now(), transfer_id],
+                )
+        return self.get_transfer(transfer_id)

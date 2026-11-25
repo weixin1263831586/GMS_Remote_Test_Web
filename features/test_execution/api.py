@@ -33,7 +33,6 @@ from .suite_helpers import (
 from .suite_helpers import (
     resolve_suite_diagnosis_target as resolve_suite_diagnosis_target,
 )
-from .suite_module_apk import router as suite_module_apk_router
 from .suites_api import (
     create_suite_apk_analysis_task as create_suite_apk_analysis_task,
 )
@@ -93,7 +92,6 @@ for child_router in (
     execution_router,
     logs_router,
     suites_router,
-    suite_module_apk_router,
     transfers_router,
     status_router,
 ):

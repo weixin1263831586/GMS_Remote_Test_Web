@@ -12,57 +12,13 @@ import re
 from typing import Any
 
 from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
-from .analyzer import HostLogParser
 from .display import report_display_name, tradefed_result_folder_name
+from .downloads import _contained_log_dir, _report_suite_root
+from .host_parser import HostLogParser
 from .repository import test_report_db
 
 
 logger = logging.getLogger(__name__)
-
-
-def _report_suite_root(report: dict[str, Any], result_dir: str) -> str | None:
-    """Resolve the report's trusted suite root for untrusted-path containment.
-
-    Prefers the recorded absolute ``suite_path`` (same ``tools``-stripping
-    semantics as ``downloads.report_suite_location``); legacy records
-    without one fall back to the trusted result_dir layout
-    ``<suite_root>/results/<run_folder>``.
-    """
-    suite_path = str(report.get("suite_path") or "").strip()
-    if suite_path:
-        expanded = os.path.expanduser(suite_path)
-        if os.path.isabs(expanded):
-            root = os.path.realpath(expanded)
-            if os.path.basename(root) == "tools":
-                root = os.path.dirname(root)
-            return root
-    if not result_dir:
-        return None
-    return os.path.dirname(os.path.dirname(os.path.abspath(result_dir)))
-
-
-def _contained_log_dir(
-    report: dict[str, Any], result_dir: str, candidate: str
-) -> str | None:
-    """Confine an untrusted ``LOG DIRECTORY`` value to the report suite root.
-
-    ``invocation_summary.txt`` 是设备/套件运行环境产出的不可信证据：其中
-    声明的任意绝对路径不得被直接当作可读日志目录（收容做法与
-    ``downloads.local_report_directories`` 一致）。越界（含 symlink 经
-    realpath 解析后出根）一律忽略该目录。
-    """
-    if not candidate:
-        return None
-    root = _report_suite_root(report, result_dir)
-    if not root:
-        return None
-    resolved = os.path.realpath(candidate)
-    if resolved != root and not resolved.startswith(root + os.sep):
-        logger.warning(
-            "Ignoring LOG DIRECTORY outside report suite root: %s", candidate
-        )
-        return None
-    return resolved
 
 
 class TestReportManager:

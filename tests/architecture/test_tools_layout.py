@@ -31,12 +31,8 @@ ALLOWED_TOP_LEVEL_DIRS = {
 ALLOWED_SCRIPT_CATEGORIES = {
     "_common.py",
     "agent",
-    "deployment",
     "docs",
-    "kkagent",
     "maintenance",
-    "migrations",
-    "setup",
     "testing",
     "utilities",
 }

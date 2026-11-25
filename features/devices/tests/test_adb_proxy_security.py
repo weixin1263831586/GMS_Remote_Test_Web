@@ -2,13 +2,13 @@ from unittest.mock import patch
 
 import pytest
 
-from features.devices.adb_proxy_security import (
+from features.devices.adb.proxy_security import (
     create_pair_grant,
     local_proxy_secret,
     pair_code_for_worker,
     validate_pair_grant,
 )
-from worker_agent.adb_proxy import pair_code_from_grant
+from worker.adb_proxy import pair_code_from_grant
 
 
 def _write_secret(tmp_path, content: bytes):

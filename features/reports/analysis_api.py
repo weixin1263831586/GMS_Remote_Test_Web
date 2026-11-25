@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import json
+import os
+import re
+import shutil
+import tempfile
+
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.responses import JSONResponse
+
 from features.auth import (
     principal_actor_id,
     require_authenticated_user,
@@ -8,51 +18,37 @@ from features.auth import (
 from features.reports.access import can_access_report, get_accessible_report_by_timestamp
 from foundation.config import settings
 from foundation.redaction import redact_sensitive_text
-from foundation.uploads import safe_upload_target_path, save_upload_to_path
+from foundation.responses import error_response, success_response
+from foundation.uploads import extract_report_name_from_upload, safe_upload_target_path, save_upload_to_path
 
 from .access import principal_has_reports_read as require_permission_reports_read
+from .ai_diagnosis import public_provider_error
 from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 from .api_helpers import (
     AnalysisMode,
-    APIRouter,
-    File,
-    Form,
-    JSONResponse,
-    Query,
-    ReportAnalyzer,
     ReportDiagnosisRequest,
-    Request,
     StackTraceUtils,
-    UploadFile,
     _build_patch_draft,
     _ensure_uploaded_report_extension,
     _extract_class_names_from_text,
     _extract_failure_keywords,
+    _get_knowledge_base,
     analyze_with_ai,
-    asyncio,
     config_manager,
-    dependencies,
-    error_response,
-    extract_report_name_from_upload,
-    json,
     logger,
-    os,
-    re,
-    shutil,
-    success_response,
-    tempfile,
-    test_report_db,
-    test_report_manager,
 )
-from .diagnosis_quality import public_provider_error
+from .archive import ReportAnalyzer
+from .dependencies import dependencies
 from .diagnosis_recalls import (
+    android_api_level_from_request,
     search_knowledge_base,
     search_mainline_exemptions,
     search_mainline_security_patches,
     search_system_background,
 )
 from .display import report_display_name
-from .knowledge_ranking import android_api_level_from_request
+from .repository import test_report_db
+from .service import test_report_manager
 
 
 router = APIRouter()
@@ -489,7 +485,7 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
 
         # 第五路召回：Android 系统机制背景知识（ADR 0014, background-only）。
         # 报告上下文的 Android 版本统一转换为 API level 透传，version-aware
-        # rerank 在这条主入口同样生效（knowledge_ranking 统一 helper）。
+        # rerank 在这条主入口同样生效（diagnosis_recalls 统一 helper）。
         background_query = " ".join(keywords[:6]) or request.test_name or (request.error_message or "")[:120]
         background_api_level = android_api_level_from_request(request)
 
@@ -684,3 +680,57 @@ async def stage_report_uploads(
         total += size
         staged.append((path, size))
     return staged
+
+
+@router.get("/api/knowledgebase/search")
+async def knowledgebase_search(
+    request: Request,
+    query: str = Query(..., min_length=1, max_length=256),
+    limit: int = Query(8, ge=1, le=20),
+):
+    """Search the local Redmine-derived GMS knowledge base."""
+
+    require_authenticated_user(request)
+    try:
+        kb = _get_knowledge_base(request)
+        if not kb:
+            return success_response({
+                "query": query.strip(),
+                "results": [],
+                "count": 0,
+            })
+        results = await asyncio.to_thread(
+            kb.search_similar,
+            query.strip(),
+            limit,
+        )
+        return success_response({
+            "query": query.strip(),
+            "results": results,
+            "count": len(results),
+        })
+    except Exception as exc:
+        logger.error("Knowledge base search failed: %s", redact_sensitive_text(exc))
+        return error_response("Knowledge base search failed", status_code=500)
+
+
+@router.get("/api/knowledgebase/stats")
+async def knowledgebase_stats(request: Request):
+    """Return local Redmine-derived GMS knowledge base stats."""
+
+    require_authenticated_user(request)
+    try:
+        kb = _get_knowledge_base(request)
+        if not kb:
+            return success_response({"stats": {"total": 0, "mature_cases": 0}})
+        data = await asyncio.to_thread(lambda: kb.list_case_facts(limit=1))
+        mature = await asyncio.to_thread(lambda: kb.list_mature_cases(limit=1))
+        return success_response({
+            "stats": {
+                "total": data.get("total", 0),
+                "mature_cases": mature.get("total", 0),
+            }
+        })
+    except Exception as exc:
+        logger.error("Knowledge base stats failed: %s", redact_sensitive_text(exc))
+        return error_response("Knowledge base stats failed", status_code=500)

@@ -13,7 +13,7 @@ from foundation.error_model import ApiError
 from foundation.networking import is_local_host
 from foundation.security import is_safe_device_id
 
-from .adb_ops import (
+from .adb.operations import (
     FACTORY_RESET_FASTBOOT_WAIT_SECONDS,
     FACTORY_RESET_FASTBOOTD_WAIT_SECONDS,
     FACTORY_RESET_FORMAT_TIMEOUT_SECONDS,
@@ -26,7 +26,7 @@ from .rockusb import (
     rockusb_loader_serials,
     rockusb_loader_vid_pids,
 )
-from .usbip import parse_adb_device_states
+from .usbip.manager import parse_adb_device_states
 from .utils import DeviceUtils
 
 
@@ -91,7 +91,7 @@ def _make_ssh_fastboot_runner(ssh_manager, ssh, device_id: str):
 
 
 def _make_ssh_adb_runner_for_adb_ops(ssh_manager, ssh, device_id: str):
-    """按 adb_ops.AdbRunner 协议 ``(device_id, args, timeout)`` 适配 SSH runner。
+    """按 adb.operations.AdbRunner 协议 ``(device_id, args, timeout)`` 适配 SSH runner。
 
     SSH runner 已绑定 device_id，忽略协议传入的设备参数。
     """
@@ -492,7 +492,7 @@ class DeviceManager:
             created_ssh = False
 
         try:
-            # adb_ops.AdbRunner 协议为 (device_id, args, timeout) 三参，
+            # adb.operations.AdbRunner 协议为 (device_id, args, timeout) 三参，
             # SSH 通道实现已绑定 device_id，由适配工厂做协议转发。
             run_adb = _make_ssh_adb_runner_for_adb_ops(self.ssh_manager, ssh, device_id)
             run_fastboot = _make_ssh_fastboot_runner(self.ssh_manager, ssh, device_id)
@@ -545,7 +545,7 @@ class DeviceManager:
     ) -> dict[str, Any]:
         """擦除 userdata 恢复出厂（fastbootd format 路径，SSH 通道）。
 
-        与 worker_agent.device_actions._factory_reset_via_fastboot 同构：
+        与 worker.device_actions._factory_reset_via_fastboot 同构：
         user build 丢 MASTER_CLEAR、RK bootloader fastboot 的 erase 不落盘，
         必须 reboot bootloader → reboot fastboot 进 userspace fastboot →
         format:f2fs userdata → reboot 并复验离开 fastboot（吞 reboot 时

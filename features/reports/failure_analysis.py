@@ -1,0 +1,726 @@
+"""Test failure diagnosis, structured report prompts and Android source lookup."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import time
+from collections.abc import Callable
+
+import requests
+
+from features.kkagent import API_FORMAT_ANTHROPIC, UniversalAIAnalyzer, build_chat_request, call_provider_chain
+from foundation.redaction import redact_sensitive_text
+
+
+logger = logging.getLogger(__name__)
+
+EMOJI_TARGET = "🎯"
+EMOJI_CHART = "📊"
+EMOJI_CHECK = "✅"
+
+
+class ReportFailureAnalyzer(UniversalAIAnalyzer):
+    """Report-specific analysis over the shared model gateway."""
+
+    def __init__(self, config: dict = None, source_search: Callable[[str], list[dict]] | None = None):
+        super().__init__(config)
+        self.source_search = source_search
+
+    def analyze_test_failure(
+        self,
+        class_name: str,
+        method_name: str | None,
+        error_message: str,
+        stack_trace: str | None = None,
+        source_code: str | None = None, auto_fetch_source: bool = True,
+        preferred_provider: str | None = None,
+    ) -> dict:
+        """Analyze a test failure with the configured AI provider, auto-fetching source when source_code is empty and auto_fetch_source is True."""
+        result = {
+            'success': False,
+            'error': None,
+            'analysis': None,
+            'suggestions': [],
+            'solution': None,
+            'provider': None,
+            'source_info': None
+        }
+
+        try:
+            if auto_fetch_source and not source_code:
+                source_info = self._fetch_source_code_android(class_name)
+                if source_info and source_info.get('content'):
+                    source_code = source_info['content']
+                    result['source_info'] = source_info
+                    logger.info(f"成功获取源码: {source_info.get('file_path', 'unknown')}")
+
+            provider_name = self.get_primary_provider(preferred=preferred_provider)
+            if not provider_name:
+                result['error'] = '未找到启用的AI模型提供商'
+                return result
+
+            providers = self.config.get('providers', {})
+            provider_order = [provider_name] + [name for name, config in providers.items()
+                                                   if name != provider_name and config.get('enabled', False)]
+            result['preferred_provider'] = provider_name
+            provider_result = call_provider_chain(
+                provider_order, providers,
+                lambda name, config: self._call_aimodel(
+                    name, config, class_name, method_name, error_message,
+                    stack_trace, source_code
+                ),
+            )
+            result.update(provider_result)
+
+        except Exception as e:
+            safe_error = redact_sensitive_text(e)
+            logger.error("AI分析失败: %s", safe_error)
+            result['error'] = f'分析失败: {safe_error}'
+
+        return result
+
+    def _call_aimodel(self, provider_name: str, config: dict, class_name: str, method_name: str | None,
+                                error_message: str, stack_trace: str | None, source_code: str | None) -> dict:
+        """Call the provider AI model to analyze a test failure."""
+        try:
+            base_url = config.get('base_url')
+            model = config.get('model')
+
+            if not base_url:
+                return {'success': False, 'error': f'{provider_name} base_url 未配置'}
+            if not model:
+                return {'success': False, 'error': f'{provider_name} 模型未配置'}
+
+            prompt = self._build_prompt(class_name, method_name, error_message, stack_trace, source_code)
+
+            url, headers, data, api_format = build_chat_request(
+                provider_name,
+                config,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=config.get('max_tokens', 2000),
+            )
+
+            logger.info(f"[{provider_name}] Request URL: {url}, Model: {model}, Format: {api_format}")
+
+            max_retries = 2
+            retry_delay = 1
+
+            for attempt in range(max_retries):
+                try:
+                    response = self._post_chat(url, headers, data, api_format)
+                    break
+                except requests.ConnectionError as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[{provider_name}] 连接失败，{retry_delay}秒后重试 ({attempt+1}/{max_retries}): {str(e)[:100]}")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        return {'success': False, 'error': f'连接失败: {redact_sensitive_text(e)}'}
+                except requests.Timeout as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"[{provider_name}] 请求超时，{retry_delay}秒后重试 ({attempt+1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    else:
+                        return {'success': False, 'error': f'请求超时: {redact_sensitive_text(e)}'}
+
+            if response.status_code == 200:
+                result = response.json()
+
+                if api_format == API_FORMAT_ANTHROPIC and 'content' in result:
+                    content = result['content'][0].get('text', '')
+                elif 'choices' in result:
+                    choice = result.get('choices', [{}])[0]
+                    message = choice.get('message', {})
+                    content = message.get('content', '')
+
+                    finish_reason = choice.get('finish_reason', '')
+                    # GLM-5.x 把推理过程放在 reasoning_content；其他模型可能用 reasoning
+                    reasoning = message.get('reasoning_content') or message.get('reasoning') or ''
+                    if not content and reasoning:
+
+                        if finish_reason == 'length':
+                            logger.warning(f"[{provider_name}] 响应被截断（max_tokens太小），只有 reasoning 字段")
+                            content = self._extract_json_from_reasoning(reasoning)
+                            if not content:
+                                content = reasoning
+                        else:
+                            content = reasoning
+                        logger.info(f"[{provider_name}] Content 为空，使用 reasoning 字段（长度: {len(content)}）")
+
+                    if not content:
+                        content = message.get('text', '')
+                        logger.info(f"[{provider_name}] Reasoning 也为空，尝试 text 字段")
+
+                    if not content:
+                        content = str(choice)
+                        logger.warning(f"[{provider_name}] 所有字段都为空，使用完整响应")
+
+                    logger.debug(f"[{provider_name}] Extracted content length: {len(content)}")
+                else:
+                    content = str(result)
+
+                # 检查是否包含推理过程文本（如 "Thinking Process"）
+                if 'Thinking Process' in content or 'thinking_process' in content.lower():
+                    logger.info(f"[{provider_name}] 检测到推理过程文本，尝试提取最终结果")
+
+                    # 尝试提取推理过程后的最终 JSON
+                    thinking_end = content.lower().find('thinking process')
+                    if thinking_end > 0:
+                        after_thinking = content[thinking_end + len('thinking process'):]
+                        json_start = after_thinking.find('{')
+                        if json_start > 0:
+                            potential_json = after_thinking[json_start:]
+                            json_end = potential_json.rfind('}') + 1
+                            if json_end > json_start:
+                                extracted_content = potential_json[:json_end]
+                                try:
+                                    test_parse = json.loads(extracted_content)
+                                    if 'root_cause' in test_parse:
+                                        content = extracted_content
+                                        logger.info(f"[{provider_name}] 成功从推理过程中提取最终 JSON")
+                                except Exception:
+                                    logger.warning(f"[{provider_name}] 提取的 JSON 无效，使用原始内容")
+
+                parsed = self._parse_response(content)
+
+                return {
+                    'success': True,
+                    'root_cause': parsed.get('root_cause', ''),
+                    'analysis': parsed.get('analysis'),
+                    'suggestions': parsed.get('suggestions', []),
+                    'solution': parsed.get('solution'),
+                    'root_cause_status': parsed.get('root_cause_status', 'hypothesis'),
+                    'confidence': parsed.get('confidence', 'low'),
+                    'evidence': parsed.get('evidence', []),
+                }
+            else:
+                try:
+                    error_data = response.json()
+                    error_msg = error_data.get('error', {}).get('message', f'HTTP {response.status_code}')
+                except Exception:
+                    error_msg = f'HTTP {response.status_code}: {response.text[:100]}'
+                return {'success': False, 'error': f'{provider_name} API错误: {redact_sensitive_text(error_msg)}'}
+
+        except Exception as e:
+            return {'success': False, 'error': f'{provider_name}调用失败: {redact_sensitive_text(e)}'}
+
+    def _build_prompt(self, class_name: str, method_name: str | None,
+                      error_message: str, stack_trace: str | None, source_code: str | None) -> str:
+        """构造分析提示词"""
+        prompt = f"""你是一个专业的Android测试代码分析专家。请分析以下测试失败信息：
+
+**测试类名**: {class_name}
+"""
+
+        if method_name:
+            prompt += f"**测试方法**: {method_name}\n"
+
+        prompt += f"""
+**错误信息**:
+```
+{error_message}
+```
+"""
+
+        if stack_trace:
+            prompt += f"""
+**堆栈跟踪**:
+```
+{stack_trace[:2000]}
+```
+"""
+        if source_code:
+            prompt += f"""
+**相关源码**:
+```java
+{source_code[:3000]}
+```
+"""
+        prompt += f"""
+请分析上述信息并按以下JSON格式返回。
+
+**最关键要求（必须严格遵守）**：
+1. 你的回复必须且只能是一个纯JSON对象，不要包含任何其他内容
+2. 不要以"🎯 根本原因"或其他标题开头
+3. 不要包含"📊 详细分析"等解释性文字
+4. 直接以 {{ 开始，以 }} 结束，中间就是JSON内容
+5. 确保JSON格式完全正确，可以被标准JSON解析器解析
+6. 绝对不要使用markdown代码块标记（```json 或 ```）
+7. **禁止输出推理过程或思考步骤** - 不要输出 "Thinking Process"、"分析步骤" 等内容
+8. **直接给出最终结果** - 不要解释你的分析过程，直接返回JSON格式的分析结果
+返回格式：
+{{
+  "root_cause": "基于现有证据的结论或待验证假设（不超过80字）",
+  "root_cause_status": "hypothesis",
+  "confidence": "low",
+  "evidence": ["直接支持该判断的日志或源码证据；没有则返回空数组"],
+  "analysis": "{EMOJI_CHART} 详细分析：\\n1. 错误类型：xxx\\n2. 触发条件：xxx\\n3. 影响范围：xxx\\n4. 相关代码逻辑：xxx",
+  "suggestions": [
+    "{EMOJI_CHECK} 建议一：具体的修改步骤",
+    "{EMOJI_CHECK} 建议二：验证方法",
+    "{EMOJI_CHECK} 建议三：预防措施"
+  ],
+  "solution": {{
+    "problem_description": "详细问题描述",
+    "error_type": "错误类型分类",
+    "fix_strategy": "修复策略说明",
+    "code_example": "代码示例（Java格式）"
+  }}
+}}
+分析要求（适用于所有类型报错）：
+1. **严格区分失败现象与根因**：异常文本、超时、断言失败只属于现象，不能直接称为根因。
+   - 没有直接日志或源码证据时，root_cause必须写成待验证假设
+   - 此时root_cause_status必须为"hypothesis"，confidence为"low"或"medium"
+   - 只有证据形成完整因果链时才能使用"verified"，并在evidence逐条列出直接证据
+   - 不得把测试方法名或测试场景改写成确定的因果结论
+
+2. **analysis必须以📊开头**，4个维度详细分析：
+   - 错误类型：明确异常类型（AssertionError/NullPointerException/TimeoutException等）
+   - 触发条件：什么场景/输入/状态下触发
+   - 影响范围：影响哪些模块/测试/功能
+   - 相关代码逻辑：涉及的关键代码/配置/API调用
+
+3. **suggestions必须以✅开头**，每条建议：
+   - 具体可操作（避免"检查相关配置"这种模糊说法）
+   - 针对根本原因（不是绕过问题）
+   - 优先级排序（先解决根本问题，再考虑workaround）
+
+4. 只返回纯JSON格式，不要有markdown标记或其他文字
+"""
+        return prompt
+
+    def _extract_json_from_reasoning(self, reasoning: str) -> str | None:
+        """从 reasoning 字段中提取最终的 JSON 输出
+
+        推理模型可能在 reasoning 的最后部分输出最终的 JSON，
+        我们需要查找最后一个完整的 JSON 对象。
+        """
+        try:
+            logger.debug(f"[AI Parse] Reasoning 长度: {len(reasoning)}, 最后 500 字符: {reasoning[-500:]}")
+
+            # 查找所有可能的 JSON 对象（从 { 开始到对应的 } 结束）
+            json_candidates = []
+            depth = 0
+            start = -1
+            in_string = False
+            escape_next = False
+
+            for i, char in enumerate(reasoning):
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+                elif char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                # 只在非字符串状态下计算括号
+                if not in_string:
+                    if char == '{':
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0 and start >= 0:
+                            json_candidates.append((start, i, reasoning[start:i+1]))
+                            start = -1
+
+            logger.info(f"[AI Parse] 找到 {len(json_candidates)} 个 JSON 候选")
+
+            # 尝试解析最后一个（且最长的）JSON 对象（通常是最终输出）
+            # 按长度排序，优先尝试较长的 JSON（更完整）
+            json_candidates.sort(key=lambda x: len(x[2]), reverse=True)
+
+            for start_pos, end_pos, json_str in json_candidates:
+                try:
+                    parsed = json.loads(json_str)
+                    # 验证是否包含预期的字段且格式正确
+                    if all(key in parsed for key in ['root_cause', 'analysis']):
+                        # 进一步验证：检查值不是以 "Thinking" 或 "**" 开头（排除思考过程）
+                        root_cause = parsed.get('root_cause', '')
+                        analysis = parsed.get('analysis', '')
+
+                        if not (root_cause.startswith('Thinking') or
+                                root_cause.startswith('**') or
+                                analysis.startswith('Thinking') or
+                                analysis.startswith('**')):
+                            logger.info(f"[AI Parse] 从 reasoning 中提取到有效 JSON (位置 {start_pos}-{end_pos}, 长度: {len(json_str)})")
+                            logger.debug(f"[AI Parse] 提取的 JSON keys: {list(parsed.keys())}")
+                            return json_str
+                        else:
+                            logger.debug(f"[AI Parse] 跳过思考过程 JSON (位置 {start_pos}-{end_pos})")
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[AI Parse] JSON 解析失败: {e}, 字符串: {json_str[:100]}...")
+                    continue
+
+            logger.warning("[AI Parse] 未能在 reasoning 中找到有效的 JSON")
+            return None
+
+        except Exception as e:
+            logger.error(f"[AI Parse] 提取 JSON 时出错: {e}")
+            return None
+
+    def _parse_response(self, response_text: str) -> dict:
+        """解析LLM响应"""
+        try:
+            # 检查输入是否为空或None
+            if not response_text:
+                logger.warning("AI响应为空，返回默认分析结果")
+                return {
+                    'root_cause': '🎯 AI响应解析失败',
+                    'analysis': '📊 AI模型返回了空响应，可能是API配置问题或模型错误',
+                    'suggestions': [
+                        '✅ 检查AI模型配置是否正确',
+                        '✅ 查看后端日志了解详细错误信息',
+                        '✅ 尝试使用基于规则的分析'
+                    ]
+                }
+
+            logger.info(f"[AI Parse] 原始响应长度: {len(response_text)}, 前800字符: {response_text[:800]}")
+
+            # 检查是否包含推理过程文本
+            if 'Thinking Process' in response_text or 'thinking_process' in response_text.lower():
+                logger.info("[AI Parse] 检测到推理过程文本，尝试提取最终结果")
+
+                # 查找推理过程的结束位置
+                # 通常推理过程后会有最终的 JSON 输出
+                lines = response_text.split('\n')
+                result_lines = []
+                in_thinking = False
+                found_json = False
+
+                for line in lines:
+                    # 检测推理过程的开始
+                    if 'thinking process' in line.lower() or line.strip().startswith('thinking'):
+                        in_thinking = True
+                        continue
+
+                    # 检测推理过程的结束（找到 JSON 开始）
+                    if in_thinking and line.strip().startswith('{'):
+                        in_thinking = False
+                        found_json = True
+                        result_lines.append(line)
+                        continue
+
+                    # 如果已经找到 JSON，收集后续内容
+                    if found_json or not in_thinking:
+                        result_lines.append(line)
+
+                if found_json and result_lines:
+                    # 重新组装内容，从 JSON 开始的部分
+                    text = '\n'.join(result_lines)
+                    logger.info("[AI Parse] 提取了推理过程后的最终结果")
+                else:
+                    text = response_text
+            else:
+                text = response_text
+
+            # 移除可能的markdown标记和额外标题
+            text = text.strip()
+
+            # 记录清理前的文本
+            logger.debug(f"[AI Parse] 清理前文本: {text[:500]}")
+
+            # 移除常见的标题格式（如果出现在JSON之前）
+            patterns_to_remove = [
+                r'🎯\s*根本原因\s*\n?',
+                r'📊\s*详细分析\s*\n?',
+                r'✅\s*解决建议\s*\n?',
+                r'🤖\s*报错分析结果\s*\n?',
+            ]
+
+            for pattern in patterns_to_remove:
+                text = re.sub(pattern, '', text, flags=re.MULTILINE)
+
+            # 移除重复的emoji和花括号组合（更激进的清理）
+            # 移除 "🎯 {" 或 "🎯 {" 这种格式
+            text = re.sub(r'🎯\s*\{', '{', text)
+            # 移除 "📊 {" 这种格式
+            text = re.sub(r'📊\s*\{', '{', text)
+            # 移除行首的单独 emoji（保留在 JSON 内容中的 emoji）
+            text = re.sub(r'^[🎯📊✅]\s*\n?', '', text, flags=re.MULTILINE)
+
+            # 优化：一次性移除所有markdown代码块标记，包括各种变体
+            text = re.sub(r'```(?:json|JSON|javascript)?', '', text, flags=re.IGNORECASE)
+            text = text.strip()
+
+            logger.debug(f"[AI Parse] 清理后文本: {text[:500]}")
+
+            # 查找JSON对象
+            start = text.find('{')
+            end = text.rfind('}') + 1
+
+            if start >= 0 and end > start:
+                json_str = text[start:end]
+
+                # 处理可能的嵌套空对象问题："{\n{...}" -> "{...}"
+                # 检查是否有连续的两个开始括号（后面跟随换行和另一个开始括号）
+                if json_str.startswith('{\n{') or json_str.startswith('{{'):
+                    # 找到第二个真正的JSON开始位置
+                    second_brace = json_str.find('{', 1)
+                    if second_brace > 0:
+                        # 尝试从第二个括号开始解析
+                        try:
+                            test_json = json_str[second_brace:]
+                            test_parsed = json.loads(test_json)
+                            if 'root_cause' in test_parsed:
+                                json_str = test_json
+                                logger.info("[AI Parse] 移除了外层的空对象包装")
+                        except Exception:
+                            pass
+
+                # 尝试多层次的JSON修复策略
+                parsed = None
+                parse_attempts = [
+                    # 1. 直接解析
+                    lambda: json.loads(json_str),
+                    # 2. 清理控制字符后解析
+                    lambda: json.loads(''.join(char for char in json_str if char.isprintable() or char in '\n\r\t')),
+                    # 3. 规范化空白后解析
+                    lambda: json.loads(' '.join(''.join(char for char in json_str if char.isprintable() or char in '\n\r\t').split())),
+                    # 4. 移除注释后解析
+                    lambda: json.loads(re.sub(r'//.*?\n|/\*.*?\*/', '', json_str)),
+                    # 5. 修复常见的中英文标点问题
+                    lambda: json.loads(json_str.replace('，', ',').replace('：', ':').replace('"', '"').replace('"', '"'))
+                ]
+
+                for i, attempt in enumerate(parse_attempts):
+                    try:
+                        parsed = attempt()
+                        if i > 0:
+                            logger.info(f"JSON解析成功（使用了策略{i+1}）")
+                        break
+                    except (json.JSONDecodeError, ValueError) as e:
+                        if i < len(parse_attempts) - 1:
+                            logger.debug(f"JSON解析策略{i+1}失败: {str(e)[:100]}")
+                        continue
+
+                if parsed is None:
+                    logger.error(f"所有JSON解析策略都失败，回退到文本解析。原始响应: {response_text[:500]}")
+                    logger.error(f"提取的JSON片段: {json_str[:200]}")
+                    return self._parse_text_response(response_text)
+
+                if 'root_cause' in parsed and not parsed['root_cause'].startswith('🎯'):
+                    parsed['root_cause'] = f"{EMOJI_TARGET} {parsed['root_cause']}"
+
+                if 'analysis' in parsed and not parsed['analysis'].startswith('📊'):
+                    parsed['analysis'] = f"{EMOJI_CHART}  {parsed['analysis']}"
+
+                if 'suggestions' in parsed:
+                    parsed['suggestions'] = [
+                        f"{EMOJI_CHECK}  {s}" if not s.startswith('✅') else s
+                        for s in parsed['suggestions']
+                    ]
+
+                # 验证必需字段
+                if not all(key in parsed for key in ['root_cause', 'analysis', 'suggestions']):
+                    logger.warning(f"[AI Parse] JSON缺少必需字段，现有字段: {list(parsed.keys())}")
+                    # 补充缺失字段
+                    if 'root_cause' not in parsed:
+                        parsed['root_cause'] = '🎯 AI分析结果不完整'
+                    if 'analysis' not in parsed:
+                        parsed['analysis'] = '📊 AI未返回详细分析'
+                    if 'suggestions' not in parsed:
+                        parsed['suggestions'] = ['✅ 查看源码和错误信息进行排查']
+
+                logger.info(f"[AI Parse] JSON解析成功，包含字段: {list(parsed.keys())}")
+                return parsed
+            else:
+                logger.warning("未找到JSON格式，回退到文本解析")
+                return self._parse_text_response(response_text)
+
+        except Exception as e:
+            logger.error(f"解析响应时发生异常: {e!s}，回退到文本解析")
+            return self._parse_text_response(response_text)
+
+    def _parse_text_response(self, text: str) -> dict:
+        """解析文本格式响应（回退方案）"""
+        try:
+            logger.info("[AI Parse] 使用文本解析回退方案")
+            logger.debug(f"[AI Parse] 待解析文本长度: {len(text)}, 前500字符: {text[:500]}")
+
+            # 检查文本中是否有 { 字符
+            has_braces = '{' in text and '}' in text
+            logger.info(f"[AI Parse] 文本包含花括号: {has_braces}")
+
+            # 首先尝试从文本中提取JSON（处理混合格式）
+            # 使用括号匹配算法来正确提取嵌套的JSON结构
+            json_candidates = []
+
+            depth = 0
+            start = -1
+            in_string = False
+            escape_next = False
+
+            for i, char in enumerate(text):
+                # 处理字符串转义
+                if escape_next:
+                    escape_next = False
+                    continue
+
+                if char == '\\':
+                    escape_next = True
+                    continue
+
+                # 处理字符串边界
+                if char == '"' and not escape_next:
+                    in_string = not in_string
+                    continue
+
+                # 只在非字符串状态下计算括号
+                if not in_string:
+                    if char == '{':
+                        if depth == 0:
+                            start = i
+                        depth += 1
+                    elif char == '}':
+                        depth -= 1
+                        if depth == 0 and start >= 0:
+                            json_candidates.append((start, i, text[start:i+1]))
+                            start = -1
+
+            logger.info(f"[AI Parse] 括号匹配找到 {len(json_candidates)} 个候选")
+
+            if json_candidates:
+                logger.info(f"[AI Parse] 找到 {len(json_candidates)} 个JSON候选")
+                for i, (start_pos, end_pos, json_str) in enumerate(json_candidates[:3]):  # 记录前3个
+                    logger.info(f"[AI Parse] JSON候选 #{i+1}: 位置={start_pos}-{end_pos}, 长度={len(json_str)}, 前100字符={json_str[:100]}")
+
+                # 按长度排序，优先尝试较长的JSON（更完整）
+                json_candidates.sort(key=lambda x: len(x[2]), reverse=True)
+
+                for start_pos, end_pos, json_str in json_candidates:
+                    try:
+                        logger.debug(f"[AI Parse] 尝试解析JSON (位置 {start_pos}-{end_pos}, 长度: {len(json_str)})")
+                        parsed = json.loads(json_str)
+                        # 验证是否包含我们需要的字段
+                        if 'root_cause' in parsed and 'analysis' in parsed:
+                            logger.info(f"[AI Parse] 从文本中成功提取完整JSON，长度: {len(json_str)}")
+
+                            # 确保格式正确
+                            if not parsed['root_cause'].startswith('🎯'):
+                                parsed['root_cause'] = f"🎯 {parsed['root_cause']}"
+                            if not parsed['analysis'].startswith('📊'):
+                                parsed['analysis'] = f"📊 {parsed['analysis']}"
+
+                            return parsed
+                    except json.JSONDecodeError as e:
+                        logger.debug(f"[AI Parse] JSON解析失败: {e}")
+                        continue
+
+            # 如果没有找到JSON，回退到原始的文本解析逻辑
+            lines = text.split('\n')
+            analysis = []
+            suggestions = []
+
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                if '分析' in line or '问题' in line:
+                    continue
+                elif line.startswith('-') or line.startswith('*') or line.startswith('•'):
+                    suggestions.append(line.lstrip('-*•').strip())
+                elif line.startswith('建议') or 'suggest' in line.lower():
+                    suggestions.append(line)
+                elif line:
+                    if not suggestions:
+                        analysis.append(line)
+                    else:
+                        # 如果已经开始收集建议，继续添加
+                        if len(suggestions) > 0 or '建议' in line:
+                            suggestions.append(line)
+
+            # 从分析文本中提取根本原因（第一行）
+            root_cause = f"{EMOJI_TARGET} {analysis[0]}" if analysis else EMOJI_TARGET + " 测试失败，需要进一步分析"
+
+            # 如果没有提取到任何有用信息，返回基于规则的分析
+            if not analysis and not suggestions:
+                logger.warning("[AI Parse] 文本解析也未提取到有用信息，返回通用分析")
+                return self._get_fallback_analysis()
+
+            return {
+                'root_cause': root_cause,
+                'analysis': '\n'.join(analysis) if analysis else '无法解析详细分析',
+                'suggestions': suggestions if suggestions else ['查看源码和错误信息进行排查'],
+                'solution': {
+                    'problem_description': '\n'.join(analysis[:3]) if analysis else '需要进一步分析',
+                    'error_type': 'Unknown',
+                    'fix_strategy': 'manual_review'
+                }
+            }
+        except Exception as e:
+            logger.error(f"[AI Parse] 文本解析也失败: {e!s}，返回默认分析")
+            return self._get_fallback_analysis()
+
+    def _get_fallback_analysis(self) -> dict:
+        """获取回退分析结果"""
+        return {
+            'root_cause': '🎯 AI响应格式异常，无法解析',
+            'analysis': '📊 AI模型返回了无法识别的格式。可能原因：\n1. AI模型配置错误\n2. API返回格式不符合预期\n3. 网络传输问题导致数据损坏',
+            'suggestions': [
+                '✅ 检查AI模型配置是否正确',
+                '✅ 查看后端日志了解详细错误信息',
+                '✅ 尝试重新进行分析',
+                '✅ 联系管理员检查AI服务状态'
+            ],
+            'solution': {
+                'problem_description': 'AI模型返回格式异常，需要技术支持',
+                'error_type': 'AI_Parse_Error',
+                'fix_strategy': '检查AI配置和日志',
+                'code_example': '// 无法提供代码示例，因为AI响应格式异常'
+            }
+        }
+
+    def _fetch_source_code_android(self, class_name: str) -> dict | None:
+        """Fetch Android source for *class_name* (e.g. com.android...vts.SomeTest) via OpenGrok; return None on failure.
+
+        源码检索能力经 ``source_search`` provider 注入（默认走 reports 的
+        OpenGrok codesearch），避免 kkagent 网关反向依赖 reports 形成
+        feature 依赖环（ADR 0034）。
+        """
+        search = self.source_search
+        if search is None:
+            return None
+        try:
+            if not class_name or not isinstance(class_name, str):
+                logger.warning(f"无效的类名参数: {class_name}")
+                return None
+
+            search_results = search(class_name)
+
+            if search_results and len(search_results) > 0:
+                first_result = search_results[0]
+
+                result = {
+                    'file_path': first_result.get('path', ''),
+                    'line': first_result.get('line', ''),
+                    'file_type': first_result.get('file_type', 'java'),
+                    'project': first_result.get('project', ''),
+                    'url': first_result.get('url', ''),
+                    'content': f"// 源码文件: {first_result.get('path', '')}\n" +
+                              f"// 项目: {first_result.get('project', '')}\n" +
+                              f"// OpenGrok链接: {first_result.get('url', '未找到链接')}\n" +
+                              "//\n" +
+                              "// 注意: 完整源码内容请通过OpenGrok链接查看\n" +
+                              f"// 该文件为 {first_result.get('file_type', 'java')} 格式\n"
+                }
+
+                logger.info(f"成功通过 rk_codesearch 获取源码信息: {first_result.get('path', 'unknown')}")
+                return result
+            else:
+                logger.warning(f"rk_codesearch 未找到类 {class_name} 的源码")
+                return None
+
+        except ImportError:
+            logger.error("无法导入 Reports 功能包分析器")
+            return None
+        except Exception as e:
+            logger.error(f"获取Android源码失败: {e}")
+            return None

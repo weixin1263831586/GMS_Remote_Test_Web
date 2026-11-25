@@ -46,7 +46,7 @@ _JS_ALLOWED = {
 
 def _iter_sources() -> list[tuple[str, str]]:
     sources: list[tuple[str, str]] = []
-    for base in ("features", "foundation", "web", "workflows"):
+    for base in ("features", "foundation", "web"):
         for path in (ROOT / base).rglob("*"):
             if not path.is_file():
                 continue

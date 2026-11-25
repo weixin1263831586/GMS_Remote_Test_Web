@@ -1,0 +1,52 @@
+name: Unified GMS scanner real-source acceptance (isolated database)
+on:
+  push:
+    branches: ['audit/mainline-gerrit-match-20261124']
+    paths: ['features/gms/**', 'tools/scripts/testing/audit_unified_gms_scan.py', '.github/workflows/audit-unified-gms-scanner.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: unified-gms-live-source-audit
+  cancel-in-progress: true
+jobs:
+  fresh-and-repeat:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 40
+    steps:
+      - name: Verify dedicated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+      - id: checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Unified scanner regression tests
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+        run: python3 -B -m pytest -q features/gms/tests
+      - name: Fresh and repeated full scans against original documents
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/unified-scan.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          db="$scratch/gms_update.sqlite3"
+          failed=0
+          for phase in first repeat; do
+            python3 -B -m features.gms.cli --db "$db" --mode full >"$scratch/scan.log" 2>"$scratch/scan.error" || failed=1
+            grep '^GMS_SCAN=' "$scratch/scan.log" || failed=1
+            python3 -B -m tools.scripts.testing.audit_unified_gms_scan --db "$db" --phase "$phase" 2>"$scratch/audit.error" | grep --line-buffered '^UNIFIED_AUDIT=' || failed=1
+          done
+          exit "$failed"

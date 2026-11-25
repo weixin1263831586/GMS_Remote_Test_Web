@@ -46,7 +46,7 @@ agent/gms-remote-test/            手工维护的源码根（CLI、MCP adapter�
 plugins/gms-remote-test/          生成结果，禁止手改
         │  python tools/scripts/agent/build_package.py
         ▼
-dist 分发包（由 features/system/agent_package_builder.py 与该工具产出，
+dist 分发包（由 features/system/agent_package/builder.py 与该工具产出，
             发布走 python tools/scripts/agent/release.py --version X.Y.Z）
 ```
 

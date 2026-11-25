@@ -25,10 +25,10 @@ def _tiny_apk(path: Path) -> None:
         archive.writestr("classes.dex", b"dex\n035\0" + b"\x00" * 32)
 
 
-def _configure_firmware_runtime(upload_dir: str):
-    from features.firmware import runtime as firmware_runtime
+def _configure_apk_runtime(upload_dir: str):
+    from features.apk import runtime as apk_runtime
 
-    firmware_runtime.configure_runtime(
+    apk_runtime.configure_runtime(
         global_state=SimpleNamespace(
             apk_analysis_tasks={},
             apk_analysis_tasks_lock=threading.RLock(),
@@ -43,7 +43,7 @@ def _configure_firmware_runtime(upload_dir: str):
         jadx_path="/nonexistent/jadx",
         jadx_timeout=5,
     )
-    return firmware_runtime
+    return apk_runtime
 
 
 class ApkImportApiTests(unittest.TestCase):
@@ -54,9 +54,9 @@ class ApkImportApiTests(unittest.TestCase):
         self.secret_env.start()
         self.directory = TemporaryDirectory()
         self.root = Path(self.directory.name)
-        self.firmware_runtime = _configure_firmware_runtime(str(self.root / "apk"))
+        self.apk_runtime = _configure_apk_runtime(str(self.root / "apk"))
 
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
         import features.redmine.users as redmine_users
 
         self.users_patch = patch.object(
@@ -68,7 +68,7 @@ class ApkImportApiTests(unittest.TestCase):
         evidence_store._STORE_CACHE.clear()
 
         # 构造一个 ready 的 APK artifact。
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         snapshot = store.create_snapshot(issue_id=648526, download_policy="all")
@@ -108,6 +108,7 @@ class ApkImportApiTests(unittest.TestCase):
         self.artifact_id = artifact["artifact_id"]
         self.snapshot_id = snapshot["snapshot_id"]
 
+        from features.apk import api as apk_api
         from features.redmine import apk_import_api
 
         app = FastAPI()
@@ -123,13 +124,13 @@ class ApkImportApiTests(unittest.TestCase):
             return await call_next(request)
 
         app.include_router(apk_import_api.router)
-        app.include_router(apk_import_api.apk_router)
+        app.include_router(apk_api.router)
         self.client = TestClient(app)
 
     def tearDown(self):
         self.client.close()
         self.users_patch.stop()
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
 
         evidence_store._STORE_CACHE.clear()
         self.directory.cleanup()
@@ -137,7 +138,7 @@ class ApkImportApiTests(unittest.TestCase):
 
     def _complete_task(self, task_id: str) -> None:
         """把任务直接置为 completed 并伪造 sources 目录，供读取测试使用。"""
-        runtime = self.firmware_runtime
+        runtime = self.apk_runtime
         task_dir = Path(runtime.apk_upload_dir) / task_id
         sources = task_dir / "jadx_output" / "sources" / "com" / "example"
         sources.mkdir(parents=True, exist_ok=True)
@@ -165,7 +166,7 @@ class ApkImportApiTests(unittest.TestCase):
         self.assertEqual(data["status"], "analyzing")
         self.assertEqual(data["source_ref"]["issue_id"], 648526)
         self.assertEqual(data["source_ref"]["snapshot_id"], self.snapshot_id)
-        task = self.firmware_runtime.global_state.apk_analysis_tasks[data["task_id"]]
+        task = self.apk_runtime.global_state.apk_analysis_tasks[data["task_id"]]
         self.assertEqual(task["source_ref"]["sha256"], self.artifact_sha256)
         self._complete_task(data["task_id"])
 
@@ -179,9 +180,9 @@ class ApkImportApiTests(unittest.TestCase):
     def test_source_search_and_read(self):
         # 直接构造 completed 任务
         task_id = str(uuid.uuid4())
-        from features.firmware import create_apk_task
+        from features.apk import create_apk_task
 
-        apk_dir = Path(self.firmware_runtime.apk_upload_dir) / task_id
+        apk_dir = Path(self.apk_runtime.apk_upload_dir) / task_id
         apk_dir.mkdir(parents=True, exist_ok=True)
         apk_file = apk_dir / "test_app.apk"
         _tiny_apk(apk_file)
@@ -213,9 +214,9 @@ class ApkImportApiTests(unittest.TestCase):
 
     def test_source_read_rejects_path_escape(self):
         task_id = str(uuid.uuid4())
-        from features.firmware import create_apk_task
+        from features.apk import create_apk_task
 
-        apk_dir = Path(self.firmware_runtime.apk_upload_dir) / task_id
+        apk_dir = Path(self.apk_runtime.apk_upload_dir) / task_id
         apk_dir.mkdir(parents=True, exist_ok=True)
         apk_file = apk_dir / "test_app.apk"
         _tiny_apk(apk_file)
@@ -231,9 +232,9 @@ class ApkImportApiTests(unittest.TestCase):
 
     def test_source_read_rejects_cross_owner(self):
         task_id = str(uuid.uuid4())
-        from features.firmware import create_apk_task
+        from features.apk import create_apk_task
 
-        apk_dir = Path(self.firmware_runtime.apk_upload_dir) / task_id
+        apk_dir = Path(self.apk_runtime.apk_upload_dir) / task_id
         apk_dir.mkdir(parents=True, exist_ok=True)
         apk_file = apk_dir / "test_app.apk"
         _tiny_apk(apk_file)
@@ -250,7 +251,7 @@ class ApkImportApiTests(unittest.TestCase):
 
     def _corrupt_artifact(self, writer) -> str:
         """把 artifact 文件替换为指定损坏内容，返回 artifact_id。"""
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.store import owner_evidence_store
 
         store = owner_evidence_store("owner-a")
         import hashlib

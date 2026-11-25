@@ -871,7 +871,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             );
             return;
         }
-        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP';
         btn.disabled = false;
         if (result.need_password && result.device_host) {
             showDevicePasswordModal(result.device_host);
@@ -892,7 +892,7 @@ async function connectUsbipDeviceHost(deviceHost, workerId, busids) {
             );
         }
     } catch (error) {
-        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
+        btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP';
         btn.disabled = false;
         if (error.needPassword && error.deviceHost) {
             showDevicePasswordModal(error.deviceHost);
@@ -995,7 +995,7 @@ async function attemptUsbipReconnect() {
         usbipReconnectTimer = null;
         usbipReconnectWaiting = false;
         const btn = $('usbip-btn');
-        if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入'; btn.disabled = false; }
+        if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP'; btn.disabled = false; }
         addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
         return;
     }
@@ -1030,7 +1030,7 @@ async function attemptUsbipReconnect() {
         if (Date.now() <= usbipManualDisconnectUntil) {
             usbipReconnectTimer = null;
             usbipReconnectWaiting = false;
-            if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入'; btn.disabled = false; }
+            if (btn) { btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP'; btn.disabled = false; }
             addLogEntry('已手动断开 USB/IP，停止自动重连', 'info');
             return;
         }
@@ -1040,7 +1040,7 @@ async function attemptUsbipReconnect() {
             return;
         }
         if (btn) {
-            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP 接入';
+            btn.innerHTML = GmsUi.testEmoji('📱') + ' USB/IP';
             btn.disabled = false;
         }
         state.usbipConnected = false;

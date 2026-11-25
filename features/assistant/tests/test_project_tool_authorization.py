@@ -28,7 +28,7 @@ async def test_discovered_firmware_list_preserves_elevation_dependency(monkeypat
 
 @pytest.mark.asyncio
 async def test_elevation_failure_keeps_a_readable_message_and_machine_action(monkeypatch):
-    from features.assistant.payloads import session_payload
+    from features.assistant.session_log import session_payload
 
     monkeypatch.setattr("features.assistant.executor.require_authenticated_user", lambda request: SimpleNamespace(role="user"))
     monkeypatch.setattr("features.auth.access.authentication_required", lambda: True)
@@ -64,13 +64,11 @@ async def test_device_catalog_distinguishes_idle_from_unresponsive(monkeypatch, 
 
 @pytest.mark.asyncio
 async def test_discovered_aoa_catalog_is_scoped_to_current_owner(monkeypatch):
-    from features.devices import aoa_api
-
     monkeypatch.setattr("features.assistant.executor.require_authenticated_user", lambda request: SimpleNamespace(role="user"))
-    monkeypatch.setattr(aoa_api, "require_human_principal", lambda request: SimpleNamespace(role="user"))
-    monkeypatch.setattr(aoa_api, "principal_owner_id", lambda request: "alice")
+    monkeypatch.setattr("features.devices.aoa.api.require_human_principal", lambda request: SimpleNamespace(role="user"))
+    monkeypatch.setattr("features.devices.aoa.api.principal_owner_id", lambda request: "alice")
     profiles = Mock(return_value=[{"id": "alice-profile", "name": "Alice AOA"}])
-    monkeypatch.setattr(aoa_api, "profile_store", lambda: SimpleNamespace(list_profiles=profiles))
+    monkeypatch.setattr("features.devices.aoa.api.profile_store", lambda: SimpleNamespace(list_profiles=profiles))
     result = await ActionExecutor().execute({}, _bare_request(), "aoa_profiles", {"owner_id": "bob", "all": "1"})
     assert result.success
     profiles.assert_called_once_with("alice", False)
@@ -92,7 +90,7 @@ def test_sdk_question_discovers_registered_sources_first():
 @pytest.mark.asyncio
 async def test_sdk_sources_lists_registered_providers_without_paths(monkeypatch):
     from features.auth import CurrentUser
-    from features.system import source_api
+    from features.sdk import source_api
 
     request = _bare_request()
     request.state.current_user = CurrentUser(
@@ -122,7 +120,7 @@ async def test_sdk_sources_lists_registered_providers_without_paths(monkeypatch)
 @pytest.mark.asyncio
 async def test_sdk_sources_reports_an_empty_registry(monkeypatch):
     from features.auth import CurrentUser
-    from features.system import source_api
+    from features.sdk import source_api
 
     request = _bare_request()
     request.state.current_user = CurrentUser(
@@ -139,7 +137,7 @@ async def test_sdk_sources_reports_an_empty_registry(monkeypatch):
 @pytest.mark.asyncio
 async def test_sdk_sources_keeps_the_scope_gate(monkeypatch):
     from features.auth import CurrentUser
-    from features.system import source_api
+    from features.sdk import source_api
 
     request = _bare_request()
     request.state.current_user = CurrentUser(

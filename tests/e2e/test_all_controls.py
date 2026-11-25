@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from playwright.sync_api import expect
 
-from tests import test_runtime_ui_smoke as runtime_ui_smoke
+from tests.runtime_ui import harness as runtime_ui_smoke
 
 
 INVENTORY_SCRIPT = """

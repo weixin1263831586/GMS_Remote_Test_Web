@@ -1,6 +1,6 @@
 import time
 
-from features.devices.serial_console import schedule_idle_stop
+from features.devices.serial.service import schedule_idle_stop
 
 
 class _Service:

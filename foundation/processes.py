@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 
 from foundation.command_result import CommandResult
 from foundation.redaction import redact_sensitive_text
@@ -45,23 +46,24 @@ def _communicate_cancellable(
     subprocess.TimeoutExpired once the overall timeout elapses, mirroring the
     plain communicate(timeout=...) contract.
     """
-    poll = 1.0
-    waited = 0.0
+    deadline = time.monotonic() + timeout
     while True:
+        if cancel_event.is_set():
+            raise _CommandCancelledError
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(process.args, timeout)
         try:
-            return process.communicate(timeout=poll)
+            return process.communicate(timeout=min(1.0, remaining))
         except subprocess.TimeoutExpired:
-            waited += poll
-            if cancel_event.is_set():
-                raise _CommandCancelledError from None
-            if waited >= timeout:
-                raise
+            continue
 
 
 def run_local_command(
     argv: list[str], timeout: int = 30, *,
     env: dict[str, str] | None = None, cwd: str | None = None,
     cancel_event: threading.Event | None = None,
+    pass_fds: tuple[int, ...] = (),
 ) -> CommandResult:
     """Run a local command from an argv list (no shell interpretation).
 
@@ -76,6 +78,8 @@ def run_local_command(
     exit with ``stderr='Command cancelled'`` so callers can persist an
     interrupted state instead of orphaning the subprocess.
     """
+    if cancel_event is not None and cancel_event.is_set():
+        return CommandResult(stdout="", stderr="Command cancelled", code=-1)
     process = None
     try:
         process = subprocess.Popen(
@@ -86,6 +90,7 @@ def run_local_command(
             start_new_session=True,
             env=env,
             cwd=cwd,
+            **({'pass_fds': pass_fds} if pass_fds else {}),
         )
         if cancel_event is None:
             stdout, stderr = process.communicate(timeout=timeout)
@@ -101,7 +106,7 @@ def run_local_command(
     except subprocess.TimeoutExpired:
         if process is not None:
             _kill_process_group(process)
-        return CommandResult(stdout="", stderr="Command timed out", code=-1)
+        return CommandResult(stdout="", stderr="Command timed out", code=-1, timed_out=True)
     except Exception as exc:
         return CommandResult(stdout="", stderr=redact_sensitive_text(exc), code=-1)
 
@@ -135,15 +140,8 @@ def run_local_shell_command(command: str, timeout: int = 30) -> CommandResult:
         )
     except subprocess.TimeoutExpired:
         if process is not None:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            except Exception as exc:
-                logger.warning("Failed to kill timed out command process group: %s", exc)
-            with contextlib.suppress(Exception):
-                process.communicate(timeout=1)
-        return CommandResult(stdout="", stderr="Command timed out", code=-1)
+            _kill_process_group(process)
+        return CommandResult(stdout="", stderr="Command timed out", code=-1, timed_out=True)
     except Exception as exc:
         return CommandResult(stdout="", stderr=redact_sensitive_text(exc), code=-1)
 

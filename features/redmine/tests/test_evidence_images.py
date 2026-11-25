@@ -43,8 +43,8 @@ def _tiny_png_bytes() -> bytes:
 
 class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
     def _fetch_with_png(self, owner_id: str = "owner-a", png: bytes | None = None):
-        from features.redmine.evidence import EvidenceFetcher
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.store import owner_evidence_store
 
         if png is None:
             png = _tiny_png_bytes()
@@ -131,7 +131,7 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         # PNG 原件保持 ready（字节完整落盘），派生状态记 missing、
         # 原因写明"依赖缺失"并进入快照 derive 阶段错误，不阻塞其余
         # 附件，也不把快照整体拉成 partial。
-        from features.redmine import evidence_images
+        from features.redmine.evidence import images as evidence_images
 
         def _no_ocr():
             raise ModuleNotFoundError("No module named 'pytesseract' (test)")
@@ -151,8 +151,8 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertFalse(artifact.get("text_available"))
 
     def test_image_ocr_timeout_records_missing_and_keeps_other_attachments(self):
-        from features.redmine.evidence import snapshot_completeness
-        from features.redmine.evidence_images import OCR_TIMEOUT_SECONDS
+        from features.redmine.evidence.images import OCR_TIMEOUT_SECONDS
+        from features.redmine.evidence.service import snapshot_completeness
 
         def timeout(_image, *, lang, timeout):
             self.assertEqual(lang, "chi_sim+eng")
@@ -182,9 +182,9 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         )
 
     def test_large_image_is_tiled_instead_of_rejected(self):
-        from features.redmine.evidence_images import OCR_TIMEOUT_SECONDS
+        from features.redmine.evidence.images import OCR_TIMEOUT_SECONDS
 
-        with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
+        with patch("features.redmine.evidence.images.OCR_MAX_IMAGE_PIXELS", 100), patch(
             "pytesseract.image_to_string", return_value="tile text",
         ) as ocr:
             result, store = self._fetch_with_png()
@@ -201,8 +201,8 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
 
     def test_large_image_ocr_respects_total_budget(self):
         """tile 总耗时超预算：停止剩余 tile，保留已识别文本并标注截断。"""
-        with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
-            "features.redmine.evidence_images.OCR_TOTAL_TIMEOUT_SECONDS", 0,
+        with patch("features.redmine.evidence.images.OCR_MAX_IMAGE_PIXELS", 100), patch(
+            "features.redmine.evidence.images.OCR_TOTAL_TIMEOUT_SECONDS", 0,
         ), patch(
             "pytesseract.image_to_string", return_value="tile text",
         ) as ocr:
@@ -217,7 +217,7 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         self.assertIn("truncated", artifact["error"])
 
     def test_tile_timeout_keeps_prefix_and_marks_derived_text_partial(self):
-        from features.redmine.evidence import snapshot_completeness
+        from features.redmine.evidence.service import snapshot_completeness
 
         tiles = iter(["recognized prefix", RuntimeError("Tesseract process timeout")])
 
@@ -229,7 +229,7 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
                 raise value
             return value
 
-        with patch("features.redmine.evidence_images.OCR_MAX_IMAGE_PIXELS", 100), patch(
+        with patch("features.redmine.evidence.images.OCR_MAX_IMAGE_PIXELS", 100), patch(
             "pytesseract.image_to_string", side_effect=recognize,
         ) as ocr:
             result, store = self._fetch_with_png()
@@ -254,8 +254,8 @@ class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
         """OCR output is retained in full, including multibyte text at the tail."""
         from pathlib import Path
 
-        from features.redmine.evidence_images import extract_image_ocr_text
-        from features.redmine.evidence_store import EvidenceStore
+        from features.redmine.evidence.images import extract_image_ocr_text
+        from features.redmine.evidence.store import EvidenceStore
 
         long_text = "崩溃日志一二三四五六七八九十" * 500
         with patch(

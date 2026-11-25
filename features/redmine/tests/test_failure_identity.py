@@ -3,8 +3,8 @@
 import json
 import unittest
 
-from features.redmine.case_extractor import RedmineCaseExtractor
-from features.redmine.daily_brief_case_fact import build_issue_failure_identity
+from features.redmine.cases.case_extractor import RedmineCaseExtractor
+from features.redmine.daily_brief.case_fact import build_issue_failure_identity
 from features.redmine.failure_identity import (
     VALID_RELATIONS,
     assertion_class,

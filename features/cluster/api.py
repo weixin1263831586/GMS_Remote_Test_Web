@@ -351,7 +351,7 @@ def _command_owner_id(request: Request, user: CurrentUser | None) -> str:
 def _require_agent_scope_when_agent(request: Request, scope: str) -> None:
     """Scope gate for Agent Service Tokens on cluster read endpoints.
 
-    Mirrors the jobs_api jobs.read enforcement (ADR 0006) with the
+    Mirrors the jobs.api jobs.read enforcement (ADR 0006) with the
     /api/cluster/devices variant: machine and Agent principals need their
     explicit capability; human sessions retain their existing access because
     the user role does not carry devices.read/suites.read. Anonymous dev-mode
@@ -456,12 +456,12 @@ def list_suites(
     if (not local_present and (not worker_id or worker_id == local_worker_id)):
         # The bridge normally refreshes this inventory. Keep the single-host
         # page usable during the first heartbeat or after a stale DB refresh.
-        from .local_bridge import _scan_suites, _suite_roots
+        from .local_bridge import scan_local_suites
 
         raw_suites = list(raw_suites)
         raw_suites.extend(
             {**item, "worker_id": local_worker_id}
-            for item in _scan_suites(_suite_roots())
+            for item in scan_local_suites()
         )
     suites = []
     for item in raw_suites:
@@ -488,23 +488,23 @@ def list_suites(
 
 def _local_execute(command_type: str, payload: dict) -> dict:
     """Execute a command directly on the Controller host (local Worker)."""
-    from worker_agent.config import WorkerConfig
-    from worker_agent.inventory import execute_suite_action as _exec_suite
+    from worker.config import WorkerConfig
+    from worker.inventory import execute_suite_action as _exec_suite
 
-    from .local_bridge import _scan_suites, _suite_roots
+    from .local_bridge import _suite_roots, scan_local_suites
 
     if command_type == "refresh_devices":
-        from worker_agent.device_actions import probe_devices
+        from worker.device_actions import probe_devices
 
         return {"devices": probe_devices(include_details=True)}
     if command_type == "refresh_suites":
-        return {"suites": _scan_suites(_suite_roots())}
+        return {"suites": scan_local_suites()}
     if command_type == "suite_action":
         config = WorkerConfig.__new__(WorkerConfig)
         config.suite_roots = _suite_roots()
         return _exec_suite(config, payload)
     if command_type == "file_browse":
-        from worker_agent.device_actions import browse_directory
+        from worker.device_actions import browse_directory
 
         # 默认打开套件根目录（如 ~/GMS-Suite），未配置则回落主目录。
         default_dir = next(
@@ -530,7 +530,7 @@ def _local_execute(command_type: str, payload: dict) -> dict:
         return _update_local_worker_config(payload)
     if command_type == "adb_proxy":
         from features.devices import pair_code_for_worker
-        from worker_agent.adb_proxy import execute_adb_proxy_action
+        from worker.adb_proxy import execute_adb_proxy_action
 
         action = str(payload.get("action") or "")
         pair_code = ""
@@ -754,7 +754,7 @@ def cluster_suite_download(
     # 避免向 Worker 传输数 GB 后才在解压阶段失败。
     filename = str(body.filename or "")
     if filename:
-        from .suite_library_api import controller_suite_archives
+        from .transfers.api import controller_suite_archives
 
         library_archive = next(
             (item for item in controller_suite_archives() if item.name == filename),
@@ -867,17 +867,15 @@ def list_job_timeline(
 def _mount_subrouters() -> None:
     """Mount split routers after this module's shared dependencies exist."""
     global device_action
+    from .artifacts_api import retention_router
     from .artifacts_api import router as artifacts_router
     from .commands_api import router as commands_router
-    from .deployment_api import router as deployment_router
-    from .device_actions_api import device_action as device_action
-    from .device_actions_api import router as device_actions_router
+    from .deployment.api import router as deployment_router
+    from .device_operations.api import device_action as device_action
+    from .device_operations.api import router as device_actions_router
     from .devices_api import router as devices_router
-    from .job_control_api import router as job_control_router
-    from .jobs_api import router as jobs_router
-    from .retention_api import router as retention_router
-    from .suite_library_api import router as suite_library_router
-    from .transfers_api import router as transfers_router
+    from .jobs.api import router as jobs_router
+    from .transfers.api import router as transfers_router
     from .worker_settings_api import router as worker_settings_router
 
     router.include_router(deployment_router)
@@ -887,8 +885,6 @@ def _mount_subrouters() -> None:
     router.include_router(transfers_router)
     router.include_router(jobs_router)
     router.include_router(artifacts_router)
-    router.include_router(job_control_router)
-    router.include_router(suite_library_router)
     router.include_router(worker_settings_router)
     router.include_router(retention_router)
 

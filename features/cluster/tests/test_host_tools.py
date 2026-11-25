@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.configure_gms_host_tools import END, START, configure_bashrc
-from scripts.extract_zip_preserve_mode import extract_archive
+from scripts.deployment.worker.configure_gms_host_tools import END, START, configure_bashrc
+from scripts.deployment.worker.extract_zip_preserve_mode import extract_archive
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 HOST_TOOLS = PROJECT_ROOT / "tools/GMS-Host-Tools"
-PREPARE_SCRIPT = PROJECT_ROOT / "scripts/prepare_gms_host_tools.sh"
+PREPARE_SCRIPT = PROJECT_ROOT / "scripts/deployment/worker/prepare_gms_host_tools.sh"
 
 
 def _sha256(path: Path) -> str:
@@ -109,6 +109,8 @@ def test_prepare_host_tools_fetches_verified_artifacts(tmp_path):
     jdk_tree = source / "jdk-11"
     (jdk_tree / "bin").mkdir(parents=True)
     (jdk_tree / "legal").mkdir()
+    (jdk_tree / "lib").mkdir()
+    (jdk_tree / "lib/modules").write_bytes(b"module fixture")
     (jdk_tree / "bin/java").write_text(
         '#!/bin/sh\necho \'openjdk version "11.0.28" 2025-10-21\'\n'
         'echo \'OpenJDK Runtime Environment Temurin-11.0.28+6\'\n',
@@ -155,6 +157,8 @@ def test_prepare_host_tools_rejects_checksum_mismatch(tmp_path):
     project = tmp_path / "project"
     host_tools = project / "tools/GMS-Host-Tools"
     (host_tools / "jdk-11/bin").mkdir(parents=True)
+    (host_tools / "jdk-11/lib").mkdir()
+    (host_tools / "jdk-11/lib/modules").write_bytes(b"module fixture")
     java = host_tools / "jdk-11/bin/java"
     java.write_text("#!/bin/sh\n", encoding="utf-8")
     java.chmod(0o755)
@@ -181,15 +185,7 @@ def test_host_tools_archives_contain_every_required_runtime(tmp_path):
         pytest.skip("deployment-only host tools are intentionally untracked")
     shutil.copytree(HOST_TOOLS / "jdk-11", tmp_path / "jdk-11")
     lib_dir = tmp_path / "jdk-11/lib"
-    parts = sorted(lib_dir.glob("modules.part.*"))
-    if parts:
-        # Shard bundle: merge exactly as the worker installer does.
-        with (lib_dir / "modules").open("wb") as output:
-            for part in parts:
-                output.write(part.read_bytes())
-    else:
-        # Downloaded bundle ships a single merged lib/modules file.
-        assert (lib_dir / "modules").is_file()
+    assert (lib_dir / "modules").stat().st_size > 0
     extract_archive(HOST_TOOLS / "platform-tools-gms-linux.zip", tmp_path)
 
     required = (
@@ -231,12 +227,14 @@ def test_bashrc_configuration_replaces_legacy_paths_and_is_idempotent(tmp_path):
 
 
 def test_worker_installer_protects_and_exports_gts_credential():
-    installer = (PROJECT_ROOT / "scripts/install_cluster_worker.sh").read_text(
+    installer = (PROJECT_ROOT / "scripts/deployment/worker/install_cluster_worker.sh").read_text(
         encoding="utf-8"
     )
     environment = (HOST_TOOLS / "env.sh").read_text(encoding="utf-8")
 
-    assert 'install -m 600 "${GTS_CREDENTIAL_FILE}"' in installer
+    software = (PROJECT_ROOT / "scripts/deployment/worker/configure_worker_software.sh").read_text(encoding="utf-8")
+    assert 'install -m 600 "${credential}"' in software
+    assert 'scripts/deployment/worker/configure_worker_software.sh' in installer
     assert "GTS credential must be supplied" in installer
     assert "Environment=APE_API_KEY=${SOFTWARE_ROOT}/gts-rockchip.json" in installer
     # env.sh 只引用部署侧解耦后的凭据；仓库/代码包内不再携带真实凭据。
@@ -245,7 +243,7 @@ def test_worker_installer_protects_and_exports_gts_credential():
 
 
 def test_worker_installer_provisions_a_headless_x_display():
-    installer = (PROJECT_ROOT / "scripts/install_cluster_worker.sh").read_text(
+    installer = (PROJECT_ROOT / "scripts/deployment/worker/install_cluster_worker.sh").read_text(
         encoding="utf-8"
     )
 
@@ -261,9 +259,11 @@ def test_worker_installer_provisions_a_headless_x_display():
 
 
 def test_worker_installer_replaces_read_only_tool_directories_before_extracting():
-    installer = (PROJECT_ROOT / "scripts/install_cluster_worker.sh").read_text(
+    installer = (PROJECT_ROOT / "scripts/deployment/worker/install_cluster_worker.sh").read_text(
         encoding="utf-8"
     )
 
-    assert 'rm -rf "${SOFTWARE_ROOT}/jdk-11" "${SOFTWARE_ROOT}/platform-tools"' in installer
-    assert 'glob("modules.part.*")' in installer
+    software = (PROJECT_ROOT / "scripts/deployment/worker/configure_worker_software.sh").read_text(encoding="utf-8")
+    assert 'scripts/deployment/worker/configure_worker_software.sh' in installer
+    assert 'rm -rf "${SOFTWARE_ROOT}/jdk-11" "${SOFTWARE_ROOT}/platform-tools"' in software
+    assert 'jdk-11/lib/modules' in software

@@ -31,6 +31,8 @@ def validate_condition(condition, depth=0):
     if not isinstance(condition, dict) or depth > 3:
         raise ValueError("invalid bounded semantic condition")
     kind = condition.get("type")
+    if not isinstance(kind, str):
+        raise ValueError("unknown semantic condition type")
     if kind in {"all", "any"}:
         terms = condition.get("conditions")
         if not isinstance(terms, list) or not 1 <= len(terms) <= 8:
@@ -194,7 +196,10 @@ def compile_plan(commands, template, context, certificate):
             max_error_px=case["max_error_px"] + math.dist((px, py), cooked))
         return hid
 
-    for raw, command, step in zip(commands, parse_profile_commands(commands), template["steps"]):
+    # The parser intentionally skips blank lines; pair steps with the same
+    # nonblank source commands rather than shifting subsequent HID actions.
+    source = [str(raw or "").strip() for raw in commands if str(raw or "").strip()]
+    for raw, command, step in zip(source, parse_profile_commands(commands), template["steps"], strict=True):
         if command.kind in {"click", "longClick"}:
             u, v = point(step["target"])
             compiled.append(f"{command.kind} {u} {v}")

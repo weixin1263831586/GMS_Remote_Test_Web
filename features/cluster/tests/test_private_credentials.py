@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from paramiko.file import BufferedFile
 
-from features.cluster.deployment_api import write_remote_private_file
+from features.cluster.deployment.api import write_remote_private_file
 
 
 def test_private_file_is_writable_and_private_before_first_write():

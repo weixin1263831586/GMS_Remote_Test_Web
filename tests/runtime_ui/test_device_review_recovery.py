@@ -4,8 +4,8 @@ import json
 import time
 from unittest.mock import patch
 
-from features.devices.debug_api import review_session
-from features.devices.deployment_api import review_deployment
+from features.devices.debug.api import review_session
+from features.devices.deployment.api import review_deployment
 from tests.runtime_ui.harness import RuntimeUiHarness
 
 
@@ -18,10 +18,10 @@ class ReviewRecoveryBrowserTests(RuntimeUiHarness):
                     page.clock.install()
                     path = "/api/devices/" + kind + "/" + "a" * 32
                     if kind == "deployments":
-                        with patch("features.devices.deployment_api.deployment_status"):
+                        with patch("features.devices.deployment.api.deployment_status"):
                             html = review_deployment(None, "a" * 32).body.decode()
                     else:
-                        with patch("features.devices.debug_api.service.read"):
+                        with patch("features.devices.debug.api.service.read"):
                             html = review_session(None, "a" * 32).body.decode()
                     state = {"reads": 0, "mutations": 0}
 

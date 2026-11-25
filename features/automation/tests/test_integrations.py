@@ -107,7 +107,7 @@ class JenkinsClientTests(unittest.TestCase):
 
 class GerritTriggerTests(unittest.TestCase):
     def test_normalize_patchset_created_event_and_match_profile(self):
-        from features.automation.gerrit_trigger import match_profiles, normalize_gerrit_event
+        from features.automation.profiles import match_profiles, normalize_gerrit_event
 
         event = normalize_gerrit_event({
             "type": "patchset-created",

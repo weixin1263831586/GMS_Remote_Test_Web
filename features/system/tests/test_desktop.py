@@ -1,7 +1,7 @@
 import unittest
 from types import SimpleNamespace
 
-from features.system.desktop import (
+from features.system.host.desktop import (
     build_novnc_upstream_url,
     create_novnc_client_session,
     default_novnc_upstream_http,

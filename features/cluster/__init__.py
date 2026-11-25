@@ -7,11 +7,10 @@ from foundation import cluster_port
 from foundation.error_model import ApiError, format_validation_errors
 
 from .admission import worker_admission_state
-from .aoa_playback import control_aoa_playback
 from .api import configure_cluster, device_action, page_router, router
 from .api import service as get_cluster_service
 from .config import ClusterConfig
-from .execution_spec import build_argv_from_spec
+from .device_operations.aoa_playback import control_aoa_playback
 from .firmware_recovery import (
     freeze_firmware_recovery,
     prepare_local_firmware_recovery,
@@ -19,8 +18,9 @@ from .firmware_recovery import (
     run_local_firmware_recovery,
     validate_local_firmware_recovery,
 )
-from .job_control_api import cancel_job
-from .job_requests import request_fingerprint
+from .jobs.api import cancel_job
+from .jobs.execution_spec import build_argv_from_spec
+from .jobs.requests import request_fingerprint
 from .local_bridge import start_local_bridge, stop_local_bridge
 from .models import ClusterDeviceAction
 from .report_index import index_cluster_report

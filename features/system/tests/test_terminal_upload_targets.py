@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser, require_elevated_admin
-from features.system import terminal_api as api
+from features.system.host.terminal import api
 
 
 @pytest.fixture

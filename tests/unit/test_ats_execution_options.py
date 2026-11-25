@@ -10,7 +10,7 @@ from foundation.command_result import CommandResult
 from foundation.execution_spec import ExecutionSpecError, build_argv_from_spec
 from foundation.test_execution_options import matches_device_selector, validate_execution_options
 from foundation.tradefed_progress import parse_progress_line
-from worker_agent.test_preparation import prepare_test_devices
+from worker.runtime import prepare_test_devices
 
 
 def test_explicit_shard_count_is_used_and_cannot_exceed_leases():

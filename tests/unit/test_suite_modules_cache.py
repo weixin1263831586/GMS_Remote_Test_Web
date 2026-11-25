@@ -2,8 +2,8 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 from unittest.mock import Mock
 
+from features.cluster.jobs import cluster_test_execution as workflow
 from foundation.cache import TTLCache
-from workflows import cluster_test_execution as workflow
 
 
 def test_module_cache_normalizes_paths_isolates_results_and_expires(tmp_path, monkeypatch):

@@ -5,9 +5,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from features.devices import debug_service, deployment_service
-from features.devices.debug_store import DebugStore
-from features.devices.deployment_store import DeploymentStore
+from features.devices.debug import service as debug_service
+from features.devices.debug.store import DebugStore
+from features.devices.deployment import service as deployment_service
+from features.devices.deployment.store import DeploymentStore
 from foundation.error_model import ApiError
 
 
@@ -64,7 +65,7 @@ def test_cached_stores_reinitialize_rebuilt_databases(tmp_path, monkeypatch, ser
 
 def test_approval_precheck_keeps_queue_alive_without_reopening_expired_work(tmp_path, monkeypatch):
     now = [1000.0]
-    monkeypatch.setattr('features.devices.deployment_store.time.time', lambda: now[0])
+    monkeypatch.setattr('features.devices.deployment.store.time.time', lambda: now[0])
     store = DeploymentStore(tmp_path)
     store.create({'id': 'request', 'owner_id': 'owner', 'expires_at': now[0] + 300})
     store.start('request', 'owner', 'human')
@@ -80,7 +81,7 @@ def test_approval_precheck_keeps_queue_alive_without_reopening_expired_work(tmp_
 
 def test_debug_approval_renews_only_while_reserved(tmp_path, monkeypatch):
     now = [1000.0]
-    monkeypatch.setattr('features.devices.debug_store.time.time', lambda: now[0])
+    monkeypatch.setattr('features.devices.debug.store.time.time', lambda: now[0])
     store = DebugStore(Path(tmp_path))
     store.create({'id': 'session', 'owner_id': 'owner', 'actor_id': 'agent', 'expires_at': 1300.0})
     store.reserve_approval('session', 'owner')

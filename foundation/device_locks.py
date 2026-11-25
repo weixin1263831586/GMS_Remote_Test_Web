@@ -149,7 +149,9 @@ class DeviceLockManager:
     def force_unlock_device(self, device_id: str) -> tuple[bool, str | None]:
         device_key = self._device(device_id)["device_key"]
         active = self.registry.active_claim(device_key)
-        if active and (
+        if active is None:
+            return True, f"设备 {device_id} 未锁定"
+        if (
             str(active.get("source_type") or "").startswith("cluster-")
             or str(active.get("source_id") or "").startswith(("job:", "reservation:"))
         ):
@@ -157,9 +159,9 @@ class DeviceLockManager:
                 False,
                 f"设备 {device_id} 正由集群任务或预约占用，请先取消对应任务或预约",
             )
-        claim = self.registry.force_release(device_key)
+        claim = self.registry.force_release(device_key, expected_claim=active)
         if not claim:
-            return True, f"设备 {device_id} 未锁定"
+            return False, f"设备 {device_id} 占用已变化，请刷新后重试"
         return True, f"设备 {device_id} 已强制释放"
 
     def get_lock_status(self, device_id: str) -> dict[str, Any] | None:

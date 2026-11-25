@@ -15,7 +15,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.devices import usbip_assignments as ua
+from features.devices.usbip import assignments as ua
 
 
 def _config_manager(runtime_config: dict, *, update_error: bool = False):

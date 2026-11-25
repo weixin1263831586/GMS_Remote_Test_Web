@@ -1,7 +1,7 @@
 """Failed analyses remain visible in new and historical morning reports."""
 
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_report import human_review_count, summarize_daily_brief
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.report import human_review_count, summarize_daily_brief
 from features.redmine.tests.test_daily_brief_service import make_service
 
 

@@ -7,10 +7,6 @@ from pathlib import Path
 from foundation.runtime_settings import RuntimeSettings
 
 
-def _prefer_existing(canonical: Path, legacy: Path) -> Path:
-    return legacy if not canonical.exists() and legacy.exists() else canonical
-
-
 def config_root(project_root: Path | str) -> Path:
     return Path(project_root).resolve() / "configs"
 
@@ -21,28 +17,24 @@ def runtime_data_root(project_root: Path | str) -> Path:
 
 def static_config_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "local/config.json", root / "config.json")
+    return root / "local/config.json"
 
 
 def example_config_path(project_root: Path | str, name: str = "config.json") -> Path:
-    """Prefer grouped templates, with read compatibility for older deployments."""
+    """Resolve grouped configuration templates."""
     root = config_root(project_root)
     example_name = Path(name).with_suffix(".example.json").name
-    canonical = root / "examples" / example_name
-    legacy = root / example_name
-    if not canonical.is_file() and legacy.is_file():
-        return legacy
-    return canonical
+    return root / "examples" / example_name
 
 
 def runtime_config_path(project_root: Path | str) -> Path:
     root = Path(project_root).resolve()
-    return _prefer_existing(runtime_data_root(root) / "settings/preferences.json", root / "configs/config_runtime.json")
+    return runtime_data_root(root) / "settings/preferences.json"
 
 
 def runtime_environment_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "local/environment.json", root / "runtime.json")
+    return root / "local/environment.json"
 
 
 def secret_environment_path(project_root: Path | str) -> Path:
@@ -51,22 +43,22 @@ def secret_environment_path(project_root: Path | str) -> Path:
 
 def cluster_config_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "local/cluster.json", root / "cluster.json")
+    return root / "local/cluster.json"
 
 
 def worker_tokens_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "secrets/worker_tokens.json", root / "worker_tokens.json")
+    return root / "secrets/worker_tokens.json"
 
 
 def certificates_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "secrets/certs", root / "certs")
+    return root / "secrets/certs"
 
 
 def user_tools_path(project_root: Path | str) -> Path:
     root = Path(project_root).resolve()
-    return _prefer_existing(runtime_data_root(root) / "settings/user_tools.json", root / "configs/user_tools_data.json")
+    return runtime_data_root(root) / "settings/user_tools.json"
 
 
 def sanitize_owner_id(owner_id: object) -> str:
@@ -82,14 +74,10 @@ def owner_config_path(project_root: Path | str, feature: str, owner_id: str) -> 
     """按用户隔离的「配置/凭据」路径（ADR-0007）。
 
     canonical 在 ``configs/secrets/<feature>/by_user/<owner>/config_runtime.json``：
-    属于配置/凭证，随部署持久，删 ``data/`` 不得影响；legacy 落在
-    ``<data_root>/<feature>/by_user/<owner>/config_runtime.json``（0.20 前的
-    位置），迁移期 canonical 缺失时回退读取，写入优先 canonical。
+    属于配置/凭证，随部署持久，不依赖运行数据目录。
     """
     owner = sanitize_owner_id(owner_id)
-    canonical = config_root(project_root) / "secrets" / feature / "by_user" / owner / "config_runtime.json"
-    legacy = runtime_data_root(project_root) / feature / "by_user" / owner / "config_runtime.json"
-    return _prefer_existing(canonical, legacy)
+    return config_root(project_root) / "secrets" / feature / "by_user" / owner / "config_runtime.json"
 
 
 def ensure_owner_config_dir(path: Path) -> Path:
@@ -101,12 +89,12 @@ def ensure_owner_config_dir(path: Path) -> Path:
 
 def automation_profiles_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "local/automation_profiles.json", root / "automation_profiles.json")
+    return root / "local/automation_profiles.json"
 
 
 def build_servers_path(project_root: Path | str) -> Path:
     root = config_root(project_root)
-    return _prefer_existing(root / "local/build_servers.json", root / "build_servers.json")
+    return root / "local/build_servers.json"
 
 
 def sdk_user_sources_path(project_root: Path | str) -> Path:

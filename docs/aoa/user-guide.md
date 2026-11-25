@@ -101,7 +101,7 @@ sleep 只能等待布局稳定，不能隐藏仍已注册的鼠标设备。
 ### 从参考机签发类别认证
 
 1. 准备同一型号、board/hardware、内核和 Android 版本的两台不同序列号参考设备，均允许 ADB。
-   安装 [安全标定应用](../../worker_agent/calibration_app/README.md)。选择录制 Worker/设备，
+   安装 [安全标定应用](../../worker/calibration_app/README.md)。选择录制 Worker/设备，
    展开工作台“设备类别认证 / 语义模板”，填写显示 ID，点击“验证录制设备 direct 输入”。
 2. 系统打开专用 Activity，检查前台/显示器/锁屏，注册 direct HID，采集输入类型和轴信息并测量七点。
    验证会改变 USB 模式，必须在安全页面操作。失败时查看原命令回执，不用普通页面手工点击作为认证证据。

@@ -8,7 +8,7 @@
 #
 # 2026-10-31 追加 PYSEC-2026-4327 / PYSEC-2026-4332（46.txt 审核意见）：
 # 影响分析——Pillow 在运行面仅用于 Redmine 证据图片的元数据读取与 OCR
-# （features/redmine/evidence_images.py、analysis_attachments.py，解码
+# （features/redmine/evidence/images.py、features/redmine/analysis/attachments.py，解码
 # 来源为登录用户拉取的 Redmine 附件，非匿名网络输入），且已有显式像素
 # 上限（OCR_MAX_IMAGE_PIXELS）、OCR 超时与异常降级（derived_status=
 # missing）防护；两者修复版本同为 13.0.0，3.10 无修复版，故按同一

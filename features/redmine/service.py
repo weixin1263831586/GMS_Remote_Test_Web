@@ -9,8 +9,8 @@ from typing import Any
 from foundation.tasks import SingleFlightTask
 
 from .agent import RedmineAgent
-from .knowledge_repository import RedmineKnowledgeDB
-from .knowledge_service import RedmineKnowledgeService
+from .knowledge.repository import RedmineKnowledgeDB
+from .knowledge.service import RedmineKnowledgeService
 from .repository import RedmineAgentDB
 
 

@@ -38,6 +38,14 @@ const HTML_ENTITIES = Object.freeze({
     "'": '&#039;'
 });
 
+// Only presentation is normalized; report and suite execution types stay intact.
+function suiteTypeColorKey(value) {
+    const type = String(value ?? '').trim().toLowerCase();
+    if (type === 'cts-verifier') return 'cts-v';
+    if (type === 'gts-root' || type === 'gts-interactive') return 'gts';
+    return /^[a-z0-9-]+$/.test(type) ? type : '';
+}
+
 function escapeHtml(text) {
     if (text === null || text === undefined) return '';
     return String(text).replace(/[&<>"']/g, char => HTML_ENTITIES[char]);
@@ -82,20 +90,6 @@ function safeHeaderPercentEncode(value) {
         // 编码前移除无效代理字符，确保 Header 为 ASCII。
         return encodeURIComponent(text.replace(/[\uD800-\uDFFF]/g, ''));
     }
-}
-
-// 密码输入框明文/密文切换：按钮位于包裹层 .password-input-wrap 内，
-// 点击后在 password 与 text 之间切换，便于校验已输入的密码。
-// 图标由 CSS 伪元素按 is-visible 类切换眼睛/闭眼 mask（form-controls.css）。
-function togglePasswordVisibility(button) {
-    const input = button.closest('.password-input-wrap')?.querySelector('input');
-    if (!input) return;
-    const showPlain = input.type === 'password';
-    input.type = showPlain ? 'text' : 'password';
-    button.classList.toggle('is-visible', showPlain);
-    const label = showPlain ? '隐藏密码' : '显示密码';
-    button.setAttribute('aria-label', label);
-    button.setAttribute('title', label);
 }
 
 function formatBytes(bytes, hideIfZero = false) {
@@ -164,7 +158,6 @@ window.throttle = throttle;
 window.normalizeApiTextError = normalizeApiTextError;
 window.escapeHtml = escapeHtml;
 window.safeHeaderPercentEncode = safeHeaderPercentEncode;
-window.togglePasswordVisibility = togglePasswordVisibility;
 window.formatBytes = formatBytes;
 window.triggerDownload = triggerDownload;
 window.copyTextToClipboard = copyTextToClipboard;

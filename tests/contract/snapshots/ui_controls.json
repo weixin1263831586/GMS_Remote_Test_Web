@@ -77,6 +77,7 @@
       "syncTestPlanSchedule",
       "tickWorker",
       "toggleKillSwitch",
+      "togglePasswordVisibility",
       "toggleTestPlan",
       "warmResource"
     ],
@@ -295,6 +296,7 @@
       "showSettings",
       "switchTab",
       "syncRedmineMembers",
+      "togglePasswordVisibility",
       "viewMemberInPersonal"
     ],
     "ids": [
@@ -352,17 +354,39 @@
       "trendStartModalTitle"
     ]
   },
-  "gms-update-monitor": {
+  "gms-update-center": {
     "handlers": [
       "loadAll",
       "page",
+      "refreshCriticalGerrit",
       "runQuery",
       "setTab",
       "startSync"
     ],
     "ids": [
+      "change_kind",
+      "critical-detail-body",
+      "critical-detail-close",
+      "critical-detail-copy",
+      "critical-detail-dialog",
+      "critical-detail-done",
+      "critical-detail-title",
+      "critical-legacy-toggle",
+      "critical_kind",
+      "critical_month",
+      "critical_version",
+      "critical_year",
+      "cve_module",
+      "cve_year",
+      "exemption_id",
+      "gerrit-refresh",
+      "gerrit_status",
+      "issue_type",
+      "monitor_version",
       "pageinfo",
+      "product_section",
       "q",
+      "requirement_kind",
       "section-badge",
       "source_key",
       "summary",
@@ -392,6 +416,7 @@
       "preview-mail",
       "radar-all-tasks",
       "radar-enabled",
+      "radar-history-kind",
       "radar-notify",
       "radar-recipients",
       "radar-settings-cancel",
@@ -416,23 +441,6 @@
       "scan",
       "scan-errors",
       "schedule-status"
-    ]
-  },
-  "mainline-known-issues": {
-    "handlers": [
-      "page",
-      "runQuery",
-      "setTab"
-    ],
-    "ids": [
-      "exemption_id",
-      "issue_type",
-      "pageinfo",
-      "product_section",
-      "q",
-      "section-badge",
-      "summary",
-      "tables-area"
     ]
   },
   "redmine-agent": {
@@ -510,6 +518,7 @@
       "switchTab",
       "toggleIssueSessionView",
       "toggleIssueWorkbench",
+      "togglePasswordVisibility",
       "toggleProjectOpenOnly",
       "triggerSync",
       "updateRedmineReplyFileList"
@@ -750,6 +759,7 @@
       "confirmFileSelection",
       "connectVpn",
       "connectWifi",
+      "copyAuthBootstrapCommand",
       "copyCommand",
       "copyDeployCommand",
       "copyPaircodeInstallCommand",
@@ -1246,8 +1256,6 @@
       "auth-bootstrap-token-help",
       "auth-bootstrap-token-row",
       "auth-close",
-      "auth-display-name",
-      "auth-display-name-row",
       "auth-gate",
       "auth-message",
       "auth-password",

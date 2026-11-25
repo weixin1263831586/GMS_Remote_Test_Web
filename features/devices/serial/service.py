@@ -1,0 +1,766 @@
+"""Controller-local serial console discovery, capture, and persistence."""
+
+from __future__ import annotations
+
+import asyncio
+import codecs
+import contextlib
+import errno
+import hashlib
+import logging
+import os
+import re
+import shutil
+import threading
+import time
+import uuid
+from collections import deque
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+import pyudev
+
+from foundation.config import settings
+
+from .storage import (
+    SUPPORTED_NEWLINES,
+    BindingStore,
+    load_serial_module,
+    utc_now,
+    validate_newline,
+    validate_port_key,
+)
+
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_MAX_LOG_BYTES = 50 * 1024 * 1024
+DEFAULT_LOG_RETENTION_DAYS = 14
+DATE_RE = re.compile(r"^\d{8}$")
+
+
+# ---- merged from serial_console_identity.py ----
+
+_USB_BUS_NODE_RE = re.compile(r"\d+(?:\.\d+)*-\d+(?:\.\d+)*(?::\d+\.\d+)*")
+
+
+def usb_bus_node(sys_path: str) -> str:
+    """物理 USB 总线节点（如 ``1-14``），与 lsusb/sysfs、AOA usb_only 清单对账。"""
+    match = _USB_BUS_NODE_RE.search(sys_path or "")
+    if not match:
+        return ""
+    return match.group(0).split(":", 1)[0]
+
+
+def serial_port_identity(
+    *, by_id: str, devname: str, usb_path: str
+) -> dict[str, str | bool]:
+    """Stable USB-serial port identity: udev by-id symlink, then USB path.
+
+    Kernel tty names are allocation order, not hardware identity.  Persistent
+    bindings therefore prefer udev's by-id symlink, then a physical USB path.
+    A bare tty name remains usable for the current process but is explicitly
+    marked unstable so callers never silently restore a binding onto
+    different hardware.
+    """
+    if by_id:
+        return {
+            "port_key": Path(by_id).name,
+            "identity_source": "by-id",
+            "identity_stable": True,
+        }
+    if usb_path:
+        digest = hashlib.sha256(usb_path.encode("utf-8")).hexdigest()[:20]
+        return {
+            "port_key": f"usb-path-{digest}",
+            "identity_source": "usb-path",
+            "identity_stable": True,
+        }
+    return {
+        "port_key": Path(devname).name,
+        "identity_source": "kernel-node",
+        "identity_stable": False,
+    }
+
+
+_TTY_NODE_RE = re.compile(r"^(?P<prefix>.*?)(?P<number>\d+)$")
+
+
+def _tty_natural_key(name: str) -> tuple[str, int]:
+    """tty 名的自然排序键：ttyUSB2 应排在 ttyUSB10 前（字典序会颠倒）。"""
+
+    match = _TTY_NODE_RE.search(name)
+    if match:
+        return (match.group("prefix"), int(match.group("number")))
+    return (name, -1)
+
+
+def _port_display_key(item: dict[str, Any]) -> tuple[int, str, int, str]:
+    """端口卡片展示顺序：在位端口按 devname 自然序在前，离线绑定在后。"""
+
+    name = str(item.get("devname") or "") or str(item.get("port_key") or "")
+    prefix, number = _tty_natural_key(name)
+    return (
+        0 if item.get("devname") else 1,
+        prefix,
+        number,
+        str(item.get("port_key") or ""),
+    )
+
+
+# ---- merged from serial_console_errors.py ----
+
+def friendly_serial_error(exc: Exception) -> str:
+    number = getattr(exc, "errno", None)
+    text = str(exc)
+    lowered = text.lower()
+    if number in {errno.EACCES, errno.EPERM} or "permission denied" in lowered:
+        return "串口权限不足：服务用户需加入 dialout 组并重新登录"
+    if number == errno.EBUSY or "resource busy" in lowered:
+        return "串口被占用，请关闭 picocom/minicom 等程序"
+    if "no such file" in lowered or number == errno.ENOENT:
+        return "串口已拔出或设备节点不存在"
+    if number in {errno.EIO, getattr(errno, "EPROTO", 71)} or any(
+        marker in lowered for marker in ("input/output error", "protocol error")
+    ):
+        return "USB 串口通信异常：请重新插拔 FTDI 或更换 USB 端口，系统将自动重连"
+    return f"串口错误：{text}"
+
+
+# ---- merged from serial_console_subscribers.py ----
+
+def _enqueue_close(queue: asyncio.Queue[Any]) -> None:
+    while not queue.empty():
+        with contextlib.suppress(asyncio.QueueEmpty):
+            queue.get_nowait()
+    with contextlib.suppress(asyncio.QueueFull):
+        queue.put_nowait(None)
+
+
+def signal_subscriber_close(subscribers: Iterable[Any]) -> None:
+    """Wake subscribers with a priority close signal, tolerating stale loops."""
+
+    for subscriber in subscribers:
+        with contextlib.suppress(RuntimeError):
+            subscriber.loop.call_soon_threadsafe(_enqueue_close, subscriber.queue)
+
+
+def schedule_idle_stop(service: Any, port_key: str, *, delay: float = 5.0) -> None:
+    """Keep the physical port open briefly so a page refresh can reconnect."""
+
+    if service._desired(port_key):
+        return
+
+    def stop_if_still_idle() -> None:
+        if not service._desired(port_key):
+            service._stop_worker(port_key)
+
+    timer = threading.Timer(delay, stop_if_still_idle)
+    timer.daemon = True
+    timer.start()
+
+
+@dataclass
+class _Subscriber:
+    loop: asyncio.AbstractEventLoop
+    queue: asyncio.Queue[Any]
+
+
+@dataclass
+class _PortRuntime:
+    backlog: deque[str] = field(default_factory=lambda: deque(maxlen=4000))
+    decoder: Any = field(default_factory=lambda: codecs.getincrementaldecoder("utf-8")("replace"))
+    subscribers: dict[str, _Subscriber] = field(default_factory=dict)
+    stop_event: threading.Event = field(default_factory=threading.Event)
+    wake_event: threading.Event = field(default_factory=threading.Event)
+    thread: threading.Thread | None = None
+    handle: Any = None
+    io_lock: threading.Lock = field(default_factory=threading.Lock)
+    log_lock: threading.RLock = field(default_factory=threading.RLock)
+    online: bool = False
+    capture_active: bool = False
+    error: str = ""
+    last_output_at: str = ""
+    last_retention_check: float = 0.0
+
+
+class SerialConsoleService:
+    _friendly_serial_error = staticmethod(friendly_serial_error)
+
+    def __init__(
+        self,
+        data_root: str | Path,
+        *,
+        serial_factory=None,
+        udev_context_factory=None,
+        by_id_root: str | Path = "/dev/serial/by-id",
+        max_log_bytes: int = DEFAULT_MAX_LOG_BYTES,
+        retention_days: int = DEFAULT_LOG_RETENTION_DAYS,
+        retry_interval: float = 2.0,
+    ) -> None:
+        self.root = Path(data_root) / "devices_console"
+        self.logs_root = self.root / "logs"
+        self.store = BindingStore(self.root / "bindings.json")
+        self.serial_factory = serial_factory
+        self.udev_context_factory = udev_context_factory or pyudev.Context
+        self.by_id_root = Path(by_id_root)
+        self.max_log_bytes = max(1, int(max_log_bytes))
+        self.retention_days = max(1, int(retention_days))
+        self.retry_interval = max(0.01, float(retry_interval))
+        self._lock = threading.RLock()
+        self._runtimes: dict[str, _PortRuntime] = {}
+        self._port_cache: dict[str, dict[str, Any]] = {}
+        self._devname_to_key: dict[str, str] = {}
+        self._observer = None
+        self._started = False
+        self._enumeration_error = ""
+    def configure_data_root(self, data_root: str | Path) -> None:
+        with self._lock:
+            if self._started:
+                raise RuntimeError("串口服务运行中，无法切换数据目录")
+            self.root = Path(data_root) / "devices_console"
+            self.logs_root = self.root / "logs"
+            self.store = BindingStore(self.root / "bindings.json")
+            self._runtimes.clear()
+            self._port_cache.clear()
+            self._devname_to_key.clear()
+
+    def _runtime(self, port_key: str) -> _PortRuntime:
+        key = validate_port_key(port_key)
+        with self._lock:
+            return self._runtimes.setdefault(key, _PortRuntime())
+
+    def _by_id_paths(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        try:
+            entries = list(self.by_id_root.iterdir())
+        except OSError:
+            return result
+        for entry in entries:
+            try:
+                result[os.path.realpath(entry)] = str(entry)
+            except OSError:
+                continue
+        return result
+
+    @staticmethod
+    def _device_value(device, name: str, default: str = "") -> str:
+        properties = getattr(device, "properties", {}) or {}
+        value = properties.get(name, default)
+        return str(value or default)
+
+    @staticmethod
+    def _device_driver(device) -> str:
+        current = device
+        while current is not None:
+            driver = getattr(current, "driver", None)
+            if driver:
+                return str(driver)
+            current = getattr(current, "parent", None)
+        return ""
+
+    def _physical_ports(self) -> list[dict[str, Any]]:
+        by_target = self._by_id_paths()
+        ports: list[dict[str, Any]] = []
+        try:
+            devices = self.udev_context_factory().list_devices(subsystem="tty")
+        except Exception as exc:
+            logger.warning("Unable to enumerate serial ports: %s", exc)
+            self._enumeration_error = f"枚举串口失败：{friendly_serial_error(exc)}"
+            return ports
+        self._enumeration_error = ""
+        for device in devices:
+            devname = str(getattr(device, "device_node", "") or "")
+            if not (devname.startswith("/dev/ttyUSB") or devname.startswith("/dev/ttyACM")):
+                continue
+            by_id = by_target.get(os.path.realpath(devname), "")
+            usb_path = self._device_value(device, "ID_PATH", str(getattr(device, "sys_path", "") or ""))
+            identity = serial_port_identity(by_id=by_id, devname=devname, usb_path=usb_path)
+            port_key = validate_port_key(str(identity["port_key"]))
+            vid = self._device_value(device, "ID_VENDOR_ID").lower()
+            pid = self._device_value(device, "ID_MODEL_ID").lower()
+            # 描述符/数据库里的厂商、型号与芯片序列号：把设备串口卡片和
+            # lsusb、AOA usb_only 清单（如 FT232R 调试小板 A6022883）对上。
+            usb_serial = (
+                self._device_value(device, "ID_SERIAL_SHORT")
+                or self._device_value(device, "ID_SERIAL")
+            )
+            usb_vendor_name = (
+                self._device_value(device, "ID_VENDOR")
+                or self._device_value(device, "ID_VENDOR_FROM_DATABASE")
+            )
+            usb_model_name = (
+                self._device_value(device, "ID_MODEL")
+                or self._device_value(device, "ID_MODEL_FROM_DATABASE")
+            )
+            ports.append(
+                {
+                    "port_key": port_key,
+                    "devname": devname,
+                    "by_id": by_id,
+                    "vid": vid,
+                    "pid": pid,
+                    "vendor_product": f"{vid}:{pid}" if vid and pid else "",
+                    "driver": self._device_driver(device),
+                    "usb_path": usb_path,
+                    "usb_serial": usb_serial,
+                    "usb_vendor_name": usb_vendor_name,
+                    "usb_model_name": usb_model_name,
+                    "usb_bus_node": usb_bus_node(str(getattr(device, "sys_path", "") or "")),
+                    "identity_source": identity["identity_source"],
+                    "identity_stable": identity["identity_stable"],
+                    "online": True,
+                }
+            )
+        ports.sort(key=_port_display_key)
+        with self._lock:
+            self._port_cache = {item["port_key"]: dict(item) for item in ports}
+            self._devname_to_key.clear()
+            self._devname_to_key.update({item["devname"]: item["port_key"] for item in ports})
+            present = set(self._port_cache)
+            for key, runtime in self._runtimes.items():
+                runtime.online = key in present
+        return ports
+
+    def list_ports(self) -> list[dict[str, Any]]:
+        physical = {item["port_key"]: item for item in self._physical_ports()}
+        if self._enumeration_error:
+            raise RuntimeError(self._enumeration_error)
+        bindings = self.store.list()
+        result = []
+        for key in set(physical) | set(bindings):
+            port = dict(physical.get(key) or {
+                "port_key": key,
+                "devname": "",
+                "by_id": "",
+                "vid": "",
+                "pid": "",
+                "vendor_product": "",
+                "driver": "",
+                "usb_path": "",
+                "usb_serial": "",
+                "usb_vendor_name": "",
+                "usb_model_name": "",
+                "usb_bus_node": "",
+                "identity_source": "stored-binding",
+                "identity_stable": True,
+                "online": False,
+            })
+            binding = bindings.get(key)
+            runtime = self._runtime(key)
+            with self._lock:
+                port.update(
+                    {
+                        "binding": dict(binding) if binding else None,
+                        "capture_enabled": bool(binding and binding.get("capture_enabled")),
+                        "capture_active": runtime.capture_active,
+                        "console_clients": len(runtime.subscribers),
+                        "last_output_at": runtime.last_output_at,
+                        "error": runtime.error,
+                    }
+                )
+            result.append(port)
+        # 在位端口自然序在前、离线绑定在后；与 _physical_ports 的展示
+        # 顺序一致（此前一处按 devname 字典序、一处按 port_key 字典序，
+        # 两个口径在多口/离线卡下都不稳定）。
+        result.sort(key=_port_display_key)
+        return result
+
+    def update_binding(self, port_key: str, value: dict[str, Any]) -> dict[str, Any]:
+        key = validate_port_key(port_key)
+        previous = self.store.get(key)
+        binding = self.store.upsert(key, value)
+        needs_restart = previous and (
+            previous.get("baudrate") != binding["baudrate"]
+            or previous.get("capture_enabled") != binding["capture_enabled"]
+        )
+        if needs_restart:
+            self._stop_worker(key)
+        if binding["capture_enabled"] or self._subscriber_count(key):
+            self._ensure_worker(key)
+        return binding
+
+    def delete_binding(self, port_key: str) -> bool:
+        key = validate_port_key(port_key)
+        deleted = self.store.delete(key)
+        if not deleted:
+            return False
+        self._stop_worker(key)
+        with self._lock:
+            subscribers = list(self._runtime(key).subscribers.values())
+        signal_subscriber_close(subscribers)
+        return True
+
+    def set_capture(self, port_key: str, enabled: bool) -> dict[str, Any]:
+        key = validate_port_key(port_key)
+        binding = self.store.get(key)
+        if not binding:
+            raise KeyError("请先绑定串口")
+        binding["capture_enabled"] = bool(enabled)
+        updated = self.update_binding(key, binding)
+        if not enabled and not self._subscriber_count(key):
+            self._stop_worker(key)
+        return updated
+
+    def _subscriber_count(self, port_key: str) -> int:
+        runtime = self._runtime(port_key)
+        with self._lock:
+            return len(runtime.subscribers)
+
+    def _desired(self, port_key: str) -> bool:
+        binding = self.store.get(port_key)
+        return bool(binding and binding.get("capture_enabled")) or bool(
+            self._subscriber_count(port_key)
+        )
+
+    def _serial_constructor(self):
+        if self.serial_factory is not None:
+            return self.serial_factory
+        return load_serial_module().Serial
+
+    def _resolve_port(self, port_key: str) -> dict[str, Any] | None:
+        key = validate_port_key(port_key)
+        return next((item for item in self._physical_ports() if item["port_key"] == key), None)
+
+    def _ensure_worker(self, port_key: str) -> None:
+        key = validate_port_key(port_key)
+        if not self.store.get(key):
+            raise KeyError("请先绑定串口")
+        runtime = self._runtime(key)
+        with self._lock:
+            if runtime.thread and runtime.thread.is_alive():
+                runtime.wake_event.set()
+                return
+            runtime.stop_event = threading.Event()
+            runtime.wake_event = threading.Event()
+            runtime.thread = threading.Thread(
+                target=self._capture_loop,
+                args=(key, runtime),
+                name=f"SerialConsole-{key[:32]}",
+                daemon=True,
+            )
+            runtime.thread.start()
+
+    def _close_handle(self, runtime: _PortRuntime) -> None:
+        with self._lock:
+            handle = runtime.handle
+            runtime.handle = None
+            runtime.capture_active = False
+        if handle is not None:
+            with contextlib.suppress(Exception):
+                handle.close()
+
+    def _stop_worker(self, port_key: str) -> None:
+        runtime = self._runtime(port_key)
+        runtime.stop_event.set()
+        runtime.wake_event.set()
+        self._close_handle(runtime)
+        thread = runtime.thread
+        if thread and thread is not threading.current_thread():
+            thread.join(timeout=2)
+        with self._lock:
+            if runtime.thread is thread and (not thread or not thread.is_alive()):
+                runtime.thread = None
+
+    def _wait_retry(self, runtime: _PortRuntime, delay: float) -> None:
+        runtime.wake_event.wait(delay)
+        runtime.wake_event.clear()
+
+    def _capture_loop(self, port_key: str, runtime: _PortRuntime) -> None:
+        retry_delay = self.retry_interval
+        try:
+            while not runtime.stop_event.is_set() and self._desired(port_key):
+                binding = self.store.get(port_key)
+                port = self._resolve_port(port_key)
+                if not binding or not port:
+                    with self._lock:
+                        runtime.online = False
+                        runtime.error = "串口离线，等待重新插入"
+                    self._wait_retry(runtime, retry_delay)
+                    retry_delay = min(retry_delay * 2, 30.0)
+                    continue
+                handle = None
+                try:
+                    constructor = self._serial_constructor()
+                    handle = constructor(
+                        port=port["by_id"] or port["devname"],
+                        baudrate=binding["baudrate"],
+                        timeout=0.2,
+                        write_timeout=1,
+                    )
+                    with self._lock:
+                        runtime.handle = handle
+                        runtime.online = True
+                        runtime.capture_active = True
+                        runtime.error = ""
+                    retry_delay = self.retry_interval
+                    while not runtime.stop_event.is_set() and self._desired(port_key):
+                        if runtime.handle is not handle:
+                            break
+                        size = max(1, min(int(getattr(handle, "in_waiting", 0) or 1), 65536))
+                        data = handle.read(size)
+                        if not data:
+                            continue
+                        self._record_data(port_key, runtime, bytes(data))
+                except Exception as exc:
+                    intentional_close = (
+                        runtime.stop_event.is_set()
+                        or (handle is not None and runtime.handle is not handle)
+                    )
+                    if not intentional_close:
+                        with self._lock:
+                            runtime.error = friendly_serial_error(exc)
+                    self._close_handle(runtime)
+                    if runtime.stop_event.is_set() or not self._desired(port_key):
+                        break
+                    self._wait_retry(runtime, retry_delay)
+                    retry_delay = min(retry_delay * 2, 30.0)
+                finally:
+                    self._close_handle(runtime)
+        finally:
+            self._close_handle(runtime)
+            with self._lock:
+                if runtime.thread is threading.current_thread():
+                    runtime.thread = None
+
+    @staticmethod
+    def _offer(queue: asyncio.Queue[str], text: str) -> None:
+        if queue.full():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                queue.get_nowait()
+        with contextlib.suppress(asyncio.QueueFull):
+            queue.put_nowait(text)
+
+    def _record_data(self, port_key: str, runtime: _PortRuntime, data: bytes) -> None:
+        text = runtime.decoder.decode(data)
+        timestamp = utc_now()
+        with self._lock:
+            runtime.backlog.extend(text.splitlines(keepends=True) or [text])
+            runtime.last_output_at = timestamp
+            subscribers = list(runtime.subscribers.values())
+        for subscriber in subscribers:
+            with contextlib.suppress(RuntimeError):
+                subscriber.loop.call_soon_threadsafe(self._offer, subscriber.queue, text)
+        binding = self.store.get(port_key)
+        if binding and binding.get("capture_enabled"):
+            try:
+                self._append_log(port_key, runtime, data)
+            except OSError:
+                logger.warning("serial log write failed for %s", port_key,
+                               exc_info=True)
+
+    def _port_log_dir(self, port_key: str) -> Path:
+        return self.logs_root / validate_port_key(port_key)
+
+    def _append_log(self, port_key: str, runtime: _PortRuntime, data: bytes) -> None:
+        with runtime.log_lock:
+            directory = self._port_log_dir(port_key)
+            directory.mkdir(parents=True, exist_ok=True)
+            path = directory / f"{datetime.now().strftime('%Y%m%d')}.log"
+            with open(path, "ab") as stream:
+                stream.write(data)
+            now = time.monotonic()
+            if now - runtime.last_retention_check >= 60:
+                runtime.last_retention_check = now
+                try:
+                    self._cleanup_retention_unlocked(port_key)
+                except OSError:
+                    # retention 失败不影响本块数据（已落盘）与采集。
+                    logger.warning("serial log retention failed for %s",
+                                   port_key, exc_info=True)
+
+    def cleanup_retention(self, port_key: str) -> None:
+        runtime = self._runtime(port_key)
+        with runtime.log_lock:
+            self._cleanup_retention_unlocked(port_key)
+
+    def _cleanup_retention_unlocked(self, port_key: str) -> None:
+        directory = self._port_log_dir(port_key)
+        if not directory.exists():
+            return
+        cutoff = datetime.now().date() - timedelta(days=self.retention_days)
+        files = sorted(path for path in directory.glob("*.log") if DATE_RE.fullmatch(path.stem))
+        for path in list(files):
+            try:
+                if datetime.strptime(path.stem, "%Y%m%d").date() < cutoff:
+                    path.unlink()
+                    files.remove(path)
+            except (OSError, ValueError):
+                continue
+        total = 0
+        sizes: dict[Path, int] = {}
+        for path in files:
+            try:
+                sizes[path] = path.stat().st_size
+            except OSError:
+                # 文件被并发清空/外部删除：跳过统计，不中断清理。
+                continue
+        total = sum(sizes.values())
+        for path in files:
+            if total <= self.max_log_bytes:
+                break
+            size = sizes.get(path)
+            if size is None:
+                continue
+            if size >= total and size > self.max_log_bytes:
+                with open(path, "rb") as source:
+                    source.seek(-self.max_log_bytes, os.SEEK_END)
+                    tail = source.read()
+                temporary = path.with_suffix(".log.tmp")
+                temporary.write_bytes(tail)
+                os.replace(temporary, path)
+                total = len(tail)
+            else:
+                path.unlink()
+                total -= size
+
+    def list_log_dates(self, port_key: str) -> list[str]:
+        directory = self._port_log_dir(port_key)
+        if not directory.exists():
+            return []
+        return sorted(
+            (path.stem for path in directory.glob("*.log") if DATE_RE.fullmatch(path.stem)),
+            reverse=True,
+        )
+
+    def log_path(self, port_key: str, date: str | None = None) -> Path:
+        dates = self.list_log_dates(port_key)
+        selected = str(date or (dates[0] if dates else datetime.now().strftime("%Y%m%d")))
+        if not DATE_RE.fullmatch(selected):
+            raise ValueError("日志日期格式必须是 yyyymmdd")
+        return self._port_log_dir(port_key) / f"{selected}.log"
+
+    def read_log(self, port_key: str, *, date: str | None = None, tail: int = 500) -> dict[str, Any]:
+        limit = max(1, min(int(tail), 10_000))
+        path = self.log_path(port_key, date)
+        if not path.is_file():
+            return {"date": path.stem, "content": "", "lines": 0, "available_dates": self.list_log_dates(port_key)}
+        with open(path, "rb") as stream:
+            size = stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, size - 2 * 1024 * 1024))
+            content = stream.read().decode("utf-8", errors="replace")
+        lines = content.splitlines(keepends=True)[-limit:]
+        return {
+            "date": path.stem,
+            "content": "".join(lines),
+            "lines": len(lines),
+            "available_dates": self.list_log_dates(port_key),
+        }
+
+    def clear_logs(self, port_key: str) -> int:
+        runtime = self._runtime(port_key)
+        with runtime.log_lock:
+            directory = self._port_log_dir(port_key)
+            if not directory.exists():
+                return 0
+            count = sum(1 for path in directory.glob("*.log") if path.is_file())
+            shutil.rmtree(directory)
+            return count
+
+    async def subscribe(self, port_key: str) -> tuple[str, asyncio.Queue[Any], str]:
+        key = validate_port_key(port_key)
+        if not self.store.get(key):
+            raise KeyError("请先绑定串口")
+        runtime = self._runtime(key)
+        subscriber_id = uuid.uuid4().hex
+        queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=256)
+        with self._lock:
+            runtime.subscribers[subscriber_id] = _Subscriber(
+                loop=asyncio.get_running_loop(), queue=queue
+            )
+            backlog = "".join(runtime.backlog)
+        self._ensure_worker(key)
+        return subscriber_id, queue, backlog
+
+    def unsubscribe(self, port_key: str, subscriber_id: str) -> None:
+        key = validate_port_key(port_key)
+        runtime = self._runtime(key)
+        with self._lock:
+            runtime.subscribers.pop(subscriber_id, None)
+        schedule_idle_stop(self, key)
+
+    def write(self, port_key: str, data: str, *, append_newline: bool = False) -> int:
+        key = validate_port_key(port_key)
+        binding = self.store.get(key)
+        if not binding:
+            raise KeyError("请先绑定串口")
+        value = str(data)
+        if append_newline:
+            value += SUPPORTED_NEWLINES[validate_newline(binding.get("newline", "cr"))]
+        encoded = value.encode("utf-8")
+        if not encoded or len(encoded) > 4096:
+            raise ValueError("单次串口输入必须为 1 到 4096 字节")
+        runtime = self._runtime(key)
+        with self._lock:
+            handle = runtime.handle
+        if handle is None:
+            raise RuntimeError(runtime.error or "串口尚未连接")
+        try:
+            with runtime.io_lock:
+                return int(handle.write(encoded))
+        except Exception as exc:
+            raise RuntimeError(friendly_serial_error(exc)) from exc
+
+    def handle_udev_event(self, action: str, device) -> None:
+        devname = str(getattr(device, "device_node", "") or "")
+        if not (devname.startswith("/dev/ttyUSB") or devname.startswith("/dev/ttyACM")):
+            return
+        if action == "remove":
+            with self._lock:
+                key = self._devname_to_key.get(devname, Path(devname).name)
+                runtime = self._runtimes.get(key)
+                if runtime:
+                    runtime.online = False
+                    runtime.error = "串口已拔出，等待重新插入"
+                    runtime.wake_event.set()
+            if runtime:
+                self._close_handle(runtime)
+            return
+        if action == "add":
+            self._physical_ports()
+            for key, binding in self.store.list().items():
+                if binding.get("capture_enabled") or self._subscriber_count(key):
+                    self._ensure_worker(key)
+
+    def _udev_callback(self, device) -> None:
+        self.handle_udev_event(str(getattr(device, "action", "") or ""), device)
+
+    def start(self) -> None:
+        with self._lock:
+            if self._started:
+                return
+            self._started = True
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.logs_root.mkdir(parents=True, exist_ok=True)
+        self._physical_ports()
+        for key, binding in self.store.list().items():
+            if binding.get("capture_enabled"):
+                self._ensure_worker(key)
+        try:
+            context = self.udev_context_factory()
+            monitor = pyudev.Monitor.from_netlink(context)
+            monitor.filter_by(subsystem="tty")
+            self._observer = pyudev.MonitorObserver(
+                monitor, callback=self._udev_callback, name="SerialConsole-Udev"
+            )
+            self._observer.start()
+        except Exception:
+            logger.exception("Failed to start serial-console hotplug monitor")
+
+    def stop(self) -> None:
+        observer = self._observer
+        self._observer = None
+        if observer is not None:
+            with contextlib.suppress(Exception):
+                observer.stop()
+        with self._lock:
+            keys = list(self._runtimes)
+            self._started = False
+        for key in keys:
+            self._stop_worker(key)
+
+
+serial_console_service = SerialConsoleService(settings.data_root)

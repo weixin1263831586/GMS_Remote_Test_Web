@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from bootstrap import env_loader
 from foundation import config as config_module
 from foundation.config import config_manager
@@ -57,3 +59,39 @@ def test_env_loader_expands_project_root_relative_to_runtime_file(tmp_path, monk
         assert os.environ["GMS_TEST_PROBE_PATH"] == expected
     finally:
         os.environ.pop("GMS_TEST_PROBE_PATH", None)
+
+
+@pytest.mark.parametrize("invalid", ["{broken", "[]", '{"BAD=KEY":"x"}', '{"GMS_TEST_BAD":"\\u0000"}'])
+def test_env_loader_rejects_present_invalid_configuration_without_partial_exports(tmp_path, monkeypatch, invalid):
+    first = tmp_path / "first/configs/local/environment.json"
+    second = tmp_path / "second/configs/local/environment.json"
+    for path in (first, second):
+        path.parent.mkdir(parents=True)
+    first.write_text(invalid, encoding="utf-8")
+    second.write_text('{"GMS_TEST_FALLBACK":"unexpected"}', encoding="utf-8")
+    monkeypatch.setattr(env_loader, "_candidate_paths", lambda: [first, second])
+    monkeypatch.delenv("GMS_SKIP_RUNTIME_ENV", raising=False)
+    monkeypatch.delenv("GMS_TEST_FALLBACK", raising=False)
+    with pytest.raises(ValueError):
+        env_loader.load_runtime_env()
+    assert "GMS_TEST_FALLBACK" not in os.environ
+
+
+def test_env_loader_validates_all_values_before_export(tmp_path, monkeypatch):
+    path = tmp_path / "configs/local/environment.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"GMS_TEST_FIRST":"good","BAD=KEY":"bad"}', encoding="utf-8")
+    monkeypatch.setattr(env_loader, "_candidate_paths", lambda: [path])
+    monkeypatch.delenv("GMS_SKIP_RUNTIME_ENV", raising=False)
+    monkeypatch.delenv("GMS_TEST_FIRST", raising=False)
+    with pytest.raises(ValueError):
+        env_loader.load_runtime_env()
+    assert "GMS_TEST_FIRST" not in os.environ
+
+
+def test_config_placeholder_uses_manager_root_and_preserves_boolean(tmp_path, monkeypatch):
+    manager = config_module.ConfigManager(project_root=tmp_path)
+    monkeypatch.setenv("GMS_TEST_BOOLEAN", "true")
+    assert manager._replace_placeholders("${PROJECT_ROOT}/x") == str(tmp_path / "x")
+    assert manager._replace_placeholders("${GMS_TEST_BOOLEAN}") is True
+    assert manager._replace_placeholders("${GMS_TEST_BOOLEAN:false}") is True

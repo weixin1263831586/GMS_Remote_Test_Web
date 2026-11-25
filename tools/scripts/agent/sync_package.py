@@ -77,14 +77,7 @@ def read_version(path: Path, pattern: str) -> str:
 
 
 def sync_one(source: Path, target: Path) -> bool:
-    """Copy when changed; returns True when a copy happened.
-
-    Historically, an early return on identical content used to leave a
-    WRONG executable bit unfixed forever (e.g. the manifests exec
-    ./scripts/mcp_launcher.py directly, but a chmod had been lost on the
-    generated side). Even when content matches, mirror the executable bit
-    the source demands.
-    """
+    """Sync file content and executable mode; return whether either changed."""
     if not source.is_file():
         fail(f"source missing: {source}")
     if target.is_file() and target.read_bytes() == source.read_bytes():
@@ -182,24 +175,7 @@ def _head_package_version(root: Path, package_yaml: Path) -> str:
 def same_version_tree_guard(
     root: Path, source_dir: Path, version: str, label: str, package_yaml: Path
 ) -> None:
-    """Whole-tree same-version content guard.
-
-    ``same_version_guard`` above only compares two anchor files; a same-version
-    change to ANY other payload file (package_manager.py, mcp_launcher.py,
-    SKILL.md, manifests, docs …) slipped through, so two machines could run
-    different content while both reported the same version and installed
-    hosts skipped re-download ("Already up to date"). This walks the whole
-    payload tree, hashes every file plus its archive-relative path, and
-    compares against HEAD. Only text files enter the anchor comparison, so
-    we hash bytes here (rb) — binary-identical to the release builder's
-    view of the tree.
-
-    升版本放行以 HEAD 的 canonical package version（package.yaml）为准：
-    正常发布必然 bump 版本并同步修改 manifests/SKILL 等 payload 文件，
-    此时树内容相对 HEAD 必然漂移，属于预期；只有「HEAD 版本 == 当前
-    版本」时的内容变化才禁止（回归：旧的 no-anchor 分支只比较树哈希，
-    未核对 HEAD 版本，导致任何升版本后的首次 sync 都被误拦）。
-    """
+    """Reject payload content changes unless the canonical package version changes."""
     digests: list[str] = []
     for path in sorted(source_dir.rglob("*")):
         if not path.is_file() or "__pycache__" in path.parts:
@@ -230,7 +206,7 @@ def same_version_tree_guard(
     if tree_hash == previous_hash:
         return
 
-    # HEAD 是旧版本 → 内容漂移是本次发布的预期结果。
+    # A new canonical version permits payload changes.
     if _head_package_version(root, package_yaml) != version:
         return
     fail(
@@ -309,18 +285,12 @@ def main() -> int:
                   r'^GMS_RT_VERSION="([^"]+)"$', "gms-remote-test.sh")
         same_version_guard(root, runtime / "mcp_server.py", mcp_version,
                   r'^SERVER_VERSION = "([^"]+)"$', "mcp_server.py")
-        # The anchor checks above only cover two files; the tree guards
-        # below close the same-version drift hole for the WHOLE
-        # distributable payload 。runtime、skill、
-        # manifests 与 templates（README/PLUGIN_AGENTS，随包发布）都在
-        # 守护范围内；docs/tests 不参与发布身份，仅 runtime 侧已覆盖。
-        # 升版本放行统一按 HEAD 的 package.yaml canonical 版本判定。
+        # Enforce version consistency across the distributable payload.
         same_version_tree_guard(root, runtime, cli_version, "runtime/", package_yaml)
         same_version_tree_guard(root, skill, cli_version, "skill/", package_yaml)
         same_version_tree_guard(root, manifests, cli_version, "manifests/", package_yaml)
         same_version_tree_guard(root, agent_dir / "templates", cli_version, "templates/", package_yaml)
-        # AGENT_PLAYBOOK.md 是发布载荷（同步进 plugin docs/），同版本内容
-        # 漂移同样造成 "version 未变但内容变了" 的安装漂移。
+        # The published playbook is part of the payload contract.
         playbook = docs / "AGENT_PLAYBOOK.md"
         if in_git and playbook.is_file():
             same_version_tree_guard(root, docs, cli_version, "docs/", package_yaml)
@@ -364,9 +334,7 @@ def main() -> int:
         agent_dir / "templates" / "PLUGIN_AGENTS.md",
         plugin_dir / rel_plugin("AGENTS.md"),
     )
-    # The agent playbook is part of the published payload —
-    # without this line the playbook only ever exists in the source tree
-    # and agents downloading from the registry never see it.
+    # Include the playbook in the published payload.
     sync_one(docs / "AGENT_PLAYBOOK.md", plugin_dir / rel_plugin("docs", "AGENT_PLAYBOOK.md"))
     # GENERATED.md
     generated_md = plugin_dir / "GENERATED.md"

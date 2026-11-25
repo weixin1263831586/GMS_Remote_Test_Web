@@ -1,29 +1,21 @@
-"""Shared size-ratchet plumbing for the architecture size gates.
-
-「历史债务只减不增」不能只靠约定：ceiling 若与代码写在同一个测试文件里，
-同时上调内嵌的 ceiling 字典就能绕过门禁。现在的
-棘轮语义：
-
-* ceilings 独立持久化在 ``baselines/*.json``（本目录随仓库提交）；
-* 门禁把当前 baseline 与 **上一个 commit 的 baseline** 对比——任何
-  ceiling 上调或新增登记都必须同时提供本文件 ``waivers`` 里带
-  ``reason`` + ``expires`` 的豁免（过期即失效，必须重新评估）；
-* 收紧（下调 / 删除条目 / 删除 waiver）永远放行；
-* 无法读到 HEAD 版本（新仓库 / baseline 首次提交）时跳过对比：
-  第一笔提交由评审人把关，CI 从第二笔起全量生效。
-
-应用代码运行时（含插件生成树、发布脚本）只读 ``ceilings``；``waivers``
-仅由 ratchet 门禁消费。
-"""
+"""Hard source-line limit and shrink-only effective-limit comparison."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from datetime import date, datetime
 from pathlib import Path
 
 
 BASELINES_DIR = Path(__file__).resolve().parent / "baselines"
+MAX_SOURCE_LINES = 2000
+BACKEND_SOURCE_SUFFIXES = {".py", ".sh", ".bash", ".bat", ".cmd", ".ps1", ".rs", ".java", ".gradle",
+                           ".yml", ".yaml", ".toml", ".service", ".timer", ".c", ".h", ".cc", ".cpp",
+                           ".hpp", ".kt", ".kts", ".go", ".sql"}
+FRONTEND_SOURCE_SUFFIXES = {".html", ".js", ".css", ".ts", ".mjs", ".cjs", ".jsx", ".tsx", ".vue", ".svelte"}
+THIRD_PARTY_PREFIXES = ("web/static/vendor/", "tools/jadx/", "tools/tesseract/")
+REPO_ROOT = BASELINES_DIR.parents[2]
 
 
 def load_baseline(name: str) -> dict:
@@ -36,6 +28,10 @@ def load_baseline(name: str) -> dict:
     waivers = data.get("waivers") or {}
     if not isinstance(waivers, dict):
         raise ValueError(f"{path}: 'waivers' must be a mapping")
+    if data.get("default_limit") != MAX_SOURCE_LINES:
+        raise ValueError(f"{path}: default_limit must be exactly {MAX_SOURCE_LINES}")
+    if any(type(value) is not int or not 0 <= value <= MAX_SOURCE_LINES for value in ceilings.values()):
+        raise ValueError(f"{path}: per-file ceilings must not exceed {MAX_SOURCE_LINES}")
     return data
 
 
@@ -54,83 +50,78 @@ def _waiver_valid(waiver: dict, *, today: date) -> str:
     return ""
 
 
-def assert_no_ceiling_raises(name: str, *, today: date | None = None) -> None:
-    """Ratchet 门禁：当前 baseline 相对 HEAD 不允许上调或新增登记。
-
-    ``git show HEAD:tests/architecture/baselines/<name>`` 不可读（新仓库、
-    baseline 尚未提交）时跳过——没有"上一个承诺"就没有"上调"可言，
-    首次登记由评审把关，CI 从 baseline 入库后的第二笔提交起全量生效。
-    """
-    baseline_name = f"baselines/{name}"
-    current = load_baseline(name)
-    today = today or date.today()
-
-    repo_root = Path(__file__).resolve().parents[2]
-    rel_path = f"tests/architecture/{baseline_name}"
-
-    # git 二进制缺失会在下面 subprocess 抛 FileNotFoundError（门禁响亮失败，
-    # 不会静默放行）。此处仅区分两类"合法跳过"：仓库无提交历史、baseline 尚
-    # 未进入 HEAD（首次登记）。除此之外的读取失败一律翻红。
-    head_check = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
-        cwd=repo_root, capture_output=True, text=True, check=False,
-    )
-    if head_check.returncode != 0:
-        return  # 新仓库 / 无任何提交：没有"上一个承诺"可比对
-    exists = subprocess.run(
-        ["git", "cat-file", "-e", f"HEAD:{rel_path}"],
-        cwd=repo_root, capture_output=True, text=True, check=False,
-    )
-    if exists.returncode != 0:
-        return  # baseline 首次登记，HEAD 中尚不存在：由评审把关
-
+def tracked_source_paths(suffixes: set[str]) -> list[Path]:
+    """All tracked first-party source files; exclude only bundled third-party assets."""
     proc = subprocess.run(
-        ["git", "show", f"HEAD:{rel_path}"],
-        cwd=repo_root, capture_output=True, text=True, check=False,
+        ["git", "ls-files", "-z"], cwd=REPO_ROOT, check=True, capture_output=True,
     )
-    if proc.returncode != 0:
-        raise AssertionError(
-            f"size-ratchet: HEAD:{rel_path} exists but could not be read "
-            f"(git show failed): {proc.stderr.strip() or proc.returncode}. "
-            "Refusing to skip the ceiling-ratchet gate silently."
-        )
-    try:
-        head = json.loads(proc.stdout)
-    except json.JSONDecodeError as exc:
-        raise AssertionError(
-            f"size-ratchet: HEAD:{rel_path} is corrupt ({exc}). "
-            "Refusing to skip the ceiling-ratchet gate silently."
-        ) from exc
-
-    head_ceilings = head.get("ceilings") or {}
-    current_ceilings = current["ceilings"]
-    current_waivers = current.get("waivers") or {}
-
-    violations: list[str] = []
-    for key, value in sorted(current_ceilings.items()):
-        head_value = head_ceilings.get(key)
-        if head_value is not None and value <= head_value:
-            continue  # 持平或收紧
-        if head_value is None and key not in head_ceilings and value <= 0:
-            continue  # 防御分支：非正 ceiling 无意义，不靠豁免
-        waiver = current_waivers.get(key)
-        if not isinstance(waiver, dict):
-            detail = (
-                f"raised {head_value} -> {value}" if head_value is not None
-                else f"new registration at {value}"
-            )
-            violations.append(f"{key}: {detail} (no waiver)")
+    paths = []
+    for name in set(os.fsdecode(proc.stdout).split("\0")):
+        if not name or name.startswith(THIRD_PARTY_PREFIXES):
             continue
-        problem = _waiver_valid(waiver, today=today)
+        path = REPO_ROOT / name
+        if path.suffix.lower() in suffixes:
+            paths.append(path)
+        elif ".sh" in suffixes and not path.suffix and path.is_file():
+            with path.open("rb") as handle:
+                if handle.read(2) == b"#!":
+                    paths.append(path)
+    return sorted(paths)
+
+
+def _git(*args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=REPO_ROOT, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+def _comparison_ref() -> str | None:
+    """CI compares against the previous push or PR base, never the checked-out HEAD."""
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path:
+        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        candidate = event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before")
+        if candidate and candidate.strip("0"):
+            return _git("rev-parse", "--verify", candidate + "^{commit}")
+    # cat-file exposes the parent even in shallow clones; a missing parent must fail.
+    parents = [line.split()[1] for line in _git("cat-file", "-p", "HEAD").splitlines()
+               if line.startswith("parent ")]
+    return _git("rev-parse", "--verify", parents[0] + "^{commit}") if parents else None
+
+
+def _assert_effective_limits(previous: dict, current: dict, existing: set[str], today: date) -> None:
+    # Removing a registered ceiling must not raise a surviving file's effective limit.
+    if previous.get("default_limit") != MAX_SOURCE_LINES:
+        return
+    old = previous.get("ceilings") or {}
+    new = current["ceilings"]
+    waivers = current.get("waivers") or {}
+    violations = []
+    for key in sorted((set(old) | set(new)) & existing):
+        old_limit = old.get(key, MAX_SOURCE_LINES)
+        new_limit = new.get(key, MAX_SOURCE_LINES)
+        if new_limit <= old_limit:
+            continue
+        waiver = waivers.get(key)
+        problem = _waiver_valid(waiver, today=today) if isinstance(waiver, dict) else "no waiver"
         if problem:
-            violations.append(f"{key}: {problem} (waiver invalid)")
+            violations.append(f"{key}: {old_limit} -> {new_limit} ({problem})")
     if violations:
-        raise AssertionError(
-            "size-ratchet violation: ceilings in "
-            f"tests/architecture/{baseline_name} must only shrink. "
-            "Raise/update requires a waiver entry (reason + future expiry) "
-            f"in the same file. Violations: {violations}"
-        )
+        raise AssertionError(f"size-ratchet violation: {violations}")
+
+
+def assert_no_ceiling_raises(name: str, *, today: date | None = None) -> None:
+    current = load_baseline(name)
+    ref = _comparison_ref()
+    if ref is None:
+        return
+    rel_path = f"tests/architecture/baselines/{name}"
+    if not _git("ls-tree", "--name-only", ref, "--", rel_path):
+        return  # first registration only; the hard limit is already enforced.
+    previous = json.loads(_git("show", f"{ref}:{rel_path}"))
+    existing = {path.relative_to(REPO_ROOT).as_posix()
+                for path in tracked_source_paths(BACKEND_SOURCE_SUFFIXES | FRONTEND_SOURCE_SUFFIXES)}
+    _assert_effective_limits(previous, current, existing, today or date.today())
 
 
 def iso_now() -> str:

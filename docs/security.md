@@ -110,14 +110,14 @@ worker/设备也不可达。烧录审批消费时同样套用设备 ACL（`agent
 （先 drain 再 `recv_exit_status`），修复了「大输出下 channel 窗口互锁」的
 历史死锁，并带超时、输出截断上限与协作式取消。
 
-**唯一登记的例外**是 `features/system/ssh.py` 的连接健康检查：它以 raw
+**唯一登记的例外**是 `features/system/host/ssh.py` 的连接健康检查：它以 raw
 channel 轮询 `exit_status_ready` 按 deadline 判定连接存活，因为 paramiko 的
 `recv_exit_status()` 是不带超时的 `status_event.wait()`，channel `settimeout`
 约束不到它（见该模块 155–162 行注释与
 [ADR-0004](architecture/adr/0004-ssh-execution-boundary.md)）。
 
 该边界由 `tests/architecture/test_no_regression_rules.py` 静态守护：扫描
-`features/`、`foundation/`、`worker_agent/`、`workflows/`、`bootstrap/` 中的
+`features/`、`foundation/`、`worker/`、`bootstrap/` 中的
 `.exec_command(`，白名单外直接失败。
 
 SSH 连接统一使用严格 Host Key 校验（`foundation/ssh_security.py` 的
@@ -161,7 +161,7 @@ SSH 连接统一使用严格 Host Key 校验（`foundation/ssh_security.py` 的
 不写进环境变量或仓库。
 
 - `GMS_SECRET_KEY_FILE`：指向 Fernet 主密钥文件（默认
-  `data_root/secrets/master.key`）。`GMS_SECRET_KEY` 可作为内联替代注入。密钥文件
+  `configs/secrets/master.key`，兼容已有 `data_root/secrets/master.key`）。`GMS_SECRET_KEY` 可作为内联替代注入。密钥文件
   权限必须为 `0600`（含 group/other 位即抛 `RuntimeError`）；文件缺失时自举一个
   部署本地密钥（生产模式明确告警：旧密钥加密的存量密文将无法解密），文件存在但
   损坏/权限错误则硬失败（`foundation/secrets.py`）。`encrypt_secret`/`decrypt_secret`
@@ -170,7 +170,7 @@ SSH 连接统一使用严格 Host Key 校验（`foundation/ssh_security.py` 的
 - `GMS_SKILL_SIGNING_KEY_FILE`：指向 Ed25519 签名校验密钥，生产模式下必须配置
   （Agent 包分发走向签名信任链，不允许静默降级为仅 SHA 校验）。
 - **Release 包不携带秘密**：`make agent-check` 内含
-  `scripts/check_source_secrets.py .` 扫描，`scripts/sanitize_release_config.py` /
+  `scripts/security/check_source_secrets.py .` 扫描，`scripts/security/sanitize_release_config.py` /
   `sanitize_tracked_config.py` 负责发布前的配置脱敏。
 
 ### 生产启动自检（fail-closed）
@@ -194,7 +194,7 @@ Agent 运行时通过 `GMS_CURL_CA_CERT` 指定信任的 CA bundle，用以校�
 ## 数据面加固
 
 - Worker SQLite 连接启用 `journal_mode=WAL`、`busy_timeout=30000`、
-  `foreign_keys=ON`（`worker_agent/runtime.py`）；`foundation/database.py`
+  `foreign_keys=ON`（`worker/runtime.py`）；`foundation/database.py`
   的 `connect_sqlite` 同样启用 WAL 与 busy_timeout。
 - 构建命令注入防护、压缩包安全与固件密码静态加密的回归集中在
   `tests/architecture/test_security_hardening.py`。

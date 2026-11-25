@@ -4,7 +4,7 @@ import json
 
 from fastapi.responses import PlainTextResponse
 
-from features.system.vnc import NOVNC_WEB_PORT
+from features.system.host.vnc import NOVNC_WEB_PORT
 from foundation.config import DEFAULT_SERVER_URL
 
 

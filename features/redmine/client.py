@@ -18,17 +18,28 @@ from typing import Any
 import aiohttp
 from redminelib import Redmine
 
-from features.redmine.attachments import RedmineAttachmentMixin
-from features.redmine.models import (
-    _ASSIGNEE_COUNT_CACHE,
-    _ASSIGNEE_TREND_CACHE,
-    _ASSIGNEE_TREND_HISTORICAL_CACHE,
-)
+from features.redmine.evidence.client_attachments import RedmineAttachmentMixin
 from features.redmine.users import RESOLVED_STATUS_NAMES, _parse_dt, _sorted_slice, _time_key
 from foundation.cache import TTLCache
 
 
 logger = logging.getLogger(__name__)
+
+_CACHE_TTL_SECONDS = 600
+_HISTORICAL_TTL_SECONDS = 7 * 24 * 3600
+_ASSIGNEE_CACHE_MAX_ENTRIES = 512
+
+# Credential identity isolates servers/accounts; trends also key their exact
+# cutoff and limit so independently expiring segments always share a boundary.
+_ASSIGNEE_COUNT_CACHE = TTLCache[tuple, dict](
+    _CACHE_TTL_SECONDS, max_entries=_ASSIGNEE_CACHE_MAX_ENTRIES,
+)
+_ASSIGNEE_TREND_CACHE = TTLCache[tuple, dict](
+    _CACHE_TTL_SECONDS, max_entries=_ASSIGNEE_CACHE_MAX_ENTRIES,
+)
+_ASSIGNEE_TREND_HISTORICAL_CACHE = TTLCache[tuple, dict](
+    _HISTORICAL_TTL_SECONDS, max_entries=_ASSIGNEE_CACHE_MAX_ENTRIES,
+)
 
 
 def clear_historical_trend_cache() -> None:

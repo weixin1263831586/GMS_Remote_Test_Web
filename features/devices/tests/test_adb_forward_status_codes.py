@@ -16,7 +16,7 @@ from unittest.mock import patch
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.devices import adb_forward_api
+from features.devices.adb import api as adb_forward_api
 
 
 class _JSONBody:

@@ -61,6 +61,9 @@ async def scp_put_with_deadline(ssh, local_path: str, remote_path: str) -> None:
         raise ApiError.dependency_timeout(
             f'SCP transfer timed out after {int(timeout_seconds)}s: {local_path}'
         ) from exc
+    except asyncio.CancelledError:
+        _abort_transport(ssh)
+        raise
     except Exception as exc:
         # 传输失败属远端基础设施故障（502）：与下方 upload_error 的映射
         # 一致；异常细节只进服务端日志，客户端消息保留失败上下文。
@@ -175,6 +178,10 @@ async def upload_firmware_to_test_host(
             'log': 'Firmware file upload complete',
             'log_type': 'success',
         })
+    except asyncio.CancelledError:
+        if not complete.is_set():
+            _abort_transport(ssh)
+        raise
     finally:
         with runtime.global_state.firmware_upload_progress_lock:
             current = runtime.global_state.firmware_upload_progress.get(client_id) or {}

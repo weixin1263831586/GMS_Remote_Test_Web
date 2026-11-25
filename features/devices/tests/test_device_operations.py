@@ -9,8 +9,9 @@ from unittest.mock import patch
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.devices import device_lock_manager, management_api, operations_api
+from features.devices import device_lock_manager, management_api
 from features.devices.models import DeviceActionRequest, WifiConnectRequest
+from features.devices.operations import api as operations_api
 from features.devices.utils import DeviceUtils
 from foundation.command_result import CommandResult
 

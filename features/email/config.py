@@ -77,7 +77,7 @@ def email_password(email_cfg: dict[str, Any]) -> str:
     if legacy:
         # 迁移告警：新写入已走平台密钥加密（email/api.py），明文分支只为
         # 旧部署兼容。设定迁移截止点：所有部署改写为 encrypted_password
-        # 后移除本分支（migration mapping: scripts/sanitize_tracked_config.py）。
+        # 后移除本分支（migration mapping: scripts/security/sanitize_tracked_config.py）。
         logger.warning(
             "SMTP 密码仍以明文配置读取（遗留部署兼容）；请重新保存邮箱配置"
             "以迁移为加密存储，明文兼容分支将在后续版本移除"

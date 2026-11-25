@@ -17,7 +17,7 @@ from features.redmine import (
 from foundation.error_model import ApiError
 from foundation.redaction import redact_sensitive_data
 
-from .execution_result import ToolResult
+from .response import ToolResult
 from .route_invocation import guarded_tool_call
 from .session_log import (
     _append_message,

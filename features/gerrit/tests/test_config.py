@@ -11,6 +11,8 @@ from unittest.mock import patch
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import serialization
 
+from foundation.runtime_config_store import RuntimeConfigStore
+
 
 class GerritConfigTests(unittest.TestCase):
     def setUp(self):
@@ -185,21 +187,18 @@ class GerritConfigTests(unittest.TestCase):
     @patch.dict('os.environ')
     def test_feature_gerrit_config_save_preserves_other_runtime_sections(self):
         os.environ.pop('GMS_DATA_ROOT', None)
-        from features.gerrit.settings import GerritConfig
+        from features.gerrit.config import GerritConfig
 
         with TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "foundation").mkdir()
             configs = root / "configs"
-            configs.mkdir()
-            (configs / "config.json").write_text(
+            (configs / "local").mkdir(parents=True)
+            (configs / "local/config.json").write_text(
                 json.dumps({"gerrit_dashboard": {"base_url": "https://old.example.com"}}),
                 encoding="utf-8",
             )
-            (configs / "config_runtime.json").write_text(
-                json.dumps({"redmine_auth": {"username": "u"}, "sidebar_order": ["test"]}),
-                encoding="utf-8",
-            )
+            RuntimeConfigStore(root).write({"redmine_auth": {"username": "u"}, "sidebar_order": ["test"]})
 
             manager = GerritConfig(project_root=root)
 
@@ -208,7 +207,7 @@ class GerritConfigTests(unittest.TestCase):
                 "department_profiles": [{"id": "sys", "name": "系统部", "owners": ["dev@example.com"]}],
             }))
 
-            runtime = json.loads((configs / "config_runtime.json").read_text(encoding="utf-8"))
+            runtime = RuntimeConfigStore(root).read()
             self.assertEqual(runtime["redmine_auth"]["username"], "u")
             self.assertEqual(runtime["sidebar_order"], ["test"])
             self.assertEqual(runtime["gerrit_dashboard"]["base_url"], "https://10.10.10.29")
@@ -216,7 +215,7 @@ class GerritConfigTests(unittest.TestCase):
     def test_gerrit_request_config_is_isolated_per_platform_owner(self):
         import features.gerrit.api as gerrit_api
         from features.auth import CurrentUser
-        from features.gerrit.settings import GerritConfig
+        from features.gerrit.config import GerritConfig
 
         def request_for(user_id):
             return SimpleNamespace(

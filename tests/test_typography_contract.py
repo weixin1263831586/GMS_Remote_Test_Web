@@ -15,9 +15,8 @@ ENTRYPOINTS = (
     "features/devices/ui/page.html",
     "features/gerrit/ui/page.html",
     "features/redmine/ui/page.html",
-    "features/system/mainline_issues/ui/page.html",
-    "features/system/update_monitor/ui/page.html",
-    "features/system/update_radar/ui/page.html",
+    "features/gms/ui/page.html",
+    "features/gms/radar/ui/page.html",
 )
 
 
@@ -106,7 +105,7 @@ class TypographyContractTests(unittest.TestCase):
                 )
 
     def test_standalone_review_pages_load_global_typography(self):
-        for path in ("features/devices/deployment_api.py", "features/devices/debug_api.py"):
+        for path in ("features/devices/deployment/api.py", "features/devices/debug/api.py"):
             with self.subTest(path=path):
                 source = (ROOT / path).read_text(encoding="utf-8")
                 self.assertIn('data-ui-type-root="review"', source)
@@ -240,7 +239,7 @@ class TypographyContractTests(unittest.TestCase):
             "web/static/js/pages/test-reports.js",
             "web/static/js/shell/shell-user-management.js",
             "web/static/js/shell/shell-device-override.js",
-            "web/static/js/pages/test-suite-browser-results.js",
+            "web/static/js/pages/test-suite-browser-reports.js",
             "web/static/js/pages/api-docs.js",
             "features/redmine/ui/knowledge.js",
             "features/system/gms_assistant_proxy.py",

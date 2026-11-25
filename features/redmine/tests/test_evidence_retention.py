@@ -18,8 +18,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from features.redmine import evidence_store
-from features.redmine.evidence_store import EvidenceStore
+from features.redmine.evidence import store as evidence_store
+from features.redmine.evidence.store import EvidenceStore
 
 
 class EvidenceRetentionTests(unittest.TestCase):

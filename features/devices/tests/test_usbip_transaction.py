@@ -11,7 +11,9 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.devices import usbip, usbip_flash, usbip_transaction
+from features.devices.usbip import flash as usbip_flash
+from features.devices.usbip import manager as usbip
+from features.devices.usbip import transaction as usbip_transaction
 from foundation.command_result import CommandResult
 
 
@@ -98,7 +100,7 @@ class AttachStabilizationTests(unittest.TestCase):
 
         manager = usbip.USBIPManager()
         manager.ssh_manager = FakeSshManager()
-        with patch("features.devices.usbip.time.sleep", return_value=None):
+        with patch("features.devices.usbip.manager.time.sleep", return_value=None):
             attached, _devices = manager._attach_devices(
                 object(), "172.16.14.66", ["1-1"]
             )
@@ -143,7 +145,7 @@ class AttachStabilizationTests(unittest.TestCase):
 
         manager = usbip.USBIPManager()
         manager.ssh_manager = FakeSshManager()
-        with patch("features.devices.usbip.time.sleep", return_value=None):
+        with patch("features.devices.usbip.manager.time.sleep", return_value=None):
             attached, devices = manager._attach_devices(
                 object(), "172.16.14.66", ["1-1"]
             )
@@ -274,7 +276,7 @@ class StartUsbipRollbackTests(unittest.TestCase):
         ) as create_windows_ssh, patch.object(
             usbip, "probe_tcp_quality", return_value={"reachable": True}
         ), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ), patch.object(
             manager, "_is_windows_host", return_value=True
         ), patch.object(
@@ -326,7 +328,7 @@ class StartUsbipRollbackTests(unittest.TestCase):
             "_create_windows_ssh",
             side_effect=lambda *args, **kwargs: win_ssh,
         ), patch.object(usbip, "probe_tcp_quality", return_value={"reachable": True}), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ), patch.object(
             manager, "_is_windows_host", return_value=True
         ), patch.object(
@@ -372,7 +374,7 @@ class StartUsbipRollbackTests(unittest.TestCase):
             "_create_windows_ssh",
             side_effect=lambda *args, **kwargs: win_ssh,
         ), patch.object(usbip, "probe_tcp_quality", return_value={"reachable": True}), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ), patch.object(
             manager, "_is_windows_host", return_value=True
         ), patch.object(
@@ -455,7 +457,7 @@ class StartUsbipDetachScopingTests(unittest.TestCase):
         ), patch.object(
             usbip, "probe_tcp_quality", return_value={"reachable": True}
         ), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ), patch.object(
             manager, "_is_windows_host", return_value=True
         ), patch.object(

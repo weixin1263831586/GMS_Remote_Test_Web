@@ -1,14 +1,10 @@
-"""Private kkagent configs from the unified model catalog (ADR 0034).
-
-Host configuration contributes identity and policy settings. Model tables come
-from ai_models, with a temporary, explicitly logged host-model fallback.
-"""
+"""Canonical model catalog and private kkagent runtime configuration (ADR 0034)."""
 
 from __future__ import annotations
 
-import logging
 import os
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -21,11 +17,114 @@ try:
 except ImportError:  # Python 3.10
     import tomli as tomllib
 
-from features.kkagent.registry import ModelSpec, default_model_alias, resolve_model_spec
+from features.kkagent.health import is_local_provider, provider_api_key
+from features.kkagent.http_client import api_format_for
 from foundation.config import config_manager as _config_manager
 
 
-logger = logging.getLogger(__name__)
+@dataclass(frozen=True)
+class ModelSpec:
+    """一个可用模型（provider 粒度；alias = provider.model）。"""
+
+    provider: str
+    alias: str
+    display_name: str
+    base_url: str
+    model: str
+    api_format: str
+    api_key: str = field(default="", repr=False)
+    local: bool = False
+    enabled: bool = True
+    max_tokens: int | None = None
+    capabilities: list[str] = field(default_factory=list)
+    max_context_size: int | None = None
+    default_effort: str | None = None
+
+
+def _as_int(value: Any) -> int | None:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _spec_from_provider(provider_name: str, provider: dict[str, Any]) -> ModelSpec | None:
+    model = str(provider.get("model") or "").strip()
+    if not model:
+        return None
+    return ModelSpec(
+        provider=provider_name,
+        alias=model,
+        display_name=str(provider.get("display_name") or provider.get("name") or model),
+        base_url=str(provider.get("base_url") or ""),
+        model=model,
+        api_format=api_format_for(provider_name, provider),
+        api_key=provider_api_key(provider_name, provider),
+        local=is_local_provider(provider_name, provider),
+        enabled=bool(provider.get("enabled", False)),
+        max_tokens=_as_int(provider.get("max_tokens")),
+        capabilities=[str(item) for item in provider.get("capabilities") or []],
+        max_context_size=_as_int(provider.get("max_context_size")),
+        default_effort=str(provider["default_effort"]) if provider.get("default_effort") else None,
+    )
+
+
+def resolve_model_spec(ai_config: dict[str, Any] | None, alias: str) -> ModelSpec | None:
+    """按 alias（= provider.model）取模型；未启用或不存在返回 None。"""
+    for spec in model_specs(ai_config):
+        if spec.alias == str(alias or "").strip():
+            return spec
+    return None
+
+
+def model_specs(ai_config: dict[str, Any] | None) -> list[ModelSpec]:
+    """全部 enabled provider 的模型，primary provider 的模型排最前。"""
+    if not isinstance(ai_config, dict) or not ai_config.get("enabled", False):
+        return []
+    providers = ai_config.get("providers")
+    if not isinstance(providers, dict):
+        return []
+    primary = str(ai_config.get("primary_provider") or "").strip()
+    names = list(providers)
+    if primary in providers:
+        names.remove(primary)
+        names.insert(0, primary)
+    specs: list[ModelSpec] = []
+    for provider_name in names:
+        provider = providers.get(provider_name)
+        if not isinstance(provider, dict) or not provider.get("enabled", False):
+            continue
+        spec = _spec_from_provider(provider_name, provider)
+        if spec and spec.enabled:
+            specs.append(spec)
+    return specs
+
+
+def default_model_alias(ai_config: dict[str, Any] | None) -> str:
+    """默认模型 alias（primary provider 的 model；否则第一个 enabled）。"""
+    specs = model_specs(ai_config)
+    return specs[0].alias if specs else ""
+
+
+def list_model_options(ai_config: dict[str, Any] | None) -> dict[str, Any]:
+    """UI 选项形状（与原 ``list_daily_brief_model_options`` 返回一致）。
+
+    只暴露 model/display_name/provider，绝不携带凭据或 base_url。
+    """
+    specs = model_specs(ai_config)
+    models = []
+    seen = set()
+    for spec in specs:
+        if spec.alias in seen:
+            continue
+        seen.add(spec.alias)
+        models.append({
+            "model": spec.alias,
+            "display_name": spec.display_name,
+            "provider": spec.provider,
+        })
+    return {"models": models, "default_model": default_model_alias(ai_config)}
+
 
 # These selectors refer to the host model table, which the catalog replaces.
 # Leave them unset so kkagent resolves each role from the selected default.
@@ -78,27 +177,21 @@ def build_config_tables(
         selected_alias = str(alias or env.get("KKAGENT_DEFAULT_MODEL") or "").strip()
         selected_alias = selected_alias or default_model_alias(ai_config)
         spec = resolve_model_spec(ai_config, selected_alias)
-        if spec:
-            for key in _HOST_MODEL_ROLE_KEYS:
-                config.pop(key, None)
-            if isinstance(config.get("goal"), dict):
-                config["goal"].pop("judge_model", None)
-            config["models"] = {spec.alias: _model_table(spec)}
-            config["providers"] = {spec.provider: {
-                "base_url": spec.base_url,
-                "type": spec.api_format,
-                **({"api_key_env": "GMS_MODEL_API_KEY"} if spec.api_key else {}),
-            }}
-            config["default_model"] = spec.alias
-            if spec.api_key:
-                config["_env"] = {"GMS_MODEL_API_KEY": spec.api_key}
-        else:
-            selected_alias = selected_alias or config.get("default_model") or ""
-            selected = config.get("models", {}).get(selected_alias)
-            if not isinstance(selected, dict):
-                raise ContextBudgetError("当前模型配置缺失，或服务端上下文不足以执行分析。")
-            config["default_model"] = selected_alias
-            logger.warning("模型目录中没有 alias=%r，回退宿主配置 %s", selected_alias, host)
+        if spec is None:
+            raise ContextBudgetError("当前模型未在统一模型目录中启用。")
+        for key in _HOST_MODEL_ROLE_KEYS:
+            config.pop(key, None)
+        if isinstance(config.get("goal"), dict):
+            config["goal"].pop("judge_model", None)
+        config["models"] = {spec.alias: _model_table(spec)}
+        config["providers"] = {spec.provider: {
+            "base_url": spec.base_url,
+            "type": spec.api_format,
+            **({"api_key_env": "GMS_MODEL_API_KEY"} if spec.api_key else {}),
+        }}
+        config["default_model"] = spec.alias
+        if spec.api_key:
+            config["_env"] = {"GMS_MODEL_API_KEY": spec.api_key}
         if context_limit is not None:
             selected = config["models"][config["default_model"]]
             ceiling = min(int(selected.get("max_context_size") or context_limit), context_limit)

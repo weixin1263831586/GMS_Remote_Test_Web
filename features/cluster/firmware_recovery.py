@@ -2,14 +2,12 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 import logging
 
 from features.auth import AGENT_ROLE, is_machine_principal, principal_owner_id, require_human_principal
 from features.devices import profile_store, usbip_source_host_for_device
 from foundation.aoa_hid_mode import profile_hid_options
-from foundation.aoa_profile import parse_profile_commands
+from foundation.aoa_profile import commands_digest, parse_profile_commands
 from foundation.aoa_recovery_policy import firmware_compatibility, require_verified_recovery, target_firmware_context
 from foundation.error_model import ApiError
 
@@ -118,8 +116,7 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
         "profile_id": profile["id"], "profile_name": profile["name"],
         "profile_revision": profile.get("revision", ""),
         "commands": commands,
-        "commands_sha256": hashlib.sha256(json.dumps(
-            commands, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest(),
+        "commands_sha256": commands_digest(commands),
         "metadata": profile.get("metadata") or {},
         "wait_adb_seconds": max(1, int(profile.get("wait_adb_seconds") or 60)),
         "boot_wait_seconds": wait, "usb_port_path": port,
@@ -177,8 +174,8 @@ def release_local_firmware_recovery(prepared: dict | None) -> None:
 def validate_local_firmware_recovery(prepared: dict | None) -> None:
     if prepared:
         from .api import service
-        from .device_action_operations import fenced_local_payload
-        from .device_actions_api import validate_local_firmware_identity
+        from .device_operations.api import validate_local_firmware_identity
+        from .device_operations.execution import fenced_local_payload
 
         try:
             fenced_local_payload(service().repository, prepared)
@@ -193,7 +190,7 @@ def refresh_post_burn_inventory(repository, worker_id: str) -> None:
     真实 agent 守护进程的下一个周期心跳（默认 15s）之前，库存还停留在
     accessory 窗口的 usb_only；完成触发的设备列表刷新会拿到旧快照。
     本函数让 Controller 主机烧写结束后库存立即可用。探测器经
-    local_bridge 同宿主桥（worker_agent.inventory，白名单内）；
+    local_bridge 同宿主桥（worker.inventory，白名单内）；
     刷新失败只告警，绝不影响烧写/恢复结果。
     """
     from . import local_bridge
@@ -208,8 +205,8 @@ def refresh_post_burn_inventory(repository, worker_id: str) -> None:
 async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
     """Continue the frozen burn claim, with a durable receipt before HID input."""
     from .api import service
-    from .device_action_operations import execute_local_operation, fenced_local_payload, request_digest
-    from .device_actions_api import execute_local_firmware_aoa
+    from .device_operations.api import execute_local_firmware_aoa
+    from .device_operations.execution import execute_local_operation, fenced_local_payload, request_digest
 
     repository = service().repository
     snapshot = prepared["snapshot"]
@@ -268,7 +265,7 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
     result = current.get("result") or {}
     success = (current["status"] == "completed" and result.get("success") is True
                and result.get("adb_recovered") is True)
-    from foundation.aoa_recovery_status import recovery_failure_reason
+    from foundation.aoa_recovery_policy import recovery_failure_reason
 
     await asyncio.to_thread(
         refresh_post_burn_inventory, repository, prepared["worker_id"])

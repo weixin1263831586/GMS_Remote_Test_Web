@@ -13,7 +13,7 @@ def target_inventory(monkeypatch):
     context = verified_mapping().context
     repository = SimpleNamespace(resolve_worker_device=lambda worker, device: (
         {"properties": {"aoa_context": context}} if worker == "w" and device == "ABC" else None))
-    monkeypatch.setattr("features.devices.aoa_mapping_service.get_cluster_service",
+    monkeypatch.setattr("features.devices.aoa.mapping_service.get_cluster_service",
                         lambda: SimpleNamespace(repository=repository))
 
 
@@ -22,7 +22,7 @@ def target_inventory(monkeypatch):
     ({"hid_touch_mode": "direct", "hid_settle_seconds": 4}, "direct", 4),
     ({"calibration": {"context": {"version": 2}}}, "direct", 2)])
 def test_recover_preserves_hid_mode(environment, monkeypatch, metadata, mode, settle):
-    from features.devices import aoa_api
+    from features.devices.aoa import api as aoa_api
 
     monkeypatch.setattr(aoa_api, "require_human_principal", lambda request: None)
     monkeypatch.setattr(aoa_api, "principal_owner_id", lambda request: "owner-1")
@@ -43,7 +43,7 @@ def test_recover_preserves_hid_mode(environment, monkeypatch, metadata, mode, se
 
 
 def test_recover_forwards_embedded_mapping_and_source_context(environment, monkeypatch):
-    from features.devices import aoa_api
+    from features.devices.aoa import api as aoa_api
     from foundation.aoa_calibration import five_point_calibration_points, mapping_from_samples
 
     monkeypatch.setattr(aoa_api, "require_human_principal", lambda request: None)

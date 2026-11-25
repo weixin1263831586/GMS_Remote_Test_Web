@@ -14,19 +14,19 @@ from foundation.config_paths import default_suites_path
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
-from worker_agent.fastboot_workflow import (
+from worker.fastboot_workflow import (
     CommandResult,
     FastbootPreparer,
 )
 
 from . import runtime
-from .info_service import read_device_info
 from .models import DeviceActionRequest, DeviceLockRequest, VerifiedBootState
 from .support import (
     AsyncSSHConnection,
     device_claim_conflict_response,
     device_fencing_owner_id,
     device_mutation_guard,
+    read_device_info,
 )
 
 
@@ -54,7 +54,7 @@ def _adb_state_is_ready(output: str, code: int) -> bool:
 
 def _adb_proxy_devices(devices: list[str]) -> list[str]:
     try:
-        from worker_agent.adb_proxy import imported_device_for_serial
+        from worker.adb_proxy import imported_device_for_serial
 
         return [
             device_id
@@ -148,7 +148,7 @@ def _run_bootloader_lock_block(
     """Synchronous body of the bootloader lock/unlock flow (thread offload)."""
     with runtime.ssh_manager.connection(config) as ssh:
         local_script = os.path.join(
-            runtime.project_root, "scripts", "run_Device_Lock.sh"
+            runtime.project_root, "scripts/execution", "run_Device_Lock.sh"
         )
         remote_script = os.path.join(
             default_suites_path(
@@ -156,12 +156,17 @@ def _run_bootloader_lock_block(
             ),
             "run_Device_Lock.sh",
         )
+        local_common = os.path.join(runtime.project_root, "scripts/execution", "fastboot_common.sh")
+        remote_common = os.path.join(os.path.dirname(remote_script), "fastboot_common.sh")
+        if not os.path.isfile(local_common):
+            return _api_error("Fastboot helper missing", status_code=503)
         if not os.path.exists(local_script):
             return _api_error(
                 f"Script file not found: {local_script}", status_code=404
             )
         try:
             with ssh.open_sftp() as sftp:
+                sftp.put(local_common, remote_common)
                 sftp.put(local_script, remote_script)
             runtime.ssh_manager.execute_command(
                 ssh, f"chmod +x {shlex.quote(remote_script)}"

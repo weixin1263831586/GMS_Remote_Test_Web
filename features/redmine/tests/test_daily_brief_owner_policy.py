@@ -6,21 +6,21 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.redmine.daily_brief_owner_policy import is_daily_brief_owner_eligible
-from features.redmine.daily_brief_service import DailyBriefService
+from features.redmine.daily_brief.owner_policy import is_daily_brief_owner_eligible
+from features.redmine.daily_brief.service import DailyBriefService
 
 
 class DailyBriefOwnerPolicyTests(unittest.TestCase):
     def test_admin_owner_is_rejected(self):
         with patch(
-            "features.redmine.daily_brief_owner_policy.auth_service.get_enabled_user",
+            "features.redmine.daily_brief.owner_policy.auth_service.get_enabled_user",
             return_value=SimpleNamespace(role="admin"),
         ):
             self.assertFalse(is_daily_brief_owner_eligible("gms"))
 
     def test_ordinary_and_unmanaged_owners_are_eligible(self):
         with patch(
-            "features.redmine.daily_brief_owner_policy.auth_service.get_enabled_user",
+            "features.redmine.daily_brief.owner_policy.auth_service.get_enabled_user",
             side_effect=[SimpleNamespace(role="user"), None],
         ):
             self.assertTrue(is_daily_brief_owner_eligible("ordinary"))
@@ -30,7 +30,7 @@ class DailyBriefOwnerPolicyTests(unittest.TestCase):
         starter = DailyBriefService.__new__(DailyBriefService)
         starter.owner_id = "gms"
         with patch(
-            "features.redmine.daily_brief_service.is_daily_brief_owner_eligible",
+            "features.redmine.daily_brief.service.is_daily_brief_owner_eligible",
             return_value=False,
         ):
             result = starter.start_run("manual")

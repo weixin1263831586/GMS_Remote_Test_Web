@@ -13,7 +13,7 @@ from bootstrap.env_loader import load_runtime_env
 
 load_runtime_env()
 
-from features.redmine.daily_brief_worker import main  # noqa: E402
+from features.redmine.daily_brief.worker import main  # noqa: E402
 
 
 if __name__ == "__main__":

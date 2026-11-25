@@ -9,13 +9,14 @@
   <style>
 {{REDMINE_CSS}}
   </style>
-  <link rel="stylesheet" href="/redmine-agent/assets/rework-chrome.css">
   <link rel="stylesheet" href="/redmine-agent/assets/case-library.css">
   <link rel="stylesheet" href="/redmine-agent/assets/daily-brief-session.css">
   <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
-<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261116-aligned-corner-path">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action">
+<link rel="stylesheet" href="/static/css/form-controls.css?v=20261125-unified-password-control">
+<script src="/static/js/password-controls.js?v=20261125-unified-password-control" defer></script>
 <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261120-type-size-dedup-v1">
 <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261120-type-size-dedup-v1">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-type-size-dedup-v1">
@@ -327,11 +328,11 @@
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
         <label for="settingRedminePass">Redmine 密码</label>
-        <input type="password" id="settingRedminePass" placeholder="留空则不修改">
+        <span class="password-input-wrap"><input type="password" id="settingRedminePass" placeholder="留空则不修改"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="settingRedminePass" aria-label="显示密码" title="显示密码"></button></span>
       </div>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label for="settingRedmineApiKey">Redmine API Key（可选）</label>
-        <input type="password" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
+        <input type="password" class="password-input-secret" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
         <div class="setting-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
       </div>
       <hr style="border:0;border-top:1px solid var(--border);margin:12px 0">

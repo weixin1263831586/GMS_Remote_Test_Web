@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -40,7 +38,6 @@ from .dashboard import (
 from .org_chart import (
     get_self_binding,
     load_org_payload,
-    org_chart_is_legacy_path,
     org_chart_path,
     save_org_payload,
     set_member_aliases,
@@ -74,7 +71,6 @@ async def get_org_chart(request: Request):
         "data": {
             "payload": load_org_payload(),
             "path": str(org_chart_path()),
-            "legacy_import_available": org_chart_is_legacy_path(),
         },
     }
 
@@ -95,39 +91,6 @@ async def put_org_chart(
             clean[key] = payload[key]
     save_org_payload(clean)
     return {"success": True, "data": {"path": str(org_chart_path())}}
-
-
-@router.post("/org-chart/import-legacy")
-async def import_legacy_org_chart(
-    request: Request,
-    _admin: Any = Depends(require_role_when_auth_required("admin")),
-):
-    """把旧扁平 configs/redmine_user_map.json 导入 canonical 组织架构文件。"""
-    require_human_principal(request)
-    current = Path(org_chart_path())
-    # canonical 缺失时 org_chart_path() 本身就解析到旧扁平文件，
-    # 此时直接以其为导入源（parent.parent 推导只在 canonical 生效时成立）。
-    legacy = (
-        current
-        if org_chart_is_legacy_path()
-        else current.parent.parent / "redmine_user_map.json"
-    )
-    if not legacy.exists():
-        return {"success": False, "error": "未找到旧版 configs/redmine_user_map.json"}
-    try:
-        payload = json.loads(legacy.read_text(encoding="utf-8"))
-    except Exception as exc:
-        return {"success": False, "error": f"旧文件解析失败: {exc}"}
-    if not isinstance(payload, dict) or not isinstance(payload.get("departments"), list):
-        return {"success": False, "error": "旧文件缺少 departments 列表"}
-    save_org_payload({"departments": payload.get("departments") or []})
-    return {
-        "success": True,
-        "data": {
-            "path": str(org_chart_path()),
-            "departments": len(payload.get("departments") or []),
-        },
-    }
 
 
 @router.get("/me/binding")

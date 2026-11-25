@@ -4,7 +4,7 @@ import multiprocessing
 
 import pytest
 
-from features.cluster.job_requests import JOB_REQUEST_LOCK_STRIPES
+from features.cluster.jobs.requests import JOB_REQUEST_LOCK_STRIPES
 from features.cluster.repository import ClusterRepository
 from foundation.error_model import ApiError
 

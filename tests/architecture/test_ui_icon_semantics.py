@@ -147,7 +147,7 @@ def test_test_workspace_action_icons_preserve_color_and_semantics():
     assert ('data-click="remountDevices"' in source
             and 'class="test-action-icon" aria-hidden="true">⚡</span> Remount</button>' in source)
     assert 'ui.svg#mount' not in source
-    assert 'USB/IP 接入' in source
+    assert 'USB/IP' in source
     assert '复制部署命令' in source
     for section in ("adb-button-frame", "vnc-button-frame", "vpn-btn-frame"):
         region = source.split('class="' + section + '"', 1)[1].split("</div>", 1)[0]
@@ -161,9 +161,9 @@ def test_test_workspace_action_icons_preserve_color_and_semantics():
 def test_dynamic_device_button_labels_preserve_color_icons():
     sources = {
         "web/static/js/pages/test-suite-browser-devices.js": ("刷新中…", "刷新设备"),
-        "web/static/js/pages/firmware-burn-usbip.js": ("USB/IP 接入", "连接中..."),
+        "web/static/js/pages/firmware-burn-usbip.js": ("USB/IP", "连接中..."),
         "web/static/js/pages/vpn-control.js": ("连接 VPN", "断开设备"),
-        "web/static/js/pages/auth-elevation.js": ("USB/IP 接入", "断开设备"),
+        "web/static/js/pages/auth-elevation.js": ("USB/IP", "断开设备"),
     }
     for path, expected in sources.items():
         script = (ROOT / path).read_text(encoding="utf-8")
@@ -175,4 +175,4 @@ def test_dynamic_device_button_labels_preserve_color_icons():
     vpn = (ROOT / "web/static/js/pages/vpn-control.js").read_text(encoding="utf-8")
     assert "btn.textContent = '🔌" not in vpn
     usbip = (ROOT / "web/static/js/pages/firmware-burn-usbip.js").read_text(encoding="utf-8")
-    assert "GmsUi.icon('network') + ' USB/IP 接入'" not in usbip
+    assert "GmsUi.icon('network') + ' USB/IP'" not in usbip

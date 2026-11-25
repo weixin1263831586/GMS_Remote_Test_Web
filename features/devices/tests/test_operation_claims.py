@@ -5,8 +5,9 @@ from unittest.mock import Mock, patch
 from starlette.requests import Request
 
 from features.auth import CurrentUser
-from features.devices import operation_claims, support
+from features.devices import support
 from features.devices.locks import DeviceLockManager
+from features.devices.operations import claims as operation_claims
 
 
 def authenticated_request(

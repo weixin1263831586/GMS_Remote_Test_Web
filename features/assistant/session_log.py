@@ -4,17 +4,49 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from features.assistant import session_store
-from features.assistant.payloads import display_record as _display_record
-from features.assistant.payloads import jsonable as _jsonable
 from features.assistant.session_registry import _now_iso
 from foundation.redaction import redact_sensitive_data
 
 
 _logger = logging.getLogger(__name__)
+
+
+def jsonable(value: Any) -> Any:
+    """Return a JSON-serializable copy of Agent session data."""
+    if is_dataclass(value):
+        return jsonable(asdict(value))
+    if isinstance(value, dict):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [jsonable(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if hasattr(value, "model_dump"):
+        return jsonable(value.model_dump())
+    return str(value)
+
+
+def session_payload(session: dict[str, Any]) -> dict[str, Any]:
+    return redact_sensitive_data(jsonable(session))
+
+
+def display_record(session: dict[str, Any], record: dict[str, Any], private_params=None) -> dict[str, Any]:
+    """Sanitize public history without replacing the internal execution plan."""
+    safe = session_payload({
+        'record': record, 'messages': session.get('messages', []), 'steps': session.get('steps', []),
+        'pending_plan': session.get('pending_plan'),
+        'context': session.get('context'), 'private_params': private_params,
+    })
+    session['messages'] = safe['messages']
+    session['steps'] = safe['steps']
+    if 'context' in session:
+        session['context'] = safe['context']
+    return safe['record']
 
 
 # 步骤终态集合：进入这些状态时记录 finished_at / duration_seconds。
@@ -85,7 +117,7 @@ def _append_step(session: dict[str, Any], title: str, status: str = "done", deta
         # 排序/展示时间戳，started_at 专供 duration 计算）。
         "started_at": now,
     }
-    safe = _display_record(session, step)
+    safe = display_record(session, step)
     session.setdefault("steps", []).append(safe)
     _settle_step(safe)
     session["updated_at"] = _now_iso()
@@ -241,7 +273,7 @@ def _append_message(session: dict[str, Any], role: str, content: str, kind: str 
     if role == "user":
         _derive_session_title(session, content)
     msg = _new_message(role, content, kind=kind, data=data)
-    msg = _display_record(session, msg, private_params)
+    msg = display_record(session, msg, private_params)
     session.setdefault("messages", []).append(msg)
     session["updated_at"] = _now_iso()
     _persist_transcript(session)
@@ -252,6 +284,6 @@ def _format_params(params: dict[str, Any]) -> str:
     """格式化参数为可读文本。"""
     if not params:
         return "无"
-    display = redact_sensitive_data(_jsonable(params))
+    display = redact_sensitive_data(jsonable(params))
     lines = [f"- {k}: {v}" for k, v in display.items() if v]
     return "\n".join(lines) if lines else "无"

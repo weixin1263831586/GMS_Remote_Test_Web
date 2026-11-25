@@ -10,7 +10,7 @@ from __future__ import annotations
 import unittest
 from unittest.mock import MagicMock, patch
 
-from features.devices import usbip
+from features.devices.usbip import manager as usbip
 from foundation.command_result import CommandResult
 
 
@@ -80,7 +80,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
             "sudo usbip detach -p 02": ("", "", 0),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.10.10.10"
@@ -95,7 +95,7 @@ class ParseUsbipPortEntriesTests(unittest.TestCase):
             "sudo usbip detach -p 02": ("", "", 0),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.10.10.1", busids=["1-2"]
@@ -126,7 +126,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             "sudo usbip detach -p 00": ("", "usbip: error", 1),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.0.0.5"
@@ -140,7 +140,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             "sudo usbip detach -p 00": ("", "", 0),
         })
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.0.0.5"
@@ -181,7 +181,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             else CommandResult(stdout="", stderr="no such port", code=1)
         )
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.0.0.5"
@@ -208,7 +208,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
             else CommandResult(stdout="", stderr="detach failed", code=1)
         )
         with patch.object(usbip.usbip_manager, "ssh_manager", manager.ssh_manager), patch(
-            "features.devices.usbip.time.sleep"
+            "features.devices.usbip.manager.time.sleep"
         ):
             detached = usbip.detach_ubuntu_usbip_ports(
                 MagicMock(), remote_host="10.0.0.5"
@@ -218,7 +218,7 @@ class DetachUbuntuUsbipPortsTests(unittest.TestCase):
 
     def test_usbip_attached_ports_returns_none_on_query_failure(self):
         """A failed listing is 'unknown', not 'no ports attached'."""
-        from features.devices.usbip_transaction import usbip_attached_ports
+        from features.devices.usbip.transaction import usbip_attached_ports
 
         ssh_manager = MagicMock()
         ssh_manager.execute_command.return_value = CommandResult(

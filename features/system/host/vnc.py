@@ -1,0 +1,701 @@
+"""
+VNC管理 - 核心业务逻辑
+
+特性：
+- VNC启动/停止
+- 多主机VNC支持
+- 设备屏幕显示（scrcpy）
+"""
+
+import logging
+import os
+import shlex
+import shutil
+import socket
+import subprocess
+import time
+import uuid
+from typing import Any
+
+from foundation.common_utils import CommonUtils
+from foundation.config import config_manager, get_ubuntu_user
+from foundation.networking import is_local_host
+from foundation.novnc import NOVNC_WEB_PORT, novnc_url
+from foundation.processes import command_reports_running, start_detached_process
+
+from .ssh import ssh_manager
+
+
+logger = logging.getLogger(__name__)
+
+
+VNC_DISPLAY = ':0'
+VNC_PORT = 5900
+REMOTE_NOVNC_DIR = '/opt/noVNC'
+
+
+def x11vnc_port_pattern(port: int = VNC_PORT) -> str:
+    return f'x11vnc.*-rfbport {port}'
+
+
+def x11vnc_display_pattern(display: str = VNC_DISPLAY) -> str:
+    return f'x11vnc.*{display}'
+
+
+def websockify_pattern(web_port: int = NOVNC_WEB_PORT) -> str:
+    return f'websockify.*{web_port}'
+
+
+def vnc_password_temp_path() -> str:
+    return f'/tmp/.gms_vnc_passwd_{uuid.uuid4().hex}'
+
+
+LOCAL_X11VNC_PATTERN = x11vnc_port_pattern()
+X11VNC_DISPLAY_PATTERN = x11vnc_display_pattern()
+WEBSOCKIFY_PATTERN = websockify_pattern()
+
+# x11vnc 性能参数：合成型窗口管理器（GNOME/KDE）下 XDamage 事件风暴会让
+# x11vnc 卡顿甚至停顿，改用快速轮询检测变化；降低 wait/defer 提高刷新率
+# 并降低延迟；-threads 让每个客户端的输入/输出在独立线程处理。
+# Some desktop sessions exhaust their MIT-SHM allocation even though :0 is
+# otherwise reachable.  -noshm keeps x11vnc alive by using XGetImage polling.
+X11VNC_PERF_FLAGS = ('-threads', '-noxdamage', '-wait', '5', '-defer', '5', '-noshm')
+X11VNC_PERF_ARGS = ' '.join(X11VNC_PERF_FLAGS)
+
+# x11vnc 默认 -norepeat 会在有 VNC 客户端时关闭 X11 自动重复，导致方向键
+# 等按键长按只触发一次。noVNC 能正确转发重复 keydown，因此显式保留 X11
+# 的自动重复。
+X11VNC_INPUT_FLAGS = ('-repeat',)
+X11VNC_INPUT_ARGS = ' '.join(X11VNC_INPUT_FLAGS)
+
+# x11vnc 大小写参数：远端 X 的 CapsLock 状态会把客户端发来的按键大小写
+# 反向（noVNC 的按键 keysym 已携带本地大小写，远端再叠加一次 caps 会双
+# 重取反），而 x11vnc 不支持 QEMU LED 状态回传，noVNC 的自动纠偏不会触
+# 发。仅用 -clear_mods 释放可能卡住的普通修饰键；不可用 -clear_all，后者
+# 会清除 NumLock，使 noVNC 数字键盘的数字键被当作导航键。-skip_lockkeys
+# 令大小写和数字锁状态完全由客户端的 keysym 决定，并把 KP_n 映射为普通
+# 数字，避免客户端与远端的锁定状态不同而使数字键盘失效。
+X11VNC_KEYMAP_FLAGS = ('-clear_mods', '-skip_lockkeys')
+X11VNC_KEYMAP_ARGS = ' '.join(X11VNC_KEYMAP_FLAGS)
+
+
+def start_remote_vnc(
+    ssh_manager,
+    host: str,
+    password: str,
+    vnc_password: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """在远程主机上启动 x11vnc/websockify，并等待两个端口都监听后才返回。"""
+    try:
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return {'success': False, 'error': 'SSH连接失败'}
+
+        ubuntu_user = config.get('ubuntu_user') or get_ubuntu_user()
+        quoted_ubuntu_user = shlex.quote(ubuntu_user)
+
+        # 如果提供了VNC密码，需要创建密码文件；否则使用免密模式
+        if vnc_password:
+            # 创建VNC密码文件（使用SFTP写入避免shell注入）
+            temp_passwd_path = vnc_password_temp_path()
+            try:
+                passwd_content = f"{vnc_password}\n{vnc_password}\n"
+                sftp = ssh.open_sftp()
+                with sftp.file(temp_passwd_path, 'w') as f:
+                    f.write(passwd_content)
+                sftp.close()
+                quoted_temp_passwd_path = shlex.quote(temp_passwd_path)
+                create_passwd_cmd = (
+                    f"x11vnc -display {VNC_DISPLAY} "
+                    f"-storepasswd $(head -1 {quoted_temp_passwd_path}) ~/.vnc/passwd && "
+                    f"rm -f {quoted_temp_passwd_path}"
+                )
+                ssh_manager.execute_command(ssh, create_passwd_cmd, timeout=10)
+            except Exception as e:
+                logger.warning(f"[VNC] Failed to create password file via SFTP: {e}")
+                ssh_manager.return_connection(ssh)
+                return {'success': False, 'error': '创建 VNC 密码文件失败'}
+            time.sleep(0.5)  # 等待文件创建完成
+
+        quoted_novnc_dir = shlex.quote(REMOTE_NOVNC_DIR)
+        check_novnc_cmd = f"[ -d {quoted_novnc_dir} ] && echo 'exists' || echo 'missing'"
+        novnc_check = ssh_manager.execute_command(ssh, check_novnc_cmd)
+
+        if "missing" in novnc_check.stdout:
+            ssh_manager.return_connection(ssh)
+            return {
+                'success': False,
+                'error': 'noVNC未安装',
+                'instructions': '''sudo apt-get install -y git
+cd /opt
+sudo git clone https://github.com/novnc/noVNC.git
+sudo git clone https://github.com/novnc/websockify.git noVNC/utils/websockify'''
+            }
+
+        display_ready = False
+        for _ in range(30):
+            display_cmd = f"export DISPLAY={VNC_DISPLAY} && xprop -root &>/dev/null && echo 'ready'"
+            display_result = ssh_manager.execute_command(ssh, display_cmd)
+            if "ready" in display_result.stdout:
+                display_ready = True
+                break
+            time.sleep(0.5)
+
+        if not display_ready:
+            ssh_manager.return_connection(ssh)
+            return {
+                'success': False,
+                'error': 'DISPLAY未就绪',
+                'warning': '需要在主机桌面环境中运行'
+            }
+
+        # 预先创建日志目录，避免后台服务因目录缺失启动失败。
+        ssh_manager.execute_command(ssh, "mkdir -p ~/logs ~/.vnc", timeout=5)
+
+        # 检查并启动x11vnc
+        check_x11_cmd = (
+            f"pgrep -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)} >/dev/null "
+            f"&& ss -ltn | grep -q ':{VNC_PORT} ' "
+            "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
+        )
+        x11_check = ssh_manager.execute_command(ssh, check_x11_cmd)
+        x11vnc_running = command_reports_running(x11_check.stdout)
+
+        # 如果x11vnc正在运行，检查是否使用了密码模式
+        if x11vnc_running and not vnc_password:
+            # 免密模式，检查是否需要从密码模式重启
+            check_password_mode = "pgrep -f -- 'x11vnc.*-rfbauth' && echo 'PASSWORD' || echo 'NOPASSWORD'"
+            password_mode = ssh_manager.execute_command(ssh, check_password_mode)
+
+            if 'PASSWORD' in password_mode.stdout:
+                # 当前是密码模式，需要重启为免密模式
+                logger.info("[VNC] Found x11vnc running with password, restarting without password...")
+                ssh_manager.execute_command(
+                    ssh,
+                    f"pkill -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)}",
+                    timeout=5,
+                )
+                time.sleep(0.5)
+                x11vnc_running = False
+
+        # x11vnc/websockify 已在运行时不会执行启动命令，两个结果变量
+        # 预置 None，失败诊断分支按“是否真的启动过”取 stderr。
+        x11_result = None
+        novnc_result = None
+        if not x11vnc_running:
+            auth_param = "-rfbauth ~/.vnc/passwd" if vnc_password else ""
+            x11vnc_cmd = (
+                f"export DISPLAY={VNC_DISPLAY} && "
+                f"export XAUTHORITY=/home/{quoted_ubuntu_user}/.Xauthority && "
+                f"x11vnc -display {VNC_DISPLAY} -forever -shared "
+                f"-rfbport {VNC_PORT} {auth_param} {X11VNC_PERF_ARGS} {X11VNC_INPUT_ARGS} {X11VNC_KEYMAP_ARGS} "
+                f"-bg -o ~/logs/x11vnc.log && xset -display {VNC_DISPLAY} r on"
+            )
+            x11_result = ssh_manager.execute_command(
+                ssh, x11vnc_cmd, timeout=15
+            )
+            if not x11_result.ok:
+                logger.warning(
+                    "[VNC] Remote x11vnc start failed: %s", x11_result.stderr
+                )
+
+        # 检查并启动websockify
+        check_ws_cmd = (
+            f"pgrep -f -- {shlex.quote(WEBSOCKIFY_PATTERN)} >/dev/null "
+            f"&& ss -ltn | grep -q ':{NOVNC_WEB_PORT} ' "
+            "&& echo 'RUNNING' || echo 'NOT_RUNNING'"
+        )
+        ws_check = ssh_manager.execute_command(ssh, check_ws_cmd)
+        websockify_running = command_reports_running(ws_check.stdout)
+
+        if not websockify_running:
+            novnc_cmd = (
+                f"cd {quoted_novnc_dir} && "
+                f"nohup ./utils/websockify/run --web {quoted_novnc_dir} "
+                f"{NOVNC_WEB_PORT} localhost:{VNC_PORT} "
+                "> ~/logs/novnc.log 2>&1 &"
+            )
+            novnc_result = ssh_manager.execute_command(
+                ssh, novnc_cmd, timeout=10
+            )
+            if not novnc_result.ok:
+                logger.warning(
+                    "[VNC] Remote websockify start failed: %s",
+                    novnc_result.stderr,
+                )
+
+        # 启动命令在后台执行，命令本身返回 0 不代表监听已经成功。只有
+        # x11vnc 与 websockify 两个端口都就绪时才向前端返回成功。
+        verify_cmd = (
+            f"ss -ltn | grep -q ':{VNC_PORT} ' && echo VNC_READY || echo VNC_FAILED; "
+            f"ss -ltn | grep -q ':{NOVNC_WEB_PORT} ' && echo NOVNC_READY || echo NOVNC_FAILED"
+        )
+        stdout = ''
+        stderr = ''
+        vnc_ready = False
+        novnc_ready = False
+        # 后台进程在较慢主机上可能需要数秒才开始监听。
+        for _ in range(10):
+            verify_result = ssh_manager.execute_command(ssh, verify_cmd, timeout=5)
+            stdout = verify_result.stdout
+            stderr = verify_result.stderr
+            vnc_ready = 'VNC_READY' in stdout
+            novnc_ready = 'NOVNC_READY' in stdout
+            if vnc_ready and novnc_ready:
+                break
+            time.sleep(0.3)
+        if not vnc_ready or not novnc_ready:
+            log_cmd = "tail -n 12 ~/logs/x11vnc.log ~/logs/novnc.log 2>/dev/null"
+            logs_result = ssh_manager.execute_command(ssh, log_cmd, timeout=5)
+            ssh_manager.return_connection(ssh)
+            failed = []
+            if not vnc_ready:
+                failed.append(str(VNC_PORT))
+            if not novnc_ready:
+                failed.append(str(NOVNC_WEB_PORT))
+            command_errors = '\n'.join(
+                value.strip()
+                for value in (
+                    x11_result.stderr if x11_result is not None and not x11_result.ok else '',
+                    novnc_result.stderr if novnc_result is not None and not novnc_result.ok else '',
+                    logs_result.stdout,
+                    stderr,
+                )
+                if value and value.strip()
+            )
+            detail = command_errors[-1200:]
+            return {
+                'success': False,
+                'error': f"远程端口 {', '.join(failed)} 未监听，VNC 服务启动失败",
+                'detail': detail,
+            }
+
+        target_ip = CommonUtils.extract_ip_from_host(host)
+
+        ssh_manager.return_connection(ssh)
+
+        return {
+            'success': True,
+            'message': '✅ VNC服务已启动',
+            'x11vnc_running': x11vnc_running,
+            'websockify_running': websockify_running,
+            'vnc_port': VNC_PORT,
+            'web_port': NOVNC_WEB_PORT,
+            'url': novnc_url(target_ip)
+        }
+
+    except Exception as e:
+        if 'ssh' in locals():
+            ssh_manager.return_connection(ssh)
+        logger.error(f"Error starting remote VNC: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+class VNCManager:
+    """Manages VNC start/stop, scrcpy device screens, locally and over SSH."""
+
+    def __init__(self):
+        self.ssh_manager = ssh_manager
+        self.config_manager = config_manager
+
+    def start_vnc(
+        self,
+        host: str = None,
+        password: str = None,
+        vnc_password: str = None,
+        force_restart: bool = False
+    ) -> dict[str, Any]:
+        """在本机或指定主机启动 VNC 服务。"""
+        try:
+            config = self.config_manager.load_config()
+
+            # 解析主机信息
+            if not host:
+                host = config.get('ubuntu_host', '')
+
+            if not host:
+                return {'success': False, 'error': '未配置主机地址'}
+
+            # 提取IP部分并检查是否本地
+            host_ip = CommonUtils.extract_ip_from_host(host)
+            is_local = is_local_host(host_ip)
+
+            if is_local:
+                return self._start_local_vnc(force_restart=force_restart)
+
+            remote_user, remote_ip = CommonUtils.parse_host_address(host)
+            remote_config = dict(config)
+            remote_config.update({
+                'host': remote_ip,
+                'hostname': remote_ip,
+                'ubuntu_host': remote_ip,
+                'username': remote_user or get_ubuntu_user(),
+                'ubuntu_user': remote_user or get_ubuntu_user(),
+                'password': password or '',
+                'ubuntu_pswd': password or '',
+            })
+            return self._start_remote_vnc(host, password, vnc_password, remote_config)
+
+        except Exception as e:
+            logger.error(f"Error starting VNC: {e}")
+            return {'success': False, 'error': str(e)}
+
+    def ensure_local_vnc(self) -> dict[str, Any]:
+        """Ensure local VNC is available without interrupting an existing server."""
+        return self._start_local_vnc(force_restart=False)
+
+    def _start_local_vnc(self, force_restart: bool = False) -> dict[str, Any]:
+        """启动本地VNC服务
+
+        Args:
+            force_restart: 强制杀死旧进程并重启（清理僵尸连接）
+        """
+        try:
+            logger.info(f"[VNC] Starting local VNC services (force_restart={force_restart})...")
+            novnc_web_dir = self._find_local_novnc_web_dir()
+            if not novnc_web_dir:
+                return {
+                    'success': False,
+                    'error': 'noVNC未安装',
+                    'instructions': 'sudo apt-get install -y x11vnc novnc websockify'
+                }
+            if not shutil.which('x11vnc'):
+                return {
+                    'success': False,
+                    'error': 'x11vnc未安装',
+                    'instructions': 'sudo apt-get install -y x11vnc'
+                }
+            if not self._has_local_websockify():
+                return {
+                    'success': False,
+                    'error': 'websockify未安装',
+                    'instructions': 'sudo apt-get install -y websockify'
+                }
+
+            local_ip = CommonUtils.get_local_ip() or 'localhost'
+
+            # 强制重启时清理现有 VNC 进程。
+            if force_restart:
+                logger.info("[VNC] Force restart: killing old x11vnc and websockify processes...")
+                self._kill_local_processes(LOCAL_X11VNC_PATTERN, force=True)
+                self._kill_local_processes(WEBSOCKIFY_PATTERN, force=True)
+                time.sleep(1)
+                logger.info("[VNC] Old processes killed")
+            else:
+                # 检查x11vnc是否运行
+                x11vnc_running = (
+                    self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                    and self._is_local_port_listening(VNC_PORT)
+                    and self._is_local_rfb_healthy()
+                )
+
+                # 检查websockify是否运行
+                websockify_running = (
+                    self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                    and self._is_local_port_listening(NOVNC_WEB_PORT)
+                )
+
+                # 如果x11vnc正在运行，检查是否使用了密码模式
+                if x11vnc_running:
+                    check_password_mode = self._is_local_process_running('x11vnc.*-rfbauth')
+
+                    if check_password_mode:
+                        logger.info("[VNC] Found x11vnc running with password, restarting without password...")
+                        self._kill_local_processes(X11VNC_DISPLAY_PATTERN)
+                        time.sleep(1)
+                        x11vnc_running = False
+
+                # Check the RFB greeting; stop only a matching x11vnc process.
+                if (
+                    not x11vnc_running
+                    and self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                ):
+                    logger.warning(
+                        "[VNC] x11vnc is listening on %s but its RFB handshake failed; restarting it",
+                        VNC_PORT,
+                    )
+                    self._kill_local_processes(X11VNC_DISPLAY_PATTERN, force=True)
+                    time.sleep(0.5)
+
+                # 如果已经运行且是免密码模式，返回成功
+                if x11vnc_running and websockify_running:
+                    return {
+                        'success': True,
+                        'message': '✅ VNC服务已在运行(本地)',
+                        'x11vnc_running': True,
+                        'websockify_running': True,
+                        'vnc_port': VNC_PORT,
+                        'web_port': NOVNC_WEB_PORT,
+                        'url': novnc_url(local_ip),
+                        'local': True
+                    }
+
+            x11vnc_cmd = [
+                'x11vnc',
+                '-display', VNC_DISPLAY,
+                '-forever',
+                '-shared',
+                '-rfbport', str(VNC_PORT),
+                '-localhost',
+                '-nopw',
+                *X11VNC_PERF_FLAGS,
+                *X11VNC_INPUT_FLAGS,
+                *X11VNC_KEYMAP_FLAGS,
+                '-bg'
+            ]
+            subprocess.run(x11vnc_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
+            logger.info("[VNC] Started x11vnc")
+            repeat_result = subprocess.run(
+                ['xset', '-display', VNC_DISPLAY, 'r', 'on'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+            if repeat_result.returncode:
+                logger.warning("[VNC] Failed to enable X11 key auto repeat")
+            time.sleep(0.5)
+
+            websockify_cmd = self._build_local_websockify_cmd(novnc_web_dir)
+            start_detached_process(
+                websockify_cmd,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                name=f'websockify_{NOVNC_WEB_PORT}',
+            )
+            logger.info("[VNC] Started websockify")
+            time.sleep(0.5)
+
+            # 验证服务是否运行
+            x11vnc_running = (
+                self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                and self._is_local_port_listening(VNC_PORT)
+                and self._is_local_rfb_healthy()
+            )
+
+            websockify_running = (
+                self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                and self._is_local_port_listening(NOVNC_WEB_PORT)
+            )
+
+            if x11vnc_running and websockify_running:
+                return {
+                    'success': True,
+                    'message': '✅ VNC服务已启动(本地)',
+                    'x11vnc_running': True,
+                    'websockify_running': True,
+                    'vnc_port': VNC_PORT,
+                    'web_port': NOVNC_WEB_PORT,
+                    'url': novnc_url(local_ip),
+                    'local': True
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': 'VNC服务启动失败'
+                }
+
+        except Exception as e:
+            logger.error(f"Error starting local VNC: {e}")
+            return {'success': False, 'error': str(e)}
+
+    @staticmethod
+    def _find_local_novnc_web_dir() -> str:
+        """Return the local noVNC web root installed by source or apt packages."""
+        for path in ('/opt/noVNC', '/usr/share/novnc'):
+            if os.path.isdir(path) and os.path.exists(os.path.join(path, 'vnc.html')):
+                return path
+        return ''
+
+    @staticmethod
+    def _is_local_process_running(pattern: str) -> bool:
+        return subprocess.run(['pgrep', '-f', pattern], capture_output=True, text=True).returncode == 0
+
+    @staticmethod
+    def _is_local_port_listening(port: int) -> bool:
+        """Return whether the local loopback port accepts connections."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as connection:
+            connection.settimeout(0.2)
+            return connection.connect_ex(('127.0.0.1', port)) == 0
+
+    @staticmethod
+    def _is_local_rfb_healthy(timeout: float = 0.5) -> bool:
+        """Return whether the local VNC server completes its RFB greeting.
+
+        ``ss`` can report a stuck x11vnc as listening even though noVNC can
+        never establish a session.  Probe the protocol rather than treating
+        an open port as readiness.
+        """
+        try:
+            with socket.create_connection(('127.0.0.1', VNC_PORT), timeout=timeout) as connection:
+                connection.settimeout(timeout)
+                greeting = bytearray()
+                while len(greeting) < 12:
+                    chunk = connection.recv(12 - len(greeting))
+                    if not chunk:
+                        break
+                    greeting.extend(chunk)
+                return len(greeting) == 12 and greeting.startswith(b'RFB ')
+        except OSError:
+            return False
+
+    @staticmethod
+    def _kill_local_processes(pattern: str, *, force: bool = False) -> None:
+        command = ['pkill']
+        if force:
+            command.append('-9')
+        command.extend(['-f', pattern])
+        subprocess.run(command, capture_output=True)
+
+    # websockify 可用性在进程内缓存。
+    _websockify_available: bool | None = None
+    _websockify_standalone: str | None = None
+
+    @classmethod
+    def _detect_websockify(cls) -> bool:
+        """Detect websockify availability (standalone binary or python module)."""
+        standalone = shutil.which('websockify')
+        if standalone:
+            cls._websockify_standalone = standalone
+            return True
+        result = subprocess.run(
+            ['python3', '-m', 'websockify', '--help'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+        return result.returncode == 0
+
+    @classmethod
+    def _has_local_websockify(cls) -> bool:
+        """Check if websockify is available. Result is cached after first check."""
+        if cls._websockify_available is None:
+            cls._websockify_available = cls._detect_websockify()
+        return cls._websockify_available
+
+    @classmethod
+    def _build_local_websockify_cmd(cls, novnc_web_dir: str) -> list[str]:
+        """Build websockify command, using cached standalone path when available."""
+        base = [cls._websockify_standalone or 'python3']
+        if not cls._websockify_standalone:
+            base.extend(['-m', 'websockify'])
+        base.extend([
+            f'--web={novnc_web_dir}',
+            f'127.0.0.1:{NOVNC_WEB_PORT}',
+            f'localhost:{VNC_PORT}',
+        ])
+        return base
+
+    def _start_remote_vnc(
+        self,
+        host: str,
+        password: str,
+        vnc_password: str,
+        config: dict[str, Any]
+    ) -> dict[str, Any]:
+        """启动远程 VNC 服务（统一由本模块的远程启动流程处理）。"""
+        return start_remote_vnc(self.ssh_manager, host, password, vnc_password, config)
+
+
+    def stop_vnc(self, host: str = None) -> dict[str, Any]:
+        """
+        停止VNC服务
+
+        Args:
+            host: 主机地址
+
+        Returns:
+            结果字典
+        """
+        try:
+            config = self.config_manager.load_config()
+
+            if not host:
+                host = config.get('ubuntu_host', '')
+
+            is_local = is_local_host(host)
+
+            if is_local:
+                # 停止本地VNC
+                self._kill_local_processes(X11VNC_DISPLAY_PATTERN)
+                self._kill_local_processes(WEBSOCKIFY_PATTERN)
+                return {'success': True, 'message': '✅ 本地VNC已停止'}
+            else:
+                # 停止远程VNC
+                ssh = self.ssh_manager.get_connection(config)
+                if not ssh:
+                    return {'success': False, 'error': 'SSH连接失败'}
+
+                self.ssh_manager.execute_command(ssh, f"pkill -f -- {shlex.quote(X11VNC_DISPLAY_PATTERN)}")
+                self.ssh_manager.execute_command(ssh, f"pkill -f -- {shlex.quote(WEBSOCKIFY_PATTERN)}")
+
+                self.ssh_manager.return_connection(ssh)
+
+                return {'success': True, 'message': '✅ 远程VNC已停止'}
+
+        except Exception as e:
+            logger.error(f"Error stopping VNC: {e}")
+            return {'success': False, 'error': str(e)}
+
+
+    def get_vnc_status(self) -> dict[str, Any]:
+        """Check whether x11vnc is running and noVNC is listening."""
+        try:
+            config = self.config_manager.load_config()
+            host = config.get('ubuntu_host', '')
+            if is_local_host(host):
+                # The Controller commonly points ubuntu_host at one of its own
+                # LAN addresses. Avoid an SSH round trip back into the same
+                # machine on every cold desktop mount.
+                x11vnc_running = (
+                    self._is_local_process_running(X11VNC_DISPLAY_PATTERN)
+                    and self._is_local_port_listening(VNC_PORT)
+                    and self._is_local_rfb_healthy()
+                )
+                websockify_running = (
+                    self._is_local_process_running(WEBSOCKIFY_PATTERN)
+                    and self._is_local_port_listening(NOVNC_WEB_PORT)
+                )
+                return {
+                    'running': x11vnc_running and websockify_running,
+                    'vnc_count': int(x11vnc_running),
+                    'port_listening': websockify_running,
+                    'host': host,
+                    'url': novnc_url(host, autoconnect=False),
+                    'local': True,
+                }
+
+            ssh = self.ssh_manager.get_connection(config)
+            if not ssh:
+                return {'running': False, 'error': 'SSH连接失败'}
+
+            check_cmd = "pgrep -f 'x11vnc' | wc -l"
+            count_result = self.ssh_manager.execute_command(ssh, check_cmd)
+
+            vnc_count = (
+                int(count_result.stdout.strip()) if count_result.ok else 0
+            )
+
+            port_check = f"netstat -tuln | grep {NOVNC_WEB_PORT}"
+            port_result = self.ssh_manager.execute_command(ssh, port_check)
+
+            port_listening = (
+                port_result.ok and str(NOVNC_WEB_PORT) in port_result.stdout
+            )
+
+            self.ssh_manager.return_connection(ssh)
+
+            return {
+                'running': vnc_count > 0,
+                'vnc_count': vnc_count,
+                'port_listening': port_listening,
+                'host': host,
+                'url': novnc_url(host, autoconnect=False)
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting VNC status: {e}")
+            return {'running': False, 'error': str(e)}
+
+
+vnc_manager = VNCManager()

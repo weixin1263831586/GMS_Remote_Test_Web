@@ -1,7 +1,7 @@
 # ADR-0005: USB/IP 完整固件烧写的所有权交还（Source-side Flash）
 
 - 状态：已采纳（Accepted）
-- 关联代码：`features/firmware/firmware_api.py`、`features/firmware/usbip_transport.py`、`features/firmware/source_flash.py`、`features/devices/usbip_flash.py`、`features/devices/reconnect.py`、`scripts/windows_source_agent.py`
+- 关联代码：`features/firmware/firmware_api.py`、`features/firmware/usbip_transport.py`、`features/firmware/source_flash.py`、`features/devices/usbip/flash.py`、`features/devices/reconnect.py`、`scripts/execution/windows_source_agent.py`
 
 ## 背景
 
@@ -27,7 +27,7 @@ USB/IP detach 后，设备回到 Windows 源主机，不会出现在 Controller 
 
 ### Windows Source：Source Agent + RKDevTool
 
-采用「文件队列式 Source Agent」（`scripts/windows_source_agent.py`，交互桌面会话常驻，计划任务自启动，可操作 RKDevTool GUI）：
+采用「文件队列式 Source Agent」（`scripts/execution/windows_source_agent.py`，交互桌面会话常驻，计划任务自启动，可操作 RKDevTool GUI）：
 
 1. Controller 通过 SFTP 上传固件到 `C:\gms-flash\<task>\`；
 2. 投递 `<task>.json` 任务（携带固件路径与目标设备 serial）到 `%USERPROFILE%\gms-flash-queue`；

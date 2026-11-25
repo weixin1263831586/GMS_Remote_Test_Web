@@ -213,7 +213,7 @@ class EvidencePipelineFixture:
             redmine_users, "owner_redmine_root", lambda owner: self.root / "owners" / str(owner)
         )
         self.users_patch.start()
-        import features.redmine.evidence_store as evidence_store
+        import features.redmine.evidence.store as evidence_store
         evidence_store._STORE_CACHE.clear()
         self.store_cache_patch = patch.object(evidence_store, "_STORE_CACHE", {})
         self.store_cache_patch.start()
@@ -222,7 +222,7 @@ class EvidencePipelineFixture:
         self.users_patch.stop()
         self.store_cache_patch.stop()
         evidence_store = __import__(
-            "features.redmine.evidence_store", fromlist=["_STORE_CACHE"]
+            "features.redmine.evidence.store", fromlist=["_STORE_CACHE"]
         )
         evidence_store._STORE_CACHE.clear()
         self.directory.cleanup()
@@ -249,7 +249,7 @@ class EvidencePipelineFixture:
                 get_redmine_base_url=lambda: base_url,
             ),
         )
-        import features.redmine.evidence as evidence
+        import features.redmine.evidence.service as evidence
         return patch.object(evidence, "redmine_config_manager", manager)
 
 
@@ -258,7 +258,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_long_journal_preserved_byte_for_byte(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -279,8 +279,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         import asyncio
         import hashlib
 
-        from features.redmine.evidence import EvidenceFetcher
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.store import owner_evidence_store
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -300,7 +300,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_refresh_creates_new_snapshot_and_old_remains(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -316,7 +316,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_partial_when_attachment_fails(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceFetcher, snapshot_completeness
+        from features.redmine.evidence.service import EvidenceFetcher, snapshot_completeness
 
         with FakeRedmineServer() as fake:
             fake.fail_attachment = "776656"
@@ -334,7 +334,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_redirect_to_other_host_rejected(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceFetcher
 
         with FakeRedmineServer() as fake:
             fake.redirect_attachment = "776655"
@@ -343,7 +343,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
                 result = asyncio.run(fetcher.run(fetcher.create_snapshot(648526, download="all")))
         self.assertEqual(result["status"], "partial")
         store = __import__(
-            "features.redmine.evidence_store", fromlist=["owner_evidence_store"]
+            "features.redmine.evidence.store", fromlist=["owner_evidence_store"]
         ).owner_evidence_store("owner-a")
         rows = store.list_artifacts(result["snapshot_id"])
         by_attachment = {row["attachment_id"]: row for row in rows}
@@ -353,7 +353,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_issue_not_found_marks_failed(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
 
         with FakeRedmineServer() as fake:
             fake.issue_not_found = True
@@ -365,8 +365,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_owner_isolation(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceFetcher
-        from features.redmine.evidence_store import owner_evidence_store
+        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.store import owner_evidence_store
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -378,7 +378,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_login_html_rejected(self):
         import asyncio
 
-        from features.redmine.evidence import EvidenceAuthError, EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceAuthError, EvidenceFetcher
 
         with FakeRedmineServer() as fake:
             document = fake.issue_document
@@ -389,7 +389,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
                 # owner-noauth 无凭据（patch 的是 owner-a），应 401
                 # 由于 config patch 对所有 owner 生效，这里直接验证 401 分支：
                 # 临时清空凭据。
-                import features.redmine.evidence as evidence
+                import features.redmine.evidence.service as evidence
                 with patch.object(
                     evidence, "load_owner_credentials",
                     lambda owner: evidence._OwnerCredentials(),
@@ -403,7 +403,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
 
         import aiohttp
 
-        from features.redmine.evidence import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -426,8 +426,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         """凭据缺失的报错必须带自助修复指引（Web UI / API）。"""
         import asyncio
 
-        import features.redmine.evidence as evidence
-        from features.redmine.evidence import EvidenceAuthError, EvidenceFetcher
+        import features.redmine.evidence.service as evidence
+        from features.redmine.evidence.service import EvidenceAuthError, EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -448,13 +448,13 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         """base_url 缺失的报错必须指向 Web UI 设置页。"""
         import asyncio
 
-        from features.redmine.evidence import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
             snapshot = fetcher.create_snapshot(648526, download="none")
             with patch(
-                "features.redmine.evidence.owner_base_url",
+                "features.redmine.evidence.service.owner_base_url",
                 lambda owner: "",
             ), self.assertRaises(EvidenceError) as ctx:
                 asyncio.run(fetcher.run(snapshot))
@@ -465,7 +465,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         """P1 回归：run() 未预期异常时 _runner 兜底必须把快照推进 failed。"""
         import asyncio
 
-        import features.redmine.evidence as evidence
+        import features.redmine.evidence.service as evidence
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = evidence.EvidenceFetcher("owner-a")
@@ -495,11 +495,11 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         import asyncio
         from datetime import datetime, timedelta
 
-        from features.redmine.evidence import EvidenceFetcher
-        from features.redmine.evidence_api import (
+        from features.redmine.evidence.api import (
             EVIDENCE_CACHE_TTL_SECONDS,
             _snapshot_fresh,
         )
+        from features.redmine.evidence.service import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -535,7 +535,7 @@ class RealConfigWiringTests(unittest.TestCase):
     def test_load_owner_credentials_with_real_redmine_config(self):
         from unittest.mock import patch
 
-        import features.redmine.evidence as evidence
+        import features.redmine.evidence.service as evidence
         from features.redmine.config import RedmineConfig
         from foundation.secrets import encrypt_secret
 
@@ -569,7 +569,7 @@ class RealConfigWiringTests(unittest.TestCase):
                         "encrypted_api_key": encrypt_secret("key1"),
                     }
                 }
-                from foundation.config_persistence import ConfigPersistenceMixin  # noqa: F401
+
                 cfg.manager.save_runtime(runtime)
                 creds = evidence.load_owner_credentials("owner-x")
                 self.assertEqual(creds.username, "u1")

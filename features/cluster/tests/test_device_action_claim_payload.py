@@ -3,10 +3,10 @@
 import pytest
 from fastapi import HTTPException
 
-from features.cluster.operation_claims import device_action_claim_payload
+from features.cluster.device_operations.claims import device_action_claim_payload
 from features.cluster.repository import ClusterRepository
-from worker_agent.config import WorkerConfig
-from worker_agent.runtime import WorkerRuntime
+from worker.config import WorkerConfig
+from worker.runtime import WorkerRuntime
 
 
 def test_mixed_claims_cover_all_devices_and_only_release_new_claims(tmp_path):

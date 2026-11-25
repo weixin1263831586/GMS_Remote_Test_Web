@@ -1,10 +1,13 @@
 """Configuration and Tailscale routes - config CRUD, sidebar order, Tailscale status."""
 
 import asyncio
+import json
 import logging
 import os
 import re
 import subprocess
+import threading
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -18,6 +21,7 @@ from features.auth import (
     require_elevated_admin_when_auth_required,
 )
 from foundation.error_model import record_internal_error
+from foundation.private_config import atomic_write_json
 from foundation.responses import error_response, success_response
 from foundation.static_routes import apply_static_routes
 
@@ -28,10 +32,7 @@ from .clients import (
     hide_sensitive_info,
     owner_id_from_request,
 )
-from .navigation_preferences import (
-    load_navigation_preferences,
-    save_navigation_preferences,
-)
+from .storage_paths import owner_storage_key
 
 
 config_manager = runtime.config_manager
@@ -630,3 +631,45 @@ async def save_sidebar_order(
         return error_response("缺少可保存的侧边栏配置", status_code=400)
     saved = save_navigation_preferences(owner_id, updates)
     return success_response(saved)
+
+
+_storage_lock = threading.RLock()
+
+
+def _preferences_path(owner_id: str) -> Path:
+    directory = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory / "navigation.json"
+
+
+def load_navigation_preferences(owner_id: str) -> dict[str, list[str]]:
+    path = _preferences_path(owner_id)
+    with _storage_lock:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            data = {}
+    if not isinstance(data, dict):
+        data = {}
+    return {
+        "order": data.get("order") if isinstance(data.get("order"), list) else [],
+        "visible_pages": (
+            data.get("visible_pages")
+            if isinstance(data.get("visible_pages"), list)
+            else []
+        ),
+    }
+
+
+def save_navigation_preferences(
+    owner_id: str,
+    updates: dict[str, Any],
+) -> dict[str, list[str]]:
+    path = _preferences_path(owner_id)
+    with _storage_lock:
+        current = load_navigation_preferences(owner_id)
+        for key in ("order", "visible_pages"):
+            if key in updates:
+                current[key] = list(updates[key])
+        atomic_write_json(path, current)
+    return current

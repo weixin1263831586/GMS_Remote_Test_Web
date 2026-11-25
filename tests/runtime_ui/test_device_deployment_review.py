@@ -4,7 +4,7 @@ import json
 import time
 from unittest.mock import patch
 
-from features.devices.deployment_api import review_deployment
+from features.devices.deployment.api import review_deployment
 from tests.runtime_ui.harness import RuntimeUiHarness
 
 
@@ -18,7 +18,7 @@ class DeploymentReviewBrowserTests(RuntimeUiHarness):
         state = {"status": "pending", "approvals": 0}
         mutations = []
         page.on("request", lambda request: mutations.append(request.url) if request.method == "POST" else None)
-        with patch("features.devices.deployment_api.deployment_status"):
+        with patch("features.devices.deployment.api.deployment_status"):
             html = review_deployment(None, request_id).body.decode()
 
         def handle(route):
@@ -63,7 +63,7 @@ class DeploymentReviewBrowserTests(RuntimeUiHarness):
         page.clock.install()
         path = "/api/devices/deployments/" + "a" * 32
         state = {"reads": 0, "mutations": 0}
-        with patch("features.devices.deployment_api.deployment_status"):
+        with patch("features.devices.deployment.api.deployment_status"):
             html = review_deployment(None, "a" * 32).body.decode()
 
         def handle(route):

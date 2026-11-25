@@ -1,0 +1,24 @@
+[Unit]
+Description=GMS Redmine Daily Brief durable worker
+Documentation=file://@PROJECT_ROOT@/docs/redmine-daily-brief.md
+After=network-online.target @CONTROLLER_SERVICE@
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=@PYTHON@ -m bootstrap.run_daily_brief_worker
+User=@RUN_USER@
+Group=@RUN_GROUP@
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@PROJECT_ROOT@/data
+# TERM 只发给 Worker；它会对独立进程组中的 kkagent/MCP 做 TERM→KILL 清理。
+KillMode=mixed
+TimeoutStopSec=20s
+
+[Install]
+WantedBy=multi-user.target

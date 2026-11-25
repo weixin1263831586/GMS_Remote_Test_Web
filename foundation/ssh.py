@@ -30,9 +30,10 @@ Restart-Computer
 
 
 def decode_ssh_output(data: bytes) -> str:
-    for encoding in ('utf-8', 'gbk', 'latin-1'):
+    """Decode UTF-8 or GBK SSH output, with lossless Latin-1 byte fallback."""
+    for encoding in ('utf-8', 'gbk'):
         try:
             return data.decode(encoding)
         except UnicodeDecodeError:
             continue
-    return data.decode('utf-8', errors='replace')
+    return data.decode('latin-1')

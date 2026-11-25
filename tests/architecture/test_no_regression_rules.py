@@ -1,8 +1,6 @@
 """Architecture regression guards.
 
-These tests encode the "no architecture regression" rules called out by the
-2026-09-10 source audit.  They are intentionally static-text based (cheap,
-dependency-free) so every regression fails CI at the exact line:
+Static checks enforce architecture constraints at the source line:
 
 1. ``ssh.exec_command(`` — business modules must execute SSH commands via
    ``foundation.ssh_executor``.  Direct calls reintroduce the
@@ -24,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-SCAN_DIRS = ("features", "foundation", "worker_agent", "workflows", "bootstrap")
+SCAN_DIRS = ("features", "foundation", "worker", "bootstrap")
 
 # Business modules may never call exec_command directly.
 EXEC_COMMAND_ALLOWED_FILES = {
@@ -32,7 +30,7 @@ EXEC_COMMAND_ALLOWED_FILES = {
     "foundation/ssh_executor.py",
     # Registered connection-health primitive: needs raw channel timeout
     # semantics (recv_exit_status has no timeout) — see module docstring.
-    "features/system/ssh.py",
+    "features/system/host/ssh.py",
 }
 
 PERSONAL_PATTERNS = {

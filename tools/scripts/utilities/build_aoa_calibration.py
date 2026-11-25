@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
     root = find_repo_root()
-    source = root / "worker_agent/calibration_app/src/main"
+    source = root / "worker/calibration_app/src/main"
     sdk = args.sdk_root.resolve()
     android = sdk / "platforms" / args.platform / "android.jar"
     build_tools = sdk / "build-tools" / args.build_tools

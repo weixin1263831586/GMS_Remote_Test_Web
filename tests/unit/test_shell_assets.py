@@ -61,16 +61,16 @@ def test_real_shell_replaces_only_consecutive_runtime_scripts():
     old_scripts = ScriptSources(old_source).sources
     new_scripts = ScriptSources(source).sources
     start = next(index for index, src in enumerate(old_scripts) if "/shell-client-identity.js" in src)
-    end = next(index for index, src in enumerate(old_scripts) if "/shell-late-init.js" in src) + 1
+    end = next(index for index, src in enumerate(old_scripts) if "/shell-main.js" in src) + 1
     asset = templates.runtime_bundle.asset
-    assert end - start == 14
+    assert end - start == 13
     # 非 bundle 资源保持原始路径，但 ?v= 统一被 ShellAssetVersioner 重写为
     # 内容摘要（旧手工日期标签不再参与），因此断言仅比较 path 部分。
     expected_paths = [src.split("?")[0] for src in old_scripts]
     expected_paths[start:end] = [f"/static/{RUNTIME_PATH}"]  # bundle 合并为一条
     actual_paths = [src.split("?")[0] for src in new_scripts]
     assert actual_paths == expected_paths
-    assert len(new_scripts) == len(old_scripts) - 13
+    assert len(new_scripts) == len(old_scripts) - (end - start - 1)
     # 所有 URL 的 ?v= 均为 12 位内容摘要（手工日期标签已消灭）。
     for src in new_scripts:
         version = src.split("?v=")[-1]

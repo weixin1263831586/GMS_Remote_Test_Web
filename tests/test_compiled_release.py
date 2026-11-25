@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from foundation.native_tools import compiled_worker_members, write_compiled_worker_manifest
 from foundation.runtime_settings import RuntimeSettings
 from scripts.release import build_binary_release as release_builder
 from scripts.release import compiled_entry
@@ -48,9 +49,30 @@ class CompiledReleaseContracts(unittest.TestCase):
             with self.subTest(source=name):
                 ast.parse((ROOT / name).read_text(encoding="utf-8"), filename=name)
 
+    def test_compiled_worker_manifest_excludes_staged_controller_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "gms-runtime"
+            runtime.write_bytes(b"native executable")
+            runtime.chmod(0o755)
+            (root / "libworker.so").write_bytes(b"native library")
+            write_compiled_worker_manifest(root)
+            (root / "configs").mkdir()
+            (root / "configs" / "private.json").write_text("private")
+            self.assertEqual(
+                {name for name, _ in compiled_worker_members(root)},
+                {"gms-runtime", "libworker.so"},
+            )
+            (root / "libworker.so").write_bytes(b"tampered")
+            with self.assertRaisesRegex(RuntimeError, "checksum mismatch"):
+                compiled_worker_members(root)
+
     def test_installer_shell_syntax(self):
-        subprocess.run(["bash", "-n", str(ROOT / "scripts/release/install_compiled.sh")],
-                       check=True, capture_output=True)
+        for name in ("scripts/release/install_compiled.sh", "scripts/deployment/worker/deploy_worker.sh",
+                     "scripts/deployment/worker/configure_worker_software.sh", "scripts/deployment/worker/install_cluster_worker.sh",
+                     "scripts/deployment/worker/install_adb_proxy_source_worker.sh", "scripts/execution/fastboot_common.sh"):
+            subprocess.run(["bash", "-n", str(ROOT / name)],
+                           check=True, capture_output=True)
 
     def test_staged_release_contains_every_embedded_page_without_sources(self):
         """Compiled routes must find their own HTML/CSS/JS and Mermaid sources."""
@@ -68,6 +90,7 @@ class CompiledReleaseContracts(unittest.TestCase):
                 "features/redmine/ui/page.css",
                 "features/automation/ui/page.js",
                 *release_builder.RESOURCE_FILES,
+                *compiled_entry.REQUIRED_SOFTWARE_ASSETS,
             )
             for name in required:
                 file = checkout / name
@@ -82,7 +105,7 @@ class CompiledReleaseContracts(unittest.TestCase):
                 with self.subTest(resource=name):
                     self.assertTrue((staged / name).is_file(), name)
             self.assertFalse((staged / "features/redmine/ui/internal.py").exists())
-            self.assertEqual((staged / "scripts/run_production_backup.sh").stat().st_mode & 0o777, 0o755)
+            self.assertEqual((staged / "scripts/backup/run_production_backup.sh").stat().st_mode & 0o777, 0o755)
             self.assertEqual(inspect(staged), [])
             self.assertTrue(all(compiled_entry._runtime_asset_checks(staged).values()))
 

@@ -1,0 +1,101 @@
+name: Critical Fix legacy bulletin structure diagnostic (read-only)
+
+on:
+  push:
+    branches: ['audit/mainline-gerrit-match-20261124']
+    paths: ['.github/workflows/audit-critical-fix-structure-readonly.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 12
+    steps:
+      - name: Verify dedicated Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Inspect previously failed months without writing the live index
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/cf-diagnostic.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          host="$HOME/GMS_Remote_Test_Web"
+          if ! (cd "$host" && python3 -B -c 'from features.gms.repository import DB_PATH; print(DB_PATH)') >"$scratch/db" 2>"$scratch/error"; then
+            echo 'Cannot resolve Controller database with the host Python runtime.'
+            exit 1
+          fi
+          db=$(tail -n 1 "$scratch/db")
+          test -f "$db"
+          if ! python3 -B -m features.gms.bulletin_diagnostics --db "$db" --timeout 20 >"$scratch/structure" 2>"$scratch/error"; then
+            echo 'Read-only diagnostic did not complete; inspect locally without uploading logs.'
+            exit 1
+          fi
+          python3 - "$scratch/structure" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          count = 0
+          for line in Path(sys.argv[1]).read_text().splitlines():
+              try:
+                  item = json.loads(line)
+              except ValueError:
+                  continue
+              if not isinstance(item, dict) or not re.fullmatch(
+                  r'\d{4} (January|February|March|April|May|June|July|August|September|October|November|December)',
+                  str(item.get('month', '')),
+              ):
+                  continue
+              result = {'month': item['month']}
+              for name in ('http_status', 'toc_count', 'toc_missing_count', 'table_count',
+                           'category_like_heading_count', 'table_rows_with_patch_id',
+                           'empty_notice_candidates', 'unparsed_heading_id_count', 'legacy_sections_count', 'category_block_count', 'empty_category_block_count'):
+                  if type(item.get(name)) is int:
+                      result[name] = item[name]
+              for name in ('article', 'explicitly_empty', 'redirected', 'legacy_sections_complete', 'content_body_found'):
+                  if type(item.get(name)) is bool:
+                      result[name] = item[name]
+              for name, allowed in (('heading_counts', {'h1','h2','h3','h4','h5','h6'}),
+                                    ('classified_counts', {'mandatory','strongly_recommended','recommended','functional_unspecified','unclassified'})):
+                  if isinstance(item.get(name), dict):
+                      result[name] = {k: v for k, v in item[name].items() if k in allowed and type(v) is int}
+              shapes = []
+              allowed_words = set('mandatory required strongly recommended optional functional security critical patch patches fix fixes update updates bug bugs applicable non and or android for on in to all devices device version versions release releases later above there are were is was no none zero not this month bulletin the current available new issue issues id ids a p r qpr # *'.split())
+              for shape in item.get('category_shapes', []):
+                  if (shape.get('tag') in {'h1','h2','h3','h4','h5','h6','p','div'}
+                      and set(str(shape.get('shape', '')).split()) <= allowed_words
+                      and type(shape.get('recognized')) is bool and type(shape.get('count')) is int):
+                      shapes.append({k: shape[k] for k in ('tag','shape','recognized','count')})
+              result['category_shapes'] = shapes
+              result['category_block_shapes'] = []
+              for block in item.get('category_block_shapes', []):
+                  if block.get('kind') in {'mandatory','recommended','strongly_recommended','functional_unspecified'}:
+                      result['category_block_shapes'].append({k: v for k, v in block.items() if k == 'kind' or (k in {'none_count','node_count','text_chars','heading_count','empty'} and type(v) in (int, bool))})
+              for field in ('other_heading_shapes', 'notice_shapes'):
+                  result[field] = []
+                  for shape in item.get(field, []):
+                      if (isinstance(shape, dict)
+                          and set(str(shape.get('shape', '')).split()) <= allowed_words
+                          and type(shape.get('count')) is int
+                          and (field != 'other_heading_shapes' or shape.get('tag') in {'h1','h2','h3','h4','h5','h6'})):
+                          result[field].append({k: shape[k] for k in ('tag','shape','count') if k in shape})
+              print('CF_STRUCTURE=' + json.dumps(result, ensure_ascii=True))
+              count += 1
+          print('DIAGNOSTIC_MONTHS=' + str(count))
+          PY

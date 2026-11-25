@@ -1,7 +1,6 @@
 """Exact native module queries must never silently resolve to a nearby JAR."""
 
-from features.test_execution.suite_module_apk import _pick_suite_module_artifact
-from features.test_execution.suite_modules import normalize_module_query
+from features.test_execution.suite_modules import _pick_suite_module_artifact, normalize_module_query
 
 
 def module(name, filenames):

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_systemd_worker_loads_environment_before_importing_analysis(tmp_path):
-    unit = (ROOT / 'deploy/systemd/gms-redmine-daily-brief-worker.service').read_text()
+    unit = (ROOT / 'scripts/deployment/systemd/gms-redmine-daily-brief-worker.service').read_text()
     command = shlex.split(next(line.split('=', 1)[1] for line in unit.splitlines()
                               if line.startswith('ExecStart=')))
     assert command[1:] == ['-m', 'bootstrap.run_daily_brief_worker']
@@ -24,7 +24,7 @@ def test_systemd_worker_loads_environment_before_importing_analysis(tmp_path):
         target = tmp_path / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(ROOT / relative, target)
-    feature = tmp_path / 'features/redmine/daily_brief_worker.py'
+    feature = tmp_path / 'features/redmine/daily_brief/worker.py'
     feature.parent.mkdir(parents=True)
     feature.write_text('''import os
 

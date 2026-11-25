@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts import _sensitive_keys, check_source_secrets, sanitize_release_config, verify_release_tree
-from scripts.check_source_secrets import find_literal_secret_paths, scan_tracked_files
-from scripts.sanitize_tracked_config import sanitize_config
+from scripts.security import _sensitive_keys, check_source_secrets, sanitize_release_config, verify_release_tree
+from scripts.security.check_source_secrets import find_literal_secret_paths, scan_tracked_files
+from scripts.security.sanitize_tracked_config import sanitize_config
 
 
 class SecurityHardeningTests(unittest.TestCase):
@@ -135,7 +135,7 @@ class SecurityHardeningTests(unittest.TestCase):
             'GMS_INSTALL_INSECURE',
         )
         scanned = [
-            Path('features/system/agent_package_registry.py'),
+            Path('features/system/agent_package/registry.py'),
             Path('agent/gms-remote-test/runtime/gms-agent'),
             Path('agent/gms-remote-test/runtime/gms_agent/package_manager.py'),
         ]

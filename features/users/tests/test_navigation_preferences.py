@@ -9,14 +9,14 @@ from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.users import config_api, navigation_preferences
+from features.users import config_api
 
 
 class NavigationPreferencesTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.data_root_patch = patch.object(
-            navigation_preferences.runtime.get_runtime(),
+            config_api.runtime.get_runtime(),
             "data_root",
             Path(self.tmp.name),
         )

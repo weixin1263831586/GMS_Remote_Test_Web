@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.reports.service import _contained_log_dir, _report_suite_root
+from features.reports.downloads import _contained_log_dir, _report_suite_root
 
 
 class ReportSuiteRootTests(unittest.TestCase):

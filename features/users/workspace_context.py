@@ -20,11 +20,12 @@ from typing import Literal
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field, field_validator
 
+from foundation.private_config import atomic_write_json
 from foundation.responses import success_response
 
 from . import runtime
 from .clients import owner_id_from_request
-from .storage_paths import atomic_write_json, owner_storage_key
+from .storage_paths import owner_storage_key
 
 
 router = APIRouter(prefix="/api/users/workspace-context")

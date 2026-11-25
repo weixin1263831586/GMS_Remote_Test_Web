@@ -1,20 +1,8 @@
-name: Tracked-source comment hygiene audit
+name: Repository comment and documentation audit
 on:
   push:
-    branches: [main, 'ui/**']
-    paths:
-      - '**/*.py'
-      - '**/*.js'
-      - '**/*.css'
-      - '**/*.html'
-      - '**/*.sh'
-      - '**/*.ts'
-      - '**/*.tsx'
-      - '**/*.rs'
-      - '*.py'
-      - '*.sh'
-      - 'tools/scripts/maintenance/audit_comment_hygiene.py'
-      - '.github/workflows/comment-hygiene-audit.yml'
+    branches: [main, 'ui/**', 'audit/**', 'fix/**', 'refactor/**']
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -22,12 +10,12 @@ permissions:
 
 jobs:
   audit-comments:
-    name: Check stale comments in all tracked sources (read-only)
+    name: Check tracked comments and documentation
     runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
-      - name: Scan all tracked source files without changing them
+      - name: Scan tracked files (read-only)
         run: python3 tools/scripts/maintenance/audit_comment_hygiene.py

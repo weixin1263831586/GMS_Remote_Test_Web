@@ -11,9 +11,6 @@ from pydantic import BaseModel, Field
 
 from features.assistant.context import record_user_message, update_context
 from features.assistant.executor import executor
-from features.assistant.payloads import jsonable as _jsonable
-from features.assistant.payloads import session_payload as _session_payload
-from features.assistant.plan_submission import submit_pending_plan_once
 from features.assistant.response import (
     WEBAPP_PAGES,
     generate_capability_overview,
@@ -24,27 +21,27 @@ from features.assistant.response import (
 from features.assistant.response import (
     generate as gen_response,
 )
-from features.assistant.session_directory import (
-    _restore_session_from_transcript as _restore_session_from_transcript,
-)
-from features.assistant.session_directory import (
-    _session_directory,
-    delete_session,
-)
-from features.assistant.session_directory import (
-    _session_directory_entry as _session_directory_entry,
-)
 from features.assistant.session_log import (
     _append_message,
     _append_step,
     _format_params,
     append_recovery_step,
 )
+from features.assistant.session_log import jsonable as _jsonable
+from features.assistant.session_log import session_payload as _session_payload
 from features.assistant.session_registry import (
     AgentRequestShim,
     _agent_monitor_tasks,
     _agent_sessions,
+    _session_directory,
     cleanup_due,
+    delete_session,
+)
+from features.assistant.session_registry import (
+    _restore_session_from_transcript as _restore_session_from_transcript,
+)
+from features.assistant.session_registry import (
+    _session_directory_entry as _session_directory_entry,
 )
 from features.assistant.session_registry import (
     cleanup_sessions as _cleanup_sessions,
@@ -64,6 +61,7 @@ from features.assistant.session_registry import (
 from features.assistant.test_runs import (
     _execute_plan,
     _monitor_agent_run,
+    submit_pending_plan_once,
 )
 from features.assistant.tools import registry
 from features.assistant.workflow_draft import (
@@ -214,7 +212,7 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             session["pending_plan"] = None
             session["status"] = "monitoring" if (session.get("active_run") or {}).get("redmine_run_id") else "idle"
         elif pending_plan.get("type") == "test_execution":
-            # 确认提交状态机在 plan_submission：同一计划只提交一次。
+            # 确认提交状态机在 test_runs：同一计划只提交一次。
             result, repeat_hint = await submit_pending_plan_once(
                 pending_plan,
                 lambda _plan: _execute_plan(session, request, pending_plan))

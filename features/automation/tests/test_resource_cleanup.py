@@ -9,9 +9,8 @@ import pytest
 from features.automation.executor_contract import StubAutomationExecutor
 from features.automation.executors import HttpAutomationExecutor
 from features.automation.models import AutomationRunCreateRequest
-from features.automation.orchestrator import AutomationOrchestrator
+from features.automation.orchestrator import AutomationOrchestrator, cleanup_state
 from features.automation.repository import RUN_COLUMNS, AutomationStore
-from features.automation.resource_cleanup import cleanup_state
 from features.cluster import ClusterRepository
 
 
@@ -136,7 +135,7 @@ def test_legacy_completed_run_is_repaired_and_keeps_completion_status(context, m
     monkeypatch.setattr(worker, 'poll_running_builds_sync', poll)
     monkeypatch.setattr(worker, 'sweep_waiting_device_timeouts', lambda *args, **kwargs: 0)
     monkeypatch.setattr(worker, 'sweep_active_stage_timeouts', lambda *args, **kwargs: {})
-    monkeypatch.setattr('features.automation.execution_policy.enforce_extra_timeouts', lambda *args: None)
+    monkeypatch.setattr('features.automation.worker.enforce_extra_timeouts', lambda *args: None)
     monkeypatch.setattr('features.cluster.run_artifact_retention', lambda: None)
     monkeypatch.setattr(worker, '_last_ops_sweep_at', worker.time.monotonic())
     monkeypatch.setattr(worker, '_last_disk_hygiene_at', worker.time.monotonic())

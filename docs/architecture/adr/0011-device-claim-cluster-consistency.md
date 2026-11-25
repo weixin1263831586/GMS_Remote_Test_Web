@@ -34,7 +34,7 @@ Python 的 `try/except → compensate()` 只能处理正常异常，处理不了
 进单连接只是把两个库绑在一条连接上，崩溃语义不变，收益有限、风险更大。
 
 因此保留双库，用**启动期对账**把 split-brain 收敛到可自愈状态
-（`features/cluster/repository.py: reconcile_claims()`，在 `__init__` 中调用）：
+（`features/cluster/repository/reconciliation.py: reconcile_claims()`，在 `__init__` 中调用）：
 
 | 漂移 | 修复 |
 | --- | --- |

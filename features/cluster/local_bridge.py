@@ -15,10 +15,9 @@ from typing import Any
 
 from foundation.config import settings
 from foundation.host_metrics import collect_host_metrics
-from worker_agent.inventory import aoa_capabilities, probe_devices
-from worker_agent.process_inventory import discover_tradefed_processes
-from worker_agent.suite_actions import tradefed_launcher_families
-from worker_agent.suite_detection import suite_details
+from worker.inventory import aoa_capabilities, probe_devices
+from worker.process_inventory import discover_tradefed_processes
+from worker.suite_actions import scan_suite_roots, tradefed_launcher_families
 
 from .config import ClusterConfig, normalize_max_jobs
 from .repository import ClusterRepository
@@ -31,38 +30,6 @@ AGENT_VERSION = "controller-0.1.0"
 def _probe_devices() -> list[dict[str, Any]]:
     """Return locally attached ADB / Fastboot devices in Worker format."""
     return probe_devices(include_details=True)
-
-
-def _scan_suites(roots: list[Path]) -> list[dict[str, Any]]:
-    suites: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    names = {"cts-tradefed", "gts-tradefed", "vts-tradefed", "sts-tradefed",
-             "cts-v-host-tradefed"}
-    for root in roots:
-        if not root.exists():
-            continue
-        for current, dirs, files in os.walk(root):
-            depth = len(Path(current).relative_to(root).parts)
-            if depth > 5:
-                dirs[:] = []
-                continue
-            for filename in names.intersection(files):
-                executable = Path(current) / filename
-                tools_path = str(executable.parent)
-                if tools_path in seen:
-                    continue
-                seen.add(tools_path)
-                suite_type, version = suite_details(executable)
-                suites.append({
-                    "suite_type": suite_type,
-                    "suite_version": version,
-                    "suite_key": f"{suite_type}:{version or executable.parent.parent.name}",
-                    "tools_path": tools_path,
-                    "checksum": "",
-                    "size_bytes": 0,
-                    "available": os.access(executable, os.X_OK),
-                })
-    return suites
 
 
 def _host_metrics() -> dict[str, float | int | None]:
@@ -78,6 +45,12 @@ def _suite_roots() -> list[Path]:
     configured = Path(config.get("suites_path") or default)
     return list({configured, default, Path("/opt/GMS-Suite"),
                  Path.home() / "GMS-Suite"})
+
+
+
+def scan_local_suites() -> list[dict[str, Any]]:
+    """Controller-local suite inventory through the Worker execution boundary."""
+    return scan_suite_roots(_suite_roots())
 
 
 class LocalWorkerBridge:
@@ -105,7 +78,7 @@ class LocalWorkerBridge:
 
     def _registration(self) -> dict[str, Any]:
         from foundation.config import config_manager
-        from worker_agent.adb_proxy import capability_status
+        from worker.adb_proxy import capability_status
 
         config = config_manager.load_config()
         ubuntu_user = config_manager.get_ubuntu_user(config)
@@ -164,7 +137,7 @@ class LocalWorkerBridge:
         if self._real_agent_active():
             return
         from features.devices import local_proxy_secret
-        from worker_agent.adb_proxy import execute_adb_proxy_action, recover_managed_state
+        from worker.adb_proxy import execute_adb_proxy_action, recover_managed_state
 
         try:
             recovery = recover_managed_state(secret=local_proxy_secret())
@@ -184,7 +157,7 @@ class LocalWorkerBridge:
         include_suites = (not self._suites
                           or now_mono - self._last_suite_scan >= self._suite_scan_interval)
         if include_suites:
-            self._suites = _scan_suites(_suite_roots())
+            self._suites = scan_local_suites()
             self._last_suite_scan = now_mono
         try:
             adb_proxy_status = execute_adb_proxy_action("status")

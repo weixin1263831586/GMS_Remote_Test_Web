@@ -14,8 +14,8 @@ from unittest.mock import patch
 import aiohttp
 import pytest
 
-from features.redmine.evidence_fetch import EvidenceFetcher
-from features.redmine.evidence_store import EvidenceStore
+from features.redmine.evidence.fetch import EvidenceFetcher
+from features.redmine.evidence.store import EvidenceStore
 
 
 class _BrokenStream:
@@ -267,7 +267,7 @@ async def test_attachment_failure_removes_part_after_pipeline_exits(tmp_path, mo
     if failure == "disk":
         def fail_sync(*_args):
             raise OSError("disk write failed")
-        monkeypatch.setattr("features.redmine.evidence_fetch.os.fsync", fail_sync)
+        monkeypatch.setattr("features.redmine.evidence.fetch.os.fsync", fail_sync)
     task = asyncio.create_task(fetcher._download_attachment(
         Session(), "https://redmine.example", {"id": "123", "filename": "a.bin"},
         {}, artifact, snapshot_dir,

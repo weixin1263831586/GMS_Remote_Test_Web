@@ -11,7 +11,15 @@ exclude = [
     ".git",
     ".claude",
     "__pycache__",
-    "tools",
+    # Exclude external tools, not project-maintained tools/scripts/.
+    "tools/GMS-Host-Tools",
+    "tools/adbproxy-rs",
+    "tools/android-internals-wiki",
+    "tools/gms-worker-native",
+    "tools/jadx",
+    "tools/tesseract",
+    "tools/usbip",
+    "tools/upgrade_tool",
     "vendor",
     "web/static/vendor",
     "data",
@@ -19,7 +27,6 @@ exclude = [
     "data.pre_identity_migration_backup",
     "remote-run-server",
     "rk-skills",
-    "scripts_local",
     "skills",
 ]
 
@@ -62,7 +69,6 @@ known-first-party = [
     "bootstrap",
     "features",
     "foundation",
-    "workflows",
 ]
 force-single-line = false
 lines-after-imports = 2
@@ -74,7 +80,8 @@ indent-style = "space"
 line-ending = "lf"
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "features", "worker_agent/tests"]
+# Agent source/generated and CodeSearch tests use separate Makefile targets.
+testpaths = ["tests", "features", "foundation/tests", "worker/tests"]
 pythonpath = ["."]
 norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
 addopts = ["-p", "no:xonsh"]

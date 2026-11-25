@@ -17,7 +17,7 @@ EMBEDDED_UI = (
     "features/automation/ui/page.html",
     "features/cluster/ui/page.html",
     "features/devices/ui/page.html",
-    "features/system/update_radar/ui/page.html",
+    "features/gms/radar/ui/page.html",
 )
 
 
@@ -79,7 +79,7 @@ def test_embedded_documents_load_the_same_skin_after_modal_base():
         assert source.index('href="/static/css/modal.css?') < source.index(
             'href="/static/css/modal-tech.css?'
         ), path
-    radar = (ROOT / "features/system/update_radar/ui/page.html").read_text(
+    radar = (ROOT / "features/gms/radar/ui/page.html").read_text(
         encoding="utf-8"
     )
     assert radar.index("update-radar-settings.css?") < radar.index(

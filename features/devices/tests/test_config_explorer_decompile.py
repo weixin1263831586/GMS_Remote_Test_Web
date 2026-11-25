@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.devices import config_explorer_api as api
+from features.devices.configuration import config_explorer_api as api
 from foundation.config import APK_MAX_FILE_SIZE
 
 

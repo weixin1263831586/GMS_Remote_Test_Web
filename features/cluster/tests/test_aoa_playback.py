@@ -59,7 +59,7 @@ class PlaybackControlTests(ClusterApiHardeningFixture, unittest.TestCase):
         self.assertEqual(latest["payload"]["action"], "cancel")
 
     def test_multiple_events_at_same_step_are_not_deduplicated(self):
-        from features.cluster.device_action_operations import _local_aoa_progress_reporter
+        from features.cluster.device_operations.execution import _local_aoa_progress_reporter
 
         original = self.playback()
         _, report = _local_aoa_progress_reporter(self.repo, original)

@@ -1,7 +1,7 @@
 # ADR-0006: Agent Service 边界 —— Service Token / Approval Token / Enrollment
 
 - 状态：已采纳（Accepted）
-- 关联代码：`features/auth/agent_tokens.py`、`features/auth/approval_tokens.py`、`features/auth/agent_api.py`、`features/auth/access.py`、`features/auth/constants.py`、`features/firmware/firmware_api.py`（burn 授权门）、`features/test_execution/execution_api.py`、`features/cluster/device_actions_api.py`、`agent/gms-remote-test/runtime/mcp_server.py`、`tests/architecture/test_review_markers.py`
+- 关联代码：`features/auth/agent_tokens.py`、`features/auth/approval_tokens.py`、`features/auth/agent_api.py`、`features/auth/access.py`、`features/auth/constants.py`、`features/firmware/firmware_api.py`（burn 授权门）、`features/test_execution/execution_api.py`、`features/cluster/device_operations/api.py`、`agent/gms-remote-test/runtime/mcp_server.py`、`tests/architecture/test_review_markers.py`
 
 ## 背景
 

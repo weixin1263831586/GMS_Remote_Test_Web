@@ -2,7 +2,7 @@
 """Inventory every tracked file and surface verifiable repository drift.
 
 This is a diagnostic scan, not a claim that every execution path was tested.
-Hard errors: unparsable first-party Python or missing shared SVG symbols.
+Hard errors: unparsable first-party Python, missing shared SVG symbols, broken repository documentation links or missing first-party Python import targets.
 Other signals remain review candidates until traced through callers/tests.
 """
 from __future__ import annotations
@@ -15,6 +15,7 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 from hashlib import sha256
+from importlib.util import resolve_name
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -24,15 +25,34 @@ from _common import find_repo_root
 
 
 ROOT = find_repo_root()
+sys.path.insert(0, str(ROOT))
+from tests.architecture._size_ratchet import (  # noqa: E402
+    BACKEND_SOURCE_SUFFIXES,
+    FRONTEND_SOURCE_SUFFIXES,
+    MAX_SOURCE_LINES,
+    THIRD_PARTY_PREFIXES,
+)
+
+
 SPRITE = ROOT / "web/static/icons/ui.svg"
 RE_ICON = re.compile(r"ui\.svg#([a-z][a-z0-9-]*)")
 RE_LINK = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 RE_MARKER = re.compile(r"\b(?:TODO|FIXME|HACK)\b")
 SCAN_SUFFIXES = {".py", ".js", ".ts", ".html", ".css", ".md", ".mmd",
-                 ".json", ".yml", ".yaml", ".sh", ".svg", ".toml"}
-OWNED_PY = ("features/", "foundation/", "bootstrap/", "worker_agent/",
-            "workflows/", "agent/gms-remote-test/", "scripts/", "tests/",
-            "tools/scripts/")
+                 ".json", ".yml", ".yaml", ".sh", ".svg", ".toml",
+                 *BACKEND_SOURCE_SUFFIXES, *FRONTEND_SOURCE_SUFFIXES}
+SOURCE_SUFFIXES = BACKEND_SOURCE_SUFFIXES | FRONTEND_SOURCE_SUFFIXES
+RE_RETIRED_SDK = re.compile(r"features(?:\.system\.source_|/system/source_)")
+RE_SIZE_SPLIT = re.compile(
+    r"(?:行数上限|行数门禁|architecture\s+size limit|below its architecture|api\.py size budget)",
+    re.IGNORECASE,
+)
+
+OWNED_PY = ("features/", "foundation/", "bootstrap/", "worker/",
+            "agent/gms-remote-test/", "scripts/", "tests/",
+            "tools/scripts/", "plugins/codesearch/")
+# Retired package roots remain in the import checker to catch stale references.
+LOCAL_IMPORT_ROOTS = {"features", "foundation", "bootstrap", "worker", "workflows", "scripts_local", "tests"}
 EXTERNAL = ("http:", "https:", "mailto:", "tel:", "//")
 
 
@@ -43,8 +63,144 @@ def tracked_files() -> list[str]:
                   for part in result.stdout.split(b"\0") if part)
 
 
+def repository_modules(names: list[str]) -> set[str]:
+    """Index first-party Python modules and their namespace packages without importing them."""
+    modules = set()
+    for name in names:
+        path = Path(name)
+        if path.suffix != ".py" or path.parts[0] not in LOCAL_IMPORT_ROOTS:
+            continue
+        parts = path.with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        modules.update(".".join(parts[:index]) for index in range(1, len(parts) + 1))
+    return modules
+
+
+def module_exports(names: list[str]) -> dict[str, set[str]]:
+    """Index statically declared exports, skipping dynamic or wildcard modules."""
+    result = {}
+    for name in names:
+        path = Path(name)
+        if path.suffix != ".py" or path.parts[0] not in LOCAL_IMPORT_ROOTS:
+            continue
+        try:
+            syntax = ast.parse((ROOT / path).read_text(encoding="utf-8"), filename=name)
+        except (OSError, SyntaxError, UnicodeError):
+            continue
+        nodes = list(ast.walk(syntax))
+        if any(
+            (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "__getattr__")
+            or (isinstance(node, ast.ImportFrom) and any(alias.name == "*" for alias in node.names))
+            or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in {"exec", "globals", "setattr"})
+            for node in nodes
+        ):
+            continue
+        exports = {"__name__", "__path__", "__file__", "__package__", "__all__",
+                   "__spec__", "__loader__", "__doc__", "__dict__", "__builtins__", "__annotations__"}
+        for node in nodes:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                exports.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                exports.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                exports.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+        parts = path.parent.parts if path.name == "__init__.py" else path.with_suffix("").parts
+        result[".".join(parts)] = exports
+    return result
+
+
+def literal_dynamic_targets(tree: ast.AST, package: str = "") -> list[tuple[ast.Call, str]]:
+    """Resolve statically identifiable dynamic imports."""
+    importlib_names = {"importlib"}
+    functions = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            importlib_names.update(alias.asname or alias.name for alias in node.names
+                                   if alias.name == "importlib")
+        elif isinstance(node, ast.ImportFrom) and node.module == "importlib" and not node.level:
+            functions.update(alias.asname or alias.name for alias in node.names
+                             if alias.name == "import_module")
+    result = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        is_import_module = (
+            isinstance(func, ast.Name) and func.id in functions
+        ) or (
+            isinstance(func, ast.Attribute) and func.attr == "import_module"
+            and isinstance(func.value, ast.Name) and func.value.id in importlib_names
+        )
+        is_builtin = isinstance(func, ast.Name) and func.id == "__import__"
+        if not (is_import_module or is_builtin):
+            continue
+        keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+        arg = node.args[0] if node.args else keywords.get("name")
+        if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
+            continue
+        target = arg.value
+        if is_import_module and target.startswith("."):
+            relative_package = node.args[1] if len(node.args) > 1 else keywords.get("package")
+            if isinstance(relative_package, ast.Constant) and isinstance(relative_package.value, str):
+                base = relative_package.value
+            elif isinstance(relative_package, ast.Name) and relative_package.id == "__package__":
+                base = package
+            else:
+                continue
+            if not base:
+                continue
+            try:
+                target = resolve_name(target, base)
+            except ImportError:
+                continue
+        result.append((node, target))
+    return result
+
+def missing_local_imports(name: str, tree: ast.AST, modules: set[str],
+                          exports: dict[str, set[str]]) -> list[dict]:
+    """Check explicit local import targets, including deferred and relative imports."""
+    findings = []
+    package = ".".join(Path(name).parent.parts)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            target = node.module or ""
+            if node.level:
+                if not package or package.split(".")[0] not in LOCAL_IMPORT_ROOTS:
+                    continue
+                try:
+                    target = resolve_name("." * node.level + target, package)
+                except ImportError:
+                    findings.append({"kind": "missing_local_import", "path": name,
+                                     "line": node.lineno, "target": "." * node.level + target})
+                    continue
+            targets = [target]
+            if target in exports:
+                targets.extend(f"{target}.{alias.name}" for alias in node.names
+                               if alias.name != "*" and alias.name not in exports[target])
+        else:
+            continue
+        for target in targets:
+            if target.split(".")[0] in LOCAL_IMPORT_ROOTS and target not in modules:
+                findings.append({"kind": "missing_local_import", "path": name,
+                                 "line": node.lineno, "target": target})
+    # Negative import tests intentionally exercise missing modules; application
+    # literal dynamic references, not test expectations, are the contract here.
+    if not name.startswith("tests/") and "/tests/" not in name:
+        for node, target in literal_dynamic_targets(tree, package):
+            if target.split(".")[0] in LOCAL_IMPORT_ROOTS and target not in modules:
+                findings.append({"kind": "missing_local_import", "path": name,
+                                 "line": node.lineno, "target": target})
+    return findings
+
+
 def examine() -> dict:
     names = tracked_files()
+    modules = repository_modules(names)
+    exports = module_exports(names)
     declared = set(re.findall(r'<symbol\s+id="([^"]+)"',
                               SPRITE.read_text(encoding="utf-8")))
     manifest = []
@@ -53,6 +209,10 @@ def examine() -> dict:
     duplicates = defaultdict(list)
     findings = []
     icon_usage = Counter()
+    source_groups = Counter()
+    oversized = []
+    retired_sdk = []
+    size_split_candidates = []
     for name in names:
         path = ROOT / name
         if not path.is_file():
@@ -64,16 +224,34 @@ def examine() -> dict:
         area = name.split("/", 1)[0]
         areas[area] += 1
         kinds[suffix or "(no extension)"] += 1
-        is_text = suffix in SCAN_SUFFIXES and b"\0" not in raw
+        is_source = not name.startswith(THIRD_PARTY_PREFIXES) and (
+            suffix in SOURCE_SUFFIXES or (not suffix and raw.startswith(b"#!"))
+        )
+        is_text = (suffix in SCAN_SUFFIXES or is_source) and b"\0" not in raw
         record = {"path": name, "area": area, "type": suffix,
                   "bytes": len(raw), "sha256": digest,
                   "scanned_as_text": is_text}
         if is_text:
             source = raw.decode("utf-8", errors="replace")
-            record["lines"] = source.count("\n") + int(bool(source) and not source.endswith("\n"))
-            if name.startswith(OWNED_PY) and suffix == ".py":
+            record["lines"] = len(source.splitlines())
+            if is_source:
+                parts = Path(name).parts
+                domain = "/".join(parts[:2]) if parts[0] == "features" else parts[0]
+                source_groups[domain] += 1
+                if record["lines"] > MAX_SOURCE_LINES:
+                    item = {"kind": "source_line_limit", "path": name, "lines": record["lines"]}
+                    oversized.append(item)
+                    findings.append(item)
+                if name.startswith(OWNED_PY) and "/tests/" not in name and not name.startswith("tests/"):
+                    if name != "tools/scripts/maintenance/audit_repository_inventory.py" and RE_RETIRED_SDK.search(source):
+                        retired_sdk.append(name)
+                        findings.append({"kind": "retired_sdk_reference", "path": name})
+                    if suffix == ".py" and RE_SIZE_SPLIT.search(source):
+                        size_split_candidates.append(name)
+            if suffix == ".py" and ("/" not in name or name.startswith(OWNED_PY)):
                 try:
-                    ast.parse(source, filename=name)
+                    syntax_tree = ast.parse(source, filename=name)
+                    findings.extend(missing_local_imports(name, syntax_tree, modules, exports))
                 except SyntaxError as exc:
                     findings.append({"kind": "python_syntax", "path": name,
                                      "line": exc.lineno, "detail": exc.msg})
@@ -99,8 +277,8 @@ def examine() -> dict:
             markers = RE_MARKER.findall(source)
             if markers and not name.startswith(("tests/", "plugins/")):
                 record["markers"] = len(markers)
-            if name.startswith(("features/", "foundation/", "bootstrap/", "worker_agent/",
-                                "web/", "scripts/", "tools/scripts/", "workflows/")):
+            if name.startswith(("features/", "foundation/", "bootstrap/", "worker/",
+                                "web/", "scripts/", "tools/scripts/")):
                 duplicates[digest].append(name)
         manifest.append(record)
 
@@ -109,7 +287,8 @@ def examine() -> dict:
     # Duplicate bytes alone do not prove a dead file. Inspect the groups manually.
     critical = [issue for issue in findings
                 if issue["kind"] in {"tracked_missing", "python_syntax",
-                                    "missing_ui_symbol"}]
+                                    "missing_ui_symbol", "broken_doc_link", "missing_local_import",
+                                     "source_line_limit", "retired_sdk_reference"}]
     return {
         "summary": {
             "tracked_files": len(names),
@@ -120,6 +299,13 @@ def examine() -> dict:
             "critical": len(critical),
             "findings": len(findings),
             "identical_owned_groups": len(duplicate_groups),
+        },
+        "source_layout": {
+            "groups": dict(sorted(source_groups.items())),
+            "source_files": sum(source_groups.values()),
+            "over_limit": oversized,
+            "retired_sdk_references": sorted(retired_sdk),
+            "size_split_candidates": sorted(size_split_candidates),
         },
         "areas": dict(sorted(areas.items())),
         "types": dict(sorted(kinds.items())),
@@ -139,6 +325,7 @@ def main() -> int:
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "repository-inventory.json").write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    print("LAYOUT_AUDIT=" + json.dumps(data["source_layout"], ensure_ascii=True), flush=True)
     summary = data["summary"]
     lines = [
         "# Current repository source inventory",

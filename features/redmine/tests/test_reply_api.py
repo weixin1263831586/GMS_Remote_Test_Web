@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 from starlette.datastructures import Headers, UploadFile
 
-from features.redmine import reply_api
+from features.redmine.reply import api as reply_api
 
 
 class _FakeForm(dict):
@@ -127,7 +127,7 @@ class RedmineReplyValidationTests(unittest.IsolatedAsyncioTestCase):
         form = _FakeForm({"issue_id": "42", "reply_text": "hello", "files": [upload]})
         with patch.object(reply_api, "get_redmine_config_for_request", return_value=_manager()), \
                 patch.object(reply_api, "RedmineClient", _ok_client()), \
-                self.assertLogs("features.redmine.reply_api", level="INFO") as logs:
+                self.assertLogs("features.redmine.reply.api", level="INFO") as logs:
             response = await reply_api.redmine_reply(
                 _FakeRequest("multipart/form-data", form=form), _user=None
             )

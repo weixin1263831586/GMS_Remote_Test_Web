@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.sanitize_release_config import sanitize_file, sanitize_product_config
-from scripts.verify_release_tree import verify_release_tree
+from scripts.security.sanitize_release_config import sanitize_file, sanitize_product_config
+from scripts.security.verify_release_tree import verify_release_tree
 
 
 class ReleasePackagingTests(unittest.TestCase):
@@ -147,7 +147,7 @@ class ReleasePackagingTests(unittest.TestCase):
 
     def test_installer_adds_limited_networkmanager_policy_for_service_user(self):
         installer = Path("install.sh").read_text(encoding="utf-8")
-        policy = Path("scripts/install_networkmanager_policy.sh").read_text(
+        policy = Path("scripts/deployment/install_networkmanager_policy.sh").read_text(
             encoding="utf-8"
         )
 
@@ -326,3 +326,10 @@ class ReleasePackagingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_release_verifier_rejects_local_audit_repair_tool(tmp_path):
+    script = tmp_path / 'tools/scripts/maintenance/repair_audit_chain.py'
+    script.parent.mkdir(parents=True)
+    script.write_text('# maintenance only\n', encoding='utf-8')
+    assert any('repair_audit_chain.py' in finding for finding in verify_release_tree(tmp_path))

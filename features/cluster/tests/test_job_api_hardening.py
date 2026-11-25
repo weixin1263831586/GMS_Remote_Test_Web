@@ -106,8 +106,8 @@ class ClusterJobApiHardeningTests(unittest.TestCase):
     def _commit_job_without_dispatch(self, *, devices=None):
         from types import SimpleNamespace
 
-        from features.cluster.job_requests import request_fingerprint
-        from features.cluster.jobs_api import _create_job
+        from features.cluster.jobs.api import _create_job
+        from features.cluster.jobs.requests import request_fingerprint
         from features.cluster.models import ClusterJobCreate
 
         payload = self._idempotent_job_payload()

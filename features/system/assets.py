@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import FileResponse, JSONResponse
 
 from features.auth import CurrentUser, require_elevated_admin_when_auth_required
+from features.system.host.ssh import ssh_manager
 from features.system.icon_fetcher import IconFetcher
-from features.system.ssh import ssh_manager
 from foundation.config import DEFAULT_FAVICON_TIMEOUT, MAX_BATCH_SIZE, config_manager
 from foundation.error_model import ApiError
 from foundation.errors import handle_api_errors

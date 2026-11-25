@@ -1,0 +1,20 @@
+[Unit]
+Description=GMS Redmine Daily Brief (morning delta refresh)
+Documentation=file://@PROJECT_ROOT@/docs/redmine-daily-brief.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=@PYTHON@ -m features.redmine.daily_brief.cli run-delta
+User=@RUN_USER@
+Group=@RUN_GROUP@
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@PROJECT_ROOT@/data
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

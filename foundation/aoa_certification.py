@@ -8,8 +8,9 @@ import math
 import re
 
 from .aoa_calibration import complete_context, five_point_calibration_points
-from .aoa_display import rect, standard_point
+from .aoa_display import MAX_SAFE_INPUT_ERROR_PX, rect, standard_point
 from .aoa_hid_mode import hid_registrations
+from .aoa_profile import AOA_HID_TOUCH_SCREEN
 
 
 MAX_CERTIFICATE_BYTES = 196608
@@ -18,7 +19,7 @@ CASE_KEYS = ("fingerprint", "display", "density", "rotation", "display_route", "
 
 
 def descriptor_sha256():
-    descriptor = dict(hid_registrations("direct"))[3]
+    descriptor = dict(hid_registrations("direct"))[AOA_HID_TOUCH_SCREEN]
     return hashlib.sha256(descriptor).hexdigest()
 
 
@@ -120,7 +121,7 @@ def validate_reference_evidence(evidence):
     for rotation in range(4):
         errors = [math.dist(standard_point(*hid, context["display"], rotation, inputs["viewport"]), cooked)
                   for hid, cooked in measured.items()]
-        if max(errors) <= 8:
+        if max(errors) <= MAX_SAFE_INPUT_ERROR_PX:
             fits.append((rotation, max(errors)))
     if len(fits) != 1:
         raise ValueError("observed HID input is not a uniquely verified standard direct transform")

@@ -7,8 +7,8 @@ from urllib.parse import urlsplit
 
 from features.auth import authentication_required, secure_cookies_enabled
 from features.cluster import worker_tokens
+from features.system.agent_package.signing import skill_verify_key_b64
 from features.system.metrics import metrics_token
-from features.system.skill_archive_signing import skill_verify_key_b64
 from foundation.runtime_settings import allowed_origins, is_production_environment
 from foundation.secrets import validate_secret_configuration
 from foundation.security_audit import security_audit_logger
@@ -17,6 +17,22 @@ from foundation.security_audit import security_audit_logger
 def _require_secret(name: str, value: str, minimum: int = 32) -> None:
     if len(str(value or "").strip()) < minimum:
         raise RuntimeError(f"{name} must contain at least {minimum} characters")
+
+
+def _validate_https_origin(origin: str) -> None:
+    """Reject entries that cannot match a browser's exact Origin header."""
+    message = "GMS_ALLOWED_ORIGINS must contain exact HTTPS origins in production"
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except ValueError as exc:
+        raise RuntimeError(message) from exc
+    if (parsed.scheme != "https" or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path or parsed.query or parsed.fragment
+            or "*" in parsed.netloc or any(ch.isspace() or ord(ch) < 32 for ch in origin)
+            or origin != f"https://{parsed.netloc}" or port == 0):
+        raise RuntimeError(message)
 
 
 def validate_production_security_configuration() -> None:
@@ -39,8 +55,8 @@ def validate_production_security_configuration() -> None:
     # the agent package trust chain must not silently
     # degrade to SHA-only in production — manifest SHA and artifact come
     # from the same Controller, so only the Ed25519 signature forms a real
-    # release trust chain. configs/runtime.json supplies the key via
-    # GMS_SKILL_SIGNING_KEY_FILE (see configs/examples/runtime.example.json).
+    # release trust chain. The runtime environment supplies the signing key path
+    # via GMS_SKILL_SIGNING_KEY_FILE (see configs/examples/runtime.example.json).
     if not skill_verify_key_b64().strip():
         raise RuntimeError(
             "GMS_SKILL_SIGNING_KEY_FILE must contain an Ed25519 signing key "
@@ -69,12 +85,4 @@ def validate_production_security_configuration() -> None:
     if not origins:
         raise RuntimeError("GMS_ALLOWED_ORIGINS is required in production")
     for origin in origins:
-        parsed = urlsplit(origin)
-        if (
-            parsed.scheme != "https"
-            or not parsed.hostname
-            or parsed.path not in {"", "/"}
-        ):
-            raise RuntimeError(
-                "GMS_ALLOWED_ORIGINS must contain exact HTTPS origins in production"
-            )
+        _validate_https_origin(origin)

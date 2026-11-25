@@ -76,7 +76,13 @@ def execute_external_transport(
     device selections.  The executor receives exactly one JSON request on
     stdin and must write exactly one JSON object to stdout.
     """
-    argv = shlex.split(str(command or "").strip())
+    try:
+        argv = shlex.split(str(command or "").strip())
+    except ValueError as exc:
+        raise TransportOperationError(
+            "TRANSPORT_EXECUTOR_NOT_CONFIGURED",
+            f"{transport} executor command has invalid quoting",
+        ) from exc
     if not argv:
         raise TransportOperationError(
             "TRANSPORT_EXECUTOR_NOT_CONFIGURED",
@@ -134,12 +140,18 @@ def execute_external_transport(
             "TRANSPORT_EXECUTOR_INVALID_RESPONSE",
             f"{transport} executor response must be a JSON object",
         )
-    if int(response.get("schema_version") or 0) != TRANSPORT_SCHEMA_VERSION:
+    if (type(response.get("schema_version")) is not int
+            or response["schema_version"] != TRANSPORT_SCHEMA_VERSION):
         raise TransportOperationError(
             "TRANSPORT_EXECUTOR_VERSION_MISMATCH",
             f"{transport} executor contract version is incompatible",
         )
-    if response.get("success") is False:
+    if type(response.get("success")) is not bool:
+        raise TransportOperationError(
+            "TRANSPORT_EXECUTOR_INVALID_RESPONSE",
+            f"{transport} executor must return an explicit boolean success flag",
+        )
+    if response["success"] is False:
         error = response.get("error") or {}
         if not isinstance(error, dict):
             error = {"message": str(error)}
@@ -150,11 +162,17 @@ def execute_external_transport(
             str(error.get("remediation") or ""),
             error.get("details") if isinstance(error.get("details"), dict) else {},
         )
-    data = response.get("data") or {}
+    data = response.get("data", {})
     if not isinstance(data, dict):
         raise TransportOperationError(
             "TRANSPORT_EXECUTOR_INVALID_RESPONSE",
             f"{transport} executor data must be a JSON object",
+        )
+    generation = response.get("generation", payload.get("generation", 0))
+    if type(generation) is not int or generation < 0:
+        raise TransportOperationError(
+            "TRANSPORT_EXECUTOR_INVALID_RESPONSE",
+            f"{transport} executor generation must be a non-negative integer",
         )
     return transport_result(
         transport,
@@ -162,7 +180,7 @@ def execute_external_transport(
         transport_state=str(response.get("transport_state") or "unknown"),
         protocol_state=str(response.get("protocol_state") or "unknown"),
         readiness=str(response.get("readiness") or "transport_ready"),
-        generation=int(response.get("generation") or payload.get("generation") or 0),
+        generation=generation,
     )
 
 

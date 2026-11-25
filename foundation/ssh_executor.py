@@ -104,6 +104,7 @@ class SSHExecutor:
             _stdin, stdout, _stderr = ssh.exec_command(
                 command, timeout=timeout, get_pty=get_pty,
             )
+            channel = stdout.channel
             if input_text is not None:
                 # sudo -S 等交互输入：写完立即 EOF，不阻塞 drain 循环。
                 try:
@@ -113,7 +114,6 @@ class SSHExecutor:
                     logger.warning("[SSH] stdin write failed: %s", exc)
                 with suppress(Exception):
                     _stdin.channel.shutdown_write()
-            channel = stdout.channel
             # 缓冲原始字节、结束后整体解码：decode_ssh_output 的
             # utf-8→gbk 兜底链必须作用于完整流，逐 chunk 解码会把跨
             # chunk 的多字节字符误判为非 UTF-8 而产生乱码。
@@ -146,7 +146,7 @@ class SSHExecutor:
             # stream fills the remote window. Drain both streams concurrently.
             while True:
                 made_progress = False
-                while channel.recv_ready():
+                if channel.recv_ready():
                     data = channel.recv(_READ_CHUNK)
                     if data:
                         room = max_captured - stdout_bytes
@@ -165,7 +165,7 @@ class SSHExecutor:
                         )
                     if _cancel_requested():
                         raise RuntimeError("SSH command cancelled by caller")
-                while channel.recv_stderr_ready():
+                if channel.recv_stderr_ready():
                     data = channel.recv_stderr(_READ_CHUNK)
                     if data:
                         room = max_captured - stderr_bytes
@@ -341,7 +341,7 @@ class SSHExecutor:
             # either stream from exiting before late tail data becomes ready.
             while True:
                 made_progress = False
-                while channel.recv_ready():
+                if channel.recv_ready():
                     data = await asyncio.to_thread(channel.recv, _READ_CHUNK)
                     if data:
                         stdout_pending, truncated = await consume_chunk(
@@ -355,7 +355,7 @@ class SSHExecutor:
                         )
                     if _cancel_requested():
                         raise RuntimeError("SSH command cancelled by caller")
-                while channel.recv_stderr_ready():
+                if channel.recv_stderr_ready():
                     data = await asyncio.to_thread(channel.recv_stderr, _READ_CHUNK)
                     if data:
                         stderr_pending, truncated = await consume_chunk(

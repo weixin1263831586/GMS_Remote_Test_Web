@@ -60,7 +60,7 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         store = SimpleNamespace(find_matching=lambda owner, context: (
             {"mapping": target.to_dict(), "mapping_policy": "direct_calibrated"}
             if owner == "admin-id" and context == target.context else None))
-        self.target_store_patch = patch("features.devices.aoa_mapping_service.calibration_store", return_value=store)
+        self.target_store_patch = patch("features.devices.aoa.mapping_service.calibration_store", return_value=store)
         self.target_store_patch.start()
         self.addCleanup(self.target_store_patch.stop)
         return target
@@ -212,7 +212,7 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
     def test_local_receipt_runs_once_and_keeps_original_burn_lock(self):
         prepared = self.prepare_local()
         execute = Mock(return_value={"success": True, "adb_recovered": True})
-        with patch("worker_agent.inventory.execute_device_action", execute):
+        with patch("worker.inventory.execute_device_action", execute):
             first = asyncio.run(run_local_firmware_recovery(prepared))
             second = asyncio.run(run_local_firmware_recovery(prepared))
         assert first["success"] is True and first["command_id"] == second["command_id"]
@@ -226,13 +226,13 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
     def test_lost_burn_claim_never_sends_hid(self):
         prepared = self.prepare_local()
         self.repo.claims.release("firmware:browser-client")
-        with patch("worker_agent.inventory.execute_device_action") as execute, self.assertRaises(RuntimeError):
+        with patch("worker.inventory.execute_device_action") as execute, self.assertRaises(RuntimeError):
             asyncio.run(run_local_firmware_recovery(prepared))
         execute.assert_not_called()
 
     def test_completed_input_without_adb_is_failed_recovery(self):
         prepared = self.prepare_local()
-        with patch("worker_agent.inventory.execute_device_action", return_value={"success": True, "adb_recovered": False}):
+        with patch("worker.inventory.execute_device_action", return_value={"success": True, "adb_recovered": False}):
             result = asyncio.run(run_local_firmware_recovery(prepared))
         assert result["success"] is False and result["reconcile_required"] is True
 
@@ -240,7 +240,7 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         prepared = self.prepare_local()
         receipt = {"success": False, "adb_recovered": True, "adb_state": "device",
                    "native_mode_restored": False, "commands_executed": 1, "commands_total": 1}
-        with patch("worker_agent.inventory.execute_device_action", return_value=receipt):
+        with patch("worker.inventory.execute_device_action", return_value=receipt):
             result = asyncio.run(run_local_firmware_recovery(prepared))
         assert result["success"] is False
         assert "ADB 已连接" in result["error"] and "USB" in result["error"]

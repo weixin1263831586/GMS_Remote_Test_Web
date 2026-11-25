@@ -1,0 +1,23 @@
+[Unit]
+Description=GMS Redmine Daily Brief (nightly full analysis)
+Documentation=file://@PROJECT_ROOT@/docs/redmine-daily-brief.md
+After=network-online.target @CONTROLLER_SERVICE@
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 按部署路径调整 WorkingDirectory / ExecStart 的 venv
+WorkingDirectory=@PROJECT_ROOT@
+ExecStart=@PYTHON@ -m features.redmine.daily_brief.cli run-nightly
+# 不给晨报任何特权：只读写 GMS data root
+User=@RUN_USER@
+Group=@RUN_GROUP@
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=@PROJECT_ROOT@/data
+# Evidence gathering completes without an elapsed-time budget.
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

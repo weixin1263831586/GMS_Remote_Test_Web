@@ -357,7 +357,7 @@ class ModalRedesignTests(RuntimeUiHarness):
                 capture('route-check', '#route-check-dialog .modal-content')
                 page.evaluate('ModalManager.closeAll()')
 
-            for path in ['/redmine-agent', '/gerrit-dashboard', '/cluster', '/devices-console', '/gms-update-monitor']:
+            for path in ['/redmine-agent', '/gerrit-dashboard', '/cluster', '/devices-console', '/gms-update-center']:
                 page.goto(self.base_url + path, wait_until='domcontentloaded')
                 ids = page.locator('.modal[id],.modal-backdrop[id]').evaluate_all('els => els.map(el => el.id)')
                 for viewport in [{"width": 1672, "height": 941}, {"width": 390, "height": 844}]:
@@ -366,7 +366,9 @@ class ModalRedesignTests(RuntimeUiHarness):
                         with self.subTest(path=path, modal=modal_id, viewport=viewport):
                             page.evaluate("""id => {
                                 const el = document.getElementById(id);
-                                if (el.classList.contains('modal-backdrop')) {
+                                if (el instanceof HTMLDialogElement) {
+                                    el.showModal();
+                                } else if (el.classList.contains('modal-backdrop')) {
                                     el.hidden = false;
                                     window.syncClusterModalState?.();
                                 } else EmbeddedModalController.open(id);
@@ -374,7 +376,9 @@ class ModalRedesignTests(RuntimeUiHarness):
                             capture(path.strip('/') + '-' + modal_id, f'#{modal_id} .modal-content')
                             page.evaluate("""id => {
                                 const el = document.getElementById(id);
-                                if (el.classList.contains('modal-backdrop')) {
+                                if (el instanceof HTMLDialogElement) {
+                                    el.close();
+                                } else if (el.classList.contains('modal-backdrop')) {
                                     el.hidden = true;
                                     window.syncClusterModalState?.();
                                 } else EmbeddedModalController.close(id);

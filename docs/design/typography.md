@@ -1,6 +1,6 @@
 # GMS 平台 Typography：全局字体与字号契约
 
-所有页面只加载一个 CSS 入口。唯一的字体 Token 入口为 [`web/static/css/typography.css`](../../web/static/css/typography.css)，其通过 CSS `@import` 集中加载 `web/static/css/typography/` 下的页面作用域文字规则；业务页面不直接链接子文件。业务 CSS 只保留布局、几何和配色，不再维护字号/字重/字体族声明。
+所有页面只加载一个 CSS 入口。唯一的字体 Token 入口为 [`web/static/css/typography.css`](../../web/static/css/typography.css)，其通过 CSS `@import` 集中加载 `web/static/css/typography/` 下的页面作用域文字规则；业务页面不直接链接子文件。业务 CSS 只保留布局、几何和配色，不维护字号/字重/字体族声明。
 
 | 场景 | 语义 Token | 字号 | 建议字重 |
 | --- | --- | ---: | ---: |
@@ -17,16 +17,16 @@
 
 ## 适用与例外
 
-- Shell 的 `web/shell/components/head.html` 和所有独立 iframe HTML 入口只加载 `/static/css/typography.css` 一次，不再单独引入任何 `typography/` 子样式文件；iframe 不继承父页面样式。
-- 原先 `--tech-font-title/body/caption`、`--analysis-control-font-size`、`--ui-font-mono` 及 `--arch-font` 已移除；文本值只取统一 Token，模块不保留字号别名。
-- `typography.css` **仅维护 Token 和五个 `@import`**；语义角色在 `roles-and-pages.css`，Shell 和工作区细则在 `shell-layout.css`、`shell-workspaces.css`，弹框与架构图在 `shared-diagrams.css`，已迁出的旧内联样式及真正例外在 `inline-and-exceptions.css`。业务 CSS/JS 不再单独定义字号数字。
+- Shell 的 `web/shell/components/head.html` 和所有独立 iframe HTML 入口只加载 `/static/css/typography.css` 一次，不单独引入任何 `typography/` 子样式文件；iframe 不继承父页面样式。
+- 文本只使用统一 Token，模块不定义字号别名。
+- `typography.css` **仅维护 Token 和五个 `@import`**；语义角色在 `roles-and-pages.css`，Shell 和工作区细则在 `shell-layout.css`、`shell-workspaces.css`，弹框与架构图在 `shared-diagrams.css`，内联语义角色及技术例外在 `inline-and-exceptions.css`。业务 CSS/JS 不单独定义字号数字。
 - 11px **仅用于已确认的状态徽标、图形刻度、技术性节点标注**，不用于普通按钮、表格、表单、业务正文、提示说明或搜索框。普通辅助信息/列表元数据使用 12px；说明段落和表单使用 13px。
 - 设备串口打印、xterm 字符格、代码/日志/命令等宽字体、SVG 和 Emoji 图标、拓扑连接与坐标轴刻度属于技术性例外。必须可说明用途和尺寸约束，普通按钮、表格和表单**绝不因空间不足成为例外**。
 - 外发邮件由独立邮件客户端渲染，不能依赖本网站 CSS；邮件 HTML 为兼容邮箱可保留独立内联字体栈，其字体选择不等于网站业务页面的本地配置。
 - 页面布局允许不同，同类组件必须共用语义 Token：普通按钮和表格 12px、输入控件和表单 13px、弹框标题 16px、页面标题 18px。
-- APK 文件树标签、文件路径、权限说明等普通列表信息统一采用 12px；代码与路径仍保留等宽字族，不再以 11px 作为压缩空间的办法。
+- APK 文件树标签、文件路径、权限说明等普通列表信息统一采用 12px；代码与路径仍保留等宽字族，不得使用 11px 压缩普通列表信息。
 - 文件浏览器失败原因及提示、测试历史邮件数量、主机终端模式文字等属于普通辅助信息（12px），不允许复用 11px 状态/图形标注；工具分类页签在 390px 与桌面宽度一律保持 12px，架构侧卡标题使用卡片标题 14px。相关规则只存在五个子文件中，业务动态 HTML 只使用语义类。
-- 不允许通过缩小普通字号消除换行：原本单行的按钮、表头和工具条保持单行布局，空间不足时调整控件宽度、间距、可滚动区域或响应式布局，确实很长的正文可正常换行。
+- 不允许通过缩小普通字号消除换行：单行按钮、表头和工具条保持单行布局，空间不足时调整控件宽度、间距、可滚动区域或响应式布局，确实很长的正文可正常换行。
 
 ## 验证
 

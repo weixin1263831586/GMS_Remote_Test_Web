@@ -664,7 +664,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
             page.close()
 
     def test_firmware_and_route_modals_keep_full_borders(self):
-        """Two formerly clipped/oversized panels remain bounded and readable."""
+        """Firmware and route panels remain bounded and readable."""
         page = self.new_page()
         try:
             self.goto_shell(page)
@@ -798,7 +798,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
                 """
                 const frame = document.createElement('iframe');
                 frame.id = 'gms-update-monitor-smoke-frame';
-                frame.src = '/gms-update-monitor';
+                frame.src = '/gms-update-center';
                 frame.style.display = 'none';
                 document.body.appendChild(frame);
                 """
@@ -948,8 +948,7 @@ class RuntimeModalsTests(RuntimeUiHarness):
             "/cluster",
             "/redmine-agent",
             "/gerrit-dashboard",
-            "/mainline-known-issues",
-            "/gms-update-monitor",
+            "/gms-update-center",
             "/templates/architecture.html",
         ]
         viewports = [

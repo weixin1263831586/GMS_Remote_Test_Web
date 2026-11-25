@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shlex
 import ssl
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -178,7 +179,14 @@ def _owners_for_department_profile(cfg: dict[str, Any], profile: dict[str, Any])
     return list(dict.fromkeys(owners))
 
 
-async def _query_gerrit_via_ssh(cfg: dict[str, Any], query: str, max_changes: int | None = None, page_size: int = 500) -> dict[str, Any]:
+async def _query_gerrit_via_ssh(
+    cfg: dict[str, Any],
+    query: str,
+    max_changes: int | None = None,
+    page_size: int = 500,
+    *,
+    commit_message: bool = False,
+) -> dict[str, Any]:
     page_size = max(1, min(int(page_size or 500), MAX_QUERY_PAGE_SIZE))
     max_total = None if max_changes is None else max(1, int(max_changes))
     start = 0
@@ -189,7 +197,7 @@ async def _query_gerrit_via_ssh(cfg: dict[str, Any], query: str, max_changes: in
         if remaining <= 0:
             break
         result = await _query_gerrit_via_ssh_once(
-            cfg, _query_for_ssh(query, remaining), start=start
+            cfg, _query_for_ssh(query, remaining), start=start, commit_message=commit_message,
         )
         if result.get("error"):
             return {**result, "items": all_items, "stats": result.get("stats") or last_stats}
@@ -230,13 +238,16 @@ def _gerrit_ssh_prefix(cfg: dict[str, Any]) -> list[str]:
 
 
 async def _query_gerrit_via_ssh_once(
-    cfg: dict[str, Any], query: str, *, start: int = 0
+    cfg: dict[str, Any], query: str, *, start: int = 0, commit_message: bool = False,
 ) -> dict[str, Any]:
     try:
         cmd = await asyncio.to_thread(_gerrit_ssh_prefix, cfg)
     except UnsafeOutboundURL as exc:
         return {"items": [], "stats": {}, "error": str(exc), "source": "ssh"}
-    cmd.extend(_ssh_gerrit_query_args(query, start=start))
+    # OpenSSH joins remote arguments into a command string. Protect the
+    # Gerrit query's own quotes from the server's SSH argv parser.
+    remote_args = _ssh_gerrit_query_args(query, start=start, commit_message=commit_message)
+    cmd.extend([*remote_args[:-1], shlex.quote(remote_args[-1])])
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -247,6 +258,11 @@ async def _query_gerrit_via_ssh_once(
         return {"items": [], "stats": {}, "error": "Gerrit SSH 无法启动", "source": "ssh"}
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+    except asyncio.CancelledError:
+        if proc.returncode is None:
+            proc.kill()
+        await proc.communicate()
+        raise
     except asyncio.TimeoutError:
         proc.kill()
         stdout, stderr = await proc.communicate()
@@ -278,18 +294,26 @@ async def query_gerrit_dual_mode(
     query: str,
     max_changes: int | None = None,
     page_size: int | None = None,
+    *,
+    commit_message: bool = False,
 ) -> dict[str, Any]:
     rest_error = ""
     effective_page_size = int(page_size or cfg.get("query_page_size") or cfg.get("defaults", {}).get("query_page_size") or 500)
     # 仅当配置了 REST 凭据时才尝试 REST；否则匿名请求对带 nginx HTTP 认证的实例
     # 每次都 401，徒增往返再 fallback SSH。
     if cfg.get("base_url") and cfg.get("rest_username") and cfg.get("rest_password"):
-        result = await _query_gerrit_via_rest(cfg, query, max_changes=max_changes, page_size=effective_page_size)
+        result = await _query_gerrit_via_rest(
+            cfg, query, max_changes=max_changes, page_size=effective_page_size,
+            commit_message=commit_message,
+        )
         if not result.get("error"):
             return result
         rest_error = result.get("error") or ""
     if cfg.get("ssh_host"):
-        result = await _query_gerrit_via_ssh(cfg, query, max_changes=max_changes, page_size=effective_page_size)
+        result = await _query_gerrit_via_ssh(
+            cfg, query, max_changes=max_changes, page_size=effective_page_size,
+            commit_message=commit_message,
+        )
         if rest_error:
             result["rest_error"] = rest_error
         return result
@@ -303,6 +327,8 @@ async def _query_gerrit_via_rest(
     query: str,
     max_changes: int | None = None,
     page_size: int = 500,
+    *,
+    commit_message: bool = False,
 ) -> dict[str, Any]:
     base_url = str(cfg.get("base_url") or "").rstrip("/")
     max_total = None if max_changes is None else max(1, int(max_changes))
@@ -335,6 +361,8 @@ async def _query_gerrit_via_rest(
                     ("o", "LABELS"),
                     ("o", "SUBMITTABLE"),
                 ]
+                if commit_message:
+                    params.extend((("o", "CURRENT_REVISION"), ("o", "CURRENT_COMMIT")))
                 url = f"{base_url}{api_prefix}/changes/?{urlencode(params)}"
                 async with session.get(url, allow_redirects=False) as response:
                     if response.status >= 300:
@@ -380,13 +408,19 @@ def _query_for_ssh(query: str, limit: int) -> str:
     return _query_with_limit(" ".join(parts), limit)
 
 
-def _ssh_gerrit_query_args(query: str, *, start: int = 0) -> list[str]:
+def _ssh_gerrit_query_args(
+    query: str, *, start: int = 0, commit_message: bool = False,
+) -> list[str]:
     """Build the remote argv after the SSH target.
 
     ``--start`` is a gerrit flag. Putting it inside the query string makes
     later pages search for the literal text instead of paginating.
+    ``commit_message`` asks for the current patch set body so callers can
+    attribute a hit to a specific upstream SHA or bug number.
     """
     args = ["gerrit", "query", "--format=JSON", "--submit-records"]
+    if commit_message:
+        args.extend(["--current-patch-set", "--commit-message"])
     if start > 0:
         args.extend(["--start", str(int(start))])
     args.extend(["--", query])

@@ -9,8 +9,8 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 
 from features.assistant import project_agent as agent
-from features.assistant.execution_result import ToolResult
 from features.assistant.kkagent_bridge import BridgeTurnResult
+from features.assistant.response import ToolResult
 
 
 @pytest.fixture

@@ -5,25 +5,16 @@ maintenance tooling required by GMS_Remote_Test_Web.
 
 ## Directory semantics: `scripts/` vs `tools/scripts/`
 
-Two script trees coexist on purpose — they serve different lifecycles
-and must not be conflated:
+Script locations follow their execution lifecycle:
 
 - `scripts/` (repo root) — **runtime / deployment scripts**: executed by
   the product itself or by production deployment / Worker install / backup
   / release procedures (e.g. `install_cluster_worker.sh`,
-  `build_adbproxy_rs.sh`, `gms_backup.py`, `run_GSI_Burn.sh`,
-  `check_source_secrets.py`). They ship with a running system.
-- `tools/scripts/` — **developer and deployment-maintenance tooling**:
-  package/doc generation, migrations, test harnesses and host maintenance.
-  Deployment entry points currently call helpers under `tools/scripts/deployment/`,
-  including `update_systemd_tls.py` from `restart_services.sh` and the running-config
-  migration. These helpers must remain in deployed source/package trees.
+  `native/build_adbproxy_rs.sh`, `backup/gms_backup.py`, `run_GSI_Burn.sh`,
+  `security/check_source_secrets.py`). They ship with a running system.
+- `tools/scripts/` — **developer and repository-maintenance tooling**: package/doc generation, test harnesses and host maintenance.
 
-New runtime execution scripts belong in `scripts/`; repository maintenance
-scripts belong in `tools/scripts/<category>/`. Before removing or relocating a
-helper, check deployment entry points and release packaging as well as imports.
-The existing deployment-maintenance category is a supported lifecycle, not a
-reason to exclude all of `tools/scripts/` from a deployed system.
+Root `scripts/` is grouped into `deployment/` (including `worker/` and `systemd/`), `execution/`, `native/`, `security/`, `backup/`, and `release/`. Repository maintenance scripts belong in `tools/scripts/<category>/`; check callers and release packaging before moving a helper.
 
 ## Top-level directories
 
@@ -32,7 +23,7 @@ Third-party or independently maintained tools may live directly under
 
 - `adbproxy-rs/`
 - `android-internals-wiki/` — local clone; do not commit its contents
-  (refresh with `tools/scripts/setup/update_android_internals_wiki.sh`)
+  (refresh with `tools/scripts/maintenance/update_android_internals_wiki.sh`)
 - `GMS-Host-Tools/`
 - `gms-worker-native/`
 - `jadx/`
@@ -44,9 +35,9 @@ Top-level data/binary files (`jq-linux-amd64`, `misc.img`,
 served to clients via `features/system/utility_tools_api.py` (stable
 `tool_id` manifest — files may move under `tools/` without UI changes).
 
-## Upstream sources & provenance (usbip 模式)
+## Upstream sources & provenance
 
-Every third-party tool with source code follows the **usbip pattern**:
+Third-party tools use the following layout:
 
 - The directory under `tools/` keeps ONLY the executable artifacts plus its
   own provenance manifest (`<name>.provenance.json`).
@@ -82,12 +73,8 @@ Developer/maintenance Python/Shell scripts live under `tools/scripts/`
 |---|---|
 | `scripts/agent/` | Agent package toolchain: `audit_contract.py` → `sync_package.py` → `build_package.py` → `release.py` → `dev.py` |
 | `scripts/docs/` | Documentation generators (`generate_cli_docs.py`, `generate_guide_screenshots.py`) |
-| `scripts/kkagent/` | Model catalog migration (`import_kkagent_models.py`) |
-| `scripts/deployment/` | Host deployment helpers (systemd installers) |
-| `scripts/maintenance/` | Repo maintenance (`audit_repository_inventory.py`, `update_size_baseline.py`, `refactor_visual_parity.py`) |
-| `scripts/migrations/` | One-shot data migrations |
-| `scripts/testing/` | Manual test harnesses (`transport_soak.py`) |
-| `scripts/setup/` | Environment setup helpers |
+| `scripts/maintenance/` | Repo maintenance (`audit_repository_inventory.py`, `update_size_baseline.py`, `update_android_internals_wiki.sh`) |
+| `scripts/testing/` | Manual test harnesses (`transport_soak.py`) and visual regression (`capture_modal_gallery.py`, `refactor_visual_parity.py`) |
 | `scripts/utilities/` | User-downloadable utilities (served via stable tool IDs) |
 | `scripts/_common.py` | Shared helpers (`find_repo_root`) — never run directly |
 

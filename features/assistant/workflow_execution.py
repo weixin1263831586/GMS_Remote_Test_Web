@@ -470,7 +470,7 @@ def run_body_from_draft(draft: dict[str, Any], workspace: dict[str, Any]) -> dic
     # tools_path 在所选 Worker 上仍可用，变化时显式失败而非静默换版本）。
     if test.get("test_suite"):
         test_plan["test_suite"] = str(test["test_suite"])
-    # 连接 WiFi 落入执行期 preparations（worker_agent 测试准备模板），
+    # 连接 WiFi 落入执行期 preparations（worker 测试准备模板），
     # 仅在测试阶段实际运行时生效。
     if test.get("connect_wifi") and (test.get("scope") or "full") != "skip":
         test_plan["preparations"] = ["wifi_on"]

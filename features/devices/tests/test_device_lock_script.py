@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-LOCK_SCRIPT = PROJECT_ROOT / "scripts" / "run_Device_Lock.sh"
+LOCK_SCRIPT = PROJECT_ROOT / "scripts/execution" / "run_Device_Lock.sh"
 
 
 def _write_executable(path: Path, content: str) -> None:

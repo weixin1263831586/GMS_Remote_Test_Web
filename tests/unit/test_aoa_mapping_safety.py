@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from features.devices.aoa_calibrations import AoaCalibrationStore
+from features.devices.aoa.calibrations import AoaCalibrationStore
 from foundation.aoa_calibration import TouchMapping, context_matches, convert_point, per_axis_mapping
 from tests.aoa_fixtures import verified_mapping
 
@@ -95,3 +95,31 @@ def test_concurrent_replacement_returns_each_successful_save_receipt(tmp_path):
         ids = list(pool.map(save, range(24)))
     assert len(set(ids)) == 24
     assert len(stores[0].list_calibrations('owner')) == 1
+
+
+@pytest.mark.parametrize("case", ["duplicate-holdout", "training-overlap", "missing-display"])
+def test_calibration_policy_never_claims_verification_without_independent_evidence(case):
+    from foundation.aoa_calibration import mapping_from_samples
+
+    mapping = verified_mapping()
+    train = [(tuple(s["hid"]), tuple(s["cooked"])) for s in mapping.samples if not s["validation"]]
+    validation = [(tuple(s["hid"]), tuple(s["cooked"])) for s in mapping.samples if s["validation"]]
+    display = mapping.display_pixels
+    if case == "duplicate-holdout":
+        validation = [validation[0], validation[0]]
+    elif case == "training-overlap":
+        validation = [validation[0], train[0]]
+    else:
+        display = (0, 0)
+    result = mapping_from_samples("direct", train, display_pixels=display,
+                                  validation_samples=validation)
+    assert not result.verified
+    assert result.effective_policy == "unsupported"
+    assert TouchMapping.from_dict(result.to_dict()).effective_policy == "unsupported"
+
+
+@pytest.mark.parametrize("mode,policy", [("pointer", "direct_calibrated"), ("direct", "pointer_calibrated")])
+def test_calibration_rejects_policy_for_another_hid_mode(mode, policy):
+    raw = verified_mapping(mode=mode).to_dict()
+    with pytest.raises(ValueError, match="another HID mode"):
+        TouchMapping.from_dict({**raw, "mapping_policy": policy})

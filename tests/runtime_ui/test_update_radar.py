@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from features.system.update_radar.repository import RadarStore
+from features.gms.radar.repository import RadarStore
 from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
@@ -46,7 +46,7 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
             self.assertEqual(requested_settings, [])
 
             # An active server-side scan still disables manual triggering.
-            store = RadarStore(Path(self.runtime_dir.name) / 'gms_update_radar.sqlite3')
+            store = RadarStore(Path(self.runtime_dir.name) / 'gms_update_radar_v2.sqlite3')
             run_id = store.claim('manual', owner_id='ui-test')
             self.assertIsNotNone(run_id)
             page.locator('#refresh').click()
@@ -75,7 +75,7 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
             # 编辑按钮由 tools 页 data-tools-action 委托渲染（utility-tools.js）。
             page.locator('[data-tools-action="radar-edit"]').click()
             expect(page.locator('#radar-settings-modal')).to_be_visible()
-            expect(page.locator('#radar-task-count')).to_have_text('已选择 6 / 6 项')
+            expect(page.locator('#radar-task-count')).to_have_text('已选择 7 / 7 项')
             page.keyboard.press('Escape')
             expect(page.locator('#radar-settings-modal')).to_be_hidden()
             self.assertEqual(writes, [])
@@ -93,7 +93,7 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
             popup.locator('#radar-all-tasks').uncheck()
             popup.locator('[name="radar-task"][value="packages"]').check()
             popup.locator('[name="radar-task"][value="exemptions"]').check()
-            expect(popup.locator('#radar-task-count')).to_have_text('已选择 2 / 6 项')
+            expect(popup.locator('#radar-task-count')).to_have_text('已选择 2 / 7 项')
             self.assertTrue(popup.locator('#radar-all-tasks').evaluate('node => node.indeterminate'))
             future = (datetime.now(timezone.utc) + timedelta(hours=12)).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%H:%M')
             popup.locator('#radar-time').fill(future)
@@ -108,12 +108,12 @@ class RuntimeUpdateRadarTests(RuntimeUiHarness):
             expect(popup.locator('#radar-time')).to_have_value(future)
             expect(popup.locator('#radar-enabled')).to_be_checked()
             expect(popup.locator('#radar-notify')).to_have_value('changes')
-            expect(popup.locator('#radar-task-count')).to_have_text('已选择 2 / 6 项')
+            expect(popup.locator('#radar-task-count')).to_have_text('已选择 2 / 7 项')
             popup.keyboard.press('Escape')
             expect(popup.locator('#modify')).to_be_focused()
             self.assertEqual([method for method, _ in writes], ['PUT'])
 
-            store = RadarStore(Path(self.runtime_dir.name) / 'gms_update_radar.sqlite3')
+            store = RadarStore(Path(self.runtime_dir.name) / 'gms_update_radar_v2.sqlite3')
             run_id = store.claim('manual', owner_id='ui-test')
             summary = {'categories': {key: {'before': 1, 'after': 1, 'added': 0, 'modified': 0, 'removed': 0}
                                       for key in ('packages', 'exemptions')}, 'errors': {}, 'changes_total': 1,

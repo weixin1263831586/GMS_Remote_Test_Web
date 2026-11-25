@@ -152,3 +152,36 @@ def test_semantic_firmware_requires_visual_precondition_and_matching_capture_bin
     require_capture_capability(options, caps, "TARGET", "1-2")
     with pytest.raises(ValueError):
         require_capture_capability(options, caps, "OTHER", "1-2")
+
+
+def test_blank_source_lines_do_not_shift_or_drop_semantic_actions():
+    context, proof = reference()["context"], certificate()
+    template = semantic_template(steps=3)
+    commands = ["", "wake", " ", "click 1 1", "sleep 100"]
+    plan = compile_plan(commands, template, context, proof)
+    assert plan["commands"] == ["wake", "click 180 481", "sleep 100"]
+    assert validate_plan(plan, proof) == plan
+
+
+def test_undeclared_firmware_recovery_still_binds_plan_to_source_commands():
+    from foundation.aoa_recovery_policy import require_verified_recovery
+
+    template = semantic_template()
+    template["steps"][0]["before"] = {
+        "type": "visual", "roi": [0, 0, 1, 1],
+        "binding_id": "camera-1", "fingerprint": "00" * 256,
+    }
+    proof = certificate()
+    plan = compile_plan(["click 1 1"], template, reference()["context"], proof)
+    with pytest.raises(ValueError, match="source commands"):
+        require_verified_recovery(["click 2 2"], {
+            "aoa_semantic_plan": plan, "aoa_direct_certificate": proof,
+        }, {})
+
+
+@pytest.mark.parametrize('kind', [[], {}, True, None])
+def test_semantic_condition_rejects_non_string_kind(kind):
+    from foundation.aoa_semantics import validate_condition
+
+    with pytest.raises(ValueError):
+        validate_condition({'type': kind})

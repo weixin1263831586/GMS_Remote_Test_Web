@@ -107,6 +107,30 @@ class ScpPutWithDeadlineTests(unittest.TestCase):
         self.assertIn("/local/tool", ctx.exception.message)
         self.assertNotIn("scp channel broken", ctx.exception.message)
 
+    def test_cancelled_put_aborts_transport(self):
+        started = threading.Event()
+
+        class _CancellableClient(_BlockingSCPClient):
+            def put(self, *_args, **_kwargs):
+                started.set()
+                return super().put()
+
+        async def exercise():
+            task = asyncio.create_task(upload_transport.scp_put_with_deadline(
+                self.ssh, "/local/tool", "/remote/tool",
+            ))
+            try:
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+                self.assertTrue(self.ssh.transport.closed)
+            finally:
+                _BlockingSCPClient.release.set()
+
+        with patch("scp.SCPClient", _CancellableClient):
+            asyncio.run(exercise())
+
     def test_success_does_not_close_transport(self):
         calls = []
 
@@ -143,7 +167,6 @@ class UploadDeadlineTests(unittest.TestCase):
 
     def tearDown(self):
         _BlockingSCPClient.release.set()
-        runtime.configure_runtime(apk_task_store=None)
 
     def test_stalled_upload_times_out_with_504_and_aborts_transport(self):
         import tempfile

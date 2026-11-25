@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 import threading
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
@@ -23,7 +22,7 @@ from features.devices.reconnect import (
     schedule_usbip_reconnect_for_removed_devices,
     stop_usbip_reconnect_tasks,
 )
-from features.devices.serial_console import serial_console_service
+from features.devices.serial.service import serial_console_service
 from features.redmine.scheduler import (
     start_redmine_agent_scheduler,
     stop_redmine_agent_scheduler,
@@ -31,8 +30,8 @@ from features.redmine.scheduler import (
 from features.system.notifications import bind_event_bus_loop, unbind_event_bus_loop
 from features.system.state import global_state
 from foundation.config import CLEANUP_INTERVAL_SECONDS
-from foundation.controller_lock import controller_process_lock
 from foundation.loop_watchdog import start_loop_watchdog, stop_loop_watchdog
+from foundation.process_sync import controller_process_lock
 
 
 logger = logging.getLogger(__name__)
@@ -60,9 +59,8 @@ def initialize_runtime_data(services: AppServices) -> None:
 
     from features.automation.repository import AutomationStore
     from features.cluster.repository import ClusterRepository
+    from features.gms import initialize_gms_update
     from features.reports.repository import TestReportDB
-    from features.system.mainline_issues.repository import init_db as init_mainline_db
-    from features.system.update_monitor.repository import init_db as init_update_monitor_db
 
     AutomationStore(data_root / 'automation/automation.sqlite3')
     from features.cluster import ClusterConfig
@@ -74,15 +72,7 @@ def initialize_runtime_data(services: AppServices) -> None:
     )
     TestReportDB(str(data_root / 'reports/reports.sqlite3'))
 
-    update_monitor_db = data_root / 'gms_update_monitor.sqlite3'
-    update_monitor_db.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(update_monitor_db) as conn:
-        init_update_monitor_db(conn)
-
-    mainline_db = data_root / 'mainline_known_issues.sqlite3'
-    mainline_db.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(mainline_db) as conn:
-        init_mainline_db(conn)
+    initialize_gms_update(data_root / 'gms_update.sqlite3')
 
 
 async def _periodic_cleanup() -> None:
@@ -101,9 +91,9 @@ async def _periodic_cleanup() -> None:
             # APK 上传孤儿目录对账：无任务行且无活跃上传会话的目录
             # 超过冷却期即清理（失败只记日志，不影响其余清理项）。
             try:
-                from features.firmware import runtime as firmware_runtime
+                from features.apk import runtime as apk_runtime
 
-                store = firmware_runtime.apk_task_store
+                store = apk_runtime.apk_task_store
                 if store is not None:
                     store.reconcile_orphan_uploads()
             except Exception:
@@ -150,7 +140,7 @@ def _start_local_vnc():
 
     def _start():
         try:
-            from features.system.vnc import vnc_manager
+            from features.system.host.vnc import vnc_manager
 
             result = vnc_manager.ensure_local_vnc()
             if result.get("success"):
@@ -247,7 +237,7 @@ def create_lifespan(services: AppServices):
             # downloading 快照推进到 interrupted 终态，避免 wait_for_snapshot
             # 与状态轮询永久等待；失败绝不阻断启动。
             try:
-                from features.redmine.evidence import reconcile_interrupted_fetches
+                from features.redmine.evidence.service import reconcile_interrupted_fetches
 
                 reconciled = reconcile_interrupted_fetches()
                 if reconciled:
@@ -261,9 +251,9 @@ def create_lifespan(services: AppServices):
             # APK 上传孤儿目录对账（与每小时周期清理同一套安全规则）：
             # 上传中断留下的无任务行目录在启动时即回收，冷却期内的跳过。
             try:
-                from features.firmware import runtime as firmware_runtime
+                from features.apk import runtime as apk_runtime
 
-                store = firmware_runtime.apk_task_store
+                store = apk_runtime.apk_task_store
                 if store is not None:
                     store.reconcile_orphan_uploads()
             except Exception:
@@ -276,7 +266,7 @@ def create_lifespan(services: AppServices):
             # （见 foundation/loop_watchdog.py 的模块注释）。
             loop_watchdog_task = await start_loop_watchdog()
             redmine_task = start_redmine_agent_scheduler(services.redmine)
-            from features.system.desktop import create_novnc_client_session
+            from features.system.host.desktop import create_novnc_client_session
 
             novnc_session = create_novnc_client_session()
             app.state.novnc_client_session = novnc_session
@@ -309,12 +299,12 @@ def create_lifespan(services: AppServices):
                 logger.exception('Failed to start automation worker')
             radar_task = None
             try:
-                from features.system.update_radar import start_radar
+                from features.gms.radar import start_radar
 
                 radar_task = start_radar()
             except Exception:
                 logger.exception('Failed to start update radar')
-            from features.firmware.apk import recover_apk_analysis_tasks
+            from features.apk.service import recover_apk_analysis_tasks
 
             recover_apk_analysis_tasks()
             from features.test_execution.transfers_api import recover_suite_tasks
@@ -323,7 +313,7 @@ def create_lifespan(services: AppServices):
             try:
                 yield
             finally:
-                from features.system.update_radar import stop_radar
+                from features.gms.radar import stop_radar
 
                 await stop_radar(radar_task)
                 await stop_loop_watchdog(loop_watchdog_task)

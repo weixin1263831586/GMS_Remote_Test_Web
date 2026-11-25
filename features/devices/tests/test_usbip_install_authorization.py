@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from features.auth import CurrentUser
-from features.devices import usbip_install_api as api
+from features.devices.usbip import install_api as api
 
 
 class UsbipInstallAuthorizationTests(unittest.TestCase):

@@ -64,7 +64,7 @@ class UpgradeMigrationSmokeTests(unittest.TestCase):
         import sys
 
         sys.path.insert(0, str(ROOT))
-        from features.redmine.daily_brief_repository import DailyBriefRepository
+        from features.redmine.daily_brief.repository import DailyBriefRepository
 
         with tempfile.TemporaryDirectory() as tmp:
             owner = Path(tmp)

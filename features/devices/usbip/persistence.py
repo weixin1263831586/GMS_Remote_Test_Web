@@ -1,0 +1,261 @@
+"""Runtime-config persistence for USB/IP quality history and device sources."""
+
+from __future__ import annotations
+
+import logging
+import re
+import threading
+import time
+import uuid
+
+from .. import runtime
+from .manager import usbip_manager
+
+
+logger = logging.getLogger(__name__)
+
+# 集群分配与网络质量历史的串行写锁；integrations_api 共享同一把锁。
+usbip_assignment_lock = threading.RLock()
+_DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_USBIP_BUSID_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
+
+
+def migrate_local_usbip_busid(
+    *,
+    device_host: str,
+    old_busid: str,
+    new_busid: str,
+    expected_serials: set[str],
+    source_device: dict[str, object] | None = None,
+) -> tuple[bool, str]:
+    """Move one persisted local assignment after safe source re-enumeration.
+
+    The caller must already have matched the new source BUSID by an exact,
+    unique Android serial.  Re-check the assignment under the shared lock so
+    a concurrent manual connect/disconnect cannot be overwritten.
+    """
+    device_host = str(device_host or "").strip()
+    old_busid = str(old_busid or "").strip()
+    new_busid = str(new_busid or "").strip()
+    expected = {
+        str(serial or "").strip()
+        for serial in expected_serials or set()
+        if str(serial or "").strip()
+    }
+    if (
+        not device_host
+        or not _USBIP_BUSID_RE.fullmatch(old_busid)
+        or not _USBIP_BUSID_RE.fullmatch(new_busid)
+        or old_busid == new_busid
+        or not expected
+    ):
+        return False, "USB/IP BUSID迁移参数无效"
+
+    timestamp = time.time()
+    with usbip_assignment_lock:
+        runtime_config = runtime.config_manager.get_runtime_config() or {}
+        assignments = runtime_config.get("usbip_cluster_assignments") or {}
+        if not isinstance(assignments, dict):
+            return False, "USB/IP持久分配记录格式无效"
+        assignments = dict(assignments)
+        old_key = f"{device_host}|{old_busid}"
+        new_key = f"{device_host}|{new_busid}"
+        current = assignments.get(old_key)
+        if not isinstance(current, dict):
+            return False, f"找不到USB/IP物理分配 {device_host}/{old_busid}"
+        if str(current.get("status") or "") not in {
+            "attaching", "attached", "unknown", "cleanup_required",
+        }:
+            return False, "USB/IP物理分配已不再活动"
+        assigned = {
+            str(serial or "").strip()
+            for serial in current.get("device_serials") or []
+            if str(serial or "").strip()
+        }
+        if assigned != expected:
+            return False, "USB/IP物理分配序列号已变化，拒绝迁移"
+        if new_key in assignments:
+            return False, f"新BUSID {new_busid} 已存在USB/IP分配"
+
+        next_generation = max(
+            (int(item.get("generation") or 0) for item in assignments.values()
+             if isinstance(item, dict)),
+            default=0,
+        ) + 1
+        identity = source_device or {}
+        migrated = {
+            **current,
+            "busid": new_busid,
+            "status": "unknown",
+            "generation": next_generation,
+            "operation_id": f"usbip-reenumerate-{uuid.uuid4().hex}",
+            "timestamp": timestamp,
+        }
+        for field in (
+            "physical_device_id", "identity_source", "identity_stable",
+            "usb_serial", "container_id", "pnp_instance_id",
+            "location_path", "vid_pid",
+        ):
+            if identity.get(field) not in {None, ""}:
+                migrated[field] = identity[field]
+        assignments.pop(old_key)
+        assignments[new_key] = migrated
+
+        updater = getattr(runtime.config_manager, "update_runtime_config", None)
+        if callable(updater):
+            saved = updater({"usbip_cluster_assignments": assignments})
+        else:
+            runtime_config["usbip_cluster_assignments"] = assignments
+            saved = runtime.config_manager.save_runtime_config(runtime_config)
+        if not saved:
+            return False, "保存USB/IP新BUSID分配失败"
+    return True, ""
+
+
+USBIP_SOURCE_OS_TTL_SECONDS = 7 * 24 * 3600
+
+
+def get_usbip_source_os_cache() -> dict[str, dict[str, object]]:
+    """Return the persisted host -> source OS map ({host: {"os","timestamp"}})."""
+    getter = getattr(runtime.config_manager, "get_runtime_config", None)
+    runtime_config = getter() if callable(getter) else {}
+    cached = (runtime_config or {}).get("usbip_source_os") or {}
+    return dict(cached) if isinstance(cached, dict) else {}
+
+
+def lookup_usbip_source_os(device_host: str) -> str:
+    """Return the cached source OS for a host ('' when absent/expired)."""
+    entry = get_usbip_source_os_cache().get(str(device_host or "").strip()) or {}
+    if not isinstance(entry, dict):
+        return ""
+    timestamp = float(entry.get("timestamp") or 0)
+    if timestamp and time.time() - timestamp > USBIP_SOURCE_OS_TTL_SECONDS:
+        return ""
+    return str(entry.get("os") or "").strip()
+
+
+def record_usbip_source_os(device_host: str, source_os: str) -> None:
+    """Persist a detected source host OS so the UI can label hosts offline."""
+    host = str(device_host or "").strip()
+    os_value = {
+        "windows": "windows",
+        # API 对外用 "ubuntu"，内部记录统一为 "linux"。
+        "linux": "linux",
+        "ubuntu": "linux",
+    }.get(str(source_os or "").strip(), "")
+    if not host or not os_value:
+        return
+    with usbip_assignment_lock:
+        getter = getattr(runtime.config_manager, "get_runtime_config", None)
+        runtime_config = getter() if callable(getter) else {}
+        runtime_config = runtime_config or {}
+        cached = runtime_config.get("usbip_source_os") or {}
+        if not isinstance(cached, dict):
+            cached = {}
+        cached = dict(cached)
+        previous = cached.get(host)
+        if (
+            isinstance(previous, dict)
+            and str(previous.get("os") or "") == os_value
+            and time.time() - float(previous.get("timestamp") or 0)
+            < USBIP_SOURCE_OS_TTL_SECONDS / 24
+        ):
+            return
+        cached[host] = {"os": os_value, "timestamp": time.time()}
+        updater = getattr(runtime.config_manager, "update_runtime_config", None)
+        if callable(updater):
+            updater({"usbip_source_os": cached})
+        else:
+            runtime_config["usbip_source_os"] = cached
+            runtime.config_manager.save_runtime_config(runtime_config)
+
+
+def record_usbip_network_quality(
+    device_host: str,
+    worker_id: str,
+    quality: dict[str, object],
+) -> None:
+    if not quality:
+        return
+    with usbip_assignment_lock:
+        getter = getattr(runtime.config_manager, "get_runtime_config", None)
+        runtime_config = getter() if callable(getter) else {}
+        runtime_config = runtime_config or {}
+        history = runtime_config.get("usbip_network_quality_history") or []
+        if not isinstance(history, list):
+            history = []
+        history = [
+            *history[-99:],
+            {
+                **quality,
+                "device_host": device_host,
+                "worker_id": worker_id,
+                "timestamp": time.time(),
+            },
+        ]
+        updater = getattr(runtime.config_manager, "update_runtime_config", None)
+        if callable(updater):
+            updater({"usbip_network_quality_history": history})
+        else:
+            runtime_config["usbip_network_quality_history"] = history
+            runtime.config_manager.save_runtime_config(runtime_config)
+
+
+def persist_local_usbip_sources(
+    device_host: str,
+    serials: list[str],
+    source_os: str = "",
+) -> None:
+    """Persist USB/IP source metadata used by local device-list endpoints."""
+    serials = list(dict.fromkeys(
+        str(serial or "").strip()
+        for serial in serials
+        if str(serial or "").strip()
+    ))
+    if not serials:
+        return
+
+    timestamp = time.time()
+    updates: dict[str, dict[str, object]] = {}
+    try:
+        runtime_config = runtime.config_manager.get_runtime_config() or {}
+        persisted = runtime_config.get("usbip_devices_source") or {}
+        if not isinstance(persisted, dict):
+            persisted = {}
+        persisted = dict(persisted)
+        for serial in serials:
+            existing = persisted.get(serial) or {}
+            existing_source = str(existing.get("source") or "").strip()
+            if existing_source and existing_source != device_host:
+                logger.info(
+                    "[USB/IP] Keep existing source for %s: %s (new: %s)",
+                    serial,
+                    existing_source,
+                    device_host,
+                )
+                continue
+            record = {"source": device_host, "timestamp": timestamp}
+            resolved_os = str(source_os or "").strip() or str(
+                existing.get("source_os") or ""
+            ).strip()
+            if resolved_os:
+                record["source_os"] = resolved_os
+            updates[serial] = record
+        if updates:
+            persisted.update(updates)
+            updater = getattr(runtime.config_manager, "update_runtime_config", None)
+            if callable(updater):
+                saved = updater({"usbip_devices_source": persisted})
+            else:
+                runtime_config["usbip_devices_source"] = persisted
+                saved = runtime.config_manager.save_runtime_config(runtime_config)
+            if not saved:
+                raise RuntimeError("无法保存USB/IP设备来源")
+    except Exception as exc:
+        logger.warning("[USB/IP] Failed to persist local device sources: %s", exc)
+
+    if not updates:
+        return
+    with runtime.global_state.usbip_devices_source_lock:
+        runtime.global_state.usbip_devices_source.update(updates)
+    getattr(usbip_manager, "device_sources", {}).update(updates)

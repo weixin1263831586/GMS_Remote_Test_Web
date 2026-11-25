@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from features.redmine.case_extractor import RedmineCaseExtractor
-from features.redmine.knowledge_repository import RedmineKnowledgeDB
+from features.redmine.cases.case_extractor import RedmineCaseExtractor
+from features.redmine.knowledge.repository import RedmineKnowledgeDB
 
 
 class UpsertCaseFactMergeTests(unittest.TestCase):

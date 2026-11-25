@@ -17,22 +17,20 @@ from fastapi.responses import (
 )
 
 from features.auth import AUTH_COOKIE_NAME, auth_service
-from features.system import agent_package_registry, gms_assistant_proxy, jq_binary
-from features.system.api_catalog import build_api_catalog, format_catalog_help
-from features.system.skill_archive_signing import (
+from features.system import gms_assistant_proxy, jq_binary
+from features.system.agent_package import registry as agent_package_registry
+from features.system.agent_package.signing import (
     sign_skill_archive,
 )
-from features.system.state import global_state
-from features.system.terminal_auxiliary import (
-    handle_tradefed_list_results,
-    refresh_devices_websocket,
-)
-from features.system.terminal_service import (
+from features.system.api_catalog import build_api_catalog, format_catalog_help
+from features.system.host.ssh import ssh_manager
+from features.system.host.terminal.service import (
     close_websocket_terminal,
     handle_terminal_connect,
     handle_terminal_input,
     handle_terminal_resize,
 )
+from features.system.state import global_state
 from features.system.topology_view import render_topology
 from features.system.websocket_security import (
     authorize_websocket_identity,
@@ -43,6 +41,7 @@ from features.system.websocket_security import (
 from features.users import runtime as users_runtime
 from foundation.cluster_port import get_local_worker_id as _get_local_worker_id
 from foundation.config import PROJECT_ROOT, config_manager
+from foundation.device_locks import device_lock_manager
 from foundation.error_model import ApiError, record_internal_error
 from foundation.files import FileUtils
 from foundation.responses import error_response
@@ -356,6 +355,131 @@ async def get_api_help(request: Request, api_path: str | None = None):
 
 
 # ==================== WebSocket ====================
+
+
+async def refresh_devices_websocket(
+    _client_id: str,
+    websocket: WebSocket,
+) -> None:
+    try:
+        config = config_manager.load_config()
+        ssh = ssh_manager.get_connection(config)
+        if not ssh:
+            return
+        try:
+            devices_result = ssh_manager.execute_command(
+                ssh, "adb devices", timeout=5
+            )
+            if devices_result.code != 0:
+                return
+            devices_info = []
+            for line in devices_result.stdout.strip().split("\n")[1:]:
+                parts = line.split("\t")
+                if len(parts) < 2:
+                    continue
+                device_id, status = parts[:2]
+                device_data = {"id": device_id, "status": status}
+                lock_status = device_lock_manager.get_lock_status(device_id)
+                if lock_status:
+                    device_data["locked"] = True
+                    device_data["locked_by"] = lock_status["locked_by"]
+                devices_info.append(device_data)
+            await websocket.send_json(
+                {"type": "devices_updated", "devices": devices_info}
+            )
+        finally:
+            ssh_manager.return_connection(ssh)
+    except Exception:
+        message = record_internal_error(
+            logger, "刷新设备列表", "Error refreshing devices"
+        )
+        await websocket.send_json({
+            "type": "error",
+            "code": "INTERNAL_ERROR",
+            "message": message,
+        })
+
+
+async def handle_tradefed_list_results(
+    _client_id: str,
+    websocket: WebSocket,
+    data: dict,
+) -> None:
+    from features.test_execution import (
+        execute_tradefed_command,
+        parse_tradefed_list_results,
+        resolve_tradefed_target,
+    )
+
+    ssh = None
+    try:
+        config = config_manager.load_config()
+        suite_path, tradefed_bin = await asyncio.to_thread(
+            resolve_tradefed_target, config, str(data.get("suite_path") or ""),
+            str(data.get("tradefed_bin") or ""),
+        )
+        ssh = await asyncio.to_thread(ssh_manager.get_connection, config)
+        if not ssh:
+            await websocket.send_json(
+                {"type": "tradefed_list_results_error", "error": "SSH 连接失败"}
+            )
+            return
+        if not suite_path or not tradefed_bin:
+            await websocket.send_json(
+                {
+                    "type": "tradefed_list_results_error",
+                    "error": "缺少参数：suite_path 或 tradefed_bin",
+                }
+            )
+            return
+        output, error, code = await asyncio.to_thread(
+            execute_tradefed_command, ssh, suite_path, tradefed_bin
+        )
+        command = f"cd '{suite_path}' && {tradefed_bin} list results"
+        if code == 0:
+            parsed = parse_tradefed_list_results(output)
+            await websocket.send_json(
+                {
+                    "type": "tradefed_list_results",
+                    "success": True,
+                    "output": output,
+                    "columns": parsed.get("columns", []),
+                    "results": parsed.get("results", []),
+                    "count": len(parsed.get("results", [])),
+                    "command": command,
+                }
+            )
+        else:
+            await websocket.send_json(
+                {
+                    "type": "tradefed_list_results_error",
+                    "success": False,
+                    "error": error or f"命令执行失败，退出代码：{code}",
+                    "command": command,
+                }
+            )
+    except ValueError as exc:
+        await websocket.send_json({"type": "tradefed_list_results_error", **ApiError.invalid_semantics(str(exc)).envelope()})
+    except RuntimeError:
+        await websocket.send_json({"type": "tradefed_list_results_error", **ApiError.upstream_failure("套件清单服务不可用").envelope()})
+    except Exception:
+        message = record_internal_error(
+            logger,
+            "列出 Tradefed 结果",
+            "[TRADEFED_LIST_RESULTS] Error",
+        )
+        await websocket.send_json(
+            {
+                "type": "tradefed_list_results_error",
+                "success": False,
+                "code": "INTERNAL_ERROR",
+                "error": message,
+            }
+        )
+    finally:
+        if ssh:
+            ssh_manager.return_connection(ssh)
+
 
 @router.websocket("/api/system/websocket/{client_id}")
 async def websocket_endpoint(websocket: WebSocket, client_id: str):

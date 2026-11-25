@@ -1,7 +1,7 @@
 """统一模型网关：模型配置、直连 HTTP 通道与 kkagent 集成（ADR 0034）。
 
 单一职责面：所有"调用大模型"的入口都从这里走——
-- ``registry``：模型目录（configs/local/config.json ``ai_models`` 段是
+- ``config``：模型目录（configs/local/config.json ``ai_models`` 段是
   唯一来源，UI 列表 / kkagent 模型 alias 都从这里物化）；
 - ``analyzer`` / ``http_client`` / ``health``：openai/anthropic 直连通道
   （provider 选择、failover、健康探针）；
@@ -16,18 +16,23 @@
 from __future__ import annotations
 
 from .analyzer import (
-    EMOJI_CHART,
-    EMOJI_CHECK,
-    EMOJI_TARGET,
     UniversalAIAnalyzer,
     call_provider_chain,
     first_local_provider,
 )
-from .config import ContextBudgetError, analysis_command, context_limited_config, model_config
+from .config import (
+    ContextBudgetError,
+    ModelSpec,
+    analysis_command,
+    context_limited_config,
+    default_model_alias,
+    list_model_options,
+    model_config,
+    resolve_model_spec,
+)
 from .errors import (
     classify_failure,
     context_length_limit,
-    has_textual_gms_tool_call,
     interrupted_exit,
     llm_stream_timeout,
     provider_overloaded,
@@ -61,17 +66,12 @@ from .process import (
     STREAM_LINE_LIMIT_BYTES,
     CappedCapture,
     child_env,
+    read_bounded,
     read_stream_capped,
     settle_reader_future,
     terminate_process_tree,
 )
-from .registry import (
-    ModelSpec,
-    default_model_alias,
-    list_model_options,
-    resolve_model_spec,
-)
-from .sandbox import read_bounded, restricted_runtime
+from .sandbox import restricted_runtime
 from .session import (
     KKAGENT_BINARY,
     TURN_TIMEOUT_SECONDS,
@@ -94,9 +94,6 @@ __all__ = [
     "API_FORMAT_OPENAI",
     "CAPTURE_HEAD_BYTES",
     "CAPTURE_TAIL_BYTES",
-    "EMOJI_CHART",
-    "EMOJI_CHECK",
-    "EMOJI_TARGET",
     "KKAGENT_BINARY",
     "MCP_IDENTITY_ENV_KEYS",
     "STREAM_LINE_LIMIT_BYTES",
@@ -125,7 +122,6 @@ __all__ = [
     "endpoint_url",
     "extract_turn_events",
     "first_local_provider",
-    "has_textual_gms_tool_call",
     "interrupted_exit",
     "is_local_provider",
     "list_model_options",

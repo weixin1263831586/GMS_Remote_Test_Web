@@ -168,6 +168,6 @@ async def get_runtime_artifact_disk_audit(
     Never accepts a user-supplied path or invokes any cleanup operation.
     The bounded scanner runs in a worker thread to avoid blocking the Web loop.
     """
-    from features.system.disk_artifacts import cached_disk_artifacts
+    from foundation.ops_port import read_disk_inventory
 
-    return ApiResponse.success(await asyncio.to_thread(cached_disk_artifacts, refresh=refresh))
+    return ApiResponse.success(await asyncio.to_thread(read_disk_inventory, refresh=refresh))

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import os
+import re
 from pathlib import Path
 
 from foundation.config_paths import runtime_environment_path, secret_environment_path
@@ -42,7 +42,8 @@ def load_runtime_env() -> dict[str, str]:
     the JSON file), mirroring the previous EnvironmentFile semantics where
     later systemd ``Environment=`` lines override earlier ``EnvironmentFile=``
     entries. Only string values are applied; ``_comment`` and non-strings are
-    skipped.
+    skipped. A present but invalid configuration fails before any variable
+    is exported; only an absent configuration can fall back to another tree.
     """
 
     applied: dict[str, str] = {}
@@ -53,14 +54,9 @@ def load_runtime_env() -> dict[str, str]:
     for path in _candidate_paths():
         base_root = path.parent.parent.parent if path.parent.name == "local" else path.parent.parent
         secret_path = secret_environment_path(base_root)
-        if not path.is_file() and not secret_path.is_file():
+        if not path.exists() and not secret_path.exists():
             continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(payload, dict):
-            continue
+        payload = read_json_object(path)
         # ${PROJECT_ROOT} 展开为包含该 runtime.json 的部署树根目录
         # （configs/ 的上一级），兼容仓库树与 GMS_DATA_ROOT 发布树。
         if secret_path.exists():
@@ -68,11 +64,11 @@ def load_runtime_env() -> dict[str, str]:
             # environment still wins below. Do not silently ignore corrupt secrets.
             payload.update(read_json_object(secret_path))
         for key, value in payload.items():
-            if key.startswith("_") or not isinstance(value, str):
+            if key.startswith("_") or not isinstance(value, str) or key in os.environ:
                 continue
-            expanded = _expand_project_root(value, base_root)
-            if key not in os.environ:
-                os.environ[key] = expanded
-                applied[key] = expanded
+            if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", key) or "\x00" in value:
+                raise ValueError("Invalid runtime environment variable name or value")
+            applied[key] = _expand_project_root(value, base_root)
+        os.environ.update(applied)
         break
     return applied

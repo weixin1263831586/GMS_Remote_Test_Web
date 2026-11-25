@@ -15,10 +15,10 @@ from types import ModuleType
 
 import pytest
 
-from features.system.agent_package_builder import build_package_bytes
+from features.system.agent_package.builder import build_package_bytes
 from scripts.release import build_binary_release as builder
 from scripts.release import compiled_entry
-from worker_agent.config import WorkerConfig
+from worker.config import WorkerConfig
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -102,7 +102,7 @@ def test_embedded_agent_uses_exactly_the_canonical_public_archive(tmp_path, monk
 def test_compiled_backup_defaults_resolve_split_roots_without_overriding_explicit_options(
     tmp_path, monkeypatch, arguments,
 ):
-    from scripts import gms_backup
+    from scripts.backup import gms_backup
 
     configs = tmp_path / "configs"
     configs.mkdir()
@@ -152,7 +152,7 @@ else:
         "TEST_BACKUP_EVENTS": str(events), "TEST_BACKUP_FAILURE": str(failure),
         "TEST_WORKER_INACTIVE": str(int(not worker_active)),
     }
-    result = subprocess.run(["bash", str(ROOT / "scripts/run_production_backup.sh")],
+    result = subprocess.run(["bash", str(ROOT / "scripts/backup/run_production_backup.sh")],
                             env=env, capture_output=True, text=True, timeout=15)
     assert result.returncode == failure, result.stderr
     calls = [json.loads(line) for line in events.read_text().splitlines()]

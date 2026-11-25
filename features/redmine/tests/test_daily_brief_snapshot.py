@@ -14,8 +14,8 @@ from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import features.redmine.daily_brief_snapshot as snapshot_mod
-from features.redmine.daily_brief_snapshot import (
+import features.redmine.daily_brief.snapshot as snapshot_mod
+from features.redmine.daily_brief.snapshot import (
     DailyBriefIdentityError,
     build_daily_triage_snapshot,
     resolve_daily_brief_owner_identity,
@@ -88,7 +88,7 @@ class SnapshotAuthorTests(unittest.TestCase):
     """triage 快照必须携带 author_name（报告人），供分析 prompt 直接引用。"""
 
     def test_merge_buckets_keeps_author_name(self):
-        from features.redmine.daily_brief_snapshot import _merge_buckets
+        from features.redmine.daily_brief.snapshot import _merge_buckets
 
         waiting = [{
             "issue_id": 653167, "subject": "rk3588 POWER", "status_name": "进行中",
@@ -101,7 +101,7 @@ class SnapshotAuthorTests(unittest.TestCase):
         self.assertEqual(merged[653167]["author_name"], "张三")
 
     def test_issue_summary_includes_author_name(self):
-        from features.redmine.repository_queries import RepositoryQueryMixin
+        from features.redmine.repository.queries import RepositoryQueryMixin
 
         summary = RepositoryQueryMixin._issue_summary({
             "issue_id": 653167, "subject": "x", "author_name": "张三",
@@ -205,7 +205,7 @@ class SnapshotScopingTests(unittest.TestCase):
     def test_snapshot_defaults_to_owner_user_map(self):
         """未显式传 organization_user_map 时必须加载 owner 组织成员映射。
 
-        晨报的「待回复」归因（repository_queries._reply_wait_info）靠这份
+        晨报的「待回复」归因（repository.queries._reply_wait_info）靠这份
         映射识别 RK 同事（部门助理等）；缺失时「同事已回复」会被误判为
         「等待 owner 回复」，晨报计数偏多、与统计看板口径不一致。
         """

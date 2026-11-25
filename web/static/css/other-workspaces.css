@@ -1,8 +1,4 @@
-/*
- * 其他工作区重构：跟随已经落地的 Agent 三栏工作区和设备库存表格。
- * 仅作用于 page-ui-rework，禁止覆盖 #page-agent、#page-devices / AOA。
- * 统一组件层级与视觉，不改变事件绑定、数据列和页面路由。
- */
+/* 共享工作区样式仅作用于 .page-ui-rework，不覆盖 Agent、设备管理和 AOA。 */
 .page-ui-rework {
     --workbench-surface: var(--card-bg);
     --workbench-subtle: var(--light-bg);
@@ -181,7 +177,9 @@
     display: none !important;
 }
 #page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) { gap: 5px; }
-#page-test.page-ui-rework :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) .btn-xxs {
+/* ADB/VNC 动作按钮的宽度、内距与间距统一在 ui-foundations.css 定义，
+   这里不再覆盖它们的 .btn-xxs，避免后加载的规则把两行宽度拆散。 */
+#page-test.page-ui-rework .vpn-btn-frame .btn-xxs {
     min-width: 0; min-height: 29px; padding: 4px 8px;
 }
 #page-test.page-ui-rework .test-btn-frame {
@@ -660,30 +658,6 @@
 #page-test-suites .suite-suite-path { margin-top: 3px; }
 #page-test-suites .suite-type-badge {
     padding: 4px 7px; min-width: 46px; border: 0; border-radius: 5px;
-    background: color-mix(in srgb, var(--primary-color) 20%, transparent);
-    color: var(--primary-light);
-}
-/* Keep the suite type colors semantically distinct even on selected rows:
-   APTS muted rose, CTS purple; selection is expressed by card outline. */
-#page-test-suites .suite-type-badge[data-type="apts"],
-#page-test-suites .suite-suite-item.active .suite-type-badge[data-type="apts"] {
-    color: #e6a5d4;
-    background: rgba(200, 103, 169, .17);
-}
-#page-test-suites .suite-type-badge[data-type="cts"],
-#page-test-suites .suite-suite-item.active .suite-type-badge[data-type="cts"] {
-    color: var(--primary-light);
-    background: color-mix(in srgb, var(--primary-color) 20%, transparent);
-}
-#page-test-suites .suite-type-badge[data-type="gts"] {
-    color: #7bdcc7; background: rgba(57,201,148,.15);
-}
-#page-test-suites .suite-type-badge[data-type="cts-v"],
-#page-test-suites .suite-type-badge[data-type="vts"] {
-    color: #89b7ff; background: rgba(106,166,255,.15);
-}
-#page-test-suites .suite-type-badge[data-type="sts"] {
-    color: #e7c36c; background: rgba(231,184,84,.16);
 }
 #page-test-suites .suite-sidebar-footer {
     display: flex; align-items: center; gap: 7px; height: 38px;
@@ -703,8 +677,6 @@
 }
 #page-test-suites .suite-header-type {
     padding: 4px 7px; border-radius: 5px; flex-shrink: 0;
-    color: var(--primary-light);
-    background: color-mix(in srgb, var(--primary-color) 22%, transparent);
 }
 #page-test-suites .suite-header-type[hidden] { display: none; }
 #page-test-suites .suite-browser-title {

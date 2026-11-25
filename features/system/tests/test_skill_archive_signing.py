@@ -9,7 +9,7 @@ from unittest.mock import patch
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
-from features.system.skill_archive_signing import (
+from features.system.agent_package.signing import (
     sign_skill_archive,
     skill_verify_key_b64,
 )

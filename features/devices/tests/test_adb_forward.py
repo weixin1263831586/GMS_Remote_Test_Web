@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from features.devices.adb_forward import ADBForwardManager, _adb_tunnel_kill_command
+from features.devices.adb.forwarding import ADBForwardManager, _adb_tunnel_kill_command
 from foundation.command_result import CommandResult
 
 
@@ -39,13 +39,16 @@ class ADBForwardManagerTests(unittest.TestCase):
             config_manager=FakeConfigManager(),
         )
 
-        with patch("features.devices.adb_forward.time.sleep"):
-            result = manager.start_forward("user@192.168.0.2")
+        with patch("features.devices.adb.forwarding.time.sleep"):
+            result = manager.start_forward("user@192.168.0.2:2222")
 
         self.assertTrue(result["success"])
         self.assertEqual(commands[0], _adb_tunnel_kill_command())
         self.assertTrue(any("-o ExitOnForwardFailure=yes" in cmd for cmd in commands))
         self.assertTrue(any("StrictHostKeyChecking=yes" in cmd for cmd in commands))
+        ssh_commands = [cmd for cmd in commands if cmd.startswith('ssh ')]
+        self.assertEqual(len(ssh_commands), 2)
+        self.assertTrue(all('-p 2222 ' in cmd and '-- user@192.168.0.2' in cmd for cmd in ssh_commands))
         self.assertFalse(any("sshpass" in cmd or "SSHPASS" in cmd for cmd in commands))
         self.assertFalse(any("pkill -f adb" in cmd for cmd in commands))
         self.assertEqual(commands[-1], "__returned__")

@@ -1,4 +1,4 @@
-from features.automation.artifact_progress import artifact_download_progress
+from features.automation.artifacts import artifact_download_progress
 from features.automation.models import TERMINAL_STATUSES as AUTOMATION_TERMINAL_STATUSES
 from features.automation.models import AutomationRunCreateRequest
 from features.automation.orchestrator import AutomationOrchestrator

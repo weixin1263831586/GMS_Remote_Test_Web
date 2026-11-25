@@ -92,7 +92,7 @@ fi
 
 # Offline installations require preinstalled packages; otherwise apt gets
 # explicit control of operating-system dependencies (never curl | bash).
-packages=(ca-certificates curl openssl rsync openssh-client openssh-server iproute2
+packages=(ca-certificates curl openssl rsync unzip openssh-client openssh-server iproute2
           libudev1 libusb-1.0-0 x11vnc novnc websockify)
 if ! $OFFLINE; then
   apt-get update
@@ -216,7 +216,7 @@ Environment=GMS_BACKUP_DIR=$BACKUP_DIR
 Environment=GMS_BACKUP_KEEP=14
 Environment=GMS_CONTROLLER_SERVICE=$SERVICE.service
 Environment=GMS_LOCAL_WORKER_SERVICE=$SERVICE-local-worker.service
-ExecStart=$PREFIX/current/scripts/run_production_backup.sh
+ExecStart=$PREFIX/current/scripts/backup/run_production_backup.sh
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true

@@ -1,7 +1,7 @@
 /* ==================== Reset & Base ==================== */
 @import url("/static/css/theme.css?v=20261112-purple-surfaces");
 @import url("/static/css/apk-analysis.css?v=20260828-manifest-scroll");
-@import url("/static/css/form-controls.css?v=20260828-password-icons");
+@import url("/static/css/form-controls.css?v=20261125-unified-password-control");
 
 * {
     margin: 0;
@@ -1671,14 +1671,14 @@ td.table-placeholder {
     margin-top: 10px;
 }
 
+/* 按钮宽度统一由 ui-foundations.css 的
+   #page-test.page-ui-rework .middle-row :is(.adb-button-frame, .vnc-button-frame) .btn-xxs
+   定义，此处只保留容器与阴影，勿再加 width/min-width。 */
 .adb-button-frame .btn-xxs,
 .vnc-button-frame .btn-xxs {
-    flex: 0 0 auto;
-    width: 75px;
-    min-width: 75px;
-    box-sizing: border-box;
+  box-sizing: border-box;
 
-    box-shadow: var(--shadow-sm);
+  box-shadow: var(--shadow-sm);
 }
 
 .adb-button-frame .btn-xxs:hover:not(:disabled),

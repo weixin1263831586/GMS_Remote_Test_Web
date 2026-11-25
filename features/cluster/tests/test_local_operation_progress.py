@@ -5,7 +5,7 @@
 """
 import unittest
 
-from features.cluster.device_action_operations import execute_local_operation
+from features.cluster.device_operations.execution import execute_local_operation
 
 
 class _FakeClaims:

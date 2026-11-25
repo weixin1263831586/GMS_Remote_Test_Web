@@ -9,13 +9,12 @@ from starlette.requests import Request
 
 from features.auth import CurrentUser
 from features.devices import (
-    config_explorer_api,
-    config_override_api,
     device_lock_manager,
-    operations_api,
     ui_control_api,
 )
+from features.devices.configuration import config_explorer_api, config_override_api
 from features.devices.models import DeviceActionRequest
+from features.devices.operations import api as operations_api
 from features.devices.ui_control_api import UiTapRequest
 
 

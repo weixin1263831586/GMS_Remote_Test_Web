@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import signal
+from collections.abc import Callable
 from typing import Any
 
 
@@ -131,6 +132,28 @@ async def read_stream_capped(
     return capture.text().encode("utf-8", errors="replace")
 
 
+async def read_bounded(
+    stream: asyncio.StreamReader, limit: int = 2 * 1024**2,
+    *, on_line: Callable[[str], None] | None = None,
+) -> bytes:
+    parts, size = [], 0
+    pending = b""
+    while chunk := await stream.read(65536):
+        size += len(chunk)
+        if size > limit:
+            raise RuntimeError("kkagent 输出超过大小限制")
+        parts.append(chunk)
+        if on_line:
+            pending += chunk
+            lines = pending.split(b"\n")
+            pending = lines.pop()
+            for line in lines:
+                on_line(line.decode("utf-8", errors="replace"))
+    if on_line and pending:
+        on_line(pending.decode("utf-8", errors="replace"))
+    return b"".join(parts)
+
+
 def child_env(env_extra: dict[str, str]) -> dict[str, str]:
     """kkagent 子进程环境：剥离继承的 Agent 身份，再显式注入目标身份。"""
     env = {
@@ -151,6 +174,7 @@ __all__ = [
     "STREAM_LINE_LIMIT_BYTES",
     "CappedCapture",
     "child_env",
+    "read_bounded",
     "read_stream_capped",
     "settle_reader_future",
     "terminate_process_tree",

@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from features.devices.adb_ops import (
+from features.devices.adb.operations import (
     fastboot_reboot_with_runner,
     reboot_with_runner,
 )

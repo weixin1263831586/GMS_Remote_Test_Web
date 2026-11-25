@@ -18,8 +18,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 
-from features.system import agent_package_builder as builder  # noqa: E402
-from features.system.agent_package_registry import _build_archive, _package_version  # noqa: E402
+from features.system.agent_package import builder as builder  # noqa: E402
+from features.system.agent_package.registry import _build_archive, _package_version  # noqa: E402
 
 
 @contextlib.contextmanager

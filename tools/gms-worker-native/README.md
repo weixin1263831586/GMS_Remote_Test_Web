@@ -17,7 +17,7 @@ Build and test:
 
 ```bash
 (cd tools/gms-worker-native && cargo test --locked)
-scripts/build_gms_worker_native.sh
+scripts/native/build_gms_worker_native.sh
 ```
 
 The build script writes binaries and `SHA256SUMS` beneath

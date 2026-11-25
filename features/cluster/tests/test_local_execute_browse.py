@@ -1,6 +1,6 @@
 """本机 Worker 桥 file_browse 的浏览边界回归。
 
-远端 Worker 的 file_browse 已限制在套件根/数据根内（worker_agent
+远端 Worker 的 file_browse 已限制在套件根/数据根内（worker
 device_actions.browse_directory 的 allowed_roots）；本机桥此前未传
 allowed_roots，等于回退到「任意目录可列」。这里钉住桥与远端同边界。
 """
@@ -24,7 +24,7 @@ class LocalFileBrowseRootsTests(unittest.TestCase):
                 "features.cluster.local_bridge._suite_roots",
                 return_value=[str(inside)],
             ), patch(
-                "worker_agent.device_actions.browse_directory"
+                "worker.device_actions.browse_directory"
             ) as browse:
                 cluster_api._local_execute("file_browse", {"path": ""})
             self.assertEqual(

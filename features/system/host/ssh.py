@@ -1,0 +1,436 @@
+"""
+SSH管理器 - 同步SSH操作
+"""
+import asyncio
+import logging
+import os
+import queue
+import time
+from contextlib import asynccontextmanager, contextmanager
+from contextlib import suppress as contextlib_suppress
+from typing import Any
+
+import paramiko
+
+from foundation.command_result import CommandResult
+from foundation.config import get_ubuntu_user
+from foundation.networking import split_host_port
+from foundation.ssh import SSHD_INSTALL_GUIDE
+from foundation.ssh_executor import ssh_executor
+from foundation.ssh_security import configure_strict_host_keys
+
+
+logger = logging.getLogger(__name__)
+
+# SFTP 性能优化常量
+SFTP_TIMEOUT_SECONDS = 300
+SFTP_WINDOW_SIZE = 2147483647
+SFTP_REKEY_BYTES = pow(2, 40)  # 减少重新密钥协商频率
+SFTP_REKEY_PACKETS = pow(2, 40)
+
+# Windows SSHD 安装命令常量
+SSHD_INSTALL_CMD = 'Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0'
+SSHD_START_CMD = 'Start-Service sshd'
+SSHD_ENABLE_CMD = 'Set-Service -Name sshd -StartupType \'Automatic\''
+
+def _connection_identity(config: dict) -> tuple[str, int, str]:
+    host = config.get('host') or config.get('hostname') or config.get('ubuntu_host')
+    host, parsed_port = split_host_port(str(host or ''))
+    port = int(config.get('port') or parsed_port)
+    username = str(config.get('username') or config.get('ubuntu_user') or get_ubuntu_user())
+    return host, port, username
+
+
+class SSHManager:
+    """提供连接池、命令执行和超时控制的同步 SSH 管理器。"""
+
+    def __init__(self, pool_size: int = 5):
+        """初始化指定容量的连接池。"""
+        self.pool: queue.Queue = queue.Queue(maxsize=pool_size)
+
+    def _load_ssh_key(self, key_path: str) -> paramiko.PKey | None:
+        """尝试按多种密钥类型加载 SSH 私钥。"""
+        key_path = os.path.expanduser(key_path)
+        key_error = None
+
+        # paramiko 5.0 移除了 DSSKey；按可用性过滤，避免列表构造时
+        # AttributeError 让所有密钥认证连接整体失败。
+        key_classes = [
+            key_class
+            for key_class in (
+                paramiko.RSAKey,
+                paramiko.Ed25519Key,
+                paramiko.ECDSAKey,
+                getattr(paramiko, "DSSKey", None),
+            )
+            if key_class is not None
+        ]
+        for key_class in key_classes:
+            try:
+                key = key_class.from_private_key_file(key_path)
+                logger.info(f"[SSH] Loaded {key_class.__name__} from {key_path}")
+                return key
+            except Exception as e:
+                key_error = e
+                continue
+
+        logger.error(f"[SSH] Failed to load SSH key from {key_path}: {key_error}")
+        return None
+
+    def create_connection(
+        self, config: dict, *, raise_on_error: bool = False
+    ) -> paramiko.SSHClient | None:
+        """根据配置创建 SSH 连接，失败时按需返回 None 或抛出异常。"""
+        try:
+            ssh = paramiko.SSHClient()
+            configure_strict_host_keys(ssh)
+
+            host, port, username = _connection_identity(config)
+            password = config.get('password') or config.get('ubuntu_pswd', '')
+
+            if config.get('use_key_auth', False):
+                key = self._load_ssh_key(config.get('private_key_path', '~/.ssh/id_rsa'))
+                if key:
+                    ssh.connect(
+                        host,
+                        port=port,
+                        username=username,
+                        pkey=key,
+                        timeout=10
+                    )
+                else:
+                    # 安装目录可能从另一台机器恢复，导致 runtime 配置仍指向
+                    # 已不存在的专用密钥。use_key_auth 表示使用密钥认证，不应
+                    # 因单个显式路径失效而禁止 Paramiko 的标准 Agent/default-key
+                    # 发现；否则本机已有可用 ~/.ssh/id_rsa 也会被误报为 SSH 失败。
+                    logger.warning(
+                        "[SSH] Configured private key is unavailable; "
+                        "trying SSH agent and default key files"
+                    )
+                    ssh.connect(
+                        host,
+                        port=port,
+                        username=username,
+                        timeout=10,
+                        banner_timeout=10,
+                        auth_timeout=10,
+                        allow_agent=True,
+                        look_for_keys=True,
+                    )
+            else:
+                if not password:
+                    logger.error("[SSH] No SSH password configured")
+                    return None
+                ssh.connect(
+                    host,
+                    port=port,
+                    username=username,
+                    password=password,
+                    timeout=10,
+                    banner_timeout=10,
+                    auth_timeout=10
+                )
+
+            logger.info(f"[SSH] Connected to {host}")
+            # 保存目标身份，防止跨主机复用连接。
+            ssh._gms_pool_identity = (str(host), str(port), str(username))
+            return ssh
+
+        except Exception as e:
+            logger.error(f"[SSH] Connection error: {e}")
+            if raise_on_error:
+                raise
+            return None
+
+    def get_connection(self, config: dict) -> paramiko.SSHClient | None:
+        """从连接池获取健康连接，必要时新建。"""
+        try:
+            requested_host, requested_port, username = _connection_identity(config)
+        except (TypeError, ValueError):
+            logger.warning("[SSH] Invalid connection identity")
+            return None
+        requested_identity = (requested_host, str(requested_port), username)
+
+        # 尝试从池中获取有效连接，最多尝试 pool_size 次防止无限循环
+        max_attempts = self.pool.maxsize
+        for attempt in range(max_attempts):
+            try:
+                ssh = self.pool.get_nowait()
+                if getattr(ssh, '_gms_pool_identity', None) != requested_identity:
+                    logger.debug("[SSH] Discarding pooled connection for a different destination")
+                    try:
+                        ssh.close()
+                    except Exception:
+                        pass
+                    continue
+                # 测试连接是否仍然有效（轻量级检查，登记的 connection-health
+                # 原语：手工管理 channel 超时，不走 SSHExecutor，因为
+                # paramiko 的 recv_exit_status() 是不带超时的
+                # status_event.wait()，channel settimeout 约束不到它——
+                # 远端不回传 exit status 时会无限阻塞整个事件循环。
+                # 按 deadline 轮询 exit_status_ready，超时
+                # 主动关闭 channel 并判定连接已死。
+                # See docs/architecture/adr/0004-ssh-execution-boundary.md.
+                try:
+                    _stdin, stdout, _stderr = ssh.exec_command('true', timeout=2)
+                    channel = stdout.channel
+                    channel.settimeout(2.0)
+                    deadline = time.monotonic() + 3.0
+                    while not channel.exit_status_ready():
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                "ssh health check: no exit status within 3s"
+                            )
+                        time.sleep(0.05)
+                    if channel.recv_exit_status() == 0:
+                        # 健康检查占用一条 session。不关闭 channel 时，
+                        # OpenSSH MaxSessions（默认 10）会在几次复用后把
+                        # 这条连接判死，后续命令全部健康检查失败。
+                        with contextlib_suppress(Exception):
+                            channel.close()
+                        logger.debug("[SSH] Reused connection from pool")
+                        return ssh
+                    logger.debug(
+                        f"[SSH] Pool health check exit_code={channel.recv_exit_status()}"
+                    )
+                    with contextlib_suppress(Exception):
+                        channel.close()
+                    with contextlib_suppress(Exception):
+                        ssh.close()
+                except Exception as e:
+                    logger.debug(f"[SSH] Connection {attempt+1}/{max_attempts} is dead: {e}")
+                    try:
+                        ssh.close()
+                    except Exception:
+                        pass
+            except queue.Empty:
+                break
+
+        logger.debug("[SSH] Creating new connection")
+        return self.create_connection(config)
+
+    def return_connection(self, ssh: paramiko.SSHClient):
+        """将连接归还连接池，池满时关闭连接。"""
+        try:
+            self.pool.put_nowait(ssh)
+        except queue.Full:
+            ssh.close()
+
+    def execute_command(
+        self,
+        ssh: paramiko.SSHClient,
+        command: str,
+        timeout: int = 30,
+        get_pty: bool = False
+    ) -> CommandResult:
+        """执行 SSH 命令，统一返回 :class:`CommandResult`。
+
+        同步/异步执行统一委托给
+        :class:`~foundation.ssh_executor.SSHExecutor` 唯一实现，
+        彻底废除 ``(stdout, stderr, exit_code)`` 裸 tuple（位置错用曾造成
+        真实功能 bug）。
+        """
+        return ssh_executor.run(ssh, command, timeout=timeout, get_pty=get_pty)
+
+    def check_sshd_installed(self, ssh) -> tuple[bool, str]:
+        """检查 Windows SSHD 是否已安装。"""
+        try:
+            result = self.execute_command(ssh, 'Get-Service sshd')
+            if result.code == 0 and result.stdout.strip():
+                return True, result.stdout.strip()
+            return False, ''
+        except Exception as e:
+            logger.error(f"Error checking sshd: {e}")
+            return False, ''
+
+    def install_sshd(self, ssh, config: dict[str, Any]) -> dict[str, Any]:
+        """在 Windows 主机安装并启动 SSHD。"""
+        try:
+            installed, status = self.check_sshd_installed(ssh)
+            if installed:
+                return {
+                    'success': True,
+                    'message': 'SSHD 已安装',
+                    'status': status
+                }
+
+            install_result = self.execute_command(ssh, SSHD_INSTALL_CMD, timeout=180)
+
+            if install_result.code == 0:
+                # 启动 SSHD 服务并设置开机自启（合并命令以提高效率）
+                combined_cmd = f'{SSHD_START_CMD}; {SSHD_ENABLE_CMD}'
+                self.execute_command(ssh, combined_cmd, timeout=60)
+
+                installed_verify, status_verify = self.check_sshd_installed(ssh)
+                if installed_verify:
+                    return {
+                        'success': True,
+                        'message': 'SSHD 安装成功并已启动',
+                        'status': status_verify
+                    }
+                return {
+                    'success': False,
+                    'error': 'SSHD 安装命令已执行，但服务未进入可查询状态',
+                    'status': status_verify,
+                }
+            else:
+                error_msg = install_result.stderr or install_result.stdout
+
+                if 'Access denied' in error_msg or '管理员' in error_msg or 'administrator' in error_msg.lower():
+                    error_msg = '需要管理员权限。请确保 Windows 上的 SSH 服务以管理员权限运行，或手动执行以下命令：\n\n' + SSHD_INSTALL_CMD
+
+                return {
+                    'success': False,
+                    'error': f'安装失败: {error_msg}',
+                    'install_guide': SSHD_INSTALL_GUIDE
+                }
+
+        except Exception as e:
+            logger.error(f"Error installing sshd: {e}")
+            return {
+                'success': False,
+                'error': str(e),
+                'install_guide': SSHD_INSTALL_GUIDE
+            }
+
+    @contextmanager
+    def connection(self, config: dict):
+        """获取 SSH 连接，并在退出时归还连接池。"""
+        ssh = self.get_connection(config)
+        if not ssh:
+            raise RuntimeError("Failed to get SSH connection")
+
+        try:
+            yield ssh
+        finally:
+            self.return_connection(ssh)
+
+    @contextmanager
+    def optional_connection(self, config: dict):
+        """允许连接为空，并在退出时归还有效连接。"""
+        ssh = self.get_connection(config)
+        try:
+            yield ssh
+        finally:
+            if ssh is not None:
+                self.return_connection(ssh)
+
+    @asynccontextmanager
+    async def async_optional_connection(self, config: dict):
+        """None-safe connection context without blocking the event loop."""
+        ssh = await asyncio.to_thread(self.get_connection, config)
+        try:
+            yield ssh
+        finally:
+            if ssh is not None:
+                await asyncio.to_thread(self.return_connection, ssh)
+
+    def optimize_sftp_performance(self, sftp):
+        """配置 SFTP 超时、窗口和重新密钥阈值。"""
+        sftp.get_channel().settimeout(SFTP_TIMEOUT_SECONDS)
+        sftp.get_channel().transport.window_size = SFTP_WINDOW_SIZE
+        sftp.get_channel().transport.packetizer.REKEY_BYTES = SFTP_REKEY_BYTES
+        sftp.get_channel().transport.packetizer.REKEY_PACKETS = SFTP_REKEY_PACKETS
+
+
+ssh_manager = SSHManager()
+
+
+class SSHAsyncManager:
+    """
+    SSH 异步管理器
+
+    特性：
+    - 异步执行 SSH 命令（SSHExecutor.run_async 线程池实现）
+    - 实时流式输出日志（stderr 走 recv_stderr API）
+    - 支持超时控制
+    - 按目标身份缓存的连接管理
+    """
+
+    def __init__(self):
+        """初始化 SSH 异步管理器"""
+        # SSH connections are identity-scoped; a host-only key could reuse an
+        # authenticated session for the wrong user.
+        self.connections: dict[tuple[str, int, str], paramiko.SSHClient] = {}
+        self._lock = asyncio.Lock()
+
+    async def connect(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        port: int | None = None,
+        timeout: int = 10
+    ) -> paramiko.SSHClient:
+        """在线程中建立 SSH 连接并按目标身份缓存。"""
+        host, parsed_port = split_host_port(host)
+        port = parsed_port if port is None else port
+        connection_key = (host, port, username)
+        async with self._lock:
+            if connection_key in self.connections:
+                try:
+                    transport = self.connections[connection_key].get_transport()
+                    if transport and transport.is_active():
+                        logger.debug(f"[SSH] Reusing existing connection to {host}")
+                        return self.connections[connection_key]
+                except Exception:
+                    pass
+
+            logger.info(f"[SSH] Connecting to {host}...")
+
+            def _connect():
+                ssh = paramiko.SSHClient()
+                configure_strict_host_keys(ssh)
+                ssh.connect(
+                    hostname=host,
+                    username=username,
+                    password=password,
+                    port=port,
+                    timeout=timeout,
+                    look_for_keys=False,
+                    allow_agent=False
+                )
+                return ssh
+
+            try:
+                ssh = await asyncio.to_thread(_connect)
+                self.connections[connection_key] = ssh
+                logger.info(f"[SSH] Connected to {host}")
+                return ssh
+            except Exception as e:
+                logger.error(f"[SSH] Failed to connect to {host}: {e}")
+                raise
+
+    async def execute_command_simple(
+        self,
+        host: str,
+        username: str,
+        password: str,
+        command: str,
+        timeout: int = 30
+    ) -> CommandResult:
+        """执行非流式 SSH 命令，统一返回 :class:`CommandResult`。"""
+        ssh = await self.connect(host, username, password, timeout=timeout)
+        return await ssh_executor.run_async(ssh, command, timeout=timeout)
+
+    def close(self, host: str):
+        """
+        关闭指定主机的连接
+
+        Args:
+            host: 主机地址
+        """
+        hostname, port = split_host_port(host)
+        keys = [key for key in self.connections
+                if key[0] == hostname and (hostname == host or key[1] == port)]
+        for key in keys:
+            try:
+                self.connections[key].close()
+                del self.connections[key]
+            except Exception as e:
+                logger.error(f"[SSH] Error closing connection to {host}: {e}")
+        if keys:
+            logger.info(f"[SSH] Closed {len(keys)} connection(s) to {host}")
+
+
+ssh_async_manager = SSHAsyncManager()

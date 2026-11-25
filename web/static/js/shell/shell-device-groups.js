@@ -310,7 +310,7 @@
             loadUsbipAssignments();
         }
         function copyTailscaleInstallCmd() {
-            copyText('sudo bash scripts/setup_tailscale.sh', {successMsg: '✓ 安装命令已复制'});
+            copyText('sudo bash scripts/deployment/setup_tailscale.sh', {successMsg: '✓ 安装命令已复制'});
         }
         async function autoGroupDevices(by) {
             if (!by) return;
@@ -382,12 +382,7 @@
                 // cluster directory. The visible terminal pane connects in ADB
                 // mode directly; no timer or shell-command injection is needed.
                 if (!desktopHosts.some(host => host.id === 'default')) {
-                    // Do not let a local ADB pane race the asynchronous host
-                    // directory merge. That merge can redraw the terminal
-                    // workspace after its WebSocket opens; the disposed pane
-                    // then never sends terminal_connect. The local shortcut
-                    // used to be safe only before the workspace renderer
-                    // began preserving/replacing panes asynchronously.
+                    // Resolve the host directory before opening the local ADB terminal pane.
                     await initDesktopHosts();
                     window.desktopHostsInitialized = true;
                 } else if (typeof mergeClusterDesktopHosts === 'function') {

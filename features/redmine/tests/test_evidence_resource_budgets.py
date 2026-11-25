@@ -12,7 +12,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from features.redmine.evidence import (
+from features.redmine.evidence.archives import extract_system_archive_text, extract_zip_derived_text
+from features.redmine.evidence.service import (
     DERIVED_TEXT_MAX_CHARS,
     EXTRACT_TIMEOUT_SECONDS,
     MAX_ATTACHMENT_BYTES,
@@ -20,10 +21,8 @@ from features.redmine.evidence import (
     OCR_TIMEOUT_SECONDS,
     _env_limit,
 )
-from features.redmine.evidence_archives import extract_system_archive_text
-from features.redmine.evidence_store import EvidenceStore
-from features.redmine.evidence_text import derive_member_index
-from features.redmine.evidence_zip import extract_zip_derived_text
+from features.redmine.evidence.store import EvidenceStore
+from features.redmine.evidence.text import derive_member_index
 
 
 def test_resource_budgets_are_env_overridable(monkeypatch):
@@ -55,7 +54,7 @@ def test_member_over_derived_text_budget_is_dropped_with_explicit_note(tmp_path)
     source = tmp_path / "small.zip"
     with zipfile.ZipFile(source, "w") as archive:
         archive.writestr("a.txt", "first")
-    with zipfile.ZipFile(source) as archive, patch("features.redmine.evidence_text.DERIVED_TEXT_MAX_CHARS", 4):
+    with zipfile.ZipFile(source) as archive, patch("features.redmine.evidence.text.DERIVED_TEXT_MAX_CHARS", 4):
         derived, note = derive_member_index(
             store, "art1", snapshot_rel,
             [("a.txt", lambda: archive.open("a.txt"))],
@@ -90,7 +89,7 @@ def test_member_budget_includes_frame_headers_and_newlines(tmp_path):
 
     store = EvidenceStore(tmp_path)
     # 首成员占 35 字符；剩余 2 字符能容纳 b 的正文，放不下其帧头。
-    with patch("features.redmine.evidence_text.DERIVED_TEXT_MAX_CHARS", 37):
+    with patch("features.redmine.evidence.text.DERIVED_TEXT_MAX_CHARS", 37):
         derived, note = derive_member_index(store, "art_frames", "1/s1", [
             ("a.txt", lambda: io.BytesIO(b"aaaa")),
             ("b.txt", lambda: io.BytesIO(b"b")),
@@ -109,7 +108,7 @@ def test_rar7z_extraction_runs_under_a_time_budget(tmp_path):
     source = tmp_path / "evil.7z"
     source.write_bytes(b"7z\xbc\xaf\x27\x1c" + b"\x00" * 16)
     with patch(
-        "features.redmine.evidence_archives.extract_system_archive"
+        "features.redmine.evidence.archives.extract_system_archive"
     ) as extract:
         extract_system_archive_text(store, "art3", "1/s1", source)
     _args, kwargs = extract.call_args
@@ -119,7 +118,7 @@ def test_rar7z_extraction_runs_under_a_time_budget(tmp_path):
 def test_attachment_stream_budget_aborts_download(tmp_path):
     import asyncio
 
-    from features.redmine.evidence_fetch import EvidenceFetcher
+    from features.redmine.evidence.fetch import EvidenceFetcher
 
     class Content:
         async def iter_chunked(self, _size):
@@ -130,7 +129,7 @@ def test_attachment_stream_budget_aborts_download(tmp_path):
 
     fetcher = EvidenceFetcher.__new__(EvidenceFetcher)
     with patch(
-        "features.redmine.evidence_fetch.MAX_ATTACHMENT_BYTES", 8
+        "features.redmine.evidence.fetch.MAX_ATTACHMENT_BYTES", 8
     ), pytest.raises(Exception, match="预算"):
         asyncio.run(
             fetcher._stream_to_disk(Response(), tmp_path / "out.part", Mock())
@@ -177,7 +176,7 @@ def test_encoding_prescan_is_bounded_by_char_budget(tmp_path):
 
     payload = b"a" * 1_000_000
     wrapped, reads = _counting_opener_log(lambda: io.BytesIO(payload))
-    with patch("features.redmine.evidence_text.DERIVED_TEXT_MAX_CHARS", 10):
+    with patch("features.redmine.evidence.text.DERIVED_TEXT_MAX_CHARS", 10):
         derived, note = derive_member_index(
             EvidenceStore(tmp_path), "art_scan2", "1/s1",
             [("big.txt", wrapped)],
@@ -198,7 +197,7 @@ def test_zip_declared_size_pre_rejection(tmp_path):
         archive.writestr("small.txt", "ok-text")
         archive.writestr("bomb.txt", "z" * 500)
     with zipfile.ZipFile(source) as archive, patch(
-        "features.redmine.evidence_zip.DERIVED_TEXT_MAX_CHARS", 100
+        "features.redmine.evidence.archives.DERIVED_TEXT_MAX_CHARS", 100
     ):
         derived, note = extract_zip_derived_text(
             store, "art_zip", snapshot_rel, source
@@ -210,7 +209,7 @@ def test_zip_declared_size_pre_rejection(tmp_path):
     with zipfile.ZipFile(source2, "w") as archive:
         archive.writestr("bomb.txt", "z" * 500)
     with zipfile.ZipFile(source2) as archive, patch(
-        "features.redmine.evidence_zip.DERIVED_TEXT_MAX_CHARS", 100
+        "features.redmine.evidence.archives.DERIVED_TEXT_MAX_CHARS", 100
     ):
         derived2, note2 = extract_zip_derived_text(
             store, "art_zip2", snapshot_rel, source2

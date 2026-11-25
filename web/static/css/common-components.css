@@ -1348,7 +1348,8 @@ select option {
     visibility: hidden;
     transition: var(--transition-normal);
     transition-property: opacity, transform;
-    z-index: 13000;
+    /* Notifications must remain above the authentication gate (20000). */
+    z-index: 21000;
 
 
     min-width: 320px;

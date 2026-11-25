@@ -2,7 +2,7 @@ import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 
-from foundation.sqlite_schema import ensure_schema, invalidate_schema
+from foundation.database import ensure_schema, invalidate_schema
 
 
 def test_readers_initialize_once_without_acquiring_write_lock_again(tmp_path):

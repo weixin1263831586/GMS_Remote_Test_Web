@@ -29,10 +29,10 @@ async def test_release_matches_host_and_busid_as_one_route_target():
     with patch.object(
         usbip_transport.runtime.get_runtime(), "ssh_manager", ssh_manager
     ), patch(
-        "features.devices.usbip_transaction.parse_usbip_port_entries",
+        "features.devices.usbip.transaction.parse_usbip_port_entries",
         side_effect=[initial_entries, []],
     ), patch(
-        "features.devices.usbip_transaction.resolve_usbip_command",
+        "features.devices.usbip.transaction.resolve_usbip_command",
         return_value="usbip",
     ), patch.object(usbip_transport, "pause_usbip_reconnect"), patch.object(
         usbip_transport.asyncio, "sleep"

@@ -48,7 +48,7 @@ _DEVICE_ACTION_SPECS: tuple[DeviceActionSpec, ...] = (
     DeviceActionSpec(action="remount", terminal_notification=True),
     # 恢复出厂：擦除 userdata 后自动重启，破坏性不可逆，与 bootloader
     # 解锁同档要求提权。user build 静默丢弃 MASTER_CLEAR 广播，实现统一
-    # 走 fastboot erase（worker_agent.device_actions._factory_reset_via_fastboot
+    # 走 fastboot erase（worker.device_actions._factory_reset_via_fastboot
     # 与 features.devices.manager.factory_reset_device 两个执行面同构）。
     DeviceActionSpec(action="factory_reset", elevated=True,
                      terminal_notification=True, forbidden_on_adb_proxy=True,

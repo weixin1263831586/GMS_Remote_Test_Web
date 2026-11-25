@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException
 
-from features.devices.adb_proxy_service import ADBProxyService
+from features.devices.adb.proxy_service import ADBProxyService
 
 
 class _ConfigManager:
@@ -169,7 +169,7 @@ async def test_connect_coordinates_source_then_target_without_pair_code_in_state
     ), patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ):
         result = await service.connect(
@@ -278,7 +278,7 @@ async def test_connect_ignores_offline_history_serial_on_target():
     ), patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ):
         result = await service.connect(
@@ -368,7 +368,7 @@ async def test_multiple_proxy_sources_share_one_target_and_disconnect_independen
     ), patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ), patch(
         "features.devices.integrations_api._usbip_assignments",
@@ -445,7 +445,7 @@ async def test_connect_adds_remaining_device_to_existing_assignment():
     ), patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ):
         result = await service.connect(
@@ -515,7 +515,7 @@ async def test_connect_restore_replays_new_generation_instead_of_stale_one():
     ), patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ), pytest.raises(RuntimeError, match="target connect failed"):
         await service.connect(
@@ -615,10 +615,10 @@ async def test_source_only_host_can_connect_to_local_target_without_cluster_mode
     ) as require_cluster, patch(
         "features.cluster.api._run_worker_command", run
     ), patch(
-        "features.devices.adb_proxy_service.create_pair_grant",
+        "features.devices.adb.proxy_service.create_pair_grant",
         return_value="short-lived-grant",
     ), patch(
-        "worker_agent.adb_proxy.capability_status",
+        "worker.adb_proxy.capability_status",
         return_value={"installed": True, "version": "adb-proxy 0.4.5"},
     ):
         status = service.status()
@@ -769,7 +769,7 @@ def test_status_hides_stale_generation_during_heartbeat_grace_period():
         }]},
     })
 
-    with patch("features.devices.adb_proxy_service.time.time", return_value=1_010):
+    with patch("features.devices.adb.proxy_service.time.time", return_value=1_010):
         reconciled = service._reconciled_status(assignment, [])
 
     assert reconciled == "recovering"
@@ -802,7 +802,7 @@ def test_status_reports_stale_generation_after_heartbeat_grace_period():
         }]},
     })
 
-    with patch("features.devices.adb_proxy_service.time.time", return_value=1_040):
+    with patch("features.devices.adb.proxy_service.time.time", return_value=1_040):
         reconciled = service._reconciled_status(assignment, [])
 
     assert reconciled == "degraded_source"

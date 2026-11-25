@@ -227,5 +227,42 @@ class ValidateTests(unittest.TestCase):
                       validate_diagnosis_read_model(model))
 
 
+class MalformedInputTests(unittest.TestCase):
+    def test_scalar_sections_do_not_raise_or_split_text(self):
+        for normalize in (
+            normalize_recommended_actions, normalize_evidence_entries,
+            normalize_background_entries, normalize_similar_cases,
+        ):
+            self.assertEqual(normalize(42), [])
+        self.assertEqual(
+            normalize_recommended_actions("check logs")[0]["action"], "check logs",
+        )
+        self.assertEqual(len(normalize_evidence_entries("one fact")), 1)
+        self.assertEqual(
+            normalize_similar_cases({"id": 9, "title": "example"})[0]["id"], 9,
+        )
+        self.assertEqual(
+            build_conclusion(missing_information="missing logs")["missing_information"],
+            ["missing logs"],
+        )
+
+    def test_nonfinite_numbers_are_not_serialized_as_confidence_or_line_numbers(self):
+        for value in (float("nan"), float("inf"), float("-inf")):
+            self.assertIsNone(build_conclusion(confidence=value)["confidence"])
+            self.assertEqual(
+                normalize_recommended_actions([{"action": "check", "step": value}])[0]["step"],
+                1,
+            )
+            self.assertIsNone(normalize_background_entries([{
+                "title": "example", "section": {"start_line": value, "end_line": 10},
+            }])[0]["section"])
+
+    def test_invalid_cluster_members_do_not_inflate_member_count(self):
+        self.assertIsNone(build_failure_cluster_stub("invalid"))
+        cluster = build_failure_cluster_stub({"fingerprint": "abc"}, related_members="invalid")
+        self.assertEqual(cluster["member_count"], 1)
+        self.assertFalse(cluster["aggregated"])
+
+
 if __name__ == "__main__":
     unittest.main()

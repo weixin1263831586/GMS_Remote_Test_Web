@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from foundation.controller_lock import controller_process_lock
+from foundation.process_sync import controller_process_lock
 
 
 class ControllerLockTests(unittest.TestCase):
@@ -20,7 +20,7 @@ class ControllerLockTests(unittest.TestCase):
                         "-c",
                         (
                             "from pathlib import Path; "
-                            "from foundation.controller_lock import controller_process_lock; "
+                            "from foundation.process_sync import controller_process_lock; "
                             f"root=Path({str(root)!r}); "
                             "ctx=controller_process_lock(root); "
                             "\ntry:\n ctx.__enter__()\nexcept RuntimeError:\n raise SystemExit(0)"

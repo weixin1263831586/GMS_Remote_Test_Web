@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-from foundation.sqlite_schema import ensure_schema
+from foundation.database import ensure_schema
 
 
 def _now() -> str:
@@ -440,22 +440,35 @@ class DeviceClaimRegistry:
             finally:
                 self._close(conn)
 
-    def force_release(self, device_key: str) -> dict[str, Any] | None:
-        now = _now()
+    def force_release(
+        self, device_key: str, *, expected_claim: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Release the current claim, optionally fencing against an observed owner/source."""
         with self._lock:
             conn = self._connect()
             try:
+                conn.execute("BEGIN IMMEDIATE")
+                now = _now()
+                self._expire(conn, now)
                 row = conn.execute(
                     "SELECT * FROM device_claims WHERE device_key=? AND status='active'",
                     (device_key,),
                 ).fetchone()
+                if row is not None and expected_claim is not None and any(
+                    row[key] != expected_claim.get(key)
+                    for key in ("id", "generation", "owner_id", "source_id", "source_type")
+                ):
+                    row = None
                 if row:
                     conn.execute(
                         """UPDATE device_claims SET status='cancelled',released_at=?
                            WHERE id=? AND status='active'""",
                         (now, row["id"]),
                     )
-                    conn.commit()
+                conn.commit()
                 return self._claim_dict(row) if row else None
+            except Exception:
+                conn.rollback()
+                raise
             finally:
                 self._close(conn)

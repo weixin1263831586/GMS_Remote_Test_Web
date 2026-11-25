@@ -4,19 +4,19 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from features.devices.transport_policy import (
+from features.devices.transport.registry import (
+    build_transport_records,
     incompatible_test_devices,
 )
-from features.devices.transport_policy import (
+from features.devices.transport.registry import (
     test_transport_requirement as classify_transport_requirement,
 )
-from features.devices.transport_registry import build_transport_records
-from foundation.network_quality import probe_tcp_quality
+from foundation.networking import probe_tcp_quality
 from foundation.transport_contract import (
     TransportOperationError,
     execute_external_transport,
 )
-from worker_agent.transport_cli import execute_request
+from worker.transport_cli import execute_request
 
 
 def _executor_command(response: dict, exit_code: int = 0) -> str:
@@ -92,10 +92,10 @@ def test_tcp_quality_reports_partial_loss_and_jitter():
     connection = MagicMock()
     connection.__enter__.return_value = connection
     with patch(
-        "foundation.network_quality.socket.create_connection",
+        "foundation.networking.socket.create_connection",
         side_effect=[connection, OSError("timeout"), connection, connection],
     ), patch(
-        "foundation.network_quality.time.monotonic",
+        "foundation.networking.time.monotonic",
         side_effect=[0, 0.01, 1, 2, 2.03, 3, 3.05],
     ):
         result = probe_tcp_quality("192.0.2.10", 3240)
@@ -144,3 +144,27 @@ def test_transport_registry_is_a_normalized_read_only_projection():
         ("usbip", "SERIAL2"),
     ]
     assert records[1]["source_identity"]["busid"] == "1-2"
+
+
+@pytest.mark.parametrize("fields,code", [
+    ({"schema_version": True}, "TRANSPORT_EXECUTOR_VERSION_MISMATCH"),
+    ({"schema_version": "bad"}, "TRANSPORT_EXECUTOR_VERSION_MISMATCH"),
+    ({"success": None}, "TRANSPORT_EXECUTOR_INVALID_RESPONSE"),
+    ({"success": "false"}, "TRANSPORT_EXECUTOR_INVALID_RESPONSE"),
+    ({"data": []}, "TRANSPORT_EXECUTOR_INVALID_RESPONSE"),
+    ({"generation": -1}, "TRANSPORT_EXECUTOR_INVALID_RESPONSE"),
+    ({"generation": "bad"}, "TRANSPORT_EXECUTOR_INVALID_RESPONSE"),
+])
+def test_external_transport_rejects_malformed_response(fields, code):
+    response = {"schema_version": 1, "success": True, "data": {}, **fields}
+    with pytest.raises(TransportOperationError) as raised:
+        execute_external_transport(_executor_command(response), transport="usbip",
+                                   action="status", payload={}, timeout=5)
+    assert raised.value.code == code
+
+
+def test_external_transport_does_not_replace_explicit_zero_generation():
+    response = {"schema_version": 1, "success": True, "generation": 0, "data": {}}
+    result = execute_external_transport(_executor_command(response), transport="usbip",
+                                        action="status", payload={"generation": 9}, timeout=5)
+    assert result["generation"] == 0

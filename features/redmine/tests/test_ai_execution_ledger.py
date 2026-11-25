@@ -24,8 +24,8 @@ from features.redmine.ai_execution_ledger import (
     input_digest,
     logical_key,
 )
-from features.redmine.daily_brief_models import DailyBriefIssue, DailyBriefRun
-from features.redmine.daily_brief_service import DailyBriefService
+from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
+from features.redmine.daily_brief.service import DailyBriefService
 
 
 def _ledger(tmp: Path) -> AIExecutionLedger:
@@ -291,11 +291,11 @@ def test_service_owns_heartbeat_and_uses_stored_issue_facts(tmp_path, cancelled)
         redmine = Mock()
         redmine.repository.get_issue.return_value = stored
         with patch.object(service.ai_ledger, "keep_alive", side_effect=heartbeat), \
-                patch("features.redmine.daily_brief_service.start_analysis_progress", return_value=None), \
-                patch("features.redmine.daily_brief_service.precollect_deep_evidence", new_callable=AsyncMock), \
-                patch("features.redmine.daily_brief_service._sdk_sources_available", return_value=False), \
-                patch("features.redmine.daily_brief_cancellation.analyze_with_persisted_cancel", side_effect=analyze), \
-                patch("features.redmine.daily_brief_cancellation.reset_cancelled_issue"), \
+                patch("features.redmine.daily_brief.service.start_analysis_progress", return_value=None), \
+                patch("features.redmine.daily_brief.service.precollect_deep_evidence", new_callable=AsyncMock), \
+                patch("features.redmine.daily_brief.service._sdk_sources_available", return_value=False), \
+                patch("features.redmine.daily_brief.cancellation.analyze_with_persisted_cancel", side_effect=analyze), \
+                patch("features.redmine.daily_brief.cancellation.reset_cancelled_issue"), \
                 patch("features.redmine.api.get_redmine_service_for_owner", return_value=redmine):
             try:
                 await service._analyze_one(brief, 1, {}, Mock(), {})
@@ -318,10 +318,10 @@ if __name__ == "__main__":
 
 
 class TraceUsageExtractionTests(unittest.TestCase):
-    """kkagent trace 平铺 token 字段必须进入回执 usage_json（2026-10-27 复盘）。"""
+    """kkagent trace 平铺 token 字段必须进入回执 usage_json。"""
 
     def test_flat_trace_tokens_are_extracted(self):
-        from features.redmine.daily_brief_service import trace_usage_from
+        from features.redmine.daily_brief.service import trace_usage_from
 
         usage = trace_usage_from({
             "input_tokens": 869612,
@@ -337,7 +337,7 @@ class TraceUsageExtractionTests(unittest.TestCase):
         })
 
     def test_explicit_usage_dict_wins_and_non_numeric_values_are_dropped(self):
-        from features.redmine.daily_brief_service import trace_usage_from
+        from features.redmine.daily_brief.service import trace_usage_from
 
         usage = trace_usage_from({
             "usage": {"input_tokens": 10, "output_tokens": "5", "model": "x"},
@@ -345,7 +345,7 @@ class TraceUsageExtractionTests(unittest.TestCase):
         self.assertEqual(usage, {"input_tokens": 10})
 
     def test_empty_trace_yields_none(self):
-        from features.redmine.daily_brief_service import trace_usage_from
+        from features.redmine.daily_brief.service import trace_usage_from
 
         self.assertIsNone(trace_usage_from({"rounds": 3}))
         self.assertIsNone(trace_usage_from({}))

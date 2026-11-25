@@ -70,6 +70,15 @@ def test_credentials_and_post_body_never_follow_redirect(redirect_server, code, 
     assert received == []
 
 
+@pytest.mark.parametrize('code', [301, 302, 303, 307, 308])
+def test_registry_download_never_follows_redirect(redirect_server, code):
+    origin, received = redirect_server
+    with pytest.raises(urllib.error.HTTPError) as error:
+        pm.http_get(f'{origin}/{code}')
+    assert error.value.code == code
+    assert received == []
+
+
 def test_sdk_blocks_redirects(redirect_server, monkeypatch):
     origin, received = redirect_server
     monkeypatch.delenv('GMS_AUTH_TOKEN_FILE', raising=False)

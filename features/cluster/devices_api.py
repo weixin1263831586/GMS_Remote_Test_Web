@@ -205,7 +205,7 @@ async def refresh_worker_inventory(
     import asyncio
 
     from .api import _local_execute, _require_cluster_enabled, _run_worker_command
-    from .device_actions_api import _require_machine_reservation
+    from .device_operations.api import _require_machine_reservation
 
     svc = service()
     machine_reservation = None

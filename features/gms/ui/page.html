@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="zh-CN" data-ui-type-root="data-table">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GMS 更新中心</title>
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261124-flex-table-pager">
+  <link rel="stylesheet" href="/static/css/modal.css">
+  <link rel="stylesheet" href="/static/css/modal-tech.css">
+  <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css">
+  <script src="/static/js/dialog-frame.js" defer></script>
+  <style>
+    :root { color-scheme: dark; --border:var(--border-color); --muted:var(--text-secondary); --bg:var(--dark-bg); --text:var(--text-primary); --head:var(--light-bg); --card:var(--card-bg); --primary:var(--primary-color); }
+    /* All eight tabs share one left-aligned navigation and right-aligned action bar. */
+    .mainline-toolbar { flex:0 0 auto; min-width:0; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--ui-spacing-sm); margin-bottom:var(--ui-spacing-sm); }
+    .mainline-toolbar > .tabs { flex:0 1 auto; max-width:100%; }
+    .mainline-toolbar > .filters { display:flex; flex:0 1 auto; flex-wrap:wrap; justify-content:flex-end; align-items:center; min-width:0; max-width:100%; margin:0 0 0 auto; gap:var(--ui-spacing-sm); }
+    .mainline-toolbar .filters > * { flex:0 0 auto; min-width:0; max-width:100%; width:auto; box-sizing:border-box; }
+    .mainline-toolbar .filters #q { width:240px; }
+    .mainline-toolbar .filters :is(input,select) { padding-inline:var(--ui-spacing-sm); }
+    .mainline-toolbar .filters #critical_year { width:94px; }
+    .mainline-toolbar .filters #critical_month { width:112px; }
+    .mainline-toolbar .filters #critical_version { width:112px; }
+    .mainline-toolbar .filters #critical_kind { width:112px; }
+    .mainline-toolbar .filters #gerrit_status { width:112px; }
+    .mainline-toolbar .filters #source_key { width:150px; }
+    .mainline-toolbar .filters #type_filter { width:150px; }
+    .mainline-toolbar .filters :is(#monitor_version,#requirement_kind,#change_kind,#cve_year) { width:112px; }
+    .mainline-toolbar .filters #cve_module { width:144px; }
+    .mainline-toolbar .filters #exemption_id { width:110px; }
+    .mainline-toolbar .filters #issue_type { width:100px; }
+    .mainline-toolbar .filters #product_section { width:120px; }
+    .mainline-toolbar :is(.filters,.tabs) button { padding-inline:var(--ui-spacing-sm); white-space:nowrap; }
+    .mainline-toolbar .filters .critical-filter { position:relative; text-align:left; padding-right:24px; overflow:hidden; text-overflow:ellipsis; background:var(--bg); color:var(--text); border:1px solid var(--border); }
+    .critical-filter::after { content:""; position:absolute; right:10px; top:50%; width:6px; height:6px; border-right:1px solid currentColor; border-bottom:1px solid currentColor; transform:translateY(-70%) rotate(45deg); pointer-events:none; }
+    .critical-filter[aria-expanded="true"]::after { transform:translateY(-25%) rotate(225deg); }
+    .critical-filter-panel { position:fixed; z-index:100; box-sizing:border-box; max-height:min(320px, calc(100vh - 16px)); overflow-x:hidden; overflow-y:auto; padding:2px; background:var(--bg); border:1px solid var(--border); border-radius:6px; box-shadow:0 6px 18px #0005; }
+    .critical-filter-panel[hidden] { display:none; }
+    .critical-filter-panel label, .critical-filter-panel .critical-filter-clear { display:flex; align-items:center; gap:4px; box-sizing:border-box; min-width:0; padding:var(--ui-spacing-sm) 4px; width:100%; text-align:left; cursor:pointer; color:var(--text); white-space:normal; overflow-wrap:anywhere; }
+    .critical-filter-panel label:hover, .critical-filter-panel .critical-filter-clear:hover { background:var(--head); }
+    .critical-filter-panel .critical-filter-clear { background:transparent; border:0; border-bottom:1px solid var(--border); border-radius:0; }
+    .critical-filter-panel .critical-filter-clear[aria-pressed="true"] { color:var(--primary); }
+    .critical-filter-panel input[type="checkbox"] { flex:0 0 14px; width:14px; min-width:0; height:14px; min-height:0; margin:0; padding:0; accent-color:var(--primary); }
+    .critical-filter-panel label span { min-width:0; overflow-wrap:anywhere; }
+    #section-badge { flex:0 0 auto; margin-bottom:var(--ui-spacing-sm); text-align:right; white-space:normal; overflow-wrap:anywhere; }
+    #section-badge[hidden] { display:none; }
+    @media (max-width:600px) {
+      .mainline-toolbar > .filters { width:100%; }
+      .mainline-toolbar .filters #q { flex:1 1 100%; width:100%; }
+    }
+    select { appearance:auto; }
+    .table-detail-link { display:block; max-width:100%; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; text-align:left; background:transparent; color:inherit; border:0; height:auto; padding:0; font:inherit; cursor:pointer; }
+    .table-detail-link:hover { text-decoration:underline; }
+    .table-detail-link:focus-visible { outline:2px solid var(--primary); outline-offset:-2px; }
+    #critical-detail-copy[hidden] { display:none; }
+    .critical-description { white-space: normal; overflow-wrap: anywhere; }
+    .critical-description details .wrap { white-space: normal; overflow-wrap: anywhere; }
+    .critical-kind, .critical-version { white-space: nowrap; }
+    .critical-matrix-group, .critical-matrix-status, .critical-source { text-align: center; }
+    .critical-matrix-status, .critical-matrix-group { border-left: 1px solid var(--border); }
+    .critical-matrix-table tbody tr:hover { background: var(--lighter-bg); }
+    .critical-matrix-table .critical-exemptions { white-space: normal; overflow-wrap: anywhere; }
+    .critical-text-button { background: transparent; color: inherit; border: 0; padding: 0; height: auto; text-align: inherit; white-space: normal; overflow-wrap: anywhere; font: inherit; cursor: pointer; }
+    .critical-text-button:hover { text-decoration: underline; }
+    .critical-text-button:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+    .critical-evidence-record { white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; border: 1px solid var(--border); border-radius: 6px; margin: 4px 0; }
+    #critical-detail-dialog { margin: 0; border: 0; max-width: none; max-height: none; }
+    #critical-detail-dialog:not([open]) { display: none; }
+    #critical-detail-dialog::backdrop { background: transparent; }
+    .critical-matrix .gerrit-badge { white-space: nowrap; }
+    .critical-status-stack { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:2.8em; line-height:1.4; }
+    #gerrit-refresh { width:88px; flex:0 0 auto; white-space:nowrap; }
+    #critical-legacy-toggle { flex: 0 0 auto; white-space: nowrap; background: var(--light-bg); color: var(--text-secondary); border: 1px solid var(--border-color); }
+    #critical-legacy-toggle[aria-pressed="true"] { color: var(--primary-light); border-color: var(--primary-color); }
+    #critical-legacy-toggle:disabled { opacity: .55; cursor: default; }
+    .gerrit-badge { font-weight: 600; }
+    .gerrit-merged { color: #3dd68c; }
+    .gerrit-partial { color: #f5c16c; }
+    .gerrit-open { color: #8eb4ff; }
+    .gerrit-missing { color: #ff8b9a; }
+    .gerrit-unknown { color: var(--muted); }
+    button.secondary { background:var(--lighter-bg); }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35);  z-index:9999; display:none; }
+    .toast.error { background:#3b1118; border-color:#7f1d1d; }
+  </style>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
+</head>
+<body>
+  <header class="ui-page-edge">
+    <h1>GMS 更新中心</h1>
+    <div id="summary" class="summary">加载中…</div>
+    <div class="actions">
+      <button data-click="startSync" data-a0="incremental">增量扫描</button>
+      <button data-click="startSync" data-a0="full" class="secondary">全量扫描</button>
+      <button data-click="loadAll" class="secondary">刷新</button>
+    </div>
+
+  </header>
+  <main class="ui-page-edge">
+    <div class="mainline-toolbar">
+      <div class="tabs">
+        <button data-tab="changes" data-click="setTab" data-a0="changes">变更记录</button>
+        <button data-tab="requirements" data-click="setTab" data-a0="requirements">GMS要求</button>
+        <button data-tab="packages" data-click="setTab" data-a0="packages">GMS包更新</button>
+        <button data-tab="mainline" data-click="setTab" data-a0="mainline">Mainline包更新</button>
+        <button data-tab="artifacts" data-click="setTab" data-a0="artifacts">测试套件更新</button>
+        <button data-tab="exemptions" data-click="setTab" data-a0="exemptions">豁免条目</button>
+        <button data-tab="patch" data-click="setTab" data-a0="patch">安全补丁 (CVE)</button>
+        <button data-tab="critical" data-click="setTab" data-a0="critical">Critical_Patch</button>
+      </div>
+      <div class="filters">
+        <input id="q" placeholder="全局搜索" aria-label="全局搜索全部八类数据" title="跨八个表格搜索">
+        <select id="source_key" aria-label="数据来源" style="display:none">
+          <option value="">全部来源</option>
+          <option value="cts_downloads">CTS</option>
+          <option value="vts_downloads">VTS</option>
+          <option value="gts_downloads">GTS</option>
+          <option value="gms_downloads">GMS Download</option>
+          <option value="gms_requirements">GMS Requirements</option>
+          <option value="mainline_preload">Mainline PRELOAD</option>
+          <option value="gms_bulletins">GMS Bulletins</option>
+        </select>
+        <input id="type_filter" style="display:none" placeholder="类型/版本">
+        <select id="monitor_version" aria-label="Android版本" style="display:none"><option value="">全部版本</option><option>Android 14</option><option>Android 15</option><option>Android 16</option><option>Android 16 QPR2</option><option>Android 17</option></select>
+        <select id="requirement_kind" aria-label="要求变更类型" style="display:none"><option value="">全部类型</option><option value="added">新增</option><option value="changed">修改</option><option value="specific">版本专属</option></select>
+        <select id="change_kind" aria-label="变更类型" style="display:none"><option value="">全部变更</option><option value="added">新增</option><option value="changed">修改</option><option value="removed">移除</option></select>
+        <input id="cve_year" aria-label="CVE发布年份" placeholder="发布年份" inputmode="numeric" maxlength="4" style="display:none">
+        <input id="cve_module" aria-label="Mainline模块" placeholder="Mainline模块" maxlength="128" style="display:none">
+        <select id="issue_type"><option value="">全部类型</option><option>CTS</option><option>MTS</option><option>GTS</option></select>
+        <select id="product_section"><option value="">全部小节</option><option>Android</option><option>Android Go</option></select>
+        <input id="exemption_id" placeholder="豁免ID">
+        <button type="button" class="critical-filter" id="critical_year" aria-label="年份" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部年份</button>
+        <button type="button" class="critical-filter" id="critical_month" aria-label="月份" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部月份</button>
+        <button type="button" class="critical-filter" id="critical_version" aria-label="Android版本" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部版本</button>
+        <button type="button" class="critical-filter" id="critical_kind" aria-label="补丁类型" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部类型</button>
+        <button type="button" class="critical-filter" id="gerrit_status" aria-label="Gerrit合入状态" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none" disabled>全部状态</button>
+        <button id="gerrit-refresh" style="display:none" data-click="refreshCriticalGerrit">重新核对</button>
+        <button data-click="runQuery" data-a0="true">查询</button>
+        <button type="button" id="critical-legacy-toggle" style="display:none" aria-pressed="false" title="显示 Android 14 以下版本列，不改变合入统计">显示历史版本</button>
+      </div>
+    </div>
+    <span id="section-badge" class="section-badge" role="status" hidden></span>
+    <div class="table-wrap">
+      <div id="tables-area" class="tables-area"><span class="muted">加载中…</span></div>
+    </div>
+    <div class="pager">
+      <button data-click="page" data-a0="-1">上一页</button>
+      <span id="pageinfo" class="muted"></span>
+      <button data-click="page" data-a0="1">下一页</button>
+    </div>
+    <div id="toast" class="toast" role="status"></div>
+  </main>
+  <dialog id="critical-detail-dialog" class="modal-backdrop" aria-labelledby="critical-detail-title">
+    <div class="modal-content modal-xl tech-dialog">
+      <svg class="tech-frame" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M16 1H986L999 14V584L984 599H16L1 584V16Z" vector-effect="non-scaling-stroke"/></svg>
+      <div class="modal-header tech-dialog-header">
+        <div class="tech-title-group"><h2 class="modal-title" id="critical-detail-title">Critical_Patch</h2></div>
+        <button type="button" class="modal-close" id="critical-detail-close" aria-label="关闭">×</button>
+        <svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
+      </div>
+      <div class="modal-body" id="critical-detail-body"></div>
+      <div class="modal-footer"><button type="button" class="secondary" id="critical-detail-copy" hidden>复制详情</button><button type="button" class="secondary" id="critical-detail-done">关闭</button></div>
+    </div>
+  </dialog>
+  <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
+  <script src="/gms-update-center/page.js?v=20261125-unified-module"></script>
+</body>
+</html>

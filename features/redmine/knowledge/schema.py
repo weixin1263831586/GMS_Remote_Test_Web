@@ -1,0 +1,267 @@
+"""Schema for the internal Redmine knowledge base.
+
+The knowledge base is a *separate* sqlite database from the issue scan store
+(``redmine.sqlite3``). It holds structured "case facts", aggregated "mature
+cases", optional reference outputs (GMS assistant / manual), case evaluations
+and internal-issue links. It is intentionally self-contained: ``case_facts``
+mirrors the issue fields it needs so searches do not require a cross-database
+join against the scan store.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any
+
+
+logger = logging.getLogger(__name__)
+
+
+class KnowledgeSchemaMixin:
+    """Creates the knowledge base tables (idempotent)."""
+
+    _REQUIRED_TABLES = frozenset({
+        "redmine_case_facts",
+        "redmine_mature_cases",
+        "redmine_case_issue_links",
+        "redmine_reference_outputs",
+        "redmine_case_evaluations",
+        "redmine_internal_issue_links",
+    })
+
+    def __init__(self, db_path: Path):
+        self.db_path = Path(db_path)
+        self._schema_lock = threading.RLock()
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.init_db()
+
+    def _open_connection(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn.row_factory = sqlite3.Row
+        # 与 daily_brief/repository 同规（仓库硬规则：多进程 Web/Worker/CLI
+        # 并发）：WAL 允许读写并行，busy_timeout 把写锁竞争从立即
+        # "database is locked" 变成等待重试。
+        try:
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA busy_timeout=30000")
+        except sqlite3.OperationalError as exc:
+            # 只吞 "locked/busy"（多进程并发建库时的竞争窗口），其余
+            # OperationalError（磁盘/权限/corruption）照常上抛，避免
+            # 掩盖真实故障。
+            if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                raise
+        return conn
+
+    def connect(self) -> sqlite3.Connection:
+        conn = self._open_connection()
+        existing_tables = {
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not self._REQUIRED_TABLES.issubset(existing_tables):
+            conn.close()
+            self.init_db()
+            conn = self._open_connection()
+        return conn
+
+    # Schema
+
+    def init_db(self) -> None:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._schema_lock, self._open_connection() as conn:
+            conn.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS redmine_case_facts (
+                    issue_id INTEGER PRIMARY KEY,
+                    subject TEXT DEFAULT '',
+                    status_name TEXT DEFAULT '',
+                    assigned_to_name TEXT DEFAULT '',
+                    project_name TEXT DEFAULT '',
+                    category TEXT DEFAULT '',
+                    chip_platform TEXT DEFAULT '',
+                    android_version TEXT DEFAULT '',
+                    certification_type TEXT DEFAULT '',
+                    module TEXT DEFAULT '',
+                    product_form TEXT DEFAULT '',
+                    region TEXT DEFAULT '',
+                    error_signature TEXT DEFAULT '',
+                    problem_summary TEXT DEFAULT '',
+                    symptoms_json TEXT DEFAULT '[]',
+                    root_cause TEXT DEFAULT '',
+                    solution TEXT DEFAULT '',
+                    verification TEXT DEFAULT '',
+                    reply_template TEXT DEFAULT '',
+                    keywords_json TEXT DEFAULT '[]',
+                    evidence_json TEXT DEFAULT '{}',
+                    doc_excerpt TEXT DEFAULT '',
+                    confidence REAL DEFAULT 0,
+                    source_quality TEXT DEFAULT '',
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS redmine_mature_cases (
+                    case_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    status TEXT DEFAULT 'draft',
+                    canonical_error_signature TEXT DEFAULT '',
+                    chip_platform TEXT DEFAULT '',
+                    android_version TEXT DEFAULT '',
+                    certification_type TEXT DEFAULT '',
+                    module TEXT DEFAULT '',
+                    product_form TEXT DEFAULT '',
+                    region TEXT DEFAULT '',
+                    problem_summary TEXT DEFAULT '',
+                    scope_json TEXT DEFAULT '{}',
+                    symptoms_json TEXT DEFAULT '[]',
+                    root_cause TEXT DEFAULT '',
+                    solution_json TEXT DEFAULT '{}',
+                    notes_json TEXT DEFAULT '[]',
+                    rules_json TEXT DEFAULT '[]',
+                    reply_template TEXT DEFAULT '',
+                    source_issue_ids_json TEXT DEFAULT '[]',
+                    evidence_json TEXT DEFAULT '{}',
+                    keywords_json TEXT DEFAULT '[]',
+                    confidence REAL DEFAULT 0,
+                    approved_by TEXT DEFAULT '',
+                    approved_at TEXT DEFAULT '',
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS redmine_case_issue_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    case_id INTEGER NOT NULL,
+                    issue_id INTEGER NOT NULL,
+                    score REAL DEFAULT 0,
+                    reason TEXT DEFAULT '',
+                    evidence_json TEXT DEFAULT '{}',
+                    created_at TEXT,
+                    UNIQUE(case_id, issue_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS redmine_reference_outputs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_id INTEGER NOT NULL,
+                    source TEXT NOT NULL,
+                    title TEXT DEFAULT '',
+                    markdown TEXT DEFAULT '',
+                    structured_json TEXT DEFAULT '{}',
+                    raw_output TEXT DEFAULT '',
+                    created_at TEXT,
+                    updated_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS redmine_case_evaluations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    issue_id INTEGER NOT NULL,
+                    internal_case_json TEXT DEFAULT '{}',
+                    reference_case_json TEXT DEFAULT '{}',
+                    score REAL DEFAULT 0,
+                    missing_fields_json TEXT DEFAULT '[]',
+                    mismatch_fields_json TEXT DEFAULT '[]',
+                    suggestions_json TEXT DEFAULT '[]',
+                    created_at TEXT
+                );
+
+                CREATE TABLE IF NOT EXISTS redmine_internal_issue_links (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    source_issue_id INTEGER,
+                    case_id INTEGER,
+                    internal_issue_id INTEGER NOT NULL,
+                    created_by TEXT DEFAULT '',
+                    payload_json TEXT DEFAULT '{}',
+                    created_at TEXT
+                );
+                """
+            )
+            try:
+                conn.execute(
+                    """
+                    CREATE VIRTUAL TABLE IF NOT EXISTS redmine_case_facts_fts USING fts5(
+                        issue_id UNINDEXED,
+                        subject,
+                        problem_summary,
+                        error_signature,
+                        root_cause,
+                        solution,
+                        keywords
+                    )
+                    """
+                )
+            except sqlite3.OperationalError as exc:
+                # 与 redmine_agent_issue_fts 同理：FTS5 缺失或并发建库竞争
+                # 不该让建库失败（检索侧有回退），但静默 pass 会让知识库
+                # 检索长期退化无人察觉，留 warning 痕迹。
+                logger.warning("redmine_case_facts_fts 创建失败，检索将退化: %s", exc)
+
+            self._migrate_indexes(conn)
+
+    @staticmethod
+    def _migrate_indexes(conn: sqlite3.Connection) -> None:
+        conn.executescript(
+            """
+            CREATE INDEX IF NOT EXISTS idx_case_facts_module
+                ON redmine_case_facts(module, chip_platform);
+            CREATE INDEX IF NOT EXISTS idx_case_facts_signature
+                ON redmine_case_facts(error_signature);
+            CREATE INDEX IF NOT EXISTS idx_mature_cases_status
+                ON redmine_mature_cases(status, module);
+            CREATE INDEX IF NOT EXISTS idx_case_issue_links_case
+                ON redmine_case_issue_links(case_id);
+            CREATE INDEX IF NOT EXISTS idx_reference_outputs_issue
+                ON redmine_reference_outputs(issue_id, source);
+            """
+        )
+
+    def reset(self) -> None:
+        """Delete all knowledge base data but keep the empty database shell."""
+        with self.connect() as conn:
+            conn.executescript(
+                """
+                DELETE FROM redmine_internal_issue_links;
+                DELETE FROM redmine_case_evaluations;
+                DELETE FROM redmine_reference_outputs;
+                DELETE FROM redmine_case_issue_links;
+                DELETE FROM redmine_mature_cases;
+                DELETE FROM redmine_case_facts;
+                """
+            )
+            try:
+                conn.execute("DELETE FROM redmine_case_facts_fts")
+            except sqlite3.OperationalError as exc:
+                # reset 是管理动作且随后冲掉 case_facts 表：这里失败只意味着
+                # FTS 残留旧行（旧库缺 fts5），留痕便于排查「重置后仍搜到旧案例」。
+                logger.warning("redmine_case_facts_fts 清空失败，可能残留旧索引: %s", exc)
+
+    # Shared helpers
+
+    @staticmethod
+    def _json_value(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        return json.dumps(value, ensure_ascii=False)
+
+    @staticmethod
+    def _decode_row(row: sqlite3.Row, *, default_obj: bool = False) -> dict[str, Any]:
+        item = dict(row)
+        for key, val in list(item.items()):
+            if not key.endswith("_json"):
+                continue
+            try:
+                item[key] = json.loads(val) if val else ({} if default_obj else [])
+            except Exception:
+                item[key] = {}
+        return item
+
+    @staticmethod
+    def _fts_query(query: str) -> str:
+        tokens = [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
+        return " OR ".join(f'"{token}"' for token in tokens) or '"empty"'

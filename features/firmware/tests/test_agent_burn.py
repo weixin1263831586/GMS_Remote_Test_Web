@@ -1,16 +1,4 @@
-"""Agent Service Token burn authorization tests (regression).
-
-`/api/burn/firmware` used to depend on require_elevated_admin_when_auth_required,
-which reads the *cookie* session elevation table. An Agent Service Token
-(Bearer) has no cookie session, so in authenticated deployments
-(GMS_AUTH_REQUIRED=1 / production) every agent burn was rejected before the
-approval-token stage could even run — the approval flow was unreachable.
-
-The endpoint now accepts two credential paths:
-- human session with a live admin elevation (unchanged behavior);
-- agent_service principal, which must still pass the server-side one-shot
-  approval token bound to tool+device+command inside the handler.
-"""
+"""Firmware authorization for elevated human sessions and approved Agent Service Tokens."""
 
 from __future__ import annotations
 
@@ -149,10 +137,6 @@ class AgentBurnAuthorizationTests(unittest.TestCase):
             store_notification=lambda *args, **kwargs: None,
             project_root=".",
             firmware_share_store=None,
-            apk_max_tasks=20,
-            apk_max_file_size=500 * 1024 * 1024,
-            apk_max_source_file_size=2 * 1024 * 1024,
-            apk_upload_dir=self.runtime_directory.name,
         )
         self.app = FastAPI()
         self.current_user: CurrentUser | None = None

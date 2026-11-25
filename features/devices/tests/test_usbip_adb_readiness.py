@@ -19,7 +19,7 @@ class _StubSSHManager:
 
 class WaitForAdbSerialReadyTests(unittest.TestCase):
     def test_returns_ready_when_adb_reports_device(self):
-        import features.devices.usbip as usbip_module
+        import features.devices.usbip.manager as usbip_module
 
         stub = _StubSSHManager([
             CommandResult(),
@@ -34,7 +34,7 @@ class WaitForAdbSerialReadyTests(unittest.TestCase):
         self.assertEqual(stub.commands[1], "adb -s RK3562GMS7 get-state")
 
     def test_reports_state_and_devices_when_not_ready(self):
-        import features.devices.usbip as usbip_module
+        import features.devices.usbip.manager as usbip_module
 
         stub = _StubSSHManager([
             CommandResult(),

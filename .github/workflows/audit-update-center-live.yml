@@ -1,0 +1,37 @@
+name: Update center live browser layout audit (read-only)
+on:
+  push:
+    branches: ['audit/mainline-gerrit-match-20261124']
+    paths: ['.github/workflows/audit-update-center-live.yml', 'tools/scripts/testing/audit_update_center_live.py']
+permissions:
+  contents: read
+jobs:
+  live-layout:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 20
+    steps:
+      - name: Verify dedicated host
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - name: Inspect live tables with Playwright (aggregate only)
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
+          GMS_SOAK_USERNAME: ${{ secrets.GMS_SOAK_USERNAME }}
+          GMS_SOAK_PASSWORD: ${{ secrets.GMS_SOAK_PASSWORD }}
+          GMS_SOAK_SESSION_TOKEN: ${{ secrets.GMS_SOAK_SESSION_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/update-center-audit.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          python3 -B -m tools.scripts.testing.audit_update_center_live 2>"$scratch/error" | grep --line-buffered '^UPDATE_CENTER_AUDIT='

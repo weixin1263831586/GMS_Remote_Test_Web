@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from features.automation.execution_policy import enforce_extra_timeouts, run_options
+from features.automation.worker import enforce_extra_timeouts, run_options
 
 
 def service_for(run):
@@ -21,10 +21,10 @@ def test_queue_budget_starts_after_scheduled_delay(monkeypatch):
     run = {'id': 'run', 'status': 'queued', 'created_at': '2026-01-01', 'not_before': '2026-01-02',
            'test_plan_json': json.dumps({'queue_timeout_seconds': 60})}
     service, cancel = service_for(run)
-    monkeypatch.setattr('features.automation.execution_policy.elapsed', lambda value: -10 if value == '2026-01-02' else 3600)
+    monkeypatch.setattr('features.automation.worker.elapsed', lambda value: -10 if value == '2026-01-02' else 3600)
     assert enforce_extra_timeouts(service, {'executor': 'cluster'}) == 0
     cancel.assert_not_called()
-    monkeypatch.setattr('features.automation.execution_policy.elapsed', lambda _: 61)
+    monkeypatch.setattr('features.automation.worker.elapsed', lambda _: 61)
     assert enforce_extra_timeouts(service, {'executor': 'cluster'}) == 1
     cancel.assert_called_once_with('run', reason='Run queue timeout exceeded', cleanup=True)
 
@@ -36,7 +36,7 @@ def test_idle_budget_is_owner_and_attempt_bound(monkeypatch, owner, attempt, exp
     repo = SimpleNamespace(get_job=lambda _: {'id': 'job', 'owner_id': owner, 'current_attempt_id': attempt},
                            job_last_output_at=lambda *_: '')
     monkeypatch.setattr('features.cluster.get_cluster_service', lambda: SimpleNamespace(repository=repo))
-    monkeypatch.setattr('features.automation.execution_policy.elapsed', lambda value: 61 if value == 'accepted' else 0)
+    monkeypatch.setattr('features.automation.worker.elapsed', lambda value: 61 if value == 'accepted' else 0)
     service, cancel = service_for(run)
     assert enforce_extra_timeouts(service, {'executor': 'cluster'}) == expected
     assert cancel.call_count == expected

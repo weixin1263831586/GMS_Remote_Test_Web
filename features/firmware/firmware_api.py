@@ -1,6 +1,5 @@
 import asyncio
 import contextlib
-import hashlib
 import logging
 import os
 import re
@@ -29,11 +28,11 @@ from foundation.cluster_port import (
     validate_local_firmware_recovery,
 )
 from foundation.error_model import ApiError, record_internal_error
+from foundation.files import sha256_file, sha256_stream
 from foundation.responses import error_response, success_response
 from foundation.uploads import upload_temp_root
 
 from . import chunk_uploads, runtime
-from .aoa_recovery import prepare_recovery, recover_after_burn
 from .api_helpers import (
     adb_proxy_devices as _adb_proxy_devices,
 )
@@ -48,6 +47,7 @@ from .firmware_validation import (
     validate_local_update_image,
     validate_remote_update_image,
 )
+from .local_flash import prepare_recovery, recover_after_burn
 from .local_flash import run_local_firmware_batch as _run_local_firmware_batch
 from .source_flash import (
     SourceFlashError,
@@ -125,25 +125,14 @@ def _sha256_of_source(source) -> str:
     stream is rewound before and after so the following SCP upload reads the
     same bytes.
     """
-    digest = hashlib.sha256()
     if hasattr(source, "read"):
         with contextlib.suppress(Exception):
             source.seek(0)
-        while True:
-            chunk = source.read(1024 * 1024)
-            if not chunk:
-                break
-            digest.update(chunk)
+        digest = sha256_stream(source)
         with contextlib.suppress(Exception):
             source.seek(0)
-    else:
-        with open(source, "rb") as firmware_file:
-            while True:
-                chunk = firmware_file.read(1024 * 1024)
-                if not chunk:
-                    break
-                digest.update(chunk)
-    return digest.hexdigest()
+        return digest
+    return sha256_file(source)
 
 
 def _parse_remote_sha256(stdout: str) -> str:
@@ -162,8 +151,7 @@ def _parse_remote_sha256(stdout: str) -> str:
 async def _remote_sha256(ssh, remote_path: str) -> str:
     """SHA-256 of a file on the test host.
 
-    Transport failure raises ``ApiError`` instead of returning an empty
-    digest. An empty digest used to become 404 or a false SHA mismatch.
+    Transport failure raises ApiError; it is not a missing file or digest mismatch.
     """
     output = await asyncio.to_thread(
         runtime.ssh_manager.execute_command,

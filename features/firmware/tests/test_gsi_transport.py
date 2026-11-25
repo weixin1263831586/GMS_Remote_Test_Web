@@ -4,7 +4,7 @@ import shlex
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.firmware.gsi_transport import prepare_gsi_command
+from features.firmware.gsi_burn import prepare_gsi_command
 
 
 def test_prepare_gsi_command_keeps_decisions_in_python() -> None:
@@ -15,7 +15,7 @@ def test_prepare_gsi_command_keeps_decisions_in_python() -> None:
         return None
 
     with patch(
-        "features.firmware.gsi_transport.FastbootPreparer"
+        "features.firmware.gsi_burn.FastbootPreparer"
     ) as preparer:
         preparer.return_value.prepare_gsi_fastbootd.return_value = prepared
         command = prepare_gsi_command(

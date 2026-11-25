@@ -2574,11 +2574,12 @@
                 "mainline",
                 "artifacts",
                 "bulletins",
-                "exemptions"
+                "exemptions",
+                "security_patches"
               ],
               "type": "string"
             },
-            "maxItems": 6,
+            "maxItems": 7,
             "minItems": 1,
             "title": "Tasks",
             "type": "array"
@@ -16411,7 +16412,7 @@
         "summary": "Sync Gerrit Redmine Members"
       }
     },
-    "/api/gms-update-monitor/artifacts": {
+    "/api/gms-update-center/artifacts": {
       "get": {
         "parameters": [
           {
@@ -16508,10 +16509,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Artifacts"
+        "summary": "List Gms Update Artifacts"
       }
     },
-    "/api/gms-update-monitor/artifacts/new": {
+    "/api/gms-update-center/artifacts/new": {
       "get": {
         "parameters": [
           {
@@ -16576,10 +16577,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List New Gms Update Monitor Artifacts"
+        "summary": "List New Gms Update Artifacts"
       }
     },
-    "/api/gms-update-monitor/bulletins": {
+    "/api/gms-update-center/bulletins": {
       "get": {
         "parameters": [
           {
@@ -16666,10 +16667,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Bulletins"
+        "summary": "List Gms Update Bulletins"
       }
     },
-    "/api/gms-update-monitor/changes": {
+    "/api/gms-update-center/changes": {
       "get": {
         "parameters": [
           {
@@ -16772,10 +16773,283 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Changes"
+        "summary": "List Gms Update Changes"
       }
     },
-    "/api/gms-update-monitor/mainline": {
+    "/api/gms-update-center/critical-patches": {
+      "get": {
+        "description": "Critical Fix Supplementary Bulletins 补丁（数据源：GMS Update Monitor 库）。\n\npatch_id 形如 ``A-568181732``，数字段与 Mainline 豁免表的\nexemption_id 同属 Google bug ID 空间；命中豁免时附带\n``exemptions``（issue_type / test_module / test_case），供分析\n「补丁修复 ↔ 豁免条目」关联。库不存在时优雅降级为空集。",
+        "parameters": [
+          {
+            "description": "Patch id, description, Android version, month, or deadline keyword",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Patch id, description, Android version, month, or deadline keyword",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mainline Critical Patches"
+      }
+    },
+    "/api/gms-update-center/critical-patches/gerrit": {
+      "get": {
+        "description": "Report whether our Gerrit has merged each Critical Fix patch.\n\nA bulletin row matches a change when the change is that revision,\nnames that full SHA, or has the same project and commit subject.\nMentioning the bug number is not a match. The response does not\ninclude bulletin detail text.",
+        "parameters": [
+          {
+            "description": "Same search as the Critical Fix list",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Same search as the Critical Fix list",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "1 skips the in-memory Gerrit cache",
+            "in": "query",
+            "name": "refresh",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "1 skips the in-memory Gerrit cache",
+              "maximum": 1,
+              "minimum": 0,
+              "title": "Refresh",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mainline Critical Patch Gerrit"
+      }
+    },
+    "/api/gms-update-center/exemptions": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Keyword search across module, testcase, exemption, issue text, and source URL",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Keyword search across module, testcase, exemption, issue text, and source URL",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "description": "MTS, CTS, or GTS",
+            "in": "query",
+            "name": "issue_type",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "MTS, CTS, or GTS",
+              "title": "Issue Type",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Android or Android Go",
+            "in": "query",
+            "name": "product_section",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Android or Android Go",
+              "title": "Product Section",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact test module",
+            "in": "query",
+            "name": "test_module",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Exact test module",
+              "title": "Test Module",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact test case",
+            "in": "query",
+            "name": "test_case",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Exact test case",
+              "title": "Test Case",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Exact internal bug/exemption id",
+            "in": "query",
+            "name": "exemption_id",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Exact internal bug/exemption id",
+              "title": "Exemption Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "release_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Release Year"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mainline Known Issues"
+      }
+    },
+    "/api/gms-update-center/exemptions/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Mainline Known Issues Summary"
+      }
+    },
+    "/api/gms-update-center/mainline": {
       "get": {
         "parameters": [
           {
@@ -16852,10 +17126,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Mainline"
+        "summary": "List Gms Update Mainline"
       }
     },
-    "/api/gms-update-monitor/packages": {
+    "/api/gms-update-center/packages": {
       "get": {
         "parameters": [
           {
@@ -16932,10 +17206,94 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Packages"
+        "summary": "List Gms Update Packages"
       }
     },
-    "/api/gms-update-monitor/requirements/sections": {
+    "/api/gms-update-center/requirements": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Android 15, Android 16, or Android 17",
+            "in": "query",
+            "name": "android_version",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "Android 15, Android 16, or Android 17",
+              "title": "Android Version",
+              "type": "string"
+            }
+          },
+          {
+            "description": "added, changed, or specific",
+            "in": "query",
+            "name": "change_kind",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "added, changed, or specific",
+              "title": "Change Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gms Update Requirement Version Tags"
+      }
+    },
+    "/api/gms-update-center/requirements/sections": {
       "get": {
         "parameters": [
           {
@@ -17022,10 +17380,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Requirement Sections"
+        "summary": "List Gms Update Requirement Sections"
       }
     },
-    "/api/gms-update-monitor/requirements/table-rows": {
+    "/api/gms-update-center/requirements/table-rows": {
       "get": {
         "parameters": [
           {
@@ -17092,10 +17450,10 @@
             "description": "Validation Error"
           }
         },
-        "summary": "List Gms Update Monitor Requirement Table Rows"
+        "summary": "List Gms Update Requirement Table Rows"
       }
     },
-    "/api/gms-update-monitor/requirements/version-summary": {
+    "/api/gms-update-center/requirements/version-summary": {
       "get": {
         "responses": {
           "200": {
@@ -17107,174 +17465,10 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Gms Update Monitor Requirement Version Summary"
+        "summary": "Gms Update Requirement Version Summary"
       }
     },
-    "/api/gms-update-monitor/requirements/version-tags": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Android 15, Android 16, or Android 17",
-            "in": "query",
-            "name": "android_version",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Android 15, Android 16, or Android 17",
-              "title": "Android Version",
-              "type": "string"
-            }
-          },
-          {
-            "description": "added, changed, or specific",
-            "in": "query",
-            "name": "change_kind",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "added, changed, or specific",
-              "title": "Change Kind",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Gms Update Monitor Requirement Version Tags"
-      }
-    },
-    "/api/gms-update-monitor/scan-runs": {
-      "get": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 50,
-              "maximum": 200,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Gms Update Monitor Scan Runs"
-      }
-    },
-    "/api/gms-update-monitor/sources": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Gms Update Monitor Sources"
-      }
-    },
-    "/api/gms-update-monitor/summary": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Gms Update Monitor Summary"
-      }
-    },
-    "/api/gms-update-monitor/sync": {
+    "/api/gms-update-center/scan": {
       "post": {
         "parameters": [
           {
@@ -17322,10 +17516,119 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Start Gms Update Monitor Sync"
+        "summary": "Scan"
       }
     },
-    "/api/gms-update-monitor/sync/status": {
+    "/api/gms-update-center/scan/runs": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Gms Update Scan Runs"
+      }
+    },
+    "/api/gms-update-center/scan/runs/{run_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scan Evidence"
+      }
+    },
+    "/api/gms-update-center/scan/status": {
       "get": {
         "responses": {
           "200": {
@@ -17337,7 +17640,127 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Gms Update Monitor Sync Status"
+        "summary": "Scan Status"
+      }
+    },
+    "/api/gms-update-center/security-patches": {
+      "get": {
+        "parameters": [
+          {
+            "description": "CVE id, module, or note keyword",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "description": "CVE id, module, or note keyword",
+              "maxLength": 256,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "release_year",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Release Year"
+            }
+          },
+          {
+            "in": "query",
+            "name": "mainline_module",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 128,
+              "title": "Mainline Module",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Mainline Security Patches"
+      }
+    },
+    "/api/gms-update-center/sources": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gms Update Sources"
+      }
+    },
+    "/api/gms-update-center/summary": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Gms Update Summary"
       }
     },
     "/api/gms-update-radar/runs": {
@@ -17364,6 +17787,22 @@
               "minimum": 0,
               "title": "Offset",
               "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "enum": [
+                "all",
+                "daily",
+                "weekly",
+                "monthly"
+              ],
+              "title": "Kind",
+              "type": "string"
             }
           }
         ],
@@ -18456,340 +18895,6 @@
           }
         },
         "summary": "Knowledgebase Stats"
-      }
-    },
-    "/api/mainline-known-issues": {
-      "get": {
-        "parameters": [
-          {
-            "description": "Keyword search across module, testcase, exemption, issue text, and source URL",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Keyword search across module, testcase, exemption, issue text, and source URL",
-              "maxLength": 256,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "description": "MTS, CTS, or GTS",
-            "in": "query",
-            "name": "issue_type",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "MTS, CTS, or GTS",
-              "title": "Issue Type",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Android or Android Go",
-            "in": "query",
-            "name": "product_section",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Android or Android Go",
-              "title": "Product Section",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Exact test module",
-            "in": "query",
-            "name": "test_module",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Exact test module",
-              "title": "Test Module",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Exact test case",
-            "in": "query",
-            "name": "test_case",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Exact test case",
-              "title": "Test Case",
-              "type": "string"
-            }
-          },
-          {
-            "description": "Exact internal bug/exemption id",
-            "in": "query",
-            "name": "exemption_id",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Exact internal bug/exemption id",
-              "title": "Exemption Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "release_year",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Release Year"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Mainline Known Issues"
-      }
-    },
-    "/api/mainline-known-issues/critical-patches": {
-      "get": {
-        "description": "Critical Fix Supplementary Bulletins 补丁（数据源：GMS Update Monitor 库）。\n\npatch_id 形如 ``A-568181732``，数字段与 Mainline 豁免表的\nexemption_id 同属 Google bug ID 空间；命中豁免时附带\n``exemptions``（issue_type / test_module / test_case），供分析\n「补丁修复 ↔ 豁免条目」关联。库不存在时优雅降级为空集。",
-        "parameters": [
-          {
-            "description": "Patch id, description, Android version, month, or deadline keyword",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "Patch id, description, Android version, month, or deadline keyword",
-              "maxLength": 256,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Mainline Critical Patches"
-      }
-    },
-    "/api/mainline-known-issues/security-patches": {
-      "get": {
-        "parameters": [
-          {
-            "description": "CVE id, module, or note keyword",
-            "in": "query",
-            "name": "q",
-            "required": false,
-            "schema": {
-              "default": "",
-              "description": "CVE id, module, or note keyword",
-              "maxLength": 256,
-              "title": "Q",
-              "type": "string"
-            }
-          },
-          {
-            "in": "query",
-            "name": "limit",
-            "required": false,
-            "schema": {
-              "default": 100,
-              "maximum": 500,
-              "minimum": 1,
-              "title": "Limit",
-              "type": "integer"
-            }
-          },
-          {
-            "in": "query",
-            "name": "offset",
-            "required": false,
-            "schema": {
-              "default": 0,
-              "minimum": 0,
-              "title": "Offset",
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Mainline Security Patches"
-      }
-    },
-    "/api/mainline-known-issues/summary": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Mainline Known Issues Summary"
-      }
-    },
-    "/api/mainline-known-issues/sync": {
-      "post": {
-        "parameters": [
-          {
-            "in": "query",
-            "name": "mode",
-            "required": false,
-            "schema": {
-              "default": "incremental",
-              "pattern": "^(full|incremental)$",
-              "title": "Mode",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Start Mainline Known Issues Sync"
-      }
-    },
-    "/api/mainline-known-issues/sync/status": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Mainline Known Issues Sync Status"
       }
     },
     "/api/notifications": {
@@ -22149,25 +22254,6 @@
           }
         },
         "summary": "Put Org Chart",
-        "tags": [
-          "redmine-org"
-        ]
-      }
-    },
-    "/api/redmine-agent/org-chart/import-legacy": {
-      "post": {
-        "description": "把旧扁平 configs/redmine_user_map.json 导入 canonical 组织架构文件。",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Import Legacy Org Chart",
         "tags": [
           "redmine-org"
         ]
@@ -26931,7 +27017,7 @@
         "summary": "Gerrit Dashboard Page Js"
       }
     },
-    "/gms-update-monitor": {
+    "/gms-update-center": {
       "get": {
         "responses": {
           "200": {
@@ -26945,10 +27031,10 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Gms Update Monitor Page"
+        "summary": "Gms Update Center Page"
       }
     },
-    "/gms-update-monitor/page.js": {
+    "/gms-update-center/page.js": {
       "get": {
         "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
         "responses": {
@@ -26961,7 +27047,7 @@
             "description": "Successful Response"
           }
         },
-        "summary": "Gms Update Monitor Page Js"
+        "summary": "Gms Update Center Page Js"
       }
     },
     "/gms-update-radar": {
@@ -26994,39 +27080,6 @@
           }
         },
         "summary": "Radar Script"
-      }
-    },
-    "/mainline-known-issues": {
-      "get": {
-        "responses": {
-          "200": {
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Mainline Known Issues Page"
-      }
-    },
-    "/mainline-known-issues/page.js": {
-      "get": {
-        "description": "页面脚本走静态资源（CSP 收紧后禁止 inline <script>）。",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Mainline Known Issues Page Js"
       }
     },
     "/notes": {

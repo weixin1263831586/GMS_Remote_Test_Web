@@ -89,9 +89,9 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
             for label, glyph in {
                 '刷新设备': '🔄', '全选设备': '✅', '恢复出厂': '🧹',
                 'Remount': '⚡',
-                '连接 Wi-Fi': '🛜', '锁定设备': '🔒', '解锁设备': '🔓',
+                '连接WiFi': '🛜', '锁定设备': '🔒', '解锁设备': '🔓',
                 '烧写固件': '🔥', '烧写 GSI': '🔥', '启动 VNC': '🚀',
-                '设备投屏': '📺', 'ADB 接入': '🔌', 'USB/IP 接入': '📱',
+                '设备投屏': '📺', 'ADB 接入': '🔌', 'USB/IP': '📱',
                 '复制部署命令': '📋',
             }.items():
                 self.assertEqual(icons[label]['emoji'], glyph, (label, data))
@@ -158,8 +158,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                             logTop: rect('.log-frame').top,
                             middleTop: rect('.middle-row').top,
                             logHeight: rect('.log-text').height,
-                            // Header used to draw a border directly above the
-                            // log-text border; there must be exactly one line.
+                            // The log header and content share a single border.
                             logHeaderBorderBottom: getComputedStyle(
                                 root.querySelector('.log-frame-header')
                             ).borderBottomWidth,
