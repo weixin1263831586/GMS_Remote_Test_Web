@@ -274,7 +274,9 @@ def _build_from_config() -> FederatedKnowledgeService:
 
     from .android_internals import AndroidInternalsProvider
 
-    service = FederatedKnowledgeService()
+    from .web_sources import WebKnowledgeProvider
+
+    service = FederatedKnowledgeService([WebKnowledgeProvider()])
     try:
         config = config_manager.load_config()
     except Exception as exc:
