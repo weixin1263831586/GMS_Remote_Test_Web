@@ -3,10 +3,10 @@ import unittest
 from importlib.util import resolve_name
 from pathlib import Path
 
+from tests.architecture._import_refs import module_names
+
 
 ROOT = Path(__file__).resolve().parents[2]
-MIGRATION_FEATURE_IMPORT_EXEMPTIONS = set()
-MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS = set()
 
 
 def resolved_module(path: Path, node: ast.ImportFrom) -> str | None:
@@ -28,15 +28,8 @@ def resolved_module(path: Path, node: ast.ImportFrom) -> str | None:
 
 def imports(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding='utf-8'))
-    result = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            result.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = resolved_module(path, node)
-            if module:
-                result.add(module)
-    return result
+    relative = path.relative_to(ROOT)
+    return module_names(tree, ".".join(relative.parent.parts), include_dynamic="tests" not in relative.parts)
 
 
 def imported_symbols(path: Path) -> list[tuple[str, str]]:
@@ -57,9 +50,6 @@ class DependencyRuleTests(unittest.TestCase):
     def test_foundation_never_imports_features(self):
         offenders = []
         for path in (ROOT / 'foundation').rglob('*.py'):
-            relative = str(path.relative_to(ROOT))
-            if relative in MIGRATION_FOUNDATION_IMPORT_EXEMPTIONS:
-                continue
             bad = sorted(
                 name
                 for name in imports(path)
@@ -72,7 +62,6 @@ class DependencyRuleTests(unittest.TestCase):
     def test_features_never_import_other_feature_internals(self):
         offenders = []
         for path in (ROOT / 'features').rglob('*.py'):
-            relative = str(path.relative_to(ROOT))
             feature = path.relative_to(ROOT / 'features').parts[0]
             for name in imports(path):
                 if not name.startswith('features.'):
@@ -81,7 +70,6 @@ class DependencyRuleTests(unittest.TestCase):
                 if (
                     len(parts) >= 3
                     and parts[1] != feature
-                    and (relative, name) not in MIGRATION_FEATURE_IMPORT_EXEMPTIONS
                 ):
                     offenders.append((str(path.relative_to(ROOT)), name))
         self.assertEqual(offenders, [])

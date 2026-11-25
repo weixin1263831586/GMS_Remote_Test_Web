@@ -20,6 +20,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.architecture._import_refs import module_names
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -82,13 +84,8 @@ ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {}
 
 def imported_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
+    package = ".".join(path.relative_to(ROOT).parent.parts)
+    return module_names(tree, package)
 
 
 def worker_modules(modules: set[str]) -> set[str]:

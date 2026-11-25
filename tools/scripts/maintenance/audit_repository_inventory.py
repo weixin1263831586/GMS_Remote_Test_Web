@@ -26,6 +26,7 @@ from _common import find_repo_root
 
 ROOT = find_repo_root()
 sys.path.insert(0, str(ROOT))
+from tests.architecture._import_refs import literal_dynamic_targets  # noqa: E402
 from tests.architecture._size_ratchet import (  # noqa: E402
     BACKEND_SOURCE_SUFFIXES,
     FRONTEND_SOURCE_SUFFIXES,
@@ -110,53 +111,6 @@ def module_exports(names: list[str]) -> dict[str, set[str]]:
         result[".".join(parts)] = exports
     return result
 
-
-def literal_dynamic_targets(tree: ast.AST, package: str = "") -> list[tuple[ast.Call, str]]:
-    """Resolve statically identifiable dynamic imports."""
-    importlib_names = {"importlib"}
-    functions = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            importlib_names.update(alias.asname or alias.name for alias in node.names
-                                   if alias.name == "importlib")
-        elif isinstance(node, ast.ImportFrom) and node.module == "importlib" and not node.level:
-            functions.update(alias.asname or alias.name for alias in node.names
-                             if alias.name == "import_module")
-    result = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        func = node.func
-        is_import_module = (
-            isinstance(func, ast.Name) and func.id in functions
-        ) or (
-            isinstance(func, ast.Attribute) and func.attr == "import_module"
-            and isinstance(func.value, ast.Name) and func.value.id in importlib_names
-        )
-        is_builtin = isinstance(func, ast.Name) and func.id == "__import__"
-        if not (is_import_module or is_builtin):
-            continue
-        keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
-        arg = node.args[0] if node.args else keywords.get("name")
-        if not isinstance(arg, ast.Constant) or not isinstance(arg.value, str):
-            continue
-        target = arg.value
-        if is_import_module and target.startswith("."):
-            relative_package = node.args[1] if len(node.args) > 1 else keywords.get("package")
-            if isinstance(relative_package, ast.Constant) and isinstance(relative_package.value, str):
-                base = relative_package.value
-            elif isinstance(relative_package, ast.Name) and relative_package.id == "__package__":
-                base = package
-            else:
-                continue
-            if not base:
-                continue
-            try:
-                target = resolve_name(target, base)
-            except ImportError:
-                continue
-        result.append((node, target))
-    return result
 
 def missing_local_imports(name: str, tree: ast.AST, modules: set[str],
                           exports: dict[str, set[str]]) -> list[dict]:

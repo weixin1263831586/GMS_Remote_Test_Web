@@ -115,7 +115,7 @@ def _module_definitions(module_path: pathlib.Path) -> set[str]:
             names.add(node.target.id)
         elif isinstance(node, ast.ImportFrom):
             # ``from .x import y as y`` re-exports count as definitions.
-            names.update(alias.name for alias in node.names)
+            names.update(alias.asname or alias.name for alias in node.names)
     return names
 
 
@@ -151,10 +151,7 @@ def _collect_dynamic_refs():
     banned: list[tuple[str, str]] = []
     for path in _assistant_sources():
         relative = path.relative_to(ROOT).as_posix()
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-        except SyntaxError:
-            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if (
                 isinstance(node, ast.Call)
