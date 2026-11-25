@@ -743,7 +743,7 @@ class DailyBriefReviewUiTests(RuntimeUiHarness):
                 page.evaluate("switchTab('stats'); switchTab('daily-brief')")
                 page.locator('#singleIssueAnalysisId').fill(str(issue_id))
                 page.locator('#singleIssueAnalysisId').press('Enter')
-                row = page.locator(f'#singleIssueAnalysisHistory [data-single-issue-id="{issue_id}"]')
+                row = page.locator(f'#singleIssueAnalysisHistory article[data-single-issue-id="{issue_id}"]')
                 expect(row).to_contain_text('已完成')
                 row.get_by_text('查看分析', exact=True).click()
                 expect(page.locator('.daily-brief-modal').last).to_contain_text('仅分析 #' + str(issue_id))
