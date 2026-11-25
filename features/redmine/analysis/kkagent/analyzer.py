@@ -317,6 +317,8 @@ class KkAgentRedmineAnalyzer:
                 "Mainline release inclusion is official release evidence, not proof that this "
                 "device/build contains the fix. Keep exemptions and Critical Fix applicability "
                 "conditional on matching module, test, Android version and release. "
+                "CDD and web documents are normative or explanatory candidates only; verify Android version, "
+                "device category and each condition against issue evidence. Never infer actual root cause from a policy alone. "
                 "Unavailable sources and incomplete coverage are not zero hits. For further "
                 "read-only lookup use gms_rt_redmine_references on this same snapshot_id."
             )
