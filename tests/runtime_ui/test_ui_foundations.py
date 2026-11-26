@@ -15,6 +15,134 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
             target.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(target / f'{name}.png'))
 
+    def test_shell_data_tables_share_header_and_row_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for width in (1912, 1440, 960):
+                page.set_viewport_size({'width': width, 'height': 914})
+                samples = page.evaluate("""() => {
+                    const selectors = [
+                        ['users', '.users-table'], ['users', '.agent-token-table'],
+                        ['users', '.sdk-source-table'], ['devices', '.device-management-table'],
+                        ['reports', '.list-table'], ['api-docs', '.api-docs-table'],
+                        ['security-audit', '.audit-log-table'],
+                        ['security-audit', '.audit-mail-table'],
+                        ['security-audit', '.audit-disk-table'], ['notes', '.kb-source-table'],
+                    ];
+                    const roots = [...document.querySelectorAll('.main-container > .page-content')];
+                    const previous = roots.map(node => node.classList.contains('active'));
+                    const results = [];
+                    try {
+                        for (const [name, selector] of selectors) {
+                            const root = document.getElementById('page-' + name);
+                            roots.forEach(node => node.classList.toggle('active', node === root));
+                            const original = root.querySelector(selector);
+                            const host = original?.parentElement || root;
+                            const test = original ? original.cloneNode(false) : document.createElement('table');
+                            test.removeAttribute('id');
+                            if (!original) test.className = 'list-table kb-source-table';
+                            test.style.width = '100%';
+                            const head = original?.tHead?.cloneNode(true) || test.createTHead();
+                            if (!head.rows.length) {
+                                const row = head.insertRow();
+                                for (const label of ['名称', '网址', '版本', '索引', '状态', '操作']) {
+                                    const th = document.createElement('th');
+                                    th.textContent = label;
+                                    row.append(th);
+                                }
+                            }
+                            if (head.parentNode !== test) test.append(head);
+                            const body = test.createTBody();
+                            const row = body.insertRow();
+                            for (let i = 0; i < head.rows[0].cells.length; i++) {
+                                const cell = row.insertCell();
+                                if (i === head.rows[0].cells.length - 1) {
+                                    const button = document.createElement('button');
+                                    button.className = 'btn-xs';
+                                    button.textContent = '编辑';
+                                    cell.append(button);
+                                } else cell.textContent = '数据';
+                            }
+                            const restore = [];
+                            try {
+                                for (let node = host; node && node !== document.body; node = node.parentElement) {
+                                    if (getComputedStyle(node).display === 'none') {
+                                        restore.push([node, node.getAttribute('style')]);
+                                        node.style.setProperty('display', 'block', 'important');
+                                    }
+                                }
+                                host.append(test);
+                                results.push({
+                                    name: selector,
+                                    header: head.rows[0].getBoundingClientRect().height,
+                                    row: row.getBoundingClientRect().height,
+                                    middle: [...row.cells].every(cell => getComputedStyle(cell).verticalAlign === 'middle'),
+                                });
+                            } finally {
+                                test.remove();
+                                for (const [node, style] of restore.reverse()) {
+                                    if (style === null) node.removeAttribute('style');
+                                    else node.setAttribute('style', style);
+                                }
+                            }
+                        }
+                        const suites = document.getElementById('page-test-suites');
+                        roots.forEach(node => node.classList.toggle('active', node === suites));
+                        const host = document.createElement('div');
+                        host.className = 'suite-file-table';
+                        host.innerHTML = '<div class="suite-file-table-head">文件名称</div><div class="suite-file-row">文件</div>';
+                        suites.append(host);
+                        try {
+                            results.push({
+                                name: 'suite-file-table',
+                                header: host.firstElementChild.getBoundingClientRect().height,
+                                row: host.lastElementChild.getBoundingClientRect().height,
+                                middle: getComputedStyle(host.lastElementChild).alignItems === 'center',
+                            });
+                        } finally { host.remove(); }
+                    } finally {
+                        roots.forEach((node, index) => node.classList.toggle('active', previous[index]));
+                    }
+                    return results;
+                }""")
+                self.assertEqual(len(samples), 11, samples)
+                for item in samples:
+                    with self.subTest(width=width, table=item['name']):
+                        self.assertAlmostEqual(item['header'], 42, delta=1, msg=str(item))
+                        self.assertAlmostEqual(item['row'], 44, delta=1, msg=str(item))
+                        self.assertTrue(item['middle'], item)
+        finally:
+            page.close()
+
+    def test_independent_workspaces_use_shared_table_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for route in ('/gerrit-dashboard', '/redmine-agent', '/cluster',
+                          '/automation', '/gms-update-center'):
+                with self.subTest(route=route):
+                    page.goto(self.base_url + route, wait_until='domcontentloaded')
+                    result = page.evaluate("""() => {
+                        const table = document.createElement('table');
+                        table.innerHTML = '<thead><tr><th>名称</th><th>操作</th></tr></thead>'
+                            + '<tbody><tr><td>数据</td><td><button>编辑</button></td></tr></tbody>';
+                        table.style.width = '600px';
+                        document.body.append(table);
+                        try {
+                            return {
+                                header: table.tHead.rows[0].getBoundingClientRect().height,
+                                row: table.tBodies[0].rows[0].getBoundingClientRect().height,
+                                align: getComputedStyle(table.tBodies[0].rows[0].cells[0]).verticalAlign,
+                            };
+                        } finally { table.remove(); }
+                    }""")
+                    self.assertAlmostEqual(result['header'], 42, delta=1, msg=str(result))
+                    self.assertAlmostEqual(result['row'], 44, delta=1, msg=str(result))
+                    self.assertEqual(result['align'], 'middle')
+        finally:
+            page.close()
+
     def test_shared_action_busy_state_preserves_compact_geometry(self):
         page = self.new_page()
         try:
