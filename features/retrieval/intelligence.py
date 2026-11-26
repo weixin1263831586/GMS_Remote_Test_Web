@@ -287,3 +287,55 @@ class IntelligentRAG:
         return {"status": status, "claims": claims, "evidence": self._rows(),
                 "steps": self.events, "model_calls": self.calls,
                 "coverage_complete": False, "independent_verification": False}
+
+
+def understand_passages(passages, model):
+    """Extract bounded, quote-grounded indexing aids from authorized passages.
+
+    The returned statements and synonyms are derived hints, never authoritative
+    policy. Callers must persist them under the source and model revision.
+    """
+    bounded = list(passages)[:4]
+    rows = [{"id": row["id"], "text": row["text"][:2400],
+             "context": str(row.get("context") or "")[:800]} for row in bounded]
+    source = {row["id"]: row for row in rows}
+    result = model(json.dumps({"passages": rows}, ensure_ascii=False),
+                   system_prompt=_SYSTEM +
+                   '为每段提取定义、要求、条件、例外、关联与中英文语义检索词。'
+                   '返回 {"items":[{"id":"原始ID","facts":[{"kind":"definition|requirement|condition|exception|relation",'
+                   '"statement":"陈述","quote":"逐字原文"}],"terms":["中英文检索词"]}]}。'
+                   '只提取有逐字原文依据的事实，不能添加外部知识。', max_tokens=2400)
+    if not isinstance(result, dict) or result.get("success") is not True:
+        raise RuntimeError("Local understanding model unavailable")
+    parsed = _object(result.get("content"))
+    output = {}
+    items = parsed.get("items")
+    if not isinstance(items, list):
+        raise ValueError("Invalid understanding result")
+    for item in items[:8]:
+        if not isinstance(item, dict) or not isinstance(item.get("id"), str) or item["id"] not in source:
+            continue
+        identity = item["id"]
+        if identity in output:
+            continue
+        row = source[identity]
+        facts = []
+        supplied = item.get("facts")
+        if isinstance(supplied, list):
+            for fact in supplied[:8]:
+                if not isinstance(fact, dict):
+                    continue
+                quote, statement = fact.get("quote"), fact.get("statement")
+                kind = fact.get("kind")
+                if (kind in ("definition", "requirement", "condition", "exception", "relation")
+                        and isinstance(quote, str) and 4 <= len(quote) <= 800
+                        and (quote in row["text"] or quote in row["context"])
+                        and isinstance(statement, str) and statement.strip()):
+                    facts.append({"kind": kind, "statement": statement.strip()[:400], "quote": quote})
+        terms = item.get("terms")
+        terms = list(dict.fromkeys(term.strip()[:100] for term in terms[:20]
+                     if isinstance(term, str) and term.strip())) if isinstance(terms, list) else []
+        if facts:
+            output[identity] = {"facts": facts, "terms": terms,
+                                "search_text": " ".join([*terms, *(fact["statement"] for fact in facts)])[:3500]}
+    return output
