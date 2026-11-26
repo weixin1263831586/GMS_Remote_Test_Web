@@ -158,7 +158,6 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
     background: color-mix(in srgb, var(--danger-color, #f06b78) 13%, transparent);
     border-color: var(--danger-color, #f06b78);
 }
-:is(.list-table, .ui-table) tbody tr td { border-bottom: 1px solid var(--border-color, var(--border, #2b384b)); }
 #page-devices .devices-table-wrap { min-width: 0; max-width: 100%; }
 .device-management-table { width: 100%; min-width: 1120px; }
 .device-management-table th, .device-management-table td { text-align: left; overflow: hidden; white-space: nowrap; }

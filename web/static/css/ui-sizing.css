@@ -58,6 +58,11 @@
 .ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
 .ui-control:is(button,select) { white-space: nowrap; }
 
+/* Ordinary data tables retain a divider below every data row. */
+:is(.list-table, .ui-table, .users-table, .agent-access-table, .dept-table, .dash-resource-table) > tbody > tr > td {
+    border-bottom: 1px solid var(--border-color, var(--border, #2b384b));
+}
+
 /* Data tables share one geometry; narrative, form and replay tables keep content-driven sizing. */
 :is(table.ui-table, table.list-table, table:has(> thead), table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
     > thead > tr > :is(th, td),

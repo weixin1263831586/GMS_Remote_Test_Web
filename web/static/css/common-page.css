@@ -1084,16 +1084,11 @@ body.apk-resizing {
 }
 
 .users-table tbody tr {
-    border-bottom: 1px solid var(--border-color);
     transition: background 0.12s ease;
 }
 
 .users-table tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, transparent);
-}
-
-.users-table tbody tr:last-child td {
-    border-bottom: 0 !important;
 }
 
 .users-col-identity { width: 200px; }
