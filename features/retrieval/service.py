@@ -225,3 +225,56 @@ def evaluate_ranking(ranked, relevant, *, k=10):
     ideal = sum(1 / math.log2(rank + 1) for rank in range(1, min(k, len(expected)) + 1))
     return {"recall_at_k": len(ranks) / len(expected),
             "mrr_at_k": 1 / ranks[0] if ranks else 0.0, "ndcg_at_k": dcg / ideal}
+
+
+@dataclass(frozen=True)
+class RankingEvaluationCase:
+    """One blinded query with human-labelled evidence and paired retrieval results."""
+
+    case_id: str
+    relevant: Sequence[Hashable]
+    baseline: Sequence[Hashable]
+    candidate: Sequence[Hashable]
+
+
+def evaluate_ranking_comparison(cases: Sequence[RankingEvaluationCase], *, k: int = 10) -> dict:
+    """Compare paired queries; never count missing ground truth as a success."""
+    if not 1 <= k <= 100:
+        raise ValueError("Invalid evaluation cutoff")
+    if any(not case.case_id.strip() for case in cases) or len({case.case_id for case in cases}) != len(cases):
+        raise ValueError("Evaluation case identities must be unique and nonempty")
+    rows = []
+    for case in cases:
+        baseline = evaluate_ranking(case.baseline, case.relevant, k=k)
+        candidate = evaluate_ranking(case.candidate, case.relevant, k=k)
+        rows.append({"case_id": case.case_id, "baseline": baseline, "candidate": candidate,
+                     "labelled": bool(case.relevant)})
+    labelled = [row for row in rows if row["labelled"]]
+    metrics = {}
+    for metric in ("recall_at_k", "mrr_at_k", "ndcg_at_k"):
+        old = sum(row["baseline"][metric] for row in labelled) / len(labelled) if labelled else None
+        new = sum(row["candidate"][metric] for row in labelled) / len(labelled) if labelled else None
+        metrics[metric] = {"baseline": old, "candidate": new,
+                           "delta": new - old if labelled else None}
+    return {"k": k, "total_cases": len(rows), "labelled_cases": len(labelled),
+            "unlabelled_cases": len(rows) - len(labelled), "metrics": metrics, "cases": rows}
+
+
+def evaluate_root_cause_comparison(reviews: Sequence[tuple[str, str, str]]) -> dict:
+    """Aggregate paired human review verdicts; no inference from text similarity."""
+    allowed = {"correct", "incorrect", "abstained", "unreviewed"}
+    if any(not case_id.strip() or old not in allowed or new not in allowed
+           for case_id, old, new in reviews) or len({row[0] for row in reviews}) != len(reviews):
+        raise ValueError("Invalid or duplicate root cause review")
+    paired = [row for row in reviews if "unreviewed" not in row[1:]]
+    result = {"total_cases": len(reviews), "paired_cases": len(paired),
+              "unreviewed_cases": len(reviews) - len(paired)}
+    for name, index in (("baseline", 1), ("candidate", 2)):
+        counts = {verdict: sum(row[index] == verdict for row in paired)
+                  for verdict in ("correct", "incorrect", "abstained")}
+        answered = counts["correct"] + counts["incorrect"]
+        result[name] = {**counts, "accuracy": counts["correct"] / len(paired) if paired else None,
+                        "answered_accuracy": counts["correct"] / answered if answered else None}
+    result["accuracy_delta"] = (result["candidate"]["accuracy"] - result["baseline"]["accuracy"]
+                                if paired else None)
+    return result
