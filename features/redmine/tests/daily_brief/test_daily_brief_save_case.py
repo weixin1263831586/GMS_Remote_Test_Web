@@ -63,7 +63,7 @@ def case_client(tmp_path, monkeypatch):
 
 def test_save_case_uses_explicit_daily_brief_run(case_client):
     client, sink = case_client
-    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=old")
+    response = client.post("/api/redmine-agent/daily-brief/2026-09-15/issues/101/save-case?run_id=old")
     assert response.status_code == 200
     fact = sink.upsert_case_fact.call_args.args[0]
     assert fact["problem_summary"] == "RK3588 CtsCarrierApiTestCases fail"
@@ -76,7 +76,7 @@ def test_save_case_uses_explicit_daily_brief_run(case_client):
 def test_save_case_rejects_triage_result(case_client):
     """triage 待办摘要禁止沉淀为知识库案例。"""
     client, sink = case_client
-    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=new")
+    response = client.post("/api/redmine-agent/daily-brief/2026-09-15/issues/101/save-case?run_id=new")
     assert response.status_code == 409
     assert response.json()["code"] == "STATE_CONFLICT"
     sink.upsert_case_fact.assert_not_called()
@@ -85,7 +85,7 @@ def test_save_case_rejects_triage_result(case_client):
 def test_save_case_rejects_native_markdown_summary(case_client):
     """ADR 0009：native 摘要无结构化字段，禁止保存为案例（挡 API 直连）。"""
     client, sink = case_client
-    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=native")
+    response = client.post("/api/redmine-agent/daily-brief/2026-09-15/issues/101/save-case?run_id=native")
     assert response.status_code == 409
     assert response.json()["code"] == "STATE_CONFLICT"
     assert "native markdown summary" in response.json()["error"]
@@ -94,7 +94,7 @@ def test_save_case_rejects_native_markdown_summary(case_client):
 
 def test_save_case_does_not_read_another_owner_run(case_client):
     client, sink = case_client
-    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=foreign")
+    response = client.post("/api/redmine-agent/daily-brief/2026-09-15/issues/101/save-case?run_id=foreign")
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"
     sink.upsert_case_fact.assert_not_called()
@@ -103,6 +103,6 @@ def test_save_case_does_not_read_another_owner_run(case_client):
 def test_save_case_rejects_agent_write(case_client, monkeypatch):
     monkeypatch.setenv("GMS_AUTH_REQUIRED", "true")
     client, sink = case_client
-    response = client.post("/daily-brief/2026-09-15/issues/101/save-case?run_id=old", headers={"role": "agent_service"})
+    response = client.post("/api/redmine-agent/daily-brief/2026-09-15/issues/101/save-case?run_id=old", headers={"role": "agent_service"})
     assert response.status_code == 403
     sink.upsert_case_fact.assert_not_called()
