@@ -10,7 +10,7 @@ from features.redmine.evidence.archives import extract_system_archive_text
 from features.redmine.evidence.search_api import _collect_zip_member_matches
 from features.redmine.evidence.service import EvidenceFetcher, split_zip_derived_text
 from features.redmine.evidence.store import EvidenceStore, owner_evidence_store
-from features.redmine.tests import test_evidence_pipeline as pipeline
+from features.redmine.tests.evidence import test_evidence_pipeline as pipeline
 
 
 def _archive_source_file(tmp_path: Path, magic: bytes) -> Path:

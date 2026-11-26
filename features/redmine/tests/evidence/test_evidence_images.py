@@ -17,7 +17,7 @@ import unittest
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from features.redmine.tests.test_evidence_pipeline import (
+from features.redmine.tests.evidence.test_evidence_pipeline import (
     EvidencePipelineFixture,
     FakeRedmineServer,
 )

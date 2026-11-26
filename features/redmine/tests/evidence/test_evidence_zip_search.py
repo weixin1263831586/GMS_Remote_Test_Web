@@ -13,7 +13,7 @@ import io
 import unittest
 import zipfile
 
-from features.redmine.tests.test_evidence_pipeline import (
+from features.redmine.tests.evidence.test_evidence_pipeline import (
     EvidencePipelineFixture,
     FakeRedmineServer,
 )

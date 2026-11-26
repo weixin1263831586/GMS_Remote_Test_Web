@@ -54,5 +54,5 @@ OCR 运行测试。本文是唯一权威清单；
   WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
   python3 -m pip_audit -r requirements.txt --strict $WAIVERS
   python3 -m pip_audit -r requirements-dev.txt --strict $WAIVERS
-  pytest features/redmine/tests/test_evidence_images.py -q
+  pytest features/redmine/tests/evidence/test_evidence_images.py -q
   ```

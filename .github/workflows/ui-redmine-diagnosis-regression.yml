@@ -49,7 +49,7 @@ jobs:
             features/redmine/tests/test_client_search_hardening.py \
             features/redmine/tests/test_analysis_similarity_ranking.py \
             features/redmine/tests/test_issue_journal_export.py \
-            features/redmine/tests/test_attachment_text_integrity.py \
+            features/redmine/tests/evidence/test_attachment_text_integrity.py \
             features/redmine/tests/test_repository_search.py \
             features/redmine/tests/test_daily_brief_service.py::RunPayloadExecutionViewTests \
             features/redmine/tests/test_daily_brief_review_regressions.py \
