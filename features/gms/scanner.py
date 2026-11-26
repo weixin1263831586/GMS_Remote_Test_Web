@@ -20,7 +20,7 @@ from .update_records import bulletin_detail_coverage, record_change, sync_source
 
 # Bump whenever parser semantics change. A new parser is a reindex, not
 # evidence that Google published new information.
-PARSER_VERSION = '5'
+PARSER_VERSION = '6'
 ISSUE_KEYS = ('product_section','issue_type','test_module','test_case','exemption_id','android_versions')
 CVE_KEYS = ('source_url','cve_id','mainline_module')
 VOLATILE = {'id','first_seen_at','last_seen_at','content_hash','detail_fetched_at'}

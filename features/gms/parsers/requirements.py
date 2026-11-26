@@ -246,7 +246,7 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
         active = next(((v, k) for v, k, s in reversed(markers) if s == scope_key), ('', ''))
         mentions = list(dict.fromkeys(v for v, _ in classify_requirement_versions(value)))
         definition = _DEFINITION.match(value)
-        if definition:
+        if definition and node.tag != 'table' and next(node.iterancestors('table'), None) is None:
             requirement_id = definition.group(1)
             # A bracketed range or a non-applicable statement remains a candidate,
             # never an assertion that every ID in the range is a definition.
