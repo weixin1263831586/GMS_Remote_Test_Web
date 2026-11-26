@@ -302,7 +302,6 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
   line-height:1.6;
   padding:15px 12px;
 }
-#tab-management .cluster-load-failed td{color:#edb7a2;padding:15px 12px}
 @keyframes cluster-loading-spin{to{transform:rotate(360deg)}}
 @keyframes cluster-loading-shimmer{to{background-position-x:-240%}}
 @media(prefers-reduced-motion:reduce){

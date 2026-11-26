@@ -171,7 +171,7 @@ code { color: var(--green); }
 .arch-system-bottom h2{padding:10px 13px;border-bottom:1px solid var(--line)}
 .arch-system-table-scroll{overflow-x:auto}
 .arch-system-modules table{width:100%;min-width:535px;border-collapse:collapse;}
-.arch-system-modules :is(th,td){padding:8px 10px;text-align:left;border-bottom:1px solid #373440;line-height:1.5}
+.arch-system-modules :is(th,td){text-align:left;border-bottom:1px solid #373440;line-height:1.5}
 .arch-system-modules th{background:#24232e;color:#bdb5cf;}
 .arch-system-modules td:first-child{color:#e0d4ff;white-space:nowrap}
 .arch-system-modules tr:last-child td{border-bottom:0}

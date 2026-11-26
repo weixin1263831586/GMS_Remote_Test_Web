@@ -129,7 +129,7 @@
 }
 .architecture-v2 .arch-v2-info-panel th,
 .architecture-v2 .arch-v2-info-panel td{
-  padding:8px 10px;text-align:left;border-bottom:1px solid #333145;
+  text-align:left;border-bottom:1px solid #333145;
 }
 .architecture-v2 .arch-v2-info-panel th{color:#b9b3ca;background:#252437;}
 .architecture-v2 .arch-v2-info-panel td:first-child{color:#d9c8ff;white-space:nowrap}

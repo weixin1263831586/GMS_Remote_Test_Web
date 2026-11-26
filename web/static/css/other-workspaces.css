@@ -82,9 +82,8 @@
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
 }
-.page-ui-rework :is(.table-placeholder, .suite-empty) {
-    color: var(--text-muted);  padding: 20px 12px;
-}
+.page-ui-rework :is(.table-placeholder, .suite-empty) { color: var(--text-muted); }
+.page-ui-rework .suite-empty { padding: 20px 12px; }
 /* 测试工作台：保留三列配置、设备/操作两列、双日志 Tab 与所有按钮。 */
 #page-test.page-ui-rework :is(.input-container, .adb-frame, .control-frame, .log-frame) {
     background: var(--card-bg); border: 1px solid var(--border-color);
@@ -273,7 +272,7 @@
 #page-notes .kb-source-table col:nth-child(5) { width: 164px; }
 #page-notes .kb-source-table col:nth-child(6) { width: 270px; }
 #page-notes .kb-source-table :is(th, td) {
-    text-align: center; vertical-align: middle; white-space: nowrap;
+    text-align: center; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
 }
 #page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
