@@ -4,6 +4,7 @@ Domain providers own access checks, source revisions and document content.
 """
 from .evidence import evidence_followup_required, evidence_plan_context, summarize_evidence
 from .intelligence import IntelligentRAG, IntelligentSource, understand_passages
+from .understanding import PassageInsightIndex, passage_token
 from .semantic import (
     LocalEmbedding,
     VectorIndex,
@@ -31,6 +32,8 @@ from .service import (
 
 
 __all__ = [
+    "PassageInsightIndex",
+    "passage_token",
     "IntelligentRAG",
     "IntelligentSource",
     "LocalEmbedding",
