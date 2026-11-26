@@ -574,7 +574,8 @@ class WebKnowledgeProvider:
         if android_api_level is not None and version is None:
             version = -1
         try:
-            rows, status = CddSemantic(self).search(query, version=version, limit=max(limit, 20))
+            rows, status = CddSemantic(self).search(query, version=version, limit=max(limit, 20),
+                                                    fresh_only=public_cdd_only)
         except Exception as exc:
             return lexical, {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
         if not rows:
