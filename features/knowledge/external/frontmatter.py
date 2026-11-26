@@ -38,13 +38,7 @@ def _scalarize(value: Any) -> str:
 
 
 def _jsonable(value: Any) -> Any:
-    """递归把 YAML 特有标量转为 JSON 稳定表示。
-
-    PyYAML 会把未加引号的 ISO 日期解析成 ``datetime.date``（真实语料
-    存在 ``last_verified: 2026-08-15`` 写法），随后 ``_apply_pages`` 的
-    ``json.dumps`` 直接 TypeError——整库 reindex 失败。统一在解析边界
-    转为 ISO 字符串，语义不变、下游（快照投影/检索展示）无感。
-    """
+    """递归将 YAML 日期等标量转换为 JSON 可序列化值。"""
     if isinstance(value, dict):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
@@ -55,12 +49,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """安全 YAML frontmatter 解析：保留 tags/sources 等数组与嵌套结构。
-
-    此前只解析顶层标量，把 sources（Wiki→codesearch 的关键
-    连接）和 tags 直接丢掉。YAML 解析失败时回退到纯文本标量投影，保证
-    正文仍可索引——坏 frontmatter 不丢正文。
-    """
+    """安全解析 YAML 元数据；解析失败时保留正文并回退至标量投影。"""
     if not text.startswith("---"):
         return {}, text
     end = text.find("\n---", 3)

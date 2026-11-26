@@ -12,7 +12,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from features.reports.models import USE_LXML
+from features.reports.xml_parser import USE_LXML
 from features.reports.xml_parser import XMLReportParser
 
 
@@ -97,7 +97,7 @@ class XxeHardeningTests(unittest.TestCase):
             self.skipTest("lxml 不可用，走 ElementTree 路径")
         from lxml import etree as lxml_etree
 
-        from features.reports.models import _LXML_PARSER
+        from features.reports.xml_parser import _LXML_PARSER
 
         document = (
             '<?xml version="1.0"?><!DOCTYPE r ['

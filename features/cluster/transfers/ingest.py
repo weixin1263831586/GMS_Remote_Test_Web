@@ -366,7 +366,7 @@ def import_transfer_for_apk_analysis(transfer_id: str, request: Request):
 
 @router.post("/transfers/{transfer_id}/report-analysis")
 async def analyze_transferred_log_directory(transfer_id: str, request: Request):
-    from features.reports import ArchiveReportAnalyzer
+    from features.reports import ReportAnalyzer
 
     require_agent_scope("reports.read")(request)
     transfer = service().repository.get_transfer(transfer_id)
@@ -404,7 +404,7 @@ async def analyze_transferred_log_directory(transfer_id: str, request: Request):
                 if total > max_bytes or unsafe:
                     raise ValueError("log archive is too large or contains an unsafe path")
                 bundle.extractall(destination)
-            result = ArchiveReportAnalyzer().analyze_log_dir(str(destination))
+            result = ReportAnalyzer().analyze_log_dir(str(destination))
             if not result:
                 raise ValueError("transferred directory contains no analyzable host logs")
             result.setdefault("report_type", "log")

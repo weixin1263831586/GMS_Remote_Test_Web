@@ -4,10 +4,37 @@ import logging
 
 from foundation.tradefed_report_type import report_test_type
 
-from .models import _LXML_PARSER, ET, USE_LXML, TestFailure, TestReport, etree
+from .models import TestFailure, TestReport
 
 
 logger = logging.getLogger(__name__)
+
+
+# Prefer the hardened lxml parser; use ElementTree when lxml is unavailable.
+try:
+    from lxml import etree
+except ImportError:
+    import xml.etree.ElementTree as ET
+
+    USE_LXML = False
+    etree = None
+else:
+    USE_LXML = True
+    ET = None
+
+# Reports are untrusted. Do not resolve entities or fetch network resources.
+_LXML_PARSER = (
+    etree.XMLParser(
+        remove_blank_text=True,
+        huge_tree=True,
+        recover=True,
+        resolve_entities=False,
+        no_network=True,
+    )
+    if USE_LXML
+    else None
+)
+
 
 class XMLReportParser:
     """XML报告解析器 - 统一处理test_result.xml解析"""

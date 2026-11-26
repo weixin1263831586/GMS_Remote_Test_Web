@@ -130,7 +130,7 @@ class AppServices:
     redmine: RedmineService
 
 
-def _wire_cross_feature_services() -> None:
+def _wire_cross_feature_services(runtime_settings: RuntimeSettings = settings) -> None:
     """Connect cross-feature seams that features cannot wire themselves.
 
     - cluster / automation: register the foundation access ports that
@@ -159,10 +159,8 @@ def _wire_cross_feature_services() -> None:
     # 内部模块直连闭合跨 feature 依赖。
     from features.automation.repository import AutomationStore
     from foundation.automation_port import configure_active_run_ids_provider
-    from foundation.config import settings
-
     def _active_automation_run_ids() -> set[str]:
-        store = AutomationStore(settings.data_root / "automation/automation.sqlite3")
+        store = AutomationStore(runtime_settings.data_root / "automation/automation.sqlite3")
         # 必须全量查询非终态任务：list_runs 的 limit 上限（500）会把更早
         # 入队/在途的任务漏掉，其暂存固件会被清理语义误判为可回收。
         return set(store.active_run_ids())
@@ -187,7 +185,7 @@ def build_services(
     runtime_settings: RuntimeSettings | None = None,
 ) -> AppServices:
     selected = settings if runtime_settings is None else runtime_settings
-    _wire_cross_feature_services()
+    _wire_cross_feature_services(selected)
     redmine_repository = RedmineAgentDB(
         db_path=selected.data_root / "redmine/redmine.sqlite3",
         docs_dir=selected.data_root / "redmine/docs",

@@ -69,6 +69,11 @@ def module_names(tree: ast.AST, package: str, *, include_dynamic: bool = True) -
                     continue
             if target:
                 result.add(target)
+                if target == "features":
+                    result.update(
+                        f"features.{alias.name}"
+                        for alias in node.names if alias.name != "*"
+                    )
     if include_dynamic:
         result.update(target for _, target in literal_dynamic_targets(tree, package))
     return result

@@ -21,3 +21,13 @@ def test_import_scanner_resolves_static_and_dynamic_import_targets():
     assert module_names(tree, "features.example", include_dynamic=False) == {
         "foundation.config", "features.example", "importlib",
     }
+
+
+def test_import_scanner_resolves_feature_package_imports():
+    tree = ast.parse(
+        'from features import devices as device_api, reports\n'
+        'from features import users\n'
+    )
+    assert module_names(tree, "features.example") == {
+        "features", "features.devices", "features.reports", "features.users",
+    }
