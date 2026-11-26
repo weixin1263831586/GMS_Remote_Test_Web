@@ -23,8 +23,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     batches = data.get("queries")
     batch_rows = [row for row in batches[:16] if isinstance(row, dict)] if isinstance(batches, list) else []
     if records is None and batch_rows:
-        records = [item for row in batch_rows for item in (row.get("matches") or [])[:30]
-                   if isinstance(item, dict)]
+        records = [item for row in batch_rows if isinstance(row.get("matches"), list)
+                   for item in row["matches"][:30] if isinstance(item, dict)]
     sdk = bool(data.get("source_id")) and isinstance(data.get("matches"), list) and (
         "reproducible" in data or "commit" in data)
     gerrit = "gerrit" in tool and records is not None
@@ -67,10 +67,24 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         offset = meta.get("offset", 0)
         if isinstance(offset, int) and offset + len(records) < meta["total"]:
             gaps.append("more_result_pages")
-    if data.get("limited") is True or data.get("next_offset") is not None or any(
-        row.get("truncated") or row.get("next_offset") is not None for row in batch_rows
-    ):
+    if (data.get("limited") is True or data.get("next_offset") is not None
+            or data.get("page_complete") is False or data.get("next_query")
+            or any(row.get("truncated") or row.get("next_offset") is not None
+                   or row.get("page_complete") is False or row.get("next_query") for row in batch_rows)):
         gaps.append("more_result_pages")
+    if any(row.get("coverage_complete") is False or row.get("source_coverage_complete") is False
+           for row in batch_rows):
+        gaps.append("incomplete_source_scope")
+    if any(row.get("index_complete") is False for row in batch_rows):
+        gaps.append("incomplete_evidence_index")
+    if (isinstance(batches, list) and (len(batches) > 16 or len(batch_rows) < len(batches)
+            or any(not isinstance(row.get("matches"), list) or len(row["matches"]) > 30
+                   for row in batch_rows))):
+        gaps.append("bounded_or_unconfirmed")
+    if records is not None and len(records) > 30:
+        gaps.append("bounded_or_unconfirmed")
+    if isinstance(source_status, list) and len(source_status) > 16:
+        gaps.append("bounded_or_unconfirmed")
     if any(row.get("total") == 0 for row in batch_rows):
         gaps.append("batch_query_without_match")
     if data.get("possibly_truncated") is True or data.get("latest_confirmed") is False:
@@ -84,6 +98,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     if isinstance(source_status, list):
         for row in source_status[:16]:
             if not isinstance(row, dict) or not row.get("source"):
+                gaps.append("bounded_or_unconfirmed")
                 continue
             state = str(row.get("status") or "unknown")
             source = {"source": str(row["source"])[:80], "status": state[:40]}
@@ -101,6 +116,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
                 source["semantic_status"] = str(retrieval.get("status") or "unknown")[:40]
                 if retrieval.get("status") in _SOURCE_FAILURES:
                     gaps.append("semantic:" + source["source"] + ":" + source["semantic_status"])
+                elif retrieval.get("coverage_complete") is False and retrieval.get("status") != "disabled":
+                    gaps.append("incomplete_evidence_index")
             sources.append(source)
     for item in (records or [])[:30]:
         if not isinstance(item, dict):
@@ -130,6 +147,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
                 references.append(ref)
         if extra.get("status") == "stale":
             gaps.append("stale_candidate")
+    if len(references) > 16:
+        gaps.append("bounded_or_unconfirmed")
     return {"tool": tool, "returned": len(records) if records is not None else None,
             "coverage_complete": (data.get("coverage_complete") is True
                                   and data.get("source_coverage_complete") is not False
