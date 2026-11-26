@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 
 from features.auth import require_authenticated_user, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
@@ -19,11 +20,17 @@ from foundation.error_model import ApiError, record_internal_error
 from ..api import get_redmine_service_for_request
 from ..cases.semantic import CaseSemantic
 from ..daily_brief.repository import canonical_owner_id, owner_daily_brief_repository
+from .journal_semantic import JournalSemantic
 
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/redmine-agent")
+
+
+class JournalSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=8192)
+    limit: int = Field(default=10, ge=1, le=50)
 
 
 def _knowledge(request: Request):
@@ -112,6 +119,41 @@ def sync_case_semantic_index(request: Request, batch_size: int = Query(128, ge=1
     except Exception as exc:
         logger.warning("Case semantic synchronization failed: %s", type(exc).__name__)
         return ApiError.conflict("本地案例语义索引未完成，请检查配置").to_response()
+
+
+@router.get("/search/journal-semantic-index")
+def journal_semantic_status(request: Request):
+    require_human_principal_when_auth_required(request)
+    require_authenticated_user(request)
+    try:
+        return {"success": True, "data": JournalSemantic(_knowledge(request).issue_repository).status()}
+    except Exception as exc:
+        logger.warning("Journal index status unavailable: %s", type(exc).__name__)
+        return {"success": True, "data": {"status": "error", "coverage_complete": False}}
+
+
+@router.post("/search/journal-semantic-index")
+def sync_journal_semantic_index(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    require_human_principal_when_auth_required(request)
+    require_authenticated_user(request)
+    try:
+        data = JournalSemantic(_knowledge(request).issue_repository).sync(batch_size=batch_size)
+        return {"success": True, "data": data}
+    except Exception as exc:
+        logger.warning("Journal semantic synchronization failed: %s", type(exc).__name__)
+        return ApiError.conflict("本地历史回复语义索引未完成，请检查配置").to_response()
+
+
+@router.post("/search/journals")
+def search_archived_journals(request: Request, body: JournalSearchRequest):
+    require_human_principal_when_auth_required(request)
+    require_authenticated_user(request)
+    try:
+        data = JournalSemantic(_knowledge(request).issue_repository).search(body.query, limit=body.limit)
+        return {"success": True, "data": data}
+    except Exception as exc:
+        logger.warning("Journal semantic search failed: %s", type(exc).__name__)
+        return ApiError.conflict("历史回复语义检索不可用").to_response()
 
 
 @router.post("/search/similar")
