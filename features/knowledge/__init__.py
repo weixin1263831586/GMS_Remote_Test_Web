@@ -59,4 +59,7 @@ def __getattr__(name: str):
 
 
 def sync_due_web_sources():
-    return WebKnowledgeProvider().sync_due()
+    provider = WebKnowledgeProvider()
+    outcomes = provider.sync_due()
+    outcomes.extend(provider.sync_due_semantic())
+    return outcomes
