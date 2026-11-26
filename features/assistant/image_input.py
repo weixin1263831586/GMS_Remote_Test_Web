@@ -98,7 +98,19 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
                 return error_response("未配置支持图片输入的本地模型（capabilities: image_in 或 vision），图片尚未发送", 503)
             _append_step(session, "图片分析", "running", f"正在分析 {len(images)} 张图片")
             step_id = session["steps"][-1]["id"]
-            result = await asyncio.to_thread(analyzer.generate_image_analysis, message, images)
+            retrieval_context = []
+            if message.strip():
+                try:
+                    from features.knowledge import retrieve_public_cdd_context
+
+                    retrieval_context = await asyncio.to_thread(retrieve_public_cdd_context, message)
+                except Exception:
+                    # Public background recall must not prevent the local image analysis.
+                    retrieval_context = []
+            if session.get("status") != "thinking":
+                return error_response("图片分析已取消", 409)
+            options = {"retrieval_context": retrieval_context} if retrieval_context else {}
+            result = await asyncio.to_thread(analyzer.generate_image_analysis, message, images, **options)
             step = next((item for item in session.get("steps", []) if item["id"] == step_id), None)
             if session.get("status") != "thinking":
                 if step:
@@ -114,7 +126,9 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
                 step.update(status="done", detail=f"已分析 {len(images)} 张图片")
                 _settle_step(step)
             _append_message(session, "user", message, data={"image_count": len(images)})
-            _append_message(session, "assistant", result["content"], data={"image_analysis": True})
+            _append_message(session, "assistant", result["content"], data={"image_analysis": True, "retrieval_context": {"scope": "public_cdd_only",
+                             "coverage_complete": False,
+                             "references": [item["reference"] for item in retrieval_context]}})
             session["status"] = prior_status
             session.pop("agent_image_busy", None)
             return success_response({"session": session_payload(session)}, "Agent updated")
