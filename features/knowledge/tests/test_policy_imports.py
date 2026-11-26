@@ -64,3 +64,45 @@ def test_partner_grant_requires_upstream_account_verification(monkeypatch):
     monkeypatch.setattr(external_api, 'require_elevated_admin', lambda _request: SimpleNamespace(resource_owner_id='owner-a'))
     payload = external_api.PartnerGrantRequest(enabled=True, authorized_for_ai_processing=True)
     assert external_api.update_partner_policy_grant(None, payload).status_code == 409
+
+
+def test_model_catalog_fingerprint_binds_primary_and_fallback_order():
+    from copy import deepcopy
+
+    config = {"enabled": True, "primary_provider": "a", "providers": {
+        name: {"enabled": True, "model": name, "base_url": f"https://{name}.example.test",
+               "api_format": "openai", "api_key": "secret"}
+        for name in ("a", "b", "c")
+    }}
+    fingerprint = web_sources.model_catalog_fingerprint(config)
+    assert fingerprint
+    changed = deepcopy(config)
+    changed["primary_provider"] = "b"
+    assert web_sources.model_catalog_fingerprint(changed) != fingerprint
+    changed = deepcopy(config)
+    changed["providers"] = {name: changed["providers"][name] for name in ("a", "c", "b")}
+    assert web_sources.model_catalog_fingerprint(changed) != fingerprint
+    changed = deepcopy(config)
+    changed["providers"]["a"]["api_key"] = "rotated"
+    assert web_sources.model_catalog_fingerprint(changed) == fingerprint
+    changed["providers"]["b"]["model"] = ""
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+    changed = deepcopy(config)
+    changed["providers"]["a"]["enabled"] = "false"
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+    changed = deepcopy(config)
+    changed["providers"]["a"]["base_url"] += "?token=secret"
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+
+
+def test_route_change_invalidates_existing_owner_import_grant(tmp_path, monkeypatch):
+    config = {"enabled": True, "primary_provider": "a", "providers": {
+        name: {"enabled": True, "model": name, "base_url": f"https://{name}.example.test"}
+        for name in ("a", "b")
+    }}
+    monkeypatch.setattr(web_sources.config_manager, "get_ai_config", lambda: config)
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    provider.approve_import("owner", "doc", "digest")
+    assert provider.approved_imports("owner") == {"doc": "digest"}
+    config["primary_provider"] = "b"
+    assert provider.approved_imports("owner") == {}
