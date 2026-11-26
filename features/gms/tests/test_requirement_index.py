@@ -363,3 +363,19 @@ def test_removed_marker_preserves_historical_status():
     assert not second.change_kind
     assert not parsed.requirement_coverage['historical_applicability_verified']
     assert not parsed.requirement_coverage['unclosed_markers']
+
+
+
+def test_policy_index_integrity_checks_all_record_families(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections, requirement_index_consistent
+
+    with closing(connect(tmp_path / 'integrity.sqlite3')) as conn, conn:
+        sync_source(conn, 1, fetched(), force=True, timestamp='2026-01-01')
+        coverage = json.loads(conn.execute(
+            'SELECT coverage_json FROM gms_update_requirement_coverage').fetchone()[0])
+        assert requirement_index_consistent(conn, coverage)
+        conn.execute('DELETE FROM gms_update_requirement_table_rows')
+        assert not requirement_index_consistent(conn, coverage)
+        result = lookup_requirement_sections(conn, 'section:GMS-1.1-001')
+        assert not result['index_consistent']
+        assert not result['latest_scan_confirmed']

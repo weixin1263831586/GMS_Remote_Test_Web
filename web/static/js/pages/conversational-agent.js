@@ -483,6 +483,7 @@ function renderAgentMessages(session) {
                 }
                 if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引，请在 GMS 更新中心核查扫描结果。');
                 if (result.truncated) lines.push('返回范围受限，请缩小章节范围。');
+                if (result.index_consistent === false) lines.push('索引记录数量或修订不一致；仅供原文核查，请重新同步政策。');
                 if (result.revision_text_scope !== 'active_markup_only') lines.push('当前索引未确认已清除删除线修订文本，请重新同步政策。');
                 const block = document.createElement('div');
                 const addText = (parent, tag, value) => {
@@ -503,7 +504,9 @@ function renderAgentMessages(session) {
                     const matchedRows = section.version_rows || [];
                     if (requested && result.lookup_scope === 'low_ram_declaration') {
                         addText(block, 'strong', 'Android ' + requested + '：政策表格对应要求');
-                        if (!matchedRows.length) {
+                        if (result.index_consistent === false) {
+                            addText(block, 'p', '索引完整性检查未通过，不推断认证容量结论。');
+                        } else if (!matchedRows.length) {
                             addText(block, 'p', '未找到明确适用的版本行，不推断 RAM 准入数值。');
                         } else {
                             for (const row of matchedRows) {

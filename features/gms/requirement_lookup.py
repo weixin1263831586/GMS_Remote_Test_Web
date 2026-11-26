@@ -224,6 +224,27 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys, android_versi
     }
 
 
+def requirement_index_consistent(conn, coverage):
+    """Check the retained revision against all indexed record families."""
+    if not coverage or not coverage.get("source_revision"):
+        return False
+    counts = conn.execute(
+        "SELECT count(*) AS total, count(DISTINCT source_revision) AS revisions, "
+        "min(source_revision) AS revision FROM gms_update_requirement_clauses WHERE source_key=?",
+        (SOURCE,),
+    ).fetchone()
+    if (not counts["total"] or counts["total"] != coverage.get("clause_candidates")
+            or counts["revisions"] != 1 or counts["revision"] != coverage["source_revision"]):
+        return False
+    sections = conn.execute(
+        "SELECT count(*) FROM gms_update_requirement_sections WHERE source_key=?", (SOURCE,),
+    ).fetchone()[0]
+    rows = conn.execute(
+        "SELECT count(*) FROM gms_update_requirement_table_rows WHERE source_key=?", (SOURCE,),
+    ).fetchone()[0]
+    return sections == coverage.get("sections") and rows == coverage.get("table_rows")
+
+
 def lookup_requirement_sections(conn, query):
     """Return bounded, revision-bound human-readable evidence, never model input."""
     row = conn.execute(
@@ -246,6 +267,7 @@ def lookup_requirement_sections(conn, query):
         "SELECT run_id,state FROM gms_update_source_results WHERE source_key=? ORDER BY run_id DESC LIMIT 1",
         (SOURCE,),
     ).fetchone()
+    index_consistent = requirement_index_consistent(conn, coverage)
     params = [SOURCE]
     keys = []
     version_match = re.fullmatch(r"section:low ram;android=(\d{2})", query.strip(), re.I)
@@ -378,7 +400,8 @@ def lookup_requirement_sections(conn, query):
             "source_revision": revision, "indexed_at": row["indexed_at"],
             "revision_text_scope": coverage.get("revision_text_scope", "unknown"),
             "historical_applicability_verified": False,
-            "latest_scan_confirmed": bool(latest and latest["run_id"] == row["run_id"]
+            "index_consistent": index_consistent,
+            "latest_scan_confirmed": bool(index_consistent and latest and latest["run_id"] == row["run_id"]
                                           and latest["state"] == "ready"),
             "truncated": len(sections) > MAX_SECTIONS or any(item["truncated"] for item in result),
             "coverage_complete": False, "applicability_verified": False,

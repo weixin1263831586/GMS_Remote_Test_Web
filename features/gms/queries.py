@@ -14,7 +14,7 @@ from features.auth import require_elevated_admin, require_human_principal
 
 from .mainline_records import escape_like
 from .repository import DB_PATH, connect
-from .requirement_lookup import lookup_requirement_sections
+from .requirement_lookup import lookup_requirement_sections, requirement_index_consistent
 from .sources import SOURCES
 from .update_records import query_bulletin_patches
 
@@ -625,13 +625,7 @@ def gms_requirement_coverage(request: Request):
             FROM gms_update_source_results WHERE source_key=? ORDER BY run_id DESC LIMIT 1""",
             ('gms_requirements',)).fetchone()
         coverage = json.loads(row['coverage_json']) if row else None
-        counts = conn.execute("""SELECT count(*) AS total, count(DISTINCT source_revision) AS revisions,
-            min(source_revision) AS revision FROM gms_update_requirement_clauses WHERE source_key=?""",
-            ('gms_requirements',)).fetchone()
-        index_consistent = bool(coverage and counts['total'] > 0
-                                and counts['total'] == coverage.get('clause_candidates')
-                                and counts['revisions'] == 1
-                                and counts['revision'] == coverage.get('source_revision'))
+        index_consistent = requirement_index_consistent(conn, coverage)
     return {'success': True, 'data': {
         'coverage': coverage,
         'index_consistent': index_consistent,
