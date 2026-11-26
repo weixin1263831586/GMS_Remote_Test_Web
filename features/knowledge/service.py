@@ -6,7 +6,7 @@ from typing import Any
 
 from .parsers import parse_file
 from .external.web_sources import model_catalog_fingerprint
-from .intelligent import local_document_rag, personal_source, render_rag_answer, web_source
+from .intelligent import local_document_model, local_document_rag, personal_source, render_rag_answer, web_source
 from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
@@ -166,3 +166,17 @@ def analyze_public_cdd(question, *, limit=8, android_api_level=None):
                          "source_revision": item["revision"], "snippet": item["text"],
                          "title": item["metadata"].get("title"), "extra": item["metadata"],
                          "evidence_level": "background"} for item in result["evidence"]]}
+
+
+def sync_due_cdd_understanding():
+    """Use the existing Controller tick; no new service or external model."""
+    from .external import cdd_intelligence
+    from .external.web_sources import WebKnowledgeProvider
+
+    key = cdd_intelligence.enabled_key()
+    if not key:
+        return []
+    model, name, fingerprint = local_document_model(_ask_analyzer_factory)
+    if not name or not fingerprint or fingerprint != model_catalog_fingerprint():
+        return [{"operation": "document_understanding", "status": "model_unavailable"}]
+    return [cdd_intelligence.sync_batch(WebKnowledgeProvider(), model, key)]
