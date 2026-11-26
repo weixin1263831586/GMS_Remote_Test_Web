@@ -59,7 +59,7 @@
 .ui-control:is(button,select) { white-space: nowrap; }
 
 /* Data tables share one geometry; narrative, form and replay tables keep content-driven sizing. */
-:is(table.ui-table, table.list-table, table:has(> thead)):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
+:is(table.ui-table, table.list-table, table:has(> thead), table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table, .dcfg-tab table:not(:has(> thead))))
     > thead > tr > :is(th, td),
 .suite-file-table-head {
     box-sizing: border-box;
@@ -67,7 +67,7 @@
     padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
     vertical-align: middle;
 }
-:is(table.ui-table, table.list-table, table:has(> thead)):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
+:is(table.ui-table, table.list-table, table:has(> thead), table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table, .dcfg-tab table:not(:has(> thead))))
     > tbody > tr:not(:where(.device-group-row, .group-row)) > :is(td, th),
 .suite-file-row {
     box-sizing: border-box;
