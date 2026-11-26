@@ -67,6 +67,9 @@ async def test_image_turn_retains_only_text_and_count(monkeypatch):
     import json
 
     from features.assistant import image_input, session_log
+    import features.knowledge as knowledge
+
+    monkeypatch.setattr(knowledge, "retrieve_public_cdd_context", lambda _query: [])
 
     monkeypatch.setattr(session_log, "_persist_transcript", lambda _session: None)
     monkeypatch.setattr(image_input.users_runtime, "config_manager", Mock())
@@ -92,3 +95,26 @@ async def test_image_turn_retains_only_text_and_count(monkeypatch):
     assert analyzer.generate_image_analysis.call_count == 1
     assert len(current["messages"]) == 2
     assert current["status"] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_image_turn_passes_public_context_without_persisting_body(monkeypatch):
+    import json
+
+    import features.knowledge as knowledge
+    from features.assistant import image_input, session_log
+
+    context = [{"reference": "POL-" + "a" * 24, "snippet": "background-only"}]
+    monkeypatch.setattr(knowledge, "retrieve_public_cdd_context", lambda _query: context)
+    monkeypatch.setattr(session_log, "_persist_transcript", lambda _session: None)
+    monkeypatch.setattr(image_input.users_runtime, "config_manager", Mock())
+    analyzer = Mock()
+    analyzer.image_provider.return_value = "local"
+    analyzer.generate_image_analysis.return_value = {"success": True, "content": "Visible result"}
+    monkeypatch.setattr(image_input, "UniversalAIAnalyzer", lambda _config: analyzer)
+    current = {"session_id": "visual", "status": "idle", "messages": [], "steps": []}
+    assert (await image_input.analyze_image_turn(current, "Analyze CDD", [image_data()])).status_code == 200
+    assert analyzer.generate_image_analysis.call_args.kwargs == {"retrieval_context": context}
+    meta = current["messages"][-1]["data"]["retrieval_context"]
+    assert meta["references"] == [context[0]["reference"]] and not meta["coverage_complete"]
+    assert "background-only" not in json.dumps(current)
