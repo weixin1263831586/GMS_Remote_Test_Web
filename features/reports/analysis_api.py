@@ -702,7 +702,7 @@ async def knowledgebase_search(
         results = await asyncio.to_thread(
             kb.search_similar,
             query.strip(),
-            limit,
+            limit=limit,
         )
         return success_response({
             "query": query.strip(),
