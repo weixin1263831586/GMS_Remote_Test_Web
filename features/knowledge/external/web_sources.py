@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import time
 import uuid
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,24 @@ from .web_fetch import fetch_html, validate_url
 SOURCE = "web_documents"
 API_TO_ANDROID = {35: 15, 36: 16, 37: 17}
 MAX_REVISIONS_PER_SOURCE = 8
+
+#: 排序用词表桥接：CDD 用 "memory available to the kernel and userspace" 表达
+#: 内存门槛，用户和模型更常说 RAM、内存。桥接只影响**章内排序**，不扩大
+#: FTS 匹配集——没命中的条款不会凭空出现。
+_SPEC_SYNONYMS = {
+    "ram": ("memory",),
+    "内存": ("memory",),
+    "运存": ("memory",),
+    "storage": ("non-volatile",),
+    "存储": ("non-volatile",),
+}
+#: 条款强度：带 MUST 的规范要求优先于 SHOULD，再优先于说明性文字。
+_STRENGTH_RULES = (
+    (re.compile(r"\bMUST NOT\b|\bMUST\b|\bSHALL\b|\bREQUIRED\b"), 3),
+    (re.compile(r"\bSTRONGLY RECOMMENDED\b|\bSHOULD\b|\bRECOMMENDED\b"), 2),
+)
+_INDEXED_COVERAGE_TTL = 60.0
+_INDEXED_COVERAGE_CACHE: dict[str, tuple[float, dict[str, int]]] = {}
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -364,27 +383,112 @@ class WebKnowledgeProvider:
         ready = [r for r in enabled if r["revision"]]
         status = ("disabled" if not enabled else "error" if any(r["error"] for r in enabled)
                   else "ready" if len(ready) == len(enabled) else "empty")
-        return ProviderStatus(SOURCE, bool(enabled), status, detail=f"{len(ready)}/{len(enabled)} sources indexed",
+        detail = f"{len(ready)}/{len(enabled)} sources indexed"
+        coverage = self.indexed_coverage()
+        if coverage:
+            # 只报文档数会被读成“索引里只有 4 段内容”，进而误判覆盖不全。
+            detail += f", {coverage['clauses']} clauses in {coverage['sections']} sections"
+        return ProviderStatus(SOURCE, bool(enabled), status, detail=detail,
                               doc_count=len(ready), license="per-source",
                               last_sync_at=max((r["synced_at"] for r in ready), default=""))
+
+    def indexed_coverage(self) -> dict[str, int]:
+        """当前 revision 的条款数与章节数，供状态说明与 Agent 判断覆盖范围。"""
+        if not self._path().is_file():
+            return {}
+        key = str(self._path())
+        now = time.monotonic()
+        cached = _INDEXED_COVERAGE_CACHE.get(key)
+        if cached and now - cached[0] < _INDEXED_COVERAGE_TTL:
+            return cached[1]
+        try:
+            with self._db() as db:
+                row = db.execute(
+                    """SELECT count(*) AS clauses, count(DISTINCT c.section) AS sections
+                       FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                       WHERE s.enabled=1"""
+                ).fetchone()
+        except (sqlite3.Error, OSError):
+            return {}
+        coverage = {"clauses": int(row["clauses"] or 0), "sections": int(row["sections"] or 0)}
+        _INDEXED_COVERAGE_CACHE[key] = (now, coverage)
+        return coverage
 
     def search(self, query, *, limit=5, android_api_level=None):
         if not self._path().is_file():
             return []
-        match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in search_terms(query))
+        terms = _match_terms(search_terms(query))
+        match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in terms)
         if not match:
             return []
         version = API_TO_ANDROID.get(android_api_level)
         if android_api_level is not None and version is None:
             version = -1
+        limit = min(max(limit, 1), 20)
+        ranking_terms = _ranking_terms(terms)
         with self._db() as db:
-            rows = db.execute(
-                """SELECT c.*,s.name,s.android_version,s.license,s.kind,s.synced_at,s.error,bm25(clauses) AS rank
+            candidates = db.execute(
+                """SELECT c.rowid AS rowid,c.source_id,c.revision,c.section,bm25(clauses) AS rank
                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
                    WHERE clauses MATCH ? AND s.enabled=1 AND
                      (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
-                   ORDER BY rank,c.token LIMIT ?""", (match, version, version, min(max(limit, 1), 20))).fetchall()
-        return [_clause_hit(dict(row), score=-row["rank"]) for row in rows]
+                   ORDER BY rank,c.token LIMIT ?""",
+                (match, version, version, max(limit * 20, 60))).fetchall()
+            # 命中按章节成组：表格/列表往往只有条件行或说明行命中，单独返回
+            # 它们回答不了问题（问内存门槛却只拿到"声明 ram.low"这类标志位）。
+            # 章节优先序沿用 bm25 的最佳名次，章内再按「MUST/SHOULD 强度 →
+            # 原文顺序」补齐，让最相关的一章先填满配额，剩余名额才给下一章。
+            sections: list[tuple[str, str, str]] = []
+            for row in candidates:
+                key = (row["source_id"], row["revision"], row["section"])
+                if key not in sections:
+                    sections.append(key)
+            ranked_sections: list[list] = []
+            for source_id, revision, section in sections[:max(2, limit)]:
+                rows = db.execute(
+                    """SELECT c.rowid AS rowid,c.*,s.name,s.android_version,s.license,s.kind,
+                              s.synced_at,s.error
+                       FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                       WHERE c.source_id=? AND c.revision=? AND c.section=? ORDER BY c.rowid""",
+                    (source_id, revision, section)).fetchall()
+                ranked_sections.append(sorted(rows, key=lambda item: _strength_order(item, ranking_terms)))
+        ordered: list = []
+        for ranked in ranked_sections:
+            if len(ordered) >= limit:
+                break
+            ordered.extend(ranked[:limit - len(ordered)])
+        return [_clause_hit(dict(row), score=-float(position))
+                for position, row in enumerate(ordered[:limit])]
+
+
+def _match_terms(terms: list[str]) -> list[str]:
+    """FTS 匹配词：丢掉 "14"/"16" 这类短版本号。
+
+    版本文本由 ``android_api_level`` 精确过滤，再让纯数字参与 OR 匹配只会
+    让 "3.8.14. Multi-windows" 这类含数字的章节标题凭空进结果集。命中集因
+    此只会变精确，不会引入新条目。
+    """
+    filtered = [term for term in terms if not (term.isdigit() and len(term) <= 2)]
+    return filtered or terms
+
+
+def _ranking_terms(terms) -> tuple[str, ...]:
+    """把检索词与其规范同义词合并，供章内排序使用（不影响 FTS 匹配集）。"""
+    synonyms = [synonym for term in terms for synonym in _SPEC_SYNONYMS.get(term, ())]
+    return tuple(dict.fromkeys([*terms, *synonyms]))
+
+
+def _strength_order(row, terms) -> tuple[int, int, int]:
+    """章内排序：先答得上问题的条款，再按 MUST/SHOULD 强度，最后原文顺序。
+
+    覆盖度只算条款原文：condition 里是「Handheld device implementations:」
+    这类模板前缀，计入会让每条条款都“沾边”。长度不足 3 的词（to、of…）
+    也不计入，否则虚词会把无关条款拉到同一档。
+    """
+    text = row["original"].casefold()
+    coverage = sum(1 for term in terms if len(term) >= 3 and term.casefold() in text)
+    strength = max((weight for pattern, weight in _STRENGTH_RULES if pattern.search(row["original"])), default=0)
+    return (-coverage, -strength, row["rowid"])
 
 
 def _clause_hit(row, *, score=0.0):
@@ -392,7 +496,7 @@ def _clause_hit(row, *, score=0.0):
         source=SOURCE, title=f"{row['name']} / {row['section']} {row['requirement_id']}".strip(),
         snippet=row["original"][:6000], source_path=row["token"], chapter=row["section"],
         source_revision=row["revision"], applicable_versions=str(row["android_version"] or "unspecified"),
-        confidence="candidate; applicability unverified",
+        confidence="indexed clause; applicability to a specific device unverified",
         last_verified=row.get("fetched_at") or row.get("synced_at", ""), license=row["license"], score=score,
         source_anchors=[SourceAnchor(
             url=row["url"], revision=row["revision"],

@@ -291,3 +291,59 @@ def test_unknown_source_requires_approval_and_failed_initial_sync_is_retryable(t
     assert provider.list_sources()[0]['name'] == 'Example policy'
     assert provider.list_sources()[0]['indexed_count'] == 1
     assert not provider.list_sources()[0]['error']
+
+
+def cdd_with_memory_table(version=16):
+    """CDD 片段：2.2.1 同时有 ram.low 标志位与按分辨率的内存门槛表。"""
+    filler = ''.join(f'<li>[C-0-{i}] MUST support filler {i}.</li>' for i in range(2, 52))
+    return (
+        f'<article><h1>Android {version} Compatibility Definition</h1>'
+        '<h2 id="hardware">2.2.1. Hardware</h2>'
+        '<ul><li>[7.6.1/H-9-1] MUST declare the feature flag android.hardware.ram.low.</li></ul>'
+        '<table><tbody>'
+        '<tr><td>qHD</td><td>[7.6.1/H-1-1] The memory available to the kernel and userspace '
+        'MUST be at least 416MB.</td></tr>'
+        '<tr><td>FHD</td><td>[7.6.1/H-3-1] The memory available to the kernel and userspace '
+        'MUST be at least 896MB.</td></tr>'
+        '</tbody></table>'
+        f'<h2 id="other">4. Other</h2><ul>{filler}</ul></article>'
+    ).encode()
+
+
+def test_section_clauses_accompany_the_matching_row(tmp_path, monkeypatch):
+    """问到内存门槛时，同节的数值条款必须一起返回，而不是只有命中的标志位。
+
+    旧实现按行返回：只有含 "ram" 的 ram.low 标志位命中，真正给出数值的内存
+    门槛表（措辞是 "memory available to the kernel"）因为不共享词元被漏掉，
+    Agent 据此得出「CDD 未给出最低 RAM 要求」的错误结论。
+    """
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source_id = configure(provider, 16)
+    monkeypatch.setattr(web_sources, 'fetch_html', lambda *args, **kwargs: (cdd_with_memory_table(), '', ''))
+    provider.sync(source_id)
+
+    hits = provider.search('RAM requirement', limit=5, android_api_level=36)
+    snippets = [hit.snippet for hit in hits]
+    assert any('android.hardware.ram.low' in text for text in snippets)
+    assert any('at least 416MB' in text for text in snippets)
+    assert any('at least 896MB' in text for text in snippets)
+    assert all(hit.chapter == '2.2.1. Hardware' for hit in hits)
+
+
+def test_short_version_tokens_do_not_widen_matching():
+    """纯数字版本号不参与 FTS 匹配：版本由 android_api_level 精确过滤。"""
+    assert web_sources._match_terms(['16', 'ram', 'requirement']) == ['ram', 'requirement']
+    assert web_sources._match_terms(['17']) == ['17']
+
+
+def test_status_reports_indexed_clause_coverage(tmp_path, monkeypatch):
+    """状态说明带条款数/章节数，避免「只索引 1 篇」被读成覆盖不全。"""
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source_id = configure(provider, 16)
+    monkeypatch.setattr(web_sources, 'fetch_html', lambda *args, **kwargs: (cdd_with_memory_table(), '', ''))
+    provider.sync(source_id)
+
+    detail = provider.status().detail
+    assert '1/1 sources indexed' in detail
+    assert 'clauses in' in detail
+    assert provider.indexed_coverage()['sections'] >= 2
