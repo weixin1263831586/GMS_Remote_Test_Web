@@ -38,9 +38,9 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                 aoaPanelState.profileMetadata.command_comments = ['', '', 'Set up using another device -> Skip'];
                 aoaRenderCommands();
             }""")
-            for width in (1912, 1440, 960, 390):
-                with self.subTest(width=width):
-                    page.set_viewport_size({'width': width, 'height': 914})
+            for width, height in ((1912, 914), (1792, 856), (1440, 900), (1280, 720), (960, 914), (390, 844)):
+                with self.subTest(width=width, height=height):
+                    page.set_viewport_size({'width': width, 'height': height})
                     expect(page.locator('.aoa-command-row')).to_have_count(3)
                     result = page.evaluate("""() => {
                         const table = document.querySelector('.aoa-command-table');
@@ -56,6 +56,8 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                         return {
                             header: singleLine(table.querySelector('.aoa-command-list-header').children),
                             rows: rows.every(row => singleLine(row.children)),
+                            compact: rows.every(row => row.closest('li').getBoundingClientRect().height <= 32),
+                            nowrap: rows.every(row => getComputedStyle(row.querySelector('code')).whiteSpace === 'nowrap'),
                             actions: rows.every(row => {
                                 const actions = row.querySelector('.aoa-command-actions');
                                 return actions.children.length === 4 && singleLine(actions.children)
