@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import sqlite3
 from pathlib import Path
 
 from .external.web_sources import WebKnowledgeProvider, model_catalog_fingerprint
@@ -37,9 +38,13 @@ def recall_owner_policy_imports(owner_id, query, *, provider=None, store=None):
     terms = [term.casefold() for term in re.findall(r'[\w.-]{3,}', query)[:24]]
     if not terms:
         return {'status': 'no_match', 'coverage_complete': False, 'items': []}
-    store = store or KnowledgeStore()
+    try:
+        store = store or KnowledgeStore()
+        docs = store.search(owner_id, ' '.join(terms), tag=IMPORT_TAG, limit=20)
+    except (OSError, sqlite3.Error, ValueError):
+        return {'status': 'unavailable', 'coverage_complete': False, 'items': []}
     items = []
-    for doc in store.search(owner_id, query, tag=IMPORT_TAG, limit=20):
+    for doc in docs:
         identity = doc.get('doc_id')
         if identity not in grants or grants[identity] != content_hash(doc):
             continue
