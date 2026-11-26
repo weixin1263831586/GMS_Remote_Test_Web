@@ -81,7 +81,7 @@ line-ending = "lf"
 
 [tool.pytest.ini_options]
 # Agent source/generated and CodeSearch tests use separate Makefile targets.
-testpaths = ["tests", "features", "foundation/tests", "worker/tests"]
+testpaths = ["tests", "features", "foundation", "worker/tests"]
 pythonpath = ["."]
 norecursedirs = ["rk-skills", "skills", "tools", "data", ".worktrees"]
 addopts = ["-p", "no:xonsh"]

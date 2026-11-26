@@ -25,7 +25,7 @@ def test_tracked_test_modules_have_a_collection_root(pytestconfig):
     uncovered = []
     for name in tracked:
         path = Path(name)
-        if path.suffix != '.py' or 'tests' not in path.parts:
+        if path.suffix != '.py':
             continue
         if not (path.name.startswith('test_') or path.name.endswith('_test.py')):
             continue

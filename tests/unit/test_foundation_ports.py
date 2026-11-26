@@ -54,6 +54,33 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             cluster_port.get_cluster_service()
 
+    def test_worker_command_signature_and_defaults(self):
+        self.addCleanup(
+            cluster_port.configure_cluster_access,
+            run_worker_command=cluster_port._run_worker_command,
+        )
+        command = MagicMock(return_value='pending')
+        cluster_port.configure_cluster_access(run_worker_command=command)
+
+        self.assertEqual(
+            cluster_port.run_worker_command(worker_id='w1', command_type='probe', payload={}),
+            'pending',
+        )
+        command.assert_called_once_with('w1', 'probe', {}, 10)
+        with self.assertRaises(TypeError):
+            cluster_port.run_worker_command('w1', 'probe', {}, invalid=True)
+
+    def test_worker_session_signature_and_defaults(self):
+        self.addCleanup(
+            cluster_port.configure_cluster_access,
+            require_worker_session=cluster_port._require_worker_session,
+        )
+        session = MagicMock()
+        cluster_port.configure_cluster_access(require_worker_session=session)
+
+        cluster_port.require_worker_session(worker_id='w1')
+        session.assert_called_once_with('w1', '', 0)
+
     def test_device_action_request_is_late_bound(self):
         submit = MagicMock(return_value="pending")
         cluster_port.configure_cluster_access(device_action_request=submit)

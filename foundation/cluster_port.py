@@ -131,11 +131,11 @@ def configure_cluster_access(
         _release_local_firmware_recovery = release_local_firmware_recovery
 
 
-def control_aoa_playback(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
+def control_aoa_playback(control_id: str, worker_id: str, owner_id: str, action: str) -> Awaitable[dict[str, Any]]:
     """Control an existing playback through the registered ownership boundary."""
     if _aoa_playback_control is None:
         raise RuntimeError("AOA playback control is not configured")
-    return _aoa_playback_control(*args, **kwargs)
+    return _aoa_playback_control(control_id, worker_id, owner_id, action)
 
 
 def submit_device_action(request: Request, payload: dict[str, Any]) -> Awaitable[Any]:
@@ -173,11 +173,11 @@ def get_local_worker_id() -> str:
         return DEFAULT_LOCAL_WORKER_ID
 
 
-def cancel_durable_job(*args: Any, **kwargs: Any) -> dict[str, Any]:
+def cancel_durable_job(job_id: str, request: Request) -> dict[str, Any]:
     """Cancel a durable cluster job via the registered callable."""
     if _cancel_job is None:
         raise RuntimeError("cluster job cancellation is not configured")
-    return _cancel_job(*args, **kwargs)
+    return _cancel_job(job_id, request)
 
 
 def worker_tokens() -> dict[str, str]:
@@ -187,60 +187,60 @@ def worker_tokens() -> dict[str, str]:
     return _worker_tokens()
 
 
-def run_worker_command(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
+def run_worker_command(worker_id: str, command_type: str, payload: dict[str, Any], timeout: float = 10) -> Awaitable[dict[str, Any]]:
     """Execute a Worker command via the registered callable."""
     if _run_worker_command is None:
         raise RuntimeError("cluster worker commands are not configured")
-    return _run_worker_command(*args, **kwargs)
+    return _run_worker_command(worker_id, command_type, payload, timeout)
 
 
-def require_worker_session(*args: Any, **kwargs: Any) -> None:
+def require_worker_session(worker_id: str, session_id: str = '', generation: int = 0) -> None:
     """Validate a Worker session via the registered callable."""
     if _require_worker_session is None:
         raise RuntimeError("cluster worker sessions are not configured")
-    return _require_worker_session(*args, **kwargs)
+    return _require_worker_session(worker_id, session_id, generation)
 
 
-def require_cluster_enabled(*args: Any, **kwargs: Any) -> None:
+def require_cluster_enabled(remote: bool = False) -> None:
     """Apply the cluster-mode gate via the registered callable."""
     if _require_cluster_enabled is None:
         raise RuntimeError("cluster mode gating is not configured")
-    return _require_cluster_enabled(*args, **kwargs)
+    return _require_cluster_enabled(remote)
 
 
-def authenticate_worker(*args: Any, **kwargs: Any) -> None:
+def authenticate_worker(worker_id: str, authorization: str | None) -> None:
     """Authenticate a Worker request via the registered callable."""
     if _authenticate_worker is None:
         raise RuntimeError("cluster worker authentication is not configured")
-    return _authenticate_worker(*args, **kwargs)
+    return _authenticate_worker(worker_id, authorization)
 
 
-def prepare_local_firmware_recovery(*args: Any, **kwargs: Any) -> dict[str, Any] | None:
+def prepare_local_firmware_recovery(request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int = 60) -> dict[str, Any] | None:
     """Prepare a burn+AOA continuation via the registered cluster boundary."""
     if _prepare_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _prepare_local_firmware_recovery(*args, **kwargs)
+    return _prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds)
 
 
-def run_local_firmware_recovery(*args: Any, **kwargs: Any) -> Awaitable[dict[str, Any]]:
+def run_local_firmware_recovery(prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None) -> Awaitable[dict[str, Any]]:
     """Run a burn+AOA continuation via the registered cluster boundary."""
     if _run_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _run_local_firmware_recovery(*args, **kwargs)
+    return _run_local_firmware_recovery(prepared, on_event)
 
 
-def validate_local_firmware_recovery(*args: Any, **kwargs: Any) -> None:
+def validate_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
     """Validate staged recovery identity via the registered cluster boundary."""
     if _validate_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _validate_local_firmware_recovery(*args, **kwargs)
+    return _validate_local_firmware_recovery(prepared)
 
 
-def release_local_firmware_recovery(*args: Any, **kwargs: Any) -> None:
+def release_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
     """Release a finished recovery via the registered cluster boundary."""
     if _release_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _release_local_firmware_recovery(*args, **kwargs)
+    return _release_local_firmware_recovery(prepared)
 
 
 # 持久化 Cluster Job 视角"仍在进行"的状态全集。定义在 foundation 侧
