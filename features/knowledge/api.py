@@ -492,6 +492,7 @@ async def ask_knowledge(request: Request):
         str(data.get("question") or ""),
         space_id=str(data.get("space_id") or ""),
         limit=limit,
+        include_external=data.get("include_external") is True,
     )
     return success_response(data=result)
 
