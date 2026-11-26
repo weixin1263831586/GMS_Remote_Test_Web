@@ -181,6 +181,10 @@ def build_call_kwargs(
 
 def body_params_for_tool(tool: AgentTool, params: dict[str, Any]) -> dict[str, Any]:
     body = dict(params or {})
+    if tool.name == "knowledge_ask":
+        # Protected import/web expansion is a human knowledge-page action, not a planner parameter.
+        body.pop("include_authorized_imports", None)
+        body.pop("include_external", None)
     if tool.name == "devices_shell" and "serial_no" not in body:
         devices = body.get("devices") or []
         if devices:
