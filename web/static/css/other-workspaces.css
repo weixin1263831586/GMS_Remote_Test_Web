@@ -373,6 +373,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     flex: 0 0 auto; min-height: var(--ui-control-height); padding: 6px 13px; white-space: nowrap;
 }
+#page-security-audit .audit-filter-bar .audit-toolbar-button[data-busy-size] { padding-inline:6px; gap:2px; }
 #page-security-audit .audit-filter-bar .audit-toolbar-export {
     background: color-mix(in srgb, var(--primary-color) 17%, var(--card-bg));
     border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
