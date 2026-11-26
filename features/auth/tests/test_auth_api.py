@@ -265,30 +265,14 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
         self.assertEqual(operator.role, "device_operator")
         self.assertEqual(service.list_users()[0]["username"], "legacy")
 
-    def test_admin_account_management_requires_elevation_and_revokes_sessions(self):
+    def test_admin_account_management_uses_role_authority_and_revokes_sessions(self):
         setup = self.client.post(
             "/api/auth/setup",
             json={"username": "admin", "password": "strongpass1"},
         )
         self.assertEqual(setup.status_code, 200)
-        self.assertEqual(
-            self.client.post(
-                "/api/auth/users",
-                json={
-                    "username": "operator",
-                    "password": "operator-pass",
-                    "role": "device_operator",
-                },
-            ).status_code,
-            403,
-        )
-        self.assertEqual(
-            self.client.post(
-                "/api/auth/elevate",
-                json={"username": "admin", "password": "strongpass1"},
-            ).status_code,
-            200,
-        )
+        self.assertTrue(setup.json()["elevated"])
+        self.assertIsNone(setup.json()["elevated_until"])
         created = self.client.post(
             "/api/auth/users",
             json={
@@ -367,28 +351,29 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
         else:
             self.client.cookies.clear()
 
-    def test_admin_must_reauthenticate_before_sensitive_operation(self):
-        self.client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "strongpass1"},
+    def test_admin_has_authority_immediately_after_setup_and_login(self):
+        setup = self.client.post(
+            "/api/auth/setup", json={"username": "admin", "password": "strongpass1"},
         )
-        self.assertFalse(self.client.get("/api/auth/status").json()["elevated"])
-
-        resp = self.client.request("DELETE", "/api/users/remove", json={"ip": "1.2.3.4"})
-        self.assertEqual(resp.status_code, 403)
-        self.assertTrue(resp.json()["detail"]["elevation_required"])
-
-    def test_admin_elevation_lasts_for_session_and_clears_on_new_session(self):
-        # 二次认证仅在当前会话有效，且为固定短 TTL（默认 30 分钟）。
-        self.client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "strongpass1"},
+        self.assertTrue(setup.json()["elevated"])
+        self.assertIsNone(setup.json()["elevated_until"])
+        self.assertEqual(self.client.get("/api/auth/roles").status_code, 200)
+        self.client.post("/api/auth/logout")
+        login = self.client.post(
+            "/api/auth/login", json={"username": "admin", "password": "strongpass1"},
         )
+        self.assertTrue(login.json()["elevated"])
+        status = self.client.get("/api/auth/status").json()
+        self.assertTrue(status["elevated"])
+        self.assertIsNone(status["elevated_until"])
+        self.assertEqual(self.client.get("/api/auth/roles").status_code, 200)
+
+    def test_user_temporary_elevation_expires_and_clears_on_new_session(self):
+        _admin_cookie, user_cookie = self._setup_admin_and_user()
+        self._set_session(user_cookie)
         elevated = self.client.post(
-            "/api/auth/elevate",
-            json={"username": "admin", "password": "strongpass1"},
+            "/api/auth/elevate", json={"username": "admin", "password": "strongpass1"},
         )
-
         self.assertEqual(elevated.status_code, 200)
         status = self.client.get("/api/auth/status").json()
         self.assertTrue(status["elevated"])
@@ -396,32 +381,28 @@ class AuthApiTests(AuthApiMixin, unittest.TestCase):
         now = datetime.now(timezone.utc)
         self.assertGreater(elevated_until, now)
         self.assertLessEqual(elevated_until, now + timedelta(minutes=30))
-
         self.client.post("/api/auth/logout")
-        self.client.post("/api/auth/login", json={"username": "admin", "password": "strongpass1"})
+        self.client.post("/api/auth/login", json={"username": "alice", "password": "alicepass1"})
         self.assertFalse(self.client.get("/api/auth/status").json()["elevated"])
 
-    def test_explicit_elevation_reset_clears_grant_without_logging_out_client(self):
-        self.client.post(
-            "/api/auth/setup",
-            json={"username": "admin", "password": "strongpass1"},
-        )
-        self.assertEqual(
-            self.client.post(
-                "/api/auth/elevate",
-                json={"username": "admin", "password": "strongpass1"},
-            ).status_code,
-            200,
-        )
+    def test_explicit_elevation_reset_clears_only_temporary_grants(self):
+        admin_cookie, user_cookie = self._setup_admin_and_user()
+        self._set_session(user_cookie)
+        self.assertEqual(self.client.post(
+            "/api/auth/elevate", json={"username": "admin", "password": "strongpass1"},
+        ).status_code, 200)
         reset = self.client.post("/api/auth/elevation/reset")
-        self.assertEqual(reset.status_code, 200)
+        self.assertFalse(reset.json()["elevated"])
         status = self.client.get("/api/auth/status").json()
         self.assertTrue(status["authenticated"])
         self.assertFalse(status["elevated"])
+        self._set_session(admin_cookie)
+        # The original admin cookie was revoked by logout; log in again.
+        self.client.post("/api/auth/login", json={"username": "admin", "password": "strongpass1"})
+        self.assertTrue(self.client.post("/api/auth/elevation/reset").json()["elevated"])
+        self.assertTrue(self.client.get("/api/auth/status").json()["elevated"])
 
     def test_normal_user_not_elevated_and_blocked_from_sensitive_endpoint(self):
-        # The elevation-on-login only applies to admins; a normal user stays
-        # non-elevated and the sensitive endpoint still demands elevation.
         _admin_cookie, user_cookie = self._setup_admin_and_user()
         self._set_session(user_cookie)
 

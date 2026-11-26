@@ -331,3 +331,36 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             self.assertEqual(len(requests), 1)
         finally:
             page.close()
+
+
+    def test_admin_role_authority_reads_policy_without_second_password_prompt(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.route('**/api/auth/status', lambda route: route.fulfill(
+                status=200, content_type='application/json', body=json.dumps({
+                    'authenticated': True, 'user': {'role': 'admin'},
+                    'elevated': True, 'elevated_until': None,
+                })))
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json', body=json.dumps({
+                    'success': True, 'data': {'status': 'matched', 'sections': [{
+                        'title': 'Policy fixture', 'text': 'Example policy', 'table_rows': [],
+                    }]},
+                })))
+            page.evaluate("""() => {
+                state.currentUser = {role: 'admin'};
+                state.elevated = false;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('Example policy')
+            expect(page.locator('#elevate-modal')).not_to_be_visible()
+            self.assertTrue(page.evaluate('state.elevated'))
+            self.assertIsNone(page.evaluate('state.elevatedUntil'))
+        finally:
+            page.close()

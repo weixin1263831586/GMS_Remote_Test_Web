@@ -15,6 +15,7 @@ from foundation.ssh import SSHD_INSTALL_GUIDE
 
 from .access import (
     get_authenticated_user,
+    is_elevated,
     require_elevated_admin,
     require_role,
 )
@@ -202,9 +203,10 @@ def _authenticate_client_ssh_user(
 @router.get("/status")
 async def auth_status(request: Request):
     user = get_authenticated_user(request)
+    elevated = is_elevated(request)
     elevated_until = (
         auth_service.get_elevated_until(request.cookies.get(AUTH_COOKIE_NAME))
-        if user
+        if elevated and user and user.role != "admin"
         else None
     )
     # principal_type / credential_mode：让
@@ -235,7 +237,7 @@ async def auth_status(request: Request):
             "principal_type": principal_type,
             "credential_mode": credential_mode,
             "user": user.as_dict() if user else None,
-            "elevated": bool(elevated_until),
+            "elevated": elevated,
             "elevated_until": elevated_until,
             "default_admin_username": (
                 _default_admin_username()
@@ -247,26 +249,25 @@ async def auth_status(request: Request):
 
 @router.post("/elevation/reset")
 async def auth_elevation_reset(request: Request):
-    """Explicitly drop admin verification without logging out the session."""
+    """Clear a temporary grant; an admin's role authority is unchanged."""
     user = get_authenticated_user(request)
     if not user:
         return error_response("请先登录", status_code=401)
+    if getattr(request.state, "auth_method", None) != "session":
+        return error_response("仅人类登录会话可重置提权", status_code=403)
     token = request.cookies.get(AUTH_COOKIE_NAME)
     auth_service.clear_elevation(token)
-    return JSONResponse(content={"success": True, "elevated": False})
+    request.state.is_elevated = False
+    return JSONResponse(content={"success": True, "elevated": is_elevated(request)})
 
 
 @router.post("/elevate")
 async def auth_elevate(request: Request, req: dict):
-    """Re-authenticate as admin to unlock sensitive operations.
+    """Grant ordinary human sessions temporary administrator authority."""
 
-    Verifies the supplied credentials belong to an admin, then stamps an
-    elevation onto the caller's current session that lasts for the rest of
-    that session. In anonymous development mode this is also the point where
-    an admin session is created; ordinary page loading remains anonymous while
-    sensitive actions still require credentials.
-    """
     current_user = get_authenticated_user(request)
+    if getattr(request.state, "auth_method", None) != "session":
+        return error_response("仅人类登录会话可申请提权", status_code=403)
     anonymous_step_up = current_user is None and not authentication_required()
     if current_user is None and not anonymous_step_up:
         return error_response("请先登录", status_code=401)
@@ -299,10 +300,13 @@ async def auth_elevate(request: Request, req: dict):
         issued_session = True
     if not token:
         return error_response("当前会话无效，请重新登录", status_code=401)
-    if not auth_service.elevate_session(token, admin):
+    effective_user = current_user or admin
+    if effective_user.role != "admin" and not auth_service.elevate_session(token, admin):
         return error_response("无法提权当前会话", status_code=400)
 
-    elevated_until = auth_service.get_elevated_until(token)
+    elevated_until = (
+        auth_service.get_elevated_until(token) if effective_user.role != "admin" else None
+    )
     response = JSONResponse(
         content={
             "success": True,
@@ -344,6 +348,8 @@ async def auth_setup(request: Request, req: dict):
             "setup_required": False,
             "user": user.as_dict(),
             "client_id": user.id,
+            "elevated": user.role == "admin",
+            "elevated_until": None,
         }
     )
     _set_session_cookie(response, token)
@@ -457,6 +463,8 @@ async def auth_login(request: Request, req: dict):
             "setup_required": False,
             "user": user.as_dict(),
             "client_id": user.id,
+            "elevated": user.role == "admin",
+            "elevated_until": None,
         }
     )
     _set_session_cookie(response, token)

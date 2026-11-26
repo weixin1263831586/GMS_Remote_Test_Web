@@ -276,21 +276,17 @@ def require_permission_when_auth_required(permission: str):
 
 
 def is_elevated(request: Request) -> bool:
-    """Return whether this request has a live re-authenticated elevation."""
-    # Elevation lives on a human *cookie* session. A Bearer principal
-    # (agent token or machine capability, valid or not) must never inherit
-    # the elevation of a leftover browser/CLI cookie that happens to ride
-    # along in the same request — that would let a machine capability
-    # combine with a human admin elevation and amplify its authority far
-    # beyond the snapshotted run plan (ADR 0010 / ADR 0012). Bearer and
-    # elevation are mutually exclusive by definition.
+    """Effective administrator authority of an authenticated human session."""
+    # Bearer and machine credentials never inherit human cookie authority.
     if getattr(request.state, "auth_method", None) in {
-        "agent_token",
-        "machine_authority",
-        "invalid_agent_token",
-        "invalid_capability_token",
+        "agent_token", "machine_authority", "invalid_agent_token", "invalid_capability_token",
     }:
         return False
+    user = get_authenticated_user(request)
+    if user is None or getattr(request.state, "auth_method", None) != "session":
+        return False
+    if user.role == "admin":
+        return True
     if getattr(request.state, "is_elevated", None) is not None:
         return bool(request.state.is_elevated)
     token = request.cookies.get(AUTH_COOKIE_NAME)
@@ -300,12 +296,7 @@ def is_elevated(request: Request) -> bool:
 
 
 def require_elevated_admin(request: Request) -> CurrentUser:
-    """Require a session verified by an administrator.
-
-    The authenticated user may remain an ordinary client. The separate admin
-    verification is stored on that same session and never changes its role.
-    """
-
+    """Require a human admin or a live temporary admin grant."""
     user = require_authenticated_user(request)
     if not is_elevated(request):
         raise HTTPException(
