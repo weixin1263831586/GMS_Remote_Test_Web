@@ -74,7 +74,7 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
             page.locator('#page-notes [data-kb-view="external"]').click()
             table = page.locator("#page-notes .kb-source-table")
             expect(table.locator("tbody tr")).to_have_count(4)
-            expect(table.locator("tbody tr").first.get_by_role("button")).to_have_count(5)
+            expect(table.locator("tbody tr").first.get_by_role("button")).to_have_count(6)
             for width in (1920, 1440, 1024):
                 page.set_viewport_size({"width": width, "height": 960})
                 metrics = table.evaluate("""table => {
@@ -91,16 +91,36 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                             aligned: Math.abs(buttons.at(-1).right - bounds.right) <= 1,
                         };
                     });
+                    const form = document.querySelector('#page-notes [data-kb-source-form]');
                     return {rows, scrollable: wrap.scrollWidth > wrap.clientWidth,
+                        inputWidth: form.elements.name.getBoundingClientRect().width,
+                        urlWidth: form.elements.url.getBoundingClientRect().width,
                         nameWidth: table.tHead.rows[0].cells[0].getBoundingClientRect().width,
                         actionWidth: table.tHead.rows[0].cells[5].getBoundingClientRect().width};
                 }""")
+                self.assertLessEqual(metrics["inputWidth"], 301)
+                if width >= 1440:
+                    self.assertGreater(metrics["urlWidth"], metrics["inputWidth"])
                 self.assertGreaterEqual(metrics["nameWidth"], 299)
-                self.assertGreaterEqual(metrics["actionWidth"], 379)
+                self.assertGreaterEqual(metrics["actionWidth"], 459)
                 for row in metrics["rows"]:
                     self.assertTrue(row["fits"] and row["singleLine"] and row["aligned"], metrics)
                     self.assertAlmostEqual(row["right"], metrics["rows"][0]["right"], delta=1)
                 if width == 1024:
                     self.assertTrue(metrics["scrollable"], metrics)
+            page.set_viewport_size({"width": 1920, "height": 960})
+            page.evaluate("""() => {
+                window.__openedSourceUrls = [];
+                window.open = (...args) => { window.__openedSourceUrls.push(args); return null; };
+            }""")
+            table.locator("tbody tr").first.get_by_role("button", name="打开网址", exact=True).click()
+            table.locator('[data-kb-source="gms_requirements"]').get_by_role(
+                "button", name="打开网址", exact=True).click()
+            self.assertEqual(page.evaluate("window.__openedSourceUrls"), [
+                [source["url"], "_blank", "noopener,noreferrer"],
+                ["https://docs.partner.android.com/gms/policies/domains/reqs",
+                 "_blank", "noopener,noreferrer"],
+            ])
+            self.assertEqual(table.get_by_role("button", name="打开网址", exact=True).count(), 2)
         finally:
             page.close()

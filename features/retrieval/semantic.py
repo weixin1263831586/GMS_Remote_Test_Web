@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import math
 import os
 import sqlite3
@@ -63,6 +64,33 @@ def _source_config(source):
     if not isinstance(allowed, list) or source not in allowed:
         return {}
     return config
+
+
+def embedding_configuration_issue(source="cdd"):
+    """Return a safe configuration diagnostic without loading or downloading a model."""
+    try:
+        config = (config_manager.load_config() or {}).get("retrieval", {})
+        if not isinstance(config, dict):
+            return "invalid_config"
+        if not config.get("enabled"):
+            return "disabled"
+        allowed = config.get("enabled_sources", ["cdd"])
+        if not isinstance(allowed, list):
+            return "invalid_config"
+        if source not in allowed:
+            return "source_disabled"
+        path = config.get("model_path")
+        revision = config.get("model_revision")
+        if not isinstance(path, str) or not path.strip() or not isinstance(revision, str) or not revision.strip():
+            return "model_unconfigured"
+        model_dir = Path(path).expanduser()
+        if not model_dir.is_dir() or not os.access(model_dir, os.R_OK | os.X_OK):
+            return "model_missing"
+        if importlib.util.find_spec("sentence_transformers") is None:
+            return "dependency_missing"
+        return None
+    except (OSError, ValueError, ImportError, RuntimeError, TypeError):
+        return "configuration_error"
 
 
 def local_embedding(source="cdd"):

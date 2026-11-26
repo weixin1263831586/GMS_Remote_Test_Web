@@ -100,6 +100,18 @@
                 b.addEventListener('click', action);
                 return b;
             }
+            function openUrlButton(value) {
+                let url;
+                try {
+                    url = new URL(value);
+                } catch {
+                    return null;
+                }
+                if (url.protocol !== 'https:' || url.username || url.password) return null;
+                const action = button('打开网址', () => window.open(url.href, '_blank', 'noopener,noreferrer'));
+                action.title = url.href;
+                return action;
+            }
             async function openPolicyImport() {
                 if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文件仅供本账号的工单分析使用，内容或模型配置变更后需要重新授权。')) kbOpenUpload(true);
             }
@@ -112,8 +124,24 @@
             async function semanticIndex(endpoint, trigger) {
                 const status = await kbFetch(endpoint);
                 const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
+                const reasons = {
+                    disabled: 'Controller 尚未启用 retrieval.enabled，请配置本地语义检索。',
+                    source_disabled: '当前知识源未加入 retrieval.enabled_sources。',
+                    invalid_config: 'Controller retrieval 配置格式不正确。',
+                    model_unconfigured: '尚未配置本地 Embedding 模型目录或模型修订版本。',
+                    model_missing: 'Controller 本地 Embedding 模型目录不存在或不可读。',
+                    dependency_missing: 'Controller 服务 Python 环境缺少 sentence-transformers。',
+                    configuration_error: 'Controller 本地语义检索配置读取失败。'
+                };
+                if (status.configuration_issue && reasons[status.configuration_issue]) {
+                    showToast(reasons[status.configuration_issue], 'warning');
+                    return;
+                }
                 if (!['empty', 'partial', 'ready'].includes(status.status)) {
-                    showToast('语义索引未启用或不可用，请检查 Controller 本地模型配置', 'warning');
+                    const message = {disabled: '当前知识源的语义索引未启用。',
+                        unavailable: '当前知识源索引不可用，请检查原始索引或 Wiki 审批状态。',
+                        error: '语义索引状态读取失败，请检查 Controller 日志。'}[status.status];
+                    showToast(message || '语义索引暂不可用。', 'warning');
                     return;
                 }
                 if (status.coverage_complete) {
@@ -178,6 +206,8 @@
                                 event.currentTarget).catch(error => showToast(error.message, 'warning'));
                         }));
                     }
+                    const open = openUrlButton(source.url);
+                    if (open) actions.append(open);
                 }
                 const wiki = body.insertRow();
                 for (const value of ['Android Internals Wiki', '本地已批准索引', '多版本', '—', '支持混合检索']) {
@@ -245,7 +275,7 @@
                 sync.disabled = Boolean(scan?.running);
                 sync.title = scan?.running ? '已有 GMS 更新扫描运行中' : '使用现有授权来源重新扫描 GMS Requirements';
                 actions.append(sync, button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
-                    button('导入授权文档', openPolicyImport));
+                    button('导入授权文档', openPolicyImport), openUrlButton(partnerUrl));
                 list.replaceChildren(table);
             }
             async function run(action, trigger = refreshButton, label = '刷新中') {

@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import FileResponse, HTMLResponse
 
 from features.auth import require_elevated_admin, require_human_principal, require_human_principal_when_auth_required
+from features.retrieval import embedding_configuration_issue
 from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -364,6 +365,9 @@ async def personal_semantic_status(request: Request):
         result = await asyncio.to_thread(lambda: PersonalSemantic(_service.store, owner).status())
     except Exception as exc:
         result = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+    issue = await asyncio.to_thread(embedding_configuration_issue, "personal_knowledge")
+    if issue:
+        result = {**result, "configuration_issue": issue}
     return success_response(data=result)
 
 

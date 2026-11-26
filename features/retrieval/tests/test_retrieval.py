@@ -74,3 +74,24 @@ def test_observations_remain_valid_json_and_preserve_status():
     result = json.loads(value)
     assert result["observation_truncated"] and result["success"]
     assert result["data"]["sources_status"][0]["status"] == "error"
+
+
+def test_embedding_configuration_diagnostics(tmp_path, monkeypatch):
+    from features.retrieval import embedding_configuration_issue
+    from features.retrieval import semantic
+
+    config = {}
+    monkeypatch.setattr(semantic.config_manager, "load_config", lambda: config)
+    assert embedding_configuration_issue() == "disabled"
+    config["retrieval"] = {"enabled": True}
+    assert embedding_configuration_issue("personal_knowledge") == "source_disabled"
+    assert embedding_configuration_issue() == "model_unconfigured"
+    config["retrieval"].update(model_path=str(tmp_path / "missing"), model_revision="v1")
+    assert embedding_configuration_issue() == "model_missing"
+    config["retrieval"]["model_path"] = str(tmp_path)
+    monkeypatch.setattr(semantic.importlib.util, "find_spec", lambda name: None)
+    assert embedding_configuration_issue() == "dependency_missing"
+    monkeypatch.setattr(semantic.importlib.util, "find_spec", lambda name: object())
+    assert embedding_configuration_issue() is None
+    config["retrieval"]["enabled_sources"] = "cdd"
+    assert embedding_configuration_issue() == "invalid_config"

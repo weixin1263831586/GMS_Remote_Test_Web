@@ -19,6 +19,7 @@ from features.auth import (
     require_elevated_admin,
     require_permission,
 )
+from features.retrieval import embedding_configuration_issue
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -269,7 +270,11 @@ def sync_web_source(request: Request, source_id: str):
 @handle_api_errors
 def semantic_index_status(request: Request, source_id: str):
     require_elevated_admin(request)
-    return success_response(data=WebKnowledgeProvider().semantic_status(source_id))
+    result = WebKnowledgeProvider().semantic_status(source_id)
+    issue = embedding_configuration_issue("cdd")
+    if issue:
+        result = {**result, "configuration_issue": issue}
+    return success_response(data=result)
 
 
 @router.post("/web-sources/{source_id}/semantic-index")
@@ -289,9 +294,12 @@ def sync_semantic_index(request: Request, source_id: str, batch_size: int = Quer
 def wiki_semantic_status(request: Request):
     require_elevated_admin(request)
     provider = _federated_provider("android_internals")
-    if provider is None:
-        return success_response(data={"status": "unavailable", "indexed": 0, "total": 0})
-    return success_response(data=provider.semantic_status())
+    result = (provider.semantic_status() if provider is not None
+              else {"status": "unavailable", "indexed": 0, "total": 0})
+    issue = embedding_configuration_issue("android_internals")
+    if issue:
+        result = {**result, "configuration_issue": issue}
+    return success_response(data=result)
 
 
 @router.post("/wiki-semantic-index")
