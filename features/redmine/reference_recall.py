@@ -20,7 +20,7 @@ MAX_SCAN_BYTES = 128 * 1024 * 1024
 MAX_IDENTIFIERS = 128
 
 
-def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None):
+def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None, allow_partner=False):
     root = owner_redmine_root(owner_id)
     db = root / "evidence.sqlite3"
     if not db.is_file():
@@ -110,7 +110,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     policy = recall_web_references(policy_query, android_version=version)
     if policy is not None:
         result.setdefault("sources", {})["web_documents"] = policy
-    if partner_policy_allowed(str(owner_id)):
+    if allow_partner and partner_policy_allowed(str(owner_id)):
         result.setdefault('sources', {})['gms_requirements'] = recall_gms_requirements(
             policy_search_terms(policy_query), data_root=data_root
         )
@@ -135,7 +135,7 @@ async def append_reference_preflight(owner_id, entry, preflight, progress=None):
     trace = ToolTrace(tool_call_id="preflight:" + tool, tool_name=tool, tool_input=arguments,
                       snapshot_ids=[preflight.snapshot_id])
     try:
-        data = await asyncio.to_thread(collect_snapshot_references, owner_id, preflight.snapshot_id)
+        data = await asyncio.to_thread(collect_snapshot_references, owner_id, preflight.snapshot_id, allow_partner=True)
         if entry.get("issue_id") and str(data["issue_id"]) != str(entry["issue_id"]):
             raise ApiError.not_found("当前工单的证据快照不存在。")
         trace.status = "succeeded"
