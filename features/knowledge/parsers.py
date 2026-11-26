@@ -31,7 +31,7 @@ def parse_file(path: str, filename: str = "") -> dict[str, str]:
     file_path = Path(path)
     suffix = (file_path.suffix or Path(filename).suffix).lower()
     if suffix in {'.html', '.htm'}:
-        from lxml import html
+        from lxml import etree, html
 
         try:
             root = html.fromstring(file_path.read_bytes(), parser=html.HTMLParser(no_network=True))
@@ -40,7 +40,7 @@ def parse_file(path: str, filename: str = "") -> dict[str, str]:
                     node.drop_tree()
             text = '\n'.join(' '.join(value.split()) for value in root.itertext() if value.strip())
             return {'text': text, 'source': 'html'}
-        except (ValueError, OSError):
+        except (ValueError, OSError, etree.ParserError):
             return {'text': '', 'source': 'html'}
     if suffix in TEXT_SUFFIXES:
         return {"text": file_path.read_text(encoding="utf-8", errors="replace"), "source": suffix.lstrip(".") or "txt"}
