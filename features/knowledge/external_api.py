@@ -249,6 +249,25 @@ def sync_web_source(request: Request, source_id: str):
     return success_response(data=data)
 
 
+@router.get("/web-sources/{source_id}/semantic-index")
+@handle_api_errors
+def semantic_index_status(request: Request, source_id: str):
+    require_elevated_admin(request)
+    return success_response(data=WebKnowledgeProvider().semantic_status(source_id))
+
+
+@router.post("/web-sources/{source_id}/semantic-index")
+@handle_api_errors
+def sync_semantic_index(request: Request, source_id: str, batch_size: int = Query(128, ge=1, le=128)):
+    require_elevated_admin(request)
+    try:
+        result = WebKnowledgeProvider().sync_semantic(source_id, batch_size=batch_size)
+    except Exception as exc:
+        logger.warning("Local semantic index synchronization failed: %s", type(exc).__name__)
+        return error_response("本地语义索引未完成，请检查模型配置和公开 CDD 来源", 502)
+    return success_response(data=result)
+
+
 class PartnerGrantRequest(BaseModel):
     enabled: bool
     authorized_for_ai_processing: bool = False

@@ -137,11 +137,16 @@ class FederatedKnowledgeService:
                     detail="未配置（fail-closed 禁用）",
                 ).to_dict())
         for provider in providers:
+            retrieval_status = None
             try:
                 search_options: dict[str, Any] = {"limit": limit}
                 if android_api_level is not None:
                     search_options["android_api_level"] = android_api_level
-                hits = provider.search(query, **search_options)
+                hybrid_search = getattr(type(provider), "search_with_status", None)
+                if callable(hybrid_search):
+                    hits, retrieval_status = hybrid_search(provider, query, **search_options)
+                else:
+                    hits = provider.search(query, **search_options)
             except Exception as exc:
                 logger.warning("external knowledge search failed for %s: %s", provider.source_id, exc)
                 status_rows.append(ProviderStatus(
@@ -149,7 +154,10 @@ class FederatedKnowledgeService:
                 ).to_dict())
                 continue
             try:
-                status_rows.append(provider.status().to_dict())
+                row = provider.status().to_dict()
+                if retrieval_status is not None:
+                    row["retrieval"] = retrieval_status
+                status_rows.append(row)
             except Exception as exc:
                 # 状态读取失败也必须留行：结果存在但状态行缺失更难排查。
                 logger.warning("external knowledge status failed for %s: %s", provider.source_id, exc)

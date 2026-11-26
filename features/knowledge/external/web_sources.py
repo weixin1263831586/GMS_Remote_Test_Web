@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from features.retrieval import fuse_rankings
 from foundation.config import config_manager, settings
 from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 
@@ -414,7 +415,50 @@ class WebKnowledgeProvider:
         _INDEXED_COVERAGE_CACHE[key] = (now, coverage)
         return coverage
 
+    def semantic_status(self, source_id=None):
+        from .cdd_semantic import CddSemantic
+
+        try:
+            return CddSemantic(self).status(source_id)
+        except Exception as exc:
+            return {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+
+    def sync_semantic(self, source_id, *, batch_size=128):
+        from .cdd_semantic import CddSemantic
+
+        return CddSemantic(self).sync(source_id, batch_size=batch_size)
+
     def search(self, query, *, limit=5, android_api_level=None):
+        hits, _ = self.search_with_status(query, limit=limit, android_api_level=android_api_level)
+        return hits
+
+    def search_with_status(self, query, *, limit=5, android_api_level=None):
+        from .cdd_semantic import CddSemantic
+
+        limit = min(max(limit, 1), 20)
+        lexical = self._lexical_search(query, limit=limit, android_api_level=android_api_level)
+        version = API_TO_ANDROID.get(android_api_level)
+        if android_api_level is not None and version is None:
+            version = -1
+        try:
+            rows, status = CddSemantic(self).search(query, version=version, limit=max(limit, 20))
+        except Exception as exc:
+            return lexical, {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+        if not rows:
+            return lexical, status
+        dense = [_clause_hit(row, score=score) for row, score in rows]
+        pool = {hit.source_path: hit for hit in [*dense, *lexical]}
+        exact = [key for key, hit in pool.items()
+                 if (identifier := str(hit.extra.get("requirement_id") or "")) and
+                 re.search(r"(?<![\\w.-])" + re.escape(identifier) + r"(?![\\w.-])", query, re.I)]
+        keys = fuse_rankings([[hit.source_path for hit in lexical], [hit.source_path for hit in dense]],
+                             limit=limit, exact_keys=exact)
+        # The federation sorts per-provider by score; retain fused order.
+        for rank, key in enumerate(keys):
+            pool[key].score = -float(rank)
+        return [pool[key] for key in keys], status
+
+    def _lexical_search(self, query, *, limit=5, android_api_level=None):
         if not self._path().is_file():
             return []
         terms = _match_terms(search_terms(query))

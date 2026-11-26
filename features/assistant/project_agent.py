@@ -25,6 +25,7 @@ from features.assistant.workflow_execution import (
     workflow_plan_busy_hint,
 )
 from features.assistant.workspace import _apply_workspace_tool_params, _missing_required_params
+from features.retrieval import compact_observation
 from foundation.redaction import redact_sensitive_data
 
 
@@ -151,7 +152,7 @@ def _context(session: dict, observations: list) -> str:
         "redmine_runs": list(redmine_runs.values())[-4:],
         "history": [{"role": item.get("role"), "content": str(item.get("content") or "")[:800]}
                     for item in (session.get("messages") or [])[-6:]],
-        "observations": observations[-3:],
+        "observations": observations[-8:],
     }
     payload = redact_sensitive_data(payload)
     encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -365,8 +366,8 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     outcome = await executor.execute(session, request, tool.name, params)
                     if tool.name == "reports_list":
                         state.report_actions = list(outcome.quick_actions) if outcome.success else []
-                    safe = json.dumps(redact_sensitive_data(outcome.to_dict()), ensure_ascii=False)
-                    observation = {"tool": tool.name, "result": safe[:8000]}
+                    safe = compact_observation(redact_sensitive_data(outcome.to_dict()))
+                    observation = {"tool": tool.name, "result": safe}
                     observations.append(observation)
                     if not tool.is_readonly:
                         state.completed[key] = observation
