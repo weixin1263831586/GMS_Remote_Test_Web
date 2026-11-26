@@ -6,7 +6,8 @@ from typing import Any
 
 from .parsers import parse_file
 from .external.web_sources import model_catalog_fingerprint
-from .intelligent import local_document_model, local_document_rag, personal_source, render_rag_answer, web_source, wiki_source
+from .intelligent import (local_document_model, local_document_rag, personal_insight_index,
+                          personal_source, render_rag_answer, web_source, wiki_source)
 from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
@@ -129,6 +130,26 @@ class KnowledgeService:
             extracted_text=text,
         )
         return self.store.get_doc(user_id, doc["doc_id"]) or doc
+
+    def document_understanding(self, user_id, *, approved_only=False, sync=False, batch_size=4):
+        """Process only the authenticated owner's ordinary or explicitly approved corpus."""
+        catalog = model_catalog_fingerprint()
+        index = personal_insight_index(self.store, user_id, approved_only=approved_only)
+        if not index.model_key or not catalog:
+            return {"status": "disabled", "processed": 0, "total": 0, "coverage_complete": False}
+        source = personal_source(self.store, user_id, approved_only=approved_only, catalog_hash=catalog)
+        manifest, complete = source.manifest()
+        if not sync:
+            return index.status(manifest, complete=complete)
+        model, name, fingerprint = local_document_model(_ask_analyzer_factory, catalog_hash=catalog)
+        if not name or fingerprint != catalog:
+            return {"status": "model_unavailable", "coverage_complete": False}
+
+        def current(hit):
+            fresh = personal_insight_index(self.store, user_id, approved_only=approved_only)
+            return fresh.model_key == index.model_key and source.current(hit)
+
+        return index.sync(manifest, current, model, complete=complete, batch_size=batch_size)
 
     def ask(self, user_id: str, question: str, *, space_id: str = "", limit: int = 8,
             include_external: bool = False, include_authorized_imports: bool = False) -> dict[str, Any]:
