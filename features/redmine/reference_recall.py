@@ -18,6 +18,9 @@ from .users import owner_redmine_root
 
 MAX_SCAN_BYTES = 128 * 1024 * 1024
 MAX_IDENTIFIERS = 128
+_RELEASE = re.compile(r'\bAndroid\s+(1[5-9]|[2-9]\d)\b', re.I)
+_BUILD_RELEASE = re.compile(r'ro\.build\.version\.release\s*[:=\]]\s*\[?(1[5-9]|[2-9]\d)\b', re.I)
+_BUILD_SDK = re.compile(r'ro\.build\.version\.sdk\s*[:=\]]\s*\[?(35|36|37)\b', re.I)
 
 
 def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None, allow_partner=False):
@@ -48,6 +51,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     if not isinstance(manifest, dict):
         raise ApiError.upstream_failure("证据清单格式无效。")
     identifiers = set()
+    build_versions = set()
     warnings = []
     scanned = 0
     complete = snapshot["status"] == "ready"
@@ -59,6 +63,8 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
         for chunk in chunks:
             scanned += len(chunk.encode("utf-8"))
             text = tail + chunk
+            build_versions.update(int(value) for value in _BUILD_RELEASE.findall(text))
+            build_versions.update(int(value) - 20 for value in _BUILD_SDK.findall(text))
             # 跨分块边界截断的标识符推迟到下一块或 EOF 再确认，
             # 避免把 CVE-2026-5883 + 5 拆成不完整的 CVE。
             identifiers.update(value for value in extract_reference_identifiers(text)
@@ -104,11 +110,15 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
             complete = False
             warnings.append(f"{artifact['artifact_id']}: 附件文本不可读")
     result = recall_mainline_references(sorted(identifiers)[:MAX_IDENTIFIERS], data_root=data_root)
-    versions = set(re.findall(r"\bAndroid\s+(1[5-9]|[2-9]\d)\b", " ".join(texts[:3]), re.I))
-    version = int(next(iter(versions))) if len(versions) == 1 else None
-    policy_query = " ".join([*sorted(identifiers)[:8], *texts[:3]])[:512]
+    described_versions = {int(value) for value in _RELEASE.findall(" ".join(texts[:3]))}
+    versions = described_versions | build_versions
+    version = next(iter(versions)) if len(versions) == 1 else None
+    policy_identifiers = sorted(identifiers, key=lambda value: (not bool(re.search(r"^(?:Cts|Gts|Mts|Sts|Vts)|#", value, re.I)), value))
+    policy_query = " ".join([texts[0], texts[1], *policy_identifiers[:6], texts[2]])[:512]
     policy = recall_web_references(policy_query, android_version=version)
     if policy is not None:
+        policy["target_android_version"] = version
+        policy["version_resolution"] = "matched" if version is not None else "conflicting" if versions else "unknown"
         result.setdefault("sources", {})["web_documents"] = policy
     if allow_partner and partner_policy_allowed(str(owner_id)):
         result.setdefault('sources', {})['gms_requirements'] = recall_gms_requirements(
