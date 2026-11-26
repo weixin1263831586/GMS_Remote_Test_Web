@@ -313,6 +313,12 @@ def wiki_semantic_status(request: Request):
     result = (provider.semantic_status() if provider is not None
               else {"status": "unavailable", "indexed": 0, "total": 0})
     result = {**result, **WebKnowledgeProvider().semantic_schedule_status("android_internals", wiki=True)}
+    from .service import wiki_document_understanding
+
+    try:
+        result["document_understanding"] = wiki_document_understanding()
+    except Exception:
+        result["document_understanding"] = {"status": "error", "coverage_complete": False}
     issue = embedding_configuration_issue("android_internals")
     if issue:
         result = {**result, "configuration_issue": issue}
