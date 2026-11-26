@@ -43,6 +43,17 @@ def digest(value):
 
 
 def local_model(controller_root):
+    from bootstrap.env_loader import load_runtime_env
+
+    old_root = os.environ.get('GMS_PROJECT_ROOT')
+    os.environ['GMS_PROJECT_ROOT'] = str(controller_root)
+    try:
+        load_runtime_env()
+    finally:
+        if old_root is None:
+            os.environ.pop('GMS_PROJECT_ROOT', None)
+        else:
+            os.environ['GMS_PROJECT_ROOT'] = old_root
     manager = ConfigManager(project_root=controller_root)
     cfg = manager.load_config()
     retrieval = cfg.get("retrieval") or {}
@@ -78,8 +89,13 @@ def run(args):
     model, name, model_name, retrieval = local_model(args.controller_root)
     # Actual local gateway probe; the synthetic input is explicitly not a case score.
     probe = model('Return JSON {"ok":true}', system_prompt="Return only the requested JSON object.", max_tokens=128)
-    if probe.get("success") is not True:
+    if probe.get("success") is not True or not isinstance(probe.get("content"), str):
         raise RuntimeError("Real local LLM probe failed")
+    reply = probe["content"].strip()
+    if reply.startswith("```json") and reply.endswith("```"):
+        reply = reply[7:-3].strip()
+    if json.loads(reply) != {"ok": True}:
+        raise RuntimeError("Local model did not follow structured-output protocol")
     print("RAG_LOCAL_MODEL_PROBE=passed", flush=True)
     if not args.manifest.is_file():
         print("RAG_REAL_CASES=blocked_missing_authorized_manifest", flush=True)
