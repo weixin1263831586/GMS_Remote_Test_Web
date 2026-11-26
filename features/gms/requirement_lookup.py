@@ -76,7 +76,38 @@ def _matches_android(label, version):
     return version >= minimum if match.group(2) else version == minimum
 
 
-def _related_ram_evidence(conn, revision, coverage, excluded_keys):
+_EXPLICIT_GO_DEFINITION = re.compile(
+    r'\bA Go device is\b.{1,700}?(?=\s+(?:See Android Go|A new S/W|Note:|\[GMS)|$)',
+    re.I,
+)
+
+
+def _ram_candidate_version(original, context, version):
+    """Classify simple explicit device OS scopes; ambiguous scopes stay unverified."""
+    scopes = []
+    for text in (context, original):
+        match = re.search(
+            r'\bDEVICEs?\s+(?:that\s+)?(?:running|run|launching with|launching or upgrading to|'
+            r'launching with or upgrading to|upgrading to)\s+Android\s+(\d{2})'
+            r'(?:\s+(or higher|or later|and higher|to\s+Android\s+\d{2}))?'
+            r'(?=\s*[:.,;]|\s+(?:with|and|that|including|MUST|MAY|are)\b|$)',
+            text, re.I,
+        )
+        if not match:
+            continue
+        low = int(match.group(1))
+        qualifier = (match.group(2) or '').lower()
+        high = int(qualifier[-2:]) if qualifier.startswith('to android ') else (
+            99 if qualifier else low)
+        scopes.append(low <= version <= high)
+    if scopes and all(scopes):
+        return "version_match"
+    if scopes and not any(scopes):
+        return "other_version"
+    return "unverified"
+
+
+def _related_ram_evidence(conn, revision, coverage, excluded_keys, android_version):
     """Search the retained revision across sections, not just the declaration rule.
 
     A RAM mention is a candidate, not an applicable certification threshold.
@@ -85,6 +116,9 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
     sections = {}
     excluded_subsystem_sections = 0
     scanned_sections = 0
+    definitions = []
+    seen_clauses = set()
+    other_version_clauses = 0
     anchors = coverage.get("section_anchors") or {}
     for row in conn.execute(
         "SELECT section_key,path,text_excerpt FROM gms_update_requirement_sections "
@@ -106,6 +140,11 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
             "clause_matches": 0, "table_row_matches": 0, "fragment_matches": 0,
         }
         text = row["text_excerpt"]
+        for match in _EXPLICIT_GO_DEFINITION.finditer(text):
+            definition = match.group(0).strip()
+            if definition and all(item["text"] != definition for item in definitions):
+                definitions.append({"text": definition, "title": row["path"],
+                                    "source_url": sections[key]["source_url"]})
         # Merge nearby matches so a long condition/list is not represented as
         # several near-identical snippets. These are explicitly excerpts.
         ranges = []
@@ -129,12 +168,24 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
         item = sections.get(row["section_key"])
         if item is None or not RAM_TERM.search(row["original_text"] + "\n" + row["context_text"]):
             continue
+        # A firmware buffer measured in bytes is not installed device RAM.
+        if not re.search(r'\bRAM\b', row["original_text"] + "\n" + row["context_text"], re.I) and re.search(
+            r'\b(?:\d+\s+bytes|APF|Packet Filter)\b', row["original_text"], re.I
+        ):
+            continue
+        identity = (row["requirement_id"], row["original_text"], row["context_text"], row["scope_json"])
+        if identity in seen_clauses:
+            continue
+        seen_clauses.add(identity)
+        applicability = _ram_candidate_version(row["original_text"], row["context_text"], android_version)
+        if applicability == "other_version":
+            other_version_clauses += 1
         item["clause_matches"] += 1
         if len(item["clauses"]) < MAX_RELATED_CLAUSES:
-            item["clauses"].append({k: row[k] for k in (
+            item["clauses"].append({**{k: row[k] for k in (
                 "requirement_id", "original_text", "context_text", "source_url", "content_hash",
                 "change_version", "change_kind", "scope_json",
-            )})
+            )}, "version_applicability": applicability})
     for row in conn.execute(
         "SELECT * FROM gms_update_requirement_table_rows WHERE source_key=? "
         "ORDER BY table_index,row_index", (SOURCE,),
@@ -161,6 +212,8 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
         "table_row_matches": sum(item["table_row_matches"] for item in matches),
         "scanned_sections": scanned_sections,
         "excluded_subsystem_sections": excluded_subsystem_sections,
+        "go_product_definitions": definitions[:5],
+        "other_version_clauses": other_version_clauses,
         "truncated": len(matches) > len(selected) or any(
             item["clause_matches"] > len(item["clauses"])
             or item["table_row_matches"] > len(item["table_rows"])
@@ -316,7 +369,7 @@ def lookup_requirement_sections(conn, query):
                                                  if item.get("section_key") == key][:MAX_ROWS],
             "truncated": (len(text) > MAX_TEXT or bounded),
         })
-    related_ram = (_related_ram_evidence(conn, revision, coverage, set(keys))
+    related_ram = (_related_ram_evidence(conn, revision, coverage, set(keys), android_version)
                    if version_match else None)
     return {"status": "matched" if result or (related_ram and related_ram["sections"]) else "no_match",
             "sections": result, "related_ram": related_ram,

@@ -591,27 +591,34 @@ function renderAgentMessages(session) {
                     const related = result.related_ram;
                     const relatedDetails = document.createElement('details');
                     addText(relatedDetails, 'summary', '展开其他 RAM 相关政策（功能及适用条件）');
-                    const definitions = (related.sections || []).filter(section => section.go_definition);
+                    const definitions = related.go_product_definitions || [];
                     if (definitions.length) {
-                        addText(block, 'p', '已定位可能相关的 Go 产品定义，尚未核验专项认证条件。');
-                        for (const section of definitions) {
-                            addText(block, 'p', '补充证据章节：' + section.title);
-                        }
+                        addText(block, 'strong', 'Go 产品定义（索引原文）');
+                        addText(block, 'p', definitions[0].text);
+                        addText(block, 'p', '定义不能替代 Go 专项认证条件；仍需核验。');
                     } else {
-                        addText(block, 'p', '未找到可补足 Go 产品定义的候选章节；仍需读取 Go 专项政策。');
+                        addText(block, 'p', '未找到明确的 Go 产品定义；仍需读取 Go 专项政策。');
                     }
                     block.append(relatedDetails);
                     addText(relatedDetails, 'p', '已检索本地规范其他章节：' + related.scanned_sections + ' 个，命中 '
                         + related.section_matches + ' 个章节、' + related.clause_matches + ' 个候选条款。');
                     addText(relatedDetails, 'p', '以下是跨版本候选原文，需核验目标 Android 版本、首发/升级、设备及芯片条件；不能将功能触发门槛当作统一 GMS 准入门槛。');
                     if (related.excluded_subsystem_sections) addText(relatedDetails, 'p', '已排除子系统内存相关章节：' + related.excluded_subsystem_sections + ' 个。');
+                    if (related.other_version_clauses) addText(relatedDetails, 'p', '明确涉及其他 Android 版本的候选条款：' + related.other_version_clauses + ' 条（仅供历史参考）。');
                     if (related.truncated) addText(relatedDetails, 'p', '返回范围受限：部分候选或上下文未展示，请按章节或条款编号进一步读取。');
                     for (const section of related.sections || []) {
                         const details = document.createElement('details');
                         addText(details, 'summary', section.title + '（' + section.clause_matches + ' 条候选）');
+                        const historical = [];
                         for (const clause of section.clauses || []) {
+                            if (clause.version_applicability === 'other_version') {
+                                historical.push(clause);
+                                continue;
+                            }
                             addText(details, 'strong', [clause.requirement_id, clause.change_version,
                                 clause.change_kind].filter(Boolean).join(' · '));
+                            addText(details, 'p', clause.version_applicability === 'version_match'
+                                ? '明确版本条件匹配；其他适用条件仍需核验。' : '版本适用性未确认。');
                             if (clause.context_text) addText(details, 'p', '索引适用条件：' + clause.context_text);
                             addText(details, 'p', clause.original_text);
                             if (clause.scope_json && clause.scope_json !== '[]') {
@@ -622,8 +629,18 @@ function renderAgentMessages(session) {
                             addText(details, 'p', row.headers.map((header, i) =>
                                 header + '：' + (row.values[i] || '')).join(' | '));
                         }
-                        for (const fragment of section.fragments || []) {
-                            addText(details, 'p', '章节上下文' + (fragment.excerpt ? '（节选）' : '') + '：' + fragment.text);
+                        if (historical.length || section.fragments?.length) {
+                            const raw = document.createElement('details');
+                            addText(raw, 'summary', '历史版本及原始上下文（未核验）');
+                            for (const clause of historical) {
+                                addText(raw, 'strong', clause.requirement_id);
+                                if (clause.context_text) addText(raw, 'p', clause.context_text);
+                                addText(raw, 'p', clause.original_text);
+                            }
+                            for (const fragment of section.fragments || []) {
+                                addText(raw, 'p', '章节上下文' + (fragment.excerpt ? '（节选）' : '') + '：' + fragment.text);
+                            }
+                            details.append(raw);
                         }
                         if (section.source_url) {
                             try {

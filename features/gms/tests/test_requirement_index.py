@@ -343,6 +343,15 @@ def test_device_ram_candidates_prioritize_go_definition_and_exclude_subsystem_me
         assert not related['applicability_verified']
 
 
+def test_ram_version_scope_is_conservative():
+    from features.gms.requirement_lookup import _ram_candidate_version
+
+    assert _ram_candidate_version("MUST use example.", "DEVICEs running Android 13 or higher:", 16) == "version_match"
+    assert _ram_candidate_version("MUST use example.", "DEVICEs launching with Android 17 or higher:", 16) == "other_version"
+    assert _ram_candidate_version("MUST use example.", "CHIPSETs that set ro.board.api_level to 202504:", 16) == "unverified"
+    assert _ram_candidate_version("DEVICEs running Android 10 MUST use example.", "", 16) == "other_version"
+    assert _ram_candidate_version("MUST use example.", "DEVICEs running Android 12 17 or higher:", 16) == "unverified"
+
 
 def test_removed_marker_preserves_historical_status():
     parsed = parse_gms_requirements(fetched("""<article class="devsite-article">

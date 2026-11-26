@@ -401,7 +401,7 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(evidence).to_contain_text('必须声明 Low RAM：Example A')
             expect(evidence).to_contain_text('不符合 GMS 资格：Example C')
             expect(evidence).to_contain_text('Go / 非 Go 设备 RAM 要求解读')
-            expect(evidence).to_contain_text('非 Go 设备 RAM（Standard / 非 Low RAM 参考）：Example B')
+            expect(evidence).to_contain_text('非 Low RAM 设备参考容量（非 Go 认证仍需核实）：Example B')
             expect(evidence).to_contain_text('不是独立的非 Go 认证最低 RAM 条款')
             expect(evidence.locator('table tbody tr')).to_have_count(1)
             expect(evidence.locator('table')).not_to_contain_text('Historical A')
@@ -424,7 +424,8 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(evidence.locator('details').first).not_to_have_attribute('open', '')
             evidence.locator('summary').first.click()
             expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
-            evidence.locator('summary').last.click()
+            evidence.get_by_text('展开其他 RAM 相关政策（功能及适用条件）', exact=True).click()
+            evidence.get_by_text('Example page size（1 条候选）', exact=True).click()
             expect(evidence.get_by_text('Example feature requirement', exact=True)).to_be_visible()
         finally:
             page.close()
