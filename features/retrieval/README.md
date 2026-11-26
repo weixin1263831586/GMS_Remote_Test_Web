@@ -234,3 +234,28 @@ metrics from supplied labels, not model-generated ground truth. Do not
 include the target issue's verified root cause or later replies in its query
 or index snapshot. Run actual evaluations against the authorized local
 Redmine archive; synthetic fixtures do not establish real quality gains.
+
+
+## 本地 LLM 智能检索（Agentic RAG）
+
+`IntelligentRAG` 是独立的只读编排器。模型先规划查询、改写检索词并选择授权文档，再主动读取命中原文或邻近段落，判断是否需要补证，生成逐条引用的陈述，最后通过单独的模型调用复核。程序验证原文引句、来源版本和访问权限；模型不得自行构造路径、网络地址或执行操作。复核不是独立人工认证，有限检索不能声称完整覆盖。
+
+使用现有 AI provider 配置，不重复建设模型服务。可在 Controller 本地配置的 retrieval 段选择已经启用的本地 provider，例如：
+
+```json
+{
+  "retrieval": {
+    "llm_provider": "glm_local",
+    "auto_understand_public_cdd": true,
+    "llm_background_recall": true
+  }
+}
+```
+
+示例 provider 名称应替换为实际配置项。专用 LLM 路由仅接受 loopback、RFC1918 地址及 IPv6 ULA，禁止代理、重定向及远端 fallback。未指定 provider 时选择可用的本地路由。Embedding 仍沿用既有 enabled、enabled_sources 及模型目录配置，与生成式模型独立；没有向量索引也可通过文本检索和授权文档阅读进行智能问答。
+
+- 个人知识问答：原有 `/api/knowledge/ask` 接入编排器；显式选择授权导入文档时校验当前本人身份、内容哈希及模型目录授权；通用 Agent 不可擅自扩大该范围。
+- 公开 CDD 分析：原有 external search 使用 `analyze:` 前缀；后台召回开关用于单测诊断、Redmine 参考资料及图片文字查询，失败时保留原有授权检索。
+- 公共 CDD 文档理解：自动任务每轮最多四条当前原文，使用本地模型提取有逐字引句支持的定义、条件、例外和术语；派生索引绑定原文版本及模型配置，缺失或无效输出可重试，派生结果只用于召回，不替代原文。语义索引状态接口分别返回文档理解覆盖情况。
+- 单次完整问答最多五次模型调用、八次检索、六次主动阅读，限制证据数量和字符数。超预算、模型故障、授权变化或缺少可靠引句均不得伪造结论。
+- 尚未实现所有私有语料的持久化 LLM 文档理解、图片专用视觉模型的版面理解及 SDK/Gerrit 全部资料的智能阅读适配。受限 Partner 扫描继续使用原有授权边界。
