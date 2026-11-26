@@ -311,61 +311,43 @@ function openAgentImagePreview(button) {
     const chat = $('agent-chat-messages');
     const sessionId = agentSessionId;
     const scrollTop = chat?.scrollTop || 0;
-    const {modal, modalId} = createAnalysisModal('agent-image', '图片预览', '');
-    modal.classList.add('agent-image-viewer-modal');
+    const modal = document.createElement('div');
+    modal.id = 'agent-image-viewer-modal';
+    modal.className = 'modal agent-image-viewer-modal';
     modal.setAttribute('aria-label', '图片预览');
-    const content = modal.querySelector('.modal-content');
-    content.classList.replace('modal-m', 'modal-workspace');
-    const body = modal.querySelector('.modal-body');
-    const toolbar = document.createElement('div');
-    toolbar.className = 'agent-image-viewer-toolbar';
-    const zoom = document.createElement('button');
-    zoom.type = 'button';
-    zoom.className = 'btn-xs';
-    zoom.textContent = '原始尺寸';
-    zoom.setAttribute('aria-pressed', 'false');
-    zoom.disabled = true;
-    const viewport = document.createElement('div');
-    viewport.className = 'agent-image-viewer-viewport';
+    modal.tabIndex = -1;
     const image = document.createElement('img');
     image.alt = thumbnail.alt;
+    image.hidden = true;
     const status = document.createElement('div');
     status.className = 'agent-image-viewer-status';
     status.setAttribute('role', 'status');
     status.textContent = '正在加载图片…';
-    image.hidden = true;
     image.addEventListener('load', () => {
         image.hidden = false;
         status.hidden = true;
-        zoom.disabled = false;
     });
     image.addEventListener('error', () => {
         image.hidden = true;
         status.hidden = false;
         status.textContent = '图片不存在或无法读取。';
-        zoom.disabled = true;
     });
-    zoom.addEventListener('click', () => {
-        const original = viewport.classList.toggle('is-original-size');
-        zoom.setAttribute('aria-pressed', String(original));
-        viewport.scrollTop = 0;
-        viewport.scrollLeft = 0;
-    });
-    toolbar.append(zoom);
-    viewport.append(image, status);
-    body.replaceChildren(toolbar, viewport);
-    ModalManager.onClose(modalId, () => {
-        modal.remove();
+    modal.append(image, status);
+    ModalManager.onClose(modal.id, () => {
         if (chat && sessionId === agentSessionId) {
             chat.scrollTop = scrollTop;
-            const current = [...chat.querySelectorAll('.agent-message-images button')]
-                .find(item => item.querySelector('img')?.src === thumbnail.src);
-            current?.focus({preventScroll: true});
+            requestAnimationFrame(() => {
+                if (agentSessionId !== sessionId || document.querySelector('.modal.show')) return;
+                const current = [...chat.querySelectorAll('.agent-message-images button')]
+                    .find(item => item.querySelector('img')?.src === thumbnail.src);
+                current?.focus({preventScroll: true});
+            });
         }
     });
     modal.addEventListener('click', event => {
-        if (event.target === modal) ModalManager.close(modalId);
+        if (event.target === modal) ModalManager.close(modal.id);
     });
+    ModalManager.registerDynamic(modal);
     image.src = thumbnail.src;
 }
 

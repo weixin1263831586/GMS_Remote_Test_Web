@@ -148,12 +148,16 @@
 .agent-message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .agent-message-images .agent-image-preview { cursor: zoom-in; height: auto; min-height: 0; background: transparent; }
 .agent-message-images .agent-image-preview img { width: 144px; height: 104px; max-width: 100%; }
-.agent-image-viewer-modal .modal-body { display: flex; flex-direction: column; gap: var(--ui-spacing-sm); overflow: hidden; }
-.agent-image-viewer-toolbar { display: flex; justify-content: flex-end; flex: none; }
-.agent-image-viewer-viewport { flex: 1; min-height: 0; min-width: 0; display: grid; place-items: center; overflow: auto; background: var(--darker-bg); }
-.agent-image-viewer-viewport img:not([hidden]) { display: block; width: 100%; height: 100%; min-height: 0; min-width: 0; object-fit: contain; }
-.agent-image-viewer-viewport.is-original-size { display: block; }
-.agent-image-viewer-viewport.is-original-size img:not([hidden]) { width: auto; height: auto; max-width: none; max-height: none; }
+.agent-image-viewer-modal.modal { cursor: zoom-out; }
+.agent-image-viewer-modal > img:not([hidden]) {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    cursor: default;
+}
 .agent-image-viewer-status { color: var(--text-secondary); }
 .agent-image-preview .agent-image-remove {
     position: absolute;
