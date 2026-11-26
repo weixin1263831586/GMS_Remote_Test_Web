@@ -538,3 +538,20 @@ async def test_partner_policy_chat_routes_without_disclosing_scan_to_model(model
     finally:
         api._agent_sessions.clear()
         api._agent_sessions.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_evidence_followup_does_not_repeat_successful_query(model):
+    turn, execute = model
+    execute.return_value = ToolResult(success=True, tool_name="android_internals_search", data={
+        "results": [{"reference": "ref1", "source_revision": "rev1"}],
+        "coverage_complete": False,
+    })
+    call = decision("call", tool="android_internals_search", params={"query": "memory"})
+    turn.side_effect = [call, decision("answer", text="初步结论"), call,
+                        decision("answer", text="证据范围不完整")]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("分析内存"))
+    assert execute.await_count == 1
+    assert current["messages"][-1]["content"] == "证据范围不完整"
+    assert current["messages"][-1]["data"]["evidence_plan"]["has_unresolved_scope"]
