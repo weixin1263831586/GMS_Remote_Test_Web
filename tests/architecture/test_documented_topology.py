@@ -412,9 +412,9 @@ def test_scene_routes_attach_to_nodes_and_keep_all_labels_visible():
                 x, y = (int(value), y) if op == 'H' else (x, int(value))
                 points.append((x, y))
             for px, py in (points[0], points[-1]):
-                assert any((px in (l, r) and t <= py <= b) or
-                           (py in (t, b) and l <= px <= r)
-                           for l, t, r, b in boxes), (view, route)
+                assert any((px in (left, right) and top <= py <= bottom) or
+                           (py in (top, bottom) and left <= px <= right)
+                           for left, top, right, bottom in boxes), (view, route)
             for a, b in pairwise(points):
                 assert not any(_hits_box(a, b, box) for box in boxes), (view, route)
             width = min(190, max(46, 14 + sum(12 if ord(ch) > 127 else 7 for ch in label)))

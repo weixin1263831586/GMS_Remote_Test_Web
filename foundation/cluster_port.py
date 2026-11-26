@@ -10,10 +10,12 @@ single-host behavior.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol, TypedDict
 
 from starlette.requests import Request
+from typing_extensions import Unpack
 
 from foundation.device_claims import DeviceClaimRegistry
 
@@ -24,6 +26,18 @@ class ClusterConfigContract(Protocol):
 
     @property
     def remote_dispatch_enabled(self) -> bool: ...
+
+
+class TransferUpdate(TypedDict, total=False):
+    status: str
+    filename: str
+    relative_path: str
+    size_bytes: int
+    sha256: str
+    error: str
+    completed_at: str
+    owner_id: str
+    metadata_json: str
 
 
 class ClusterRepositoryContract(Protocol):
@@ -65,7 +79,7 @@ class ClusterRepositoryContract(Protocol):
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
     def get_transfer(self, transfer_id: str) -> dict[str, Any] | None: ...
-    def update_transfer(self, transfer_id: str, **values: Any) -> dict[str, Any] | None: ...
+    def update_transfer(self, transfer_id: str, **values: Unpack[TransferUpdate]) -> dict[str, Any] | None: ...
 
 
 class ClusterServiceContract(Protocol):
@@ -167,7 +181,11 @@ DEFAULT_LOCAL_WORKER_ID = "ats-worker-controller"
 
 # Default for ``configure_cluster_access`` arguments: omitted means "keep the
 # current registration", while an explicit ``None`` clears it.
-_UNSET: Any = object()
+class _RegistrationUnset(Enum):
+    TOKEN = 0
+
+
+_UNSET = _RegistrationUnset.TOKEN
 
 _cluster_service_provider: ClusterServiceProvider | None = None
 _cancel_job: CancelJob | None = None
@@ -186,19 +204,19 @@ _release_local_firmware_recovery: FirmwareRecoveryCheck | None = None
 
 def configure_cluster_access(
     *,
-    service_provider: ClusterServiceProvider | None = _UNSET,
-    cancel_job: CancelJob | None = _UNSET,
-    worker_tokens: WorkerTokens | None = _UNSET,
-    run_worker_command: RunWorkerCommand | None = _UNSET,
-    require_worker_session: RequireWorkerSession | None = _UNSET,
-    require_cluster_enabled: RequireClusterEnabled | None = _UNSET,
-    authenticate_worker: AuthenticateWorker | None = _UNSET,
-    device_action_request: DeviceActionRequest | None = _UNSET,
-    aoa_playback_control: AoaPlaybackControl | None = _UNSET,
-    prepare_local_firmware_recovery: PrepareFirmwareRecovery | None = _UNSET,
-    run_local_firmware_recovery: RunFirmwareRecovery | None = _UNSET,
-    validate_local_firmware_recovery: FirmwareRecoveryCheck | None = _UNSET,
-    release_local_firmware_recovery: FirmwareRecoveryCheck | None = _UNSET,
+    service_provider: ClusterServiceProvider | None | _RegistrationUnset = _UNSET,
+    cancel_job: CancelJob | None | _RegistrationUnset = _UNSET,
+    worker_tokens: WorkerTokens | None | _RegistrationUnset = _UNSET,
+    run_worker_command: RunWorkerCommand | None | _RegistrationUnset = _UNSET,
+    require_worker_session: RequireWorkerSession | None | _RegistrationUnset = _UNSET,
+    require_cluster_enabled: RequireClusterEnabled | None | _RegistrationUnset = _UNSET,
+    authenticate_worker: AuthenticateWorker | None | _RegistrationUnset = _UNSET,
+    device_action_request: DeviceActionRequest | None | _RegistrationUnset = _UNSET,
+    aoa_playback_control: AoaPlaybackControl | None | _RegistrationUnset = _UNSET,
+    prepare_local_firmware_recovery: PrepareFirmwareRecovery | None | _RegistrationUnset = _UNSET,
+    run_local_firmware_recovery: RunFirmwareRecovery | None | _RegistrationUnset = _UNSET,
+    validate_local_firmware_recovery: FirmwareRecoveryCheck | None | _RegistrationUnset = _UNSET,
+    release_local_firmware_recovery: FirmwareRecoveryCheck | None | _RegistrationUnset = _UNSET,
 ) -> None:
     """Register or clear the cluster access callables.
 
@@ -212,31 +230,31 @@ def configure_cluster_access(
     global _device_action_request, _aoa_playback_control
     global _prepare_local_firmware_recovery, _run_local_firmware_recovery
     global _validate_local_firmware_recovery, _release_local_firmware_recovery
-    if service_provider is not _UNSET:
+    if not isinstance(service_provider, _RegistrationUnset):
         _cluster_service_provider = service_provider
-    if cancel_job is not _UNSET:
+    if not isinstance(cancel_job, _RegistrationUnset):
         _cancel_job = cancel_job
-    if worker_tokens is not _UNSET:
+    if not isinstance(worker_tokens, _RegistrationUnset):
         _worker_tokens = worker_tokens
-    if run_worker_command is not _UNSET:
+    if not isinstance(run_worker_command, _RegistrationUnset):
         _run_worker_command = run_worker_command
-    if require_worker_session is not _UNSET:
+    if not isinstance(require_worker_session, _RegistrationUnset):
         _require_worker_session = require_worker_session
-    if require_cluster_enabled is not _UNSET:
+    if not isinstance(require_cluster_enabled, _RegistrationUnset):
         _require_cluster_enabled = require_cluster_enabled
-    if authenticate_worker is not _UNSET:
+    if not isinstance(authenticate_worker, _RegistrationUnset):
         _authenticate_worker = authenticate_worker
-    if device_action_request is not _UNSET:
+    if not isinstance(device_action_request, _RegistrationUnset):
         _device_action_request = device_action_request
-    if aoa_playback_control is not _UNSET:
+    if not isinstance(aoa_playback_control, _RegistrationUnset):
         _aoa_playback_control = aoa_playback_control
-    if prepare_local_firmware_recovery is not _UNSET:
+    if not isinstance(prepare_local_firmware_recovery, _RegistrationUnset):
         _prepare_local_firmware_recovery = prepare_local_firmware_recovery
-    if run_local_firmware_recovery is not _UNSET:
+    if not isinstance(run_local_firmware_recovery, _RegistrationUnset):
         _run_local_firmware_recovery = run_local_firmware_recovery
-    if validate_local_firmware_recovery is not _UNSET:
+    if not isinstance(validate_local_firmware_recovery, _RegistrationUnset):
         _validate_local_firmware_recovery = validate_local_firmware_recovery
-    if release_local_firmware_recovery is not _UNSET:
+    if not isinstance(release_local_firmware_recovery, _RegistrationUnset):
         _release_local_firmware_recovery = release_local_firmware_recovery
 
 
@@ -273,10 +291,7 @@ def get_local_worker_id() -> str:
     """
     try:
         service = get_cluster_service()
-        worker_id = str(
-            getattr(getattr(service, "config", None), "local_worker_id", "")
-            or ""
-        ).strip()
+        worker_id = str(service.config.local_worker_id or "").strip()
         return worker_id or DEFAULT_LOCAL_WORKER_ID
     except Exception:
         return DEFAULT_LOCAL_WORKER_ID

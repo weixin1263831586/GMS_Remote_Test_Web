@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 
 from foundation.error_model import ApiError
 
+
 if TYPE_CHECKING:
     from features.auth import CurrentUser
 

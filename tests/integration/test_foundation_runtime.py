@@ -7,10 +7,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from foundation import cluster_port
 from foundation.cache import TTLCache
 from foundation.config import ConfigManager, RuntimeSettings
 from foundation.runtime_settings import allowed_origins, runtime_environment
 from foundation.tasks import SingleFlightTask
+
+
+class ClusterPortRegistrationTests(unittest.TestCase):
+    def test_omitted_registration_is_preserved_and_none_clears_it(self):
+        with patch.object(cluster_port, '_worker_tokens', None):
+            cluster_port.configure_cluster_access(worker_tokens=lambda: {'worker': 'token'})
+            cluster_port.configure_cluster_access()
+            self.assertEqual(cluster_port.worker_tokens(), {'worker': 'token'})
+            cluster_port.configure_cluster_access(worker_tokens=None)
+            with self.assertRaises(RuntimeError):
+                cluster_port.worker_tokens()
 
 
 class FoundationConfigTests(unittest.TestCase):

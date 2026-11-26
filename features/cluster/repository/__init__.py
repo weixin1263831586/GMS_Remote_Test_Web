@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from typing_extensions import Unpack
+
+from foundation.cluster_port import TransferUpdate
 from foundation.device_claims import DeviceClaimRegistry
 
 from ..admission import worker_admission_state
@@ -661,7 +664,7 @@ class ClusterRepository(
     def update_transfer(
         self,
         transfer_id: str,
-        **values: Any,
+        **values: Unpack[TransferUpdate],
     ) -> dict[str, Any] | None:
         allowed = {
             "status",

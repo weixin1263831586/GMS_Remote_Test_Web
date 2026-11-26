@@ -80,7 +80,7 @@ def review_deployment(request: Request, request_id: str):
     return HTMLResponse('''<!doctype html><html lang="zh-CN" data-ui-type-root="review"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>APK 部署审批</title><link rel="stylesheet" href="/static/css/device-deployment-review.css"><link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
-<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-38"><link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
+<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-divider"><link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-deployment-review.js" defer></script></head>
 <body class="ui-page-edge"><main><h1>APK 部署审批</h1><p>请登录发起申请的 Agent 所属平台账号。核对制品和目标后，一次批准完成传输和安装。</p>

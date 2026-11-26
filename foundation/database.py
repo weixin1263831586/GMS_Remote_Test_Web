@@ -6,7 +6,7 @@ import os
 import sqlite3
 import threading
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -36,7 +36,7 @@ _initialized: OrderedDict[Path, tuple[int, ...]] = OrderedDict()
 _MAX_DATABASES = 256
 
 
-def _identity(conn, path: Path) -> tuple[int, ...]:
+def _identity(conn: sqlite3.Connection, path: Path) -> tuple[int, ...]:
     info = path.stat()
     # Schema cookies change on DDL, but ordinary writes leave them alone.
     # A truncated/rebuilt file can keep its inode, so inode alone is insufficient.
@@ -53,7 +53,9 @@ def invalidate_schema(path: Path) -> None:
         _initialized.pop(Path(path).resolve(), None)
 
 
-def ensure_schema(conn, path: Path, initialize) -> None:
+def ensure_schema(
+    conn: sqlite3.Connection, path: Path, initialize: Callable[[sqlite3.Connection], object],
+) -> None:
     """Check file/schema identity; initializers version migrations with user_version."""
     path = Path(path).resolve()
     identity = _identity(conn, path)
@@ -79,7 +81,9 @@ def ensure_schema(conn, path: Path, initialize) -> None:
             _initialized.popitem(last=False)
 
 
-def open_initialized_sqlite(path: Path, initialize, *, timeout: float = 10) -> sqlite3.Connection:
+def open_initialized_sqlite(
+    path: Path, initialize: Callable[[sqlite3.Connection], object], *, timeout: float = 10,
+) -> sqlite3.Connection:
     """Open a caller-owned SQLite connection with row mapping and schema validation.
 
     Preserve the caller's transaction and journal settings; connect_sqlite is
