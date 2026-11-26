@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, TypedDict
 
-
 from typing_extensions import Unpack
 
 from foundation.config import ConfigManager
