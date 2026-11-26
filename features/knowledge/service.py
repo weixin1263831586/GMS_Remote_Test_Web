@@ -6,7 +6,7 @@ from typing import Any
 
 from .parsers import parse_file
 from .external.web_sources import model_catalog_fingerprint
-from .intelligent import local_document_model, local_document_rag, personal_source, render_rag_answer, web_source
+from .intelligent import local_document_model, local_document_rag, personal_source, render_rag_answer, web_source, wiki_source
 from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
@@ -143,7 +143,7 @@ class KnowledgeService:
             sources.append(personal_source(self.store, user_id, space_id=space_id,
                                            approved_only=True, catalog_hash=catalog))
         if include_external:
-            sources.append(web_source())
+            sources.extend([web_source(), wiki_source()])
         result = local_document_rag(question, sources, _ask_analyzer_factory,
                                     limit=limit, catalog_hash=catalog)
         contexts = [{"doc_id": item["metadata"].get("doc_id"), "title": item["metadata"].get("title"),
@@ -188,3 +188,22 @@ def sync_due_cdd_understanding():
     if not name or not fingerprint or fingerprint != model_catalog_fingerprint():
         return [{"operation": "document_understanding", "status": "model_unavailable"}]
     return [cdd_intelligence.sync_batch(WebKnowledgeProvider(), model, key)]
+
+
+def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=None):
+    """Public CDD and separately approved local Wiki; never expose owner imports."""
+    selected = set(sources or ["web_documents"])
+    if selected == {"web_documents"}:
+        return analyze_public_cdd(question, limit=limit, android_api_level=android_api_level)
+    adapters = []
+    if "web_documents" in selected:
+        adapters.append(web_source(android_api_level=android_api_level, cdd_only=True))
+    if "android_internals" in selected:
+        adapters.append(wiki_source(android_api_level=android_api_level))
+    result = local_document_rag(question, adapters, _ask_analyzer_factory, limit=limit)
+    return {"answer": render_rag_answer(result), "rag": result, "coverage_complete": False,
+            "analysis_scope": "public_cdd_and_approved_local_wiki",
+            "results": [{"source": item["source"], "source_path": item["reference"],
+                         "source_revision": item["revision"], "snippet": item["text"],
+                         "title": item["metadata"].get("title"), "extra": item["metadata"],
+                         "evidence_level": "background"} for item in result["evidence"]]}
