@@ -84,6 +84,13 @@ def _lookup(path, table, columns, terms, *, kind, limit):
         identity = row.get("id") or row.get("item_key") or digest[:16]
         item["reference"] = f"ref:mainline:{kind}:{identity}"
         item["content_sha256"] = digest
+        # A retained-record revision is independent of query-specific excerpts and scan timestamps.
+        stable = {key: row[key] for key in allowed if key in row
+                  and key not in {"first_seen_at", "last_seen_at", "detail_status", "detail_fetched_at"}}
+        if row.get("detail_text"):
+            stable["detail_content_sha256"] = item["detail_content_sha256"]
+        item["source_revision"] = hashlib.sha256(json.dumps(stable, sort_keys=True).encode()).hexdigest()
+        item["revision_basis"] = "retained_record_sha256"
         items.append(item)
     return {"status": "matched" if items else "no_match", "items": items, **coverage,
             "possibly_truncated": len(items) == limit}
