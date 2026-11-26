@@ -206,7 +206,7 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
         }
         if (!append) {
             if (tbody && !hasCachedQuery && !hadRenderedReports) {
-                tbody.innerHTML = '<tr><td colspan="10" style="padding:40px;text-align:center;color:var(--text-secondary);">正在加载报告...</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="10" class="table-placeholder">正在加载报告...</td></tr>';
             }
         }
         const [data] = await Promise.all([
@@ -242,7 +242,7 @@ async function loadTestReports(userOnly = false, append = false, force = false) 
         } else if (tbody) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="10" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                    <td colspan="10" class="table-placeholder">
                         加载失败
                     </td>
                 </tr>
@@ -333,7 +333,7 @@ function displayTestReports(reports) {
     if (reports.length === 0) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="10" style="padding: 60px 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="10" class="table-placeholder">
                     暂无测试报告
                 </td>
             </tr>

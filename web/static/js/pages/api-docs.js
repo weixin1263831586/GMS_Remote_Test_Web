@@ -560,7 +560,7 @@ async function loadApiDocs(forceRefresh = false, signal = window.GmsDocumentAbor
         if (tbody && !hadRenderedDocs) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="5" style="padding: 40px; text-align: center; color: var(--danger-color);">
+                    <td colspan="5" class="table-placeholder" style="color: var(--danger-color);">
                         ❌ 加载失败: ${escapeHtml(e.message)}
                     </td>
                 </tr>

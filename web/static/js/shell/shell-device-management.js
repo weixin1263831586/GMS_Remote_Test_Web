@@ -333,7 +333,7 @@
             if (devices.length === 0) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="12" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="12" class="table-placeholder">
                             暂无符合条件的设备
                         </td>
                     </tr>
