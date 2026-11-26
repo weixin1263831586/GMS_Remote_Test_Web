@@ -50,12 +50,7 @@ class AgentBearerAuthTests(unittest.TestCase):
             json={"username": "admin", "password": "password123"},
         )
         assert resp.status_code == 200, resp.text
-        # Token minting / enrollment require the elevated-admin gate.
-        resp = self.client.post(
-            "/api/auth/elevate",
-            json={"username": "admin", "password": "password123"},
-        )
-        assert resp.status_code == 200, resp.text
+        assert resp.json()["elevated"] is True
 
     def _create_token(self, scopes):
         resp = self.client.post(
@@ -70,7 +65,7 @@ class AgentBearerAuthTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 200, resp.text)
         return resp.json()["token"]
 
-    def test_create_token_requires_elevation_and_returns_raw_once(self):
+    def test_admin_login_can_create_token_and_returns_raw_once(self):
         record = self._create_token(["devices.read", "tests.execute"])
         self.assertIn("token", record)
         resp = self.client.get("/api/auth/agent-tokens")
@@ -88,6 +83,21 @@ class AgentBearerAuthTests(unittest.TestCase):
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["user"]["role"], "agent_service")
         self.assertIn("devices.read", payload["user"]["permissions"])
+        self.assertFalse(payload["elevated"])
+        self.assertIsNone(payload["elevated_until"])
+
+    def test_agent_token_cannot_use_admin_cookie_authority(self):
+        record = self._create_token(["devices.read"])
+        headers = {"Authorization": f"Bearer {record['token']}"}
+        self.assertEqual(self.client.get("/api/auth/roles", headers=headers).status_code, 403)
+        self.assertEqual(self.client.post(
+            "/api/auth/elevate", headers=headers,
+            json={"username": "admin", "password": "password123"},
+        ).status_code, 403)
+        self.assertEqual(self.client.post(
+            "/api/auth/elevation/reset", headers=headers,
+        ).status_code, 403)
+        self.assertTrue(self.client.get("/api/auth/status").json()["elevated"])
 
     def test_invalid_bearer_token_fails_closed(self):
         headers = {"Authorization": "Bearer not-a-real-token"}

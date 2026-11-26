@@ -257,6 +257,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
             page.locator("#agent-access-create-toggle").click()
             page.evaluate("""() => {
                 window.requestElevatedAccess = window.__agentOriginalElevation;
+                state.currentUser = { ...state.currentUser, role: 'user' };
                 state.elevated = false;
                 state.elevatedUntil = null;
                 void agentAccessCreateEnrollment();
