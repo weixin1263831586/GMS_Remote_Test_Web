@@ -50,6 +50,7 @@ class AiConfigApiTests(unittest.TestCase):
         status = payload["data"]["status"]
         providers = {item["provider"]: item for item in status["providers"]}
         self.assertEqual(status["local_provider"], "glm_local")
+        self.assertEqual(status["routes"], {"default_text": "remote", "local_rag": "glm_local", "private_vision": ""})
         self.assertEqual(providers["glm_local"]["state"], "credential_missing")
         self.assertIsNone(providers["glm_local"]["available"])
         self.assertNotEqual(

@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.kkagent import (
+    KKAGENT_BINARY,
     STREAM_LINE_LIMIT_BYTES,
     ContextBudgetError,
     analysis_command,
@@ -44,8 +45,6 @@ from .preflight import probe_kkagent_mcp_health
 from .trace import KkAgentTrace, ToolTrace, consume_line, trace_from_summary
 
 
-# 与 __init__ 共享的常量（避免包级循环 import，直接定义于 process/本模块）。
-KKAGENT_BINARY = "kkagent"
 DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 
 logger = logging.getLogger(__name__)

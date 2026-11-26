@@ -44,6 +44,7 @@ async def get_ai_config(
             for item in statuses
         ]
 
+    # Publish actual eligible routes separately from provider naming/readiness.
     safe_config = redact_sensitive_data(ai_config)
     safe_config['status'] = {
         'local_provider': local_provider,
@@ -52,6 +53,11 @@ async def get_ai_config(
         'probed': bool(probe),
         'providers': redact_sensitive_data(statuses),
         'kkagent_installed': bool(shutil.which(KKAGENT_BINARY)),
+        'routes': {
+            'default_text': primary_provider,
+            'local_rag': analyzer.rag_local_provider() or '',
+            'private_vision': analyzer.image_provider() or '',
+        },
     }
     safe_config['model_options'] = list_model_options(ai_config)
     return success_response(safe_config)

@@ -48,7 +48,7 @@ def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt, capability)
     url, _, payload, actual_format = analyzer._post_chat.call_args.args
     assert url.startswith("http://127.0.0.1:8000/")
     assert actual_format == fmt
-    assert analyzer._post_chat.call_args.kwargs == {"allow_redirects": False}
+    assert analyzer._post_chat.call_args.kwargs == {"allow_redirects": False, "direct": True}
     block = payload["messages"][-1]["content"][1]
     assert block["type"] == ("image" if fmt == "anthropic" else "image_url")
     config["providers"]["local"]["capabilities"] = []
@@ -134,3 +134,19 @@ async def test_image_turn_passes_public_context_without_persisting_body(monkeypa
     meta = current["messages"][-1]["data"]["retrieval_context"]
     assert meta["references"] == [context[0]["reference"]] and not meta["coverage_complete"]
     assert "background-only" not in json.dumps(current)
+
+
+@pytest.mark.parametrize("base_url", [
+    "https://example.test", "http://user:password@127.0.0.1:8000",
+    "http://127.0.0.1:8000?redirect=remote", "http://169.254.169.254",
+])
+def test_private_vision_rejects_non_pinned_routes_even_if_named_local(base_url):
+    config = {"enabled": True, "providers": {"local_vision": {
+        "enabled": True, "base_url": base_url, "model": "vision",
+        "capabilities": ["image_in"], "auth_required": False,
+    }}}
+    analyzer = UniversalAIAnalyzer(config)
+    analyzer._post_chat = Mock()
+    assert analyzer.image_provider() is None
+    assert not analyzer.generate_image_analysis("Analyze", [image_data()])["success"]
+    analyzer._post_chat.assert_not_called()

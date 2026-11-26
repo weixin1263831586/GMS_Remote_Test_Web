@@ -35,12 +35,13 @@ function switchSystemSettingsSection(name) {
     }
 }
 
-async function loadSystemModelCatalog() {
+async function loadSystemModelCatalog(probeProvider = '') {
     const output = document.getElementById('system-model-catalog');
     if (!output) return;
     output.textContent = '正在读取统一模型目录…';
     try {
-        const result = await apiCall('/api/config/ai', 'GET');
+        const query = probeProvider ? '?probe=true&provider=' + encodeURIComponent(probeProvider) : '';
+        const result = await apiCall('/api/config/ai' + query, 'GET');
         const data = result?.data || result || {};
         const providers = data.status?.providers || [];
         output.replaceChildren();
@@ -51,9 +52,26 @@ async function loadSystemModelCatalog() {
         const engine = document.createElement('p');
         engine.textContent = 'KKAgent：' + (data.status?.kkagent_installed ? '已安装（不代表模型在线）' : '未检测到可执行文件');
         output.append(engine);
-        for (const provider of providers) {
+        const routes = data.status?.routes || {};
+        for (const [label, route] of [['默认文本', routes.default_text], ['本地 RAG', routes.local_rag], ['私有图片', routes.private_vision]]) {
             const row = document.createElement('p');
-            row.textContent = [provider.provider, provider.model, provider.status || provider.state].filter(Boolean).join(' · ');
+            row.textContent = label + '：' + (route || '未配置合格路由');
+            output.append(row);
+        }
+        const stateLabels = {disabled:'未启用', incomplete:'配置不完整', credential_missing:'缺少凭据', ready_to_probe:'待检测', available:'检测成功', unavailable:'检测失败'};
+        for (const provider of providers) {
+            const row = document.createElement('div');
+            row.className = 'modal-form-row';
+            const label = document.createElement('span');
+            label.textContent = [provider.provider, provider.model, stateLabels[provider.state] || provider.state,
+                provider.checked && Number.isFinite(provider.latency_ms) ? provider.latency_ms + ' ms' : ''].filter(Boolean).join(' · ');
+            const probe = document.createElement('button');
+            probe.type = 'button';
+            probe.className = 'btn-xxs';
+            probe.textContent = '检测';
+            probe.disabled = !provider.enabled || !provider.configured || !provider.credential_configured;
+            probe.addEventListener('click', () => { void loadSystemModelCatalog(provider.provider); });
+            row.append(label, probe);
             output.append(row);
         }
         if (!providers.length) output.append(document.createTextNode('未配置模型。'));
