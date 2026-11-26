@@ -754,6 +754,23 @@ def recall_web_references(query: str, *, android_version=None):
             return {"status": "unavailable", "coverage_complete": False, "items": [],
                     "reason": "Android version mapping not configured"}
         hits, retrieval = provider.search_with_status(query[:512], limit=5, android_api_level=api)
+        # Redmine preflight and MCP use the same optional local-model public recall.
+        from ..model_context import model_planned_cdd_hits
+
+        planned = model_planned_cdd_hits(query[:512], android_api_level=api, limit=5)
+        if planned:
+            current = []
+            for candidate in planned:
+                row = provider.read_requirement(candidate["source_path"])
+                if (row and row["kind"] == "cdd" and not row["error"]
+                        and row["revision"] == row["current_revision"] == candidate["source_revision"]
+                        and (android_version is None or row["android_version"] == android_version)):
+                    current.append(_clause_hit(row))
+            if current:
+                pool = {hit.source_path: hit for hit in [*hits, *current]}
+                ordered = list(dict.fromkeys(hit.source_path for hit in [*current, *hits]))
+                hits = [pool[token] for token in ordered[:5]]
+                retrieval = {**retrieval, "local_model_planned": True, "coverage_complete": False}
         items = [{"reference": h.source_path, "source_url": h.extra["source_url"],
                   "source_revision": h.source_revision, "title": h.title,
                   "requirement_id": h.extra["requirement_id"], "requirement_level": h.extra["requirement_level"],
