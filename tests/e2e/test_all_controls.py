@@ -574,6 +574,7 @@ class AllControlsE2ETests(runtime_ui_smoke.RuntimeUiHarness):
             page.evaluate("() => switchPage('api-docs')")
             page.evaluate("() => window.__pendingNavigation")
             self.assertTrue(page.evaluate("window.__suiteCancelled"))
+            page.wait_for_function("GmsPageLifecycle.status === 'ready'")
             self.assertEqual(page.evaluate("GmsPageLifecycle.status"), 'ready')
             self.assert_clean_browser(page, captured)
         finally:

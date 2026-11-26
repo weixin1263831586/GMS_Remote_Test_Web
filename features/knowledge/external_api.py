@@ -16,11 +16,11 @@ reindex。Handler 全部为普通 ``def``——provider 内部是同步阻塞 I/
 from __future__ import annotations
 
 import logging
+import sqlite3
+from typing import Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
-import sqlite3
-from typing import Literal
 
 from features.auth import (
     require_agent_scope,
@@ -37,8 +37,6 @@ from .external import (
     federated_search,
     federated_status,
 )
-
-
 from .external.web_sources import WebKnowledgeProvider
 
 

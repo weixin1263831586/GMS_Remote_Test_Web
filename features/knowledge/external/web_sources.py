@@ -14,6 +14,7 @@ from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
 from .document_index import document_revision, parse_document
 from .web_fetch import fetch_html, validate_url
 
+
 SOURCE = "web_documents"
 API_TO_ANDROID = {35: 15, 36: 16, 37: 17}
 _SCHEMA = """

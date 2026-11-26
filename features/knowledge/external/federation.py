@@ -273,7 +273,6 @@ def _build_from_config() -> FederatedKnowledgeService:
     from foundation.config import config_manager
 
     from .android_internals import AndroidInternalsProvider
-
     from .web_sources import WebKnowledgeProvider
 
     service = FederatedKnowledgeService([WebKnowledgeProvider()])
