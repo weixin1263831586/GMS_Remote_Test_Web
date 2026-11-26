@@ -24,7 +24,7 @@ WATCHDOG_ERROR_LOG_INTERVAL_SECONDS = 300.0
 
 class ClusterService:
     def __init__(self, repository: ClusterRepository, offline_seconds: int = 45,
-                 config: ClusterConfig | None = None):
+                 config: ClusterConfig | None = None) -> None:
         self.repository = repository
         self.config = config or ClusterConfig(enabled=True, remote_dispatch_enabled=True,
                                               global_device_pool_enabled=True,
@@ -168,12 +168,12 @@ class ClusterService:
             for value in (excluded_transports or set())
             if str(value).strip()
         }
-        suites_by_worker = {}
+        suites_by_worker: dict[str, list[dict[str, Any]]] = {}
         for suite in self.repository.list_suites():
             if (suite["available"] and (not suite_key or suite["suite_key"] == suite_key)
                     and (not suite_path or suite["tools_path"] == suite_path)):
                 suites_by_worker.setdefault(suite["worker_id"], []).append(suite)
-        devices_by_worker = {}
+        devices_by_worker: dict[str, list[dict[str, Any]]] = {}
         inventory = self.repository.list_devices()
         inventory_ids = {device["id"] for device in inventory}
         for device in inventory:
@@ -186,7 +186,7 @@ class ClusterService:
                      in allowed_transports)
             ):
                 devices_by_worker.setdefault(device["worker_id"], []).append(device)
-        candidates = []
+        candidates: list[tuple[float, str, list[dict[str, Any]]]] = []
         for worker in self.list_workers():
             devices = devices_by_worker.get(worker["id"], [])
             if ((worker_id and worker["id"] != worker_id)

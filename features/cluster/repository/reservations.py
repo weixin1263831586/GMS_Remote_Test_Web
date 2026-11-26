@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -18,7 +19,7 @@ def _expires(seconds: int) -> str:
 
 
 class ClusterReservationRepositoryMixin:
-    def _expire_device_reservations(self, conn, now: str | None = None) -> int:
+    def _expire_device_reservations(self, conn: sqlite3.Connection, now: str | None = None) -> int:
         now = now or _now()
         rows = conn.execute(
             """SELECT reservation_id,device_id FROM cluster_device_reservations
@@ -173,7 +174,7 @@ class ClusterReservationRepositoryMixin:
                 raise
 
     @staticmethod
-    def _reservation_payload(conn, reservation_id: str) -> dict[str, Any]:
+    def _reservation_payload(conn: sqlite3.Connection, reservation_id: str) -> dict[str, Any]:
         rows = conn.execute(
             """SELECT * FROM cluster_device_reservations
                WHERE reservation_id=? ORDER BY device_id""",

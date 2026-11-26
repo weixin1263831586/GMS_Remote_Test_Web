@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypedDict
 
 from foundation.aoa_profile import MAX_AOA_OPERATION_SECONDS
 
@@ -23,6 +24,12 @@ STALE_LOCAL_DEVICE_ACTION_SECONDS = MAX_AOA_OPERATION_SECONDS + 120
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class AoaDebugQueueEntry(TypedDict):
+    sequence: int
+    request_id: str
+    command: str
 
 
 class ClusterCommandRepositoryMixin:
@@ -303,7 +310,9 @@ class ClusterCommandRepositoryMixin:
                 self._attach_command_to_job_conn(conn, job_id, command, newly_created=True)
         return self.get_command(command_id) or {}
 
-    def enqueue_aoa_debug_command(self, command_id, owner_id, request_id, text):
+    def enqueue_aoa_debug_command(
+        self, command_id: str, owner_id: str, request_id: str, text: str,
+    ) -> int:
         from foundation.error_model import ApiError
 
         with self._lock, self.connect() as conn:
@@ -330,7 +339,9 @@ class ClusterCommandRepositoryMixin:
                          (json.dumps(payload, separators=(",", ":")), _utc_now(), command_id))
             return sequence
 
-    def read_aoa_debug_command(self, command_id, cursor, *, close=False):
+    def read_aoa_debug_command(
+        self, command_id: str, cursor: int, *, close: bool = False,
+    ) -> AoaDebugQueueEntry | None:
         # Closing and enqueueing share a write lock: no accepted input can fall
         # between the idle timeout's last poll and marking the session closed.
         with self._lock, self.connect() as conn:
@@ -347,7 +358,9 @@ class ClusterCommandRepositoryMixin:
                              (json.dumps(payload, separators=(",", ":")), command_id))
             return entry
 
-    def request_aoa_playback_control(self, worker_id, control_id, owner_id, action):
+    def request_aoa_playback_control(
+        self, worker_id: str, control_id: str, owner_id: str, action: str,
+    ) -> tuple[dict[str, Any] | None, int]:
         if action not in {"pause", "resume", "cancel"}:
             raise ValueError("invalid AOA playback control")
         with self._lock, self.connect() as conn:
@@ -606,7 +619,7 @@ class ClusterCommandRepositoryMixin:
             self._attach_command_to_job_conn(conn, job_id, command)
 
     def _attempt_has_no_start_command(
-        self, conn: Any, job_id: str, attempt_id: str, *,
+        self, conn: sqlite3.Connection, job_id: str, attempt_id: str, *,
         exclude_command_id: str = "",
     ) -> bool:
         query = """SELECT 1 FROM cluster_commands
@@ -619,7 +632,7 @@ class ClusterCommandRepositoryMixin:
         return conn.execute(query, params).fetchone() is None
 
     def _attach_command_to_job_conn(
-        self, conn: Any, job_id: str, command: dict[str, Any], *, newly_created: bool = False,
+        self, conn: sqlite3.Connection, job_id: str, command: dict[str, Any], *, newly_created: bool = False,
     ) -> None:
         job = conn.execute(
             "SELECT current_attempt_id,assigned_worker_id,status FROM cluster_jobs WHERE id=?", (job_id,),

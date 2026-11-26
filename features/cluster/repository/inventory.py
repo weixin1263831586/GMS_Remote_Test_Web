@@ -389,7 +389,7 @@ class ClusterInventoryRepositoryMixin:
         if worker is not None and str(worker["status"] or "") != "offline":
             emit_worker_availability(worker, "offline")
 
-    def refresh_devices(self, worker_id: str, devices: list[dict]) -> None:
+    def refresh_devices(self, worker_id: str, devices: list[dict[str, Any]]) -> None:
         """Restore completion writes ONLY the device inventory for this worker.
 
         真实 agent 守护进程以短周期心跳（默认 15s）喂库存；本地烧写（Controller
@@ -403,9 +403,9 @@ class ClusterInventoryRepositoryMixin:
 
     def _replace_devices(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        devices: list[dict],
+        devices: list[dict[str, Any]],
         now: str,
         external_serials: set[str] | None = None,
     ) -> None:
@@ -489,9 +489,9 @@ class ClusterInventoryRepositoryMixin:
 
     def _replace_worker_tests(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        tests: list[dict],
+        tests: list[dict[str, Any]],
         now: str,
     ) -> None:
         conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
@@ -532,9 +532,9 @@ class ClusterInventoryRepositoryMixin:
 
     def _replace_suites(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        suites: list[dict],
+        suites: list[dict[str, Any]],
         now: str,
     ) -> None:
         conn.execute(
@@ -567,7 +567,7 @@ class ClusterInventoryRepositoryMixin:
                 ),
             )
 
-    def replace_worker_suites(self, worker_id: str, suites: list[dict]) -> None:
+    def replace_worker_suites(self, worker_id: str, suites: list[dict[str, Any]]) -> None:
         """Replace one Worker's suite inventory from a refresh command ACK."""
         if not worker_id:
             raise ValueError("worker_id is required")

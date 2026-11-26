@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
@@ -24,7 +25,7 @@ from foundation.config import ConfigManager, RuntimeSettings, settings
 from foundation.device_locks import configure_display_name_resolver
 
 
-def _universal_analyzer_factory(config=None):
+def _universal_analyzer_factory(config: dict[str, Any] | None = None) -> UniversalAIAnalyzer:
     """Shared text-generation and provider gateway factory."""
     if config is None:
         from foundation.config import config_manager
@@ -34,14 +35,14 @@ def _universal_analyzer_factory(config=None):
     return UniversalAIAnalyzer(config)
 
 
-def _report_failure_analyzer_factory(config=None):
+def _report_failure_analyzer_factory(config: dict[str, Any] | None = None) -> ReportFailureAnalyzer:
     """Report diagnosis with an injected Android source search provider."""
     if config is None:
         from foundation.config import config_manager
 
         config = config_manager.get_ai_config()
 
-    def _codesearch_source_search(class_name: str) -> list[dict]:
+    def _codesearch_source_search(class_name: str) -> list[dict[str, Any]]:
         try:
             return search_indexed_source(class_name, max_results=3) or []
         except Exception:
