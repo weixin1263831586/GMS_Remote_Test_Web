@@ -105,8 +105,20 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
         result = passage(doc, start)
         return RetrievalResult([result] if result else [], "matched" if result else "no_match")
 
+    def inventory():
+        rows = []
+        for doc_id in store.list_doc_ids(owner, space_id=space_id,
+                                         tag=IMPORT_TAG if approved_only else "", limit=12):
+            doc = get(doc_id)
+            hit = passage(doc, 0) if doc else None
+            if hit:
+                rows.append(hit)
+            if len(rows) >= 8:
+                break
+        return rows
+
     return IntelligentSource(source_id, "当前账号已授权导入规范" if approved_only else "当前账号普通知识文档",
-                             search, current, read)
+                             search, current, read, inventory)
 
 
 def web_source(*, android_api_level=None, cdd_only=False):
