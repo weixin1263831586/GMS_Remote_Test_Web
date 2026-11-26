@@ -37,9 +37,7 @@ async function sdkConfigLoadSources(button) {
     if (agentSdkSourcesLoaded && !button) return; // 打开页签时自动加载一次
     const sequence = ++agentSdkSourcesSequence;
     if (button) {
-        button.disabled = true;
-        const label = button.lastElementChild?.nextSibling;
-        if (label) label.textContent = ' 刷新中…';
+        setActionButtonBusy(button, true, '刷新中');
     }
     try {
         // 「刷新」按钮（button 非空）走 sync 强校验；页签自动加载走
@@ -65,12 +63,17 @@ async function sdkConfigLoadSources(button) {
         agentSdkSourcesLoaded = true;
     } catch (error) {
         if (sequence !== agentSdkSourcesSequence) return;
-        tbody.innerHTML = `<tr><td colspan="8" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要 sdk.read 权限')}</td></tr>`;
+        if (agentSdkSourcesLoaded && Number(error.status) !== 401 && Number(error.status) !== 403) {
+            showToast('SDK 配置刷新失败：' + error.message, 'error');
+        } else {
+            agentSdkSourcesLoaded = false;
+            agentSdkSourcesCache = [];
+            agentSdkUserLiveCache = {};
+            tbody.innerHTML = `<tr><td colspan="8" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要 sdk.read 权限')}</td></tr>`;
+        }
     } finally {
         if (sequence === agentSdkSourcesSequence && button) {
-            button.disabled = false;
-            const label = button.lastElementChild?.nextSibling;
-            if (label) label.textContent = ' 刷新';
+            setActionButtonBusy(button, false);
         }
     }
 }
