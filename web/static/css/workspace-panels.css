@@ -36,6 +36,7 @@
 .agent-message-header { padding: 8px 12px; background: transparent; border-bottom: 0; }
 .agent-role {  color: var(--text-primary); }
 .agent-message-body { padding-top: 2px; line-height: 1.7; }
+.agent-policy-evidence .list-table :is(th, td) { text-align: center; }
 .agent-message.plan { border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color)); }
 .agent-composer { align-items: stretch; padding: 12px; background: var(--card-bg); }
 /* 高度对齐右侧按钮列：textarea 的 rows 固有高度会让 flex stretch 失效，

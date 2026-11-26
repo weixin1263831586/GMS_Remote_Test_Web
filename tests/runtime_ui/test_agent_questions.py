@@ -397,6 +397,20 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(evidence).to_contain_text('不符合 GMS 资格：Example C')
             expect(evidence.locator('table tbody tr')).to_have_count(1)
             expect(evidence.locator('table')).not_to_contain_text('Historical A')
+            alignment = evidence.locator('table').evaluate("""table => {
+                const headers = [...table.tHead.rows[0].cells];
+                const cells = [...table.tBodies[0].rows[0].cells];
+                return headers.map((header, index) => {
+                    const cell = cells[index];
+                    const h = header.getBoundingClientRect();
+                    const d = cell.getBoundingClientRect();
+                    return getComputedStyle(header).textAlign === 'center'
+                        && getComputedStyle(cell).textAlign === 'center'
+                        && Math.abs(h.left - d.left) <= 1
+                        && Math.abs(h.width - d.width) <= 1;
+                });
+            }""")
+            self.assertEqual(alignment, [True] * 4)
             expect(evidence.locator('details')).not_to_have_attribute('open', '')
             evidence.locator('summary').click()
             expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
