@@ -316,6 +316,30 @@ async def get_evidence_references(
     require_agent_scope("artifacts.read_own")(request)
     from ..reference_recall import collect_snapshot_references
 
+    if q.startswith("analyze:"):
+        from features.knowledge import run_authorized_rag
+        from foundation.config import config_manager
+        from .intelligent import SnapshotCorpus
+
+        config = (config_manager.load_config() or {}).get("retrieval") or {}
+        if not isinstance(config, dict) or config.get("allow_local_redmine_llm") is not True:
+            return _error_response(EvidenceError("尚未启用本地 Redmine 智能取证", status_code=403))
+        question = q.removeprefix("analyze:").strip()
+        if not question:
+            return _error_response(EvidenceError("分析问题不能为空", status_code=422))
+
+        def analyze():
+            corpus = SnapshotCorpus(_owner(request), snapshot_id)
+            result = run_authorized_rag(question, [corpus.source()])
+            return {"snapshot_id": snapshot_id, "rag": result, "coverage_complete": False,
+                    "snapshot_bounded": corpus.bounded, "sources": {}}
+
+        try:
+            data = await asyncio.to_thread(analyze)
+        except (ValueError, OSError):
+            return _error_response(EvidenceError("保留的证据快照不可用", status_code=409))
+        return {"success": True, "data": data}
+
     data = await asyncio.to_thread(
         collect_snapshot_references, _owner(request), snapshot_id, query=q,
     )
