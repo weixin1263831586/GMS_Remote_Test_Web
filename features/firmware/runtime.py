@@ -4,14 +4,20 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypedDict
+
+
+from typing_extensions import Unpack
 
 from foundation.config import ConfigManager
 from foundation.runtime_contracts import (
     ApiHelpProvider,
     ClientIdResolver,
+    ControllerStateContract,
     DeviceLockRelease,
     FirmwareDeviceLocker,
     NotificationStore,
+    SSHManagerContract,
     WebSocketSender,
 )
 
@@ -19,8 +25,8 @@ from foundation.runtime_contracts import (
 @dataclass
 class FirmwareRuntime:
     config_manager: ConfigManager | None = None
-    ssh_manager: object | None = None
-    global_state: object | None = None
+    ssh_manager: SSHManagerContract | None = None
+    global_state: ControllerStateContract | None = None
     safe_websocket_send: WebSocketSender | None = None
     store_notification: NotificationStore | None = None
     generate_help_or_continue: ApiHelpProvider | None = None
@@ -30,6 +36,21 @@ class FirmwareRuntime:
     lock_firmware_devices: FirmwareDeviceLocker | None = None
     release_firmware_devices: DeviceLockRelease | None = None
     firmware_share_store: str | Path | None = None
+
+
+class FirmwareRuntimeBindings(TypedDict, total=False):
+    config_manager: ConfigManager | None
+    ssh_manager: SSHManagerContract | None
+    global_state: ControllerStateContract | None
+    safe_websocket_send: WebSocketSender | None
+    store_notification: NotificationStore | None
+    generate_help_or_continue: ApiHelpProvider | None
+    get_client_id_from_request: ClientIdResolver | None
+    project_root: str | Path | None
+    firmware_transfer_timeout: int
+    lock_firmware_devices: FirmwareDeviceLocker | None
+    release_firmware_devices: DeviceLockRelease | None
+    firmware_share_store: str | Path | None
 
 
 _runtime = FirmwareRuntime()
@@ -46,7 +67,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
-def configure_runtime(**values: object) -> None:
+def configure_runtime(**values: Unpack[FirmwareRuntimeBindings]) -> None:
     invalid = set(values) - _RUNTIME_FIELDS
     if invalid:
         raise TypeError(f"unknown firmware runtime bindings: {sorted(invalid)}")

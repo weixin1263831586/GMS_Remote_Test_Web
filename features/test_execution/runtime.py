@@ -13,7 +13,9 @@ from foundation.runtime_contracts import (
     ApkTaskCreator,
     ClientIdResolver,
     ClusterTestStarter,
+    ControllerStateContract,
     FileCleanup,
+    SSHManagerContract,
     SafePathJoin,
     WebSocketSender,
 )
@@ -26,8 +28,8 @@ if TYPE_CHECKING:
 @dataclass
 class TestExecutionRuntime:
     config_manager: ConfigManager | None = None
-    ssh_manager: object | None = None
-    global_state: object | None = None
+    ssh_manager: SSHManagerContract | None = None
+    global_state: ControllerStateContract | None = None
     project_root: Path | None = None
     safe_websocket_send: WebSocketSender | None = None
     generate_help_or_continue: ApiHelpProvider | None = None
@@ -60,8 +62,8 @@ def __getattr__(name: str) -> object:
 def configure_runtime(
     *,
     selected_config_manager: ConfigManager,
-    selected_ssh_manager: object,
-    selected_global_state: object,
+    selected_ssh_manager: SSHManagerContract,
+    selected_global_state: ControllerStateContract,
     selected_project_root: Path,
     selected_safe_websocket_send: WebSocketSender | None = None,
     selected_generate_help_or_continue: ApiHelpProvider | None = None,
@@ -101,8 +103,8 @@ def configure_runtime(
 def configure_test_execution_dependencies(
     *,
     config_manager: ConfigManager,
-    ssh_manager: object,
-    global_state: object,
+    ssh_manager: SSHManagerContract,
+    global_state: ControllerStateContract,
     project_root: Path,
     safe_websocket_send: WebSocketSender,
     generate_help_or_continue: ApiHelpProvider,

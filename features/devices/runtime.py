@@ -13,10 +13,13 @@ from pathlib import Path
 from foundation.config import ConfigManager
 from foundation.runtime_contracts import (
     ApiHelpProvider,
+    ClientIdManager,
     ClientIdResolver,
     ClientIpResolver,
+    ControllerStateContract,
     LocalShellRunner,
     NotificationStore,
+    SSHManagerContract,
     TailscaleHostResolver,
     WebSocketSender,
     WindowsUsbipProbe,
@@ -26,8 +29,8 @@ from foundation.runtime_contracts import (
 @dataclass
 class DeviceRuntime:
     config_manager: ConfigManager | None = None
-    global_state: object | None = None
-    ssh_manager: object | None = None
+    global_state: ControllerStateContract | None = None
+    ssh_manager: SSHManagerContract | None = None
     store_notification: NotificationStore | None = None
     generate_help_or_continue: ApiHelpProvider | None = None
     get_client_id_from_request: ClientIdResolver | None = None
@@ -35,7 +38,7 @@ class DeviceRuntime:
     resolve_tailscale_device_host: TailscaleHostResolver | None = None
     safe_websocket_send: WebSocketSender | None = None
     get_client_ip: ClientIpResolver | None = None
-    client_manager: object | None = None
+    client_manager: ClientIdManager | None = None
     run_local_shell_command: LocalShellRunner | None = None
     project_root: Path | None = None
     device_cache_ttl: float = 15
@@ -58,8 +61,8 @@ def __getattr__(name: str) -> object:
 def configure_runtime(
     *,
     selected_config_manager: ConfigManager,
-    selected_global_state: object,
-    selected_ssh_manager: object,
+    selected_global_state: ControllerStateContract,
+    selected_ssh_manager: SSHManagerContract,
     selected_store_notification: NotificationStore,
     selected_generate_help_or_continue: ApiHelpProvider,
     selected_get_client_id_from_request: ClientIdResolver,
@@ -67,7 +70,7 @@ def configure_runtime(
     selected_resolve_tailscale_device_host: TailscaleHostResolver,
     selected_safe_websocket_send: WebSocketSender | None = None,
     selected_get_client_ip: ClientIpResolver | None = None,
-    selected_client_manager: object | None = None,
+    selected_client_manager: ClientIdManager | None = None,
     selected_run_local_shell_command: LocalShellRunner | None = None,
     selected_project_root: Path | None = None,
     selected_device_cache_ttl: float = 15,
@@ -92,9 +95,9 @@ def configure_runtime(
 
 def configure_device_dependencies(
     *,
-    ssh_manager: object,
+    ssh_manager: SSHManagerContract,
     config_manager: ConfigManager,
-    global_state: object,
+    global_state: ControllerStateContract,
     store_notification: NotificationStore,
     generate_help_or_continue: ApiHelpProvider,
     get_client_id_from_request: ClientIdResolver,
@@ -102,7 +105,7 @@ def configure_device_dependencies(
     resolve_tailscale_device_host: TailscaleHostResolver,
     safe_websocket_send: WebSocketSender,
     get_client_ip: ClientIpResolver,
-    client_manager: object,
+    client_manager: ClientIdManager,
     run_local_shell_command: LocalShellRunner,
     project_root: Path,
     device_cache_ttl: float,

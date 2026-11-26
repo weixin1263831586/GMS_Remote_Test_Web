@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
-from foundation.runtime_contracts import UserStateProvider
+
+from typing_extensions import Unpack
+
+from foundation.runtime_contracts import ControllerStateContract, SSHAsyncManagerContract, UserStateProvider
 
 
 if TYPE_CHECKING:
@@ -17,9 +20,17 @@ if TYPE_CHECKING:
 class UserRuntime:
     config_manager: ConfigManager | None = None
     data_root: Path | None = None
-    global_state: object | None = None
-    ssh_async_manager: object | None = None
+    global_state: ControllerStateContract | None = None
+    ssh_async_manager: SSHAsyncManagerContract | None = None
     get_or_create_user_state: UserStateProvider | None = None
+
+
+class UserRuntimeBindings(TypedDict, total=False):
+    config_manager: ConfigManager | None
+    data_root: str | Path | None
+    global_state: ControllerStateContract | None
+    ssh_async_manager: SSHAsyncManagerContract | None
+    get_or_create_user_state: UserStateProvider | None
 
 
 _runtime = UserRuntime()
@@ -36,7 +47,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
-def configure_runtime(**values: object) -> None:
+def configure_runtime(**values: Unpack[UserRuntimeBindings]) -> None:
     invalid = set(values) - _RUNTIME_FIELDS
     if invalid:
         raise TypeError(f"unknown user runtime bindings: {sorted(invalid)}")
@@ -52,8 +63,8 @@ def configure_user_dependencies(
     *,
     config_manager: ConfigManager,
     data_root: Path,
-    global_state: object,
-    ssh_async_manager: object,
+    global_state: ControllerStateContract,
+    ssh_async_manager: SSHAsyncManagerContract,
     get_or_create_user_state: UserStateProvider,
 ) -> None:
     """Wire user runtime and configuration consumers."""

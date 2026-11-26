@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from asyncio import Lock, Task
 from collections.abc import Awaitable, Callable
+from contextlib import AbstractAsyncContextManager, AbstractContextManager
 from typing import Any, Protocol
 
+from paramiko import SFTPClient, SSHClient
 from pydantic import BaseModel, Field
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.websockets import WebSocket
 
 from foundation.command_result import CommandResult
 
@@ -23,6 +27,75 @@ ApkTaskCreator = Callable[[str, str, str, str], None]
 ApkFilenameNormalizer = Callable[[str | None], str]
 FileCleanup = Callable[[list[str]], None]
 DeviceLockRelease = Callable[[str, list[str]], Awaitable[None]]
+
+
+class ControllerStateContract(Protocol):
+    """Mutable Controller process state shared by configured features."""
+
+    test_logs: dict[str, list[Any]]
+    test_logs_lock: AbstractContextManager[bool]
+    last_saved_log_file: dict[str, str]
+    device_cache: dict[str, Any]
+    device_cache_lock: AbstractContextManager[bool]
+    websocket_connections: dict[str, WebSocket | set[WebSocket]]
+    websocket_connections_lock: AbstractContextManager[bool]
+    firmware_upload_progress: dict[str, Any]
+    firmware_upload_progress_lock: AbstractContextManager[bool]
+    usbip_states: dict[str, dict[str, Any]]
+    usbip_states_lock: AbstractContextManager[bool]
+    usbip_devices_source: dict[str, dict[str, Any]]
+    usbip_devices_source_lock: AbstractContextManager[bool]
+    user_states: dict[str, dict[str, Any]]
+    user_states_lock: AbstractContextManager[bool]
+    apk_analysis_tasks: dict[str, dict[str, Any]]
+    apk_analysis_tasks_lock: AbstractContextManager[bool]
+    apk_upload_locks: dict[str, Lock]
+    apk_upload_locks_lock: AbstractContextManager[bool]
+    background_tasks: set[Task[Any]]
+
+    def device_ssh_pool_get(
+        self, pool_key: str, config: dict[str, Any], pool_size: int = 3,
+    ) -> SSHClient | None: ...
+
+    def device_ssh_pool_return(self, pool_key: str, ssh: SSHClient) -> None: ...
+
+
+class SSHManagerContract(Protocol):
+    def create_connection(
+        self, config: dict[str, Any], *, raise_on_error: bool = False,
+    ) -> SSHClient | None: ...
+
+    def get_connection(self, config: dict[str, Any]) -> SSHClient | None: ...
+
+    def return_connection(self, ssh: SSHClient) -> None: ...
+
+    def execute_command(
+        self, ssh: SSHClient, command: str, timeout: int = 30, get_pty: bool = False,
+    ) -> CommandResult: ...
+
+    def check_sshd_installed(self, ssh: SSHClient) -> tuple[bool, str]: ...
+
+    def install_sshd(self, ssh: SSHClient, config: dict[str, Any]) -> dict[str, Any]: ...
+
+    def connection(self, config: dict[str, Any]) -> AbstractContextManager[SSHClient]: ...
+
+    def optional_connection(self, config: dict[str, Any]) -> AbstractContextManager[SSHClient | None]: ...
+
+    def async_optional_connection(
+        self, config: dict[str, Any],
+    ) -> AbstractAsyncContextManager[SSHClient | None]: ...
+
+    def optimize_sftp_performance(self, sftp: SFTPClient) -> None: ...
+
+
+class SSHAsyncManagerContract(Protocol):
+    async def execute_command_simple(
+        self, host: str, username: str, password: str, command: str, timeout: int = 30,
+    ) -> CommandResult: ...
+
+
+class ClientIdManager(Protocol):
+    def get_client_id(self, client_ip: str, username: str = "unknown") -> str: ...
 
 
 class NotificationStore(Protocol):
