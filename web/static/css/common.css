@@ -1142,7 +1142,6 @@ body {
     z-index: 2;
 }
 .list-table th {
-    padding: 5px 6px;
     border-bottom: 1px solid var(--border-color);
     background: var(--darker-bg);
     color: var(--text-secondary);
