@@ -15,6 +15,73 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
             target.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(target / f'{name}.png'))
 
+    def test_shared_action_busy_state_preserves_compact_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""async () => {
+                const host = document.createElement('div');
+                host.style.cssText = 'position:fixed;top:10px;left:10px;display:flex;gap:6px';
+                document.body.append(host);
+                const make = (size, html) => {
+                    const button = document.createElement('button');
+                    button.className = 'btn-xs';
+                    button.dataset.busySize = size;
+                    button.innerHTML = html;
+                    host.append(button);
+                    return button;
+                };
+                const plain = make('short', '查询');
+                const icon = make('icon', GmsUi.icon('refresh') + ' 刷新');
+                const long = make('long', GmsUi.icon('refresh') + ' 全量同步');
+                const records = [];
+                try {
+                    for (const [button, label, max] of [[plain, '查询中', 70],
+                            [icon, '刷新中', 86], [long, '同步中', 96]]) {
+                        const markup = button.innerHTML;
+                        const before = button.getBoundingClientRect();
+                        const iconNode = button.querySelector('svg');
+                        setActionButtonBusy(button, true, label);
+                        const during = button.getBoundingClientRect();
+                        const busy = button.disabled && button.getAttribute('aria-busy') === 'true';
+                        const matches = button.textContent.trim() === label;
+                        const preserved = button.querySelector('svg') === iconNode;
+                        const fits = button.scrollWidth <= button.clientWidth + 1;
+                        setActionButtonBusy(button, false);
+                        const after = button.getBoundingClientRect();
+                        records.push({
+                            busy, matches, preserved, fits, compact: before.width <= max,
+                            same: before.width === during.width && during.width === after.width
+                                && before.height === during.height && during.height === after.height,
+                            restored: button.innerHTML === markup && !button.disabled
+                                && button.getAttribute('aria-busy') === null,
+                        });
+                    }
+                    let finishFirst, finishSecond;
+                    const first = withActionButtonBusy(icon, '刷新中', () => new Promise(resolve => { finishFirst = resolve; }));
+                    const second = withActionButtonBusy(icon, '刷新中', () => new Promise(resolve => { finishSecond = resolve; }));
+                    finishFirst();
+                    await first;
+                    const overlapping = icon.disabled && icon.getAttribute('aria-busy') === 'true';
+                    finishSecond();
+                    await second;
+                    const settled = !icon.disabled && icon.textContent.trim() === '刷新';
+                    try {
+                        await withActionButtonBusy(plain, '查询中', async () => { throw new Error('failed'); });
+                    } catch (_) {}
+                    return {records, overlapping, settled, failureRestored: !plain.disabled && plain.textContent === '查询'};
+                } finally {
+                    host.remove();
+                }
+            }""")
+            for record in result['records']:
+                self.assertTrue(all(record.values()), record)
+            self.assertTrue(result['overlapping'], result)
+            self.assertTrue(result['settled'], result)
+            self.assertTrue(result['failureRestored'], result)
+        finally:
+            page.close()
+
     def test_original_navigation_icons_match_page_titles(self):
         page = self.new_page()
         try:
