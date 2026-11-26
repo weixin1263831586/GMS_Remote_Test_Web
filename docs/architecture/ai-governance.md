@@ -308,7 +308,7 @@ flowchart LR
 | 错误出口契约 | `tests/architecture/test_api_error_semantics.py` | 异常文本泄漏；record_internal_error 旧用法回潮 |
 | 语料契约 | `tests/quality/test_diagnosis_corpus_contract.py` | 语料本身非法导致质量门禁静默失效 |
 | Ledger 状态机 | `features/redmine/tests/daily_brief/test_ai_execution_ledger.py` | 防重复发送/终态改写/租约僵尸语义回归 |
-| 失败身份 | `features/redmine/tests/test_failure_identity.py` | 同名用例误合并；归一化过度/不足 |
+| 失败身份 | `features/redmine/tests/analysis/test_failure_identity.py` | 同名用例误合并；归一化过度/不足 |
 | 统一读模型 | `foundation/test_diagnosis_read_model.py` + 两个适配器测试 | canonical 章节漂移；封闭词表被绕过；投影破坏原生负载 |
 | Wiki golden query | `features/knowledge/tests/test_external_provider.py::GoldenQueryCorpusTests` | 知识召回质量漂移 |
 

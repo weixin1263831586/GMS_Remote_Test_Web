@@ -45,12 +45,12 @@ jobs:
           GMS_SKIP_RUNTIME_ENV: "1"
         run: |
           python -m pytest -q \
-            features/redmine/tests/test_history_remote_contract.py \
-            features/redmine/tests/test_client_search_hardening.py \
-            features/redmine/tests/test_analysis_similarity_ranking.py \
-            features/redmine/tests/test_issue_journal_export.py \
+            features/redmine/tests/issues/test_history_remote_contract.py \
+            features/redmine/tests/issues/test_client_search_hardening.py \
+            features/redmine/tests/analysis/test_analysis_similarity_ranking.py \
+            features/redmine/tests/analysis/test_issue_journal_export.py \
             features/redmine/tests/evidence/test_attachment_text_integrity.py \
-            features/redmine/tests/test_repository_search.py \
+            features/redmine/tests/repository/test_repository_search.py \
             features/redmine/tests/daily_brief/test_daily_brief_service.py::RunPayloadExecutionViewTests \
             features/redmine/tests/daily_brief/test_daily_brief_review_regressions.py \
             features/redmine/tests/analysis/kkagent/test_claim_review.py \
