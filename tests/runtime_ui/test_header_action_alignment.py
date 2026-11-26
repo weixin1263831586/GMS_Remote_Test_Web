@@ -1,6 +1,6 @@
 """One title-action geometry template for segmented navigation headers.
 
-Desktop/Terminal's four layout buttons and Users/Audit's tab capsules must
+Desktop/Terminal layout buttons and Users/Audit/Knowledge tab capsules must
 start at exactly the same top edge and use the same 26px outer control height.
 """
 
@@ -22,7 +22,7 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                 page.set_viewport_size({"width": width, "height": height})
                 geometry = page.evaluate(
                     """() => {
-                        const names = ['terminal', 'users', 'desktop', 'security-audit'];
+                        const names = ['terminal', 'users', 'desktop', 'security-audit', 'notes'];
                         const pages = [...document.querySelectorAll(
                             '.main-container > .page-content')];
                         const oldActive = pages.map(node => node.classList.contains('active'));
@@ -75,7 +75,7 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                     }"""
                 )
                 evidence[str(width)] = geometry
-                self.assertEqual(len(geometry), 4)
+                self.assertEqual(len(geometry), 5)
                 tops = [item["top"] for item in geometry.values()]
                 heights = [item["height"] for item in geometry.values()]
                 for name, item in geometry.items():
@@ -89,7 +89,7 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                         self.assertAlmostEqual(item["height"], 26,
                                                delta=0.75, msg=str(item))
                         self.assertLessEqual(max(item["buttons"]), 26.5, item)
-                        expectedButton = 24 if name in ("users", "security-audit") else 26
+                        expectedButton = 24 if name in ("users", "security-audit", "notes") else 26
                         for buttonHeight in item["buttons"]:
                             self.assertAlmostEqual(
                                 buttonHeight, expectedButton, delta=0.75,
