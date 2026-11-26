@@ -80,6 +80,18 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         unknown = _validate_sources(payload.sources)
         if unknown:
             return error_response(unknown, 422)
+    if query.startswith("analyze:"):
+        if payload.sources and "web_documents" not in payload.sources:
+            return error_response("智能规范分析仅接入公开 CDD；Wiki 可使用原有检索", 422)
+        question = query.removeprefix("analyze:").strip()
+        if not question:
+            return error_response("分析问题不能为空", 422)
+        from .service import analyze_public_cdd
+
+        result = analyze_public_cdd(question, limit=payload.limit, android_api_level=payload.android_api_level)
+        result["sources_status"] = [row for row in federated_status() if row.get("source") == "web_documents"]
+        result["analysis_scope"] = "public_cdd_only"
+        return success_response(data=result)
     if query.startswith(('context:', 'section:')):
         if payload.sources and 'web_documents' not in payload.sources:
             return error_response('请求的来源不包含外部网页', 422)
