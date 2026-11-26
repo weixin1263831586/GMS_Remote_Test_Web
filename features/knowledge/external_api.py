@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 
 from fastapi import APIRouter, Query, Request
@@ -78,6 +79,21 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         unknown = _validate_sources(payload.sources)
         if unknown:
             return error_response(unknown, 422)
+    if query.startswith(('context:', 'section:')):
+        if payload.sources and 'web_documents' not in payload.sources:
+            return error_response('请求的来源不包含外部网页', 422)
+        match = re.fullmatch(r'(context|section):(POL-[0-9a-f]{24})(?:\|(\d{1,5}))?', query)
+        if not match or int(match.group(3) or 0) > 30000:
+            return error_response('读取格式：context:POL-引用|偏移 或 section:POL-引用|偏移', 422)
+        mode, token, offset = match.groups()
+        result = WebKnowledgeProvider().read_cdd_scope(
+            token, mode=mode, offset=int(offset or 0), limit=payload.limit,
+            android_api_level=payload.android_api_level,
+        )
+        result['sources_status'] = [row for row in federated_status() if row.get('source') == 'web_documents']
+        if result['next_offset'] is not None:
+            result['next_query'] = f"{mode}:{token}|{result['next_offset']}"
+        return success_response(data=result)
     # Exact citation retrieval and version comparison use the existing search contract.
     if query.startswith('POL-') or query.startswith('compare:'):
         if payload.sources and 'web_documents' not in payload.sources:

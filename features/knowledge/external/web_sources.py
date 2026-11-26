@@ -363,6 +363,59 @@ class WebKnowledgeProvider:
             ).fetchall()
         return dict(rows[0]) if len(rows) == 1 else None
 
+    def read_cdd_scope(self, token, *, mode, offset=0, limit=3, android_api_level=None):
+        """Read a current CDD section or rows carrying an indexed condition."""
+        if mode not in {'context', 'section'} or not 0 <= offset <= 30000:
+            raise ValueError('Invalid scope or offset')
+        limit = min(max(limit, 1), 3)
+        result = {'scope': mode, 'reference': token, 'offset': offset, 'total': 0,
+                  'next_offset': None, 'coverage_complete': False, 'status': 'unavailable',
+                  'results': []}
+        if not re.fullmatch(r'POL-[0-9a-f]{24}', token) or not self._path().is_file():
+            return result
+        version = API_TO_ANDROID.get(android_api_level, -1) if android_api_level is not None else None
+        with self._db() as db:
+            db.execute('BEGIN')
+            anchors = db.execute(
+                """SELECT DISTINCT c.*,s.android_version,s.error FROM clauses c JOIN sources s
+                   ON c.source_id=s.id AND c.revision=s.revision
+                   WHERE c.token=? AND s.enabled=1 AND s.kind='cdd'
+                   AND (? IS NULL OR s.android_version=?) LIMIT 2""", (token, version, version)
+            ).fetchall()
+            if len(anchors) != 1:
+                return result
+            anchor = anchors[0]
+            result.update(section=anchor['section'], source_revision=anchor['revision'],
+                          android_version=anchor['android_version'], source_url=anchor['url'])
+            if anchor['error']:
+                result['status'] = 'stale'
+                return result
+            where = 'c.source_id=? AND c.revision=? AND c.section=? AND c.url=?'
+            params = [anchor['source_id'], anchor['revision'], anchor['section'], anchor['url']]
+            if mode == 'context':
+                # Textual condition association is not proof of device applicability.
+                where += ' AND c.token<>? AND instr(c.condition,?)>0'
+                params.extend([token, anchor['original']])
+            total = db.execute(f'SELECT count(*) FROM clauses c WHERE {where}', params).fetchone()[0]
+            rows = db.execute(
+                f"""SELECT c.*,s.name,s.android_version,s.kind,s.license,s.error,s.synced_at
+                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                    WHERE {where} ORDER BY c.rowid LIMIT ? OFFSET ?""",
+                [*params, limit, offset],
+            ).fetchall()
+        next_offset = offset + len(rows) if rows and offset + len(rows) < total else None
+        result.update(status='matched' if rows else 'no_match', total=total, next_offset=next_offset,
+                      page_complete=next_offset is None,
+                      results=[{
+                          'source': SOURCE, 'reference': row['token'], 'source_revision': row['revision'],
+                          'requirement_id': row['requirement_id'], 'requirement_level': row['level'],
+                          'original': row['original'], 'condition': row['condition'],
+                          'source_anchors': [{'url': row['url'], 'revision': row['revision'],
+                                              'evidence_type': 'official'}],
+                          'evidence_level': 'background',
+                      } for row in rows])
+        return result
+
     def compare_requirements(self, section, requirement_id, *, limit=10, android_api_level=None):
         """Compare current CDD revisions by exact section and clause, never bare ID."""
         if not self._path().is_file():

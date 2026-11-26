@@ -115,9 +115,10 @@ def compact_observation(payload: dict[str, Any], *, max_bytes: int = 8000) -> st
         return encode(payload)
 
     priority = ("success", "tool_name", "error", "status", "status_code", "code",
-                "coverage_complete", "sources_status", "retrieval", "source", "reference",
+                "coverage_complete", "next_query", "next_offset", "total", "offset", "page_complete",
+                "sources_status", "retrieval", "source", "reference",
                 "source_revision", "source_path", "source_anchors", "requirement_id",
-                "run_id", "items", "results", "data", "extra")
+                "original", "condition", "scope", "run_id", "items", "results", "data", "extra")
 
     def shorten(value, width, count, depth=0):
         if isinstance(value, str):

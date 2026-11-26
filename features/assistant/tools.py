@@ -527,12 +527,14 @@ def knowledge_agent_tools() -> list[AgentTool]:
                 "区分规范要求与背景解释，检查 sources_status 和适用条件；"
                 "背景知识不得作为已证实根因。"
                 "若命中 POL- 引用但仅返回片段，使用该完整引用作为 query 单独读取原条款；"
+                "条件引导句使用 context:POL-引用|0 展开同条件的下属记录；"
+                "section:POL-引用|0 分页读取同章节，按 next_query 继续。"
                 "保留目标 Android 版本，不能将其他版本或过期修订用于当前结论。"
             ),
             api_path="/api/knowledge/external/search",
             method="POST",
             params=[
-                {"name": "query", "type": "string", "required": True, "desc": "规范或机制关键词；完整 POL- 引用可读取对应条款原文；compare:章节|条款编号可比较当前版本条款"},
+                {"name": "query", "type": "string", "required": True, "desc": "规范或机制关键词；完整 POL- 引用可读取对应条款原文；context:POL-引用|0 展开条件；section:POL-引用|0 分页读取章节；compare:章节|条款编号比较版本"},
                 {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源：web_documents（公开网页规范）、android_internals（机制 Wiki）；默认全部"},
                 {"name": "limit", "type": "integer", "required": False, "desc": "返回数量（1-10）"},
                 {"name": "android_api_level", "type": "integer", "required": False,

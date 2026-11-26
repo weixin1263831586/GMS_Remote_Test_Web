@@ -347,3 +347,34 @@ def test_status_reports_indexed_clause_coverage(tmp_path, monkeypatch):
     assert '1/1 sources indexed' in detail
     assert 'clauses in' in detail
     assert provider.indexed_coverage()['sections'] >= 2
+
+
+
+def test_read_condition_and_section_pages_are_current_and_version_bound(tmp_path, monkeypatch):
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source = configure(provider, 16)
+    body = cdd(16).replace(
+        b'<li>[C-1-1] MUST support TTS framework APIs.</li>',
+        b'<li>For 64-bit devices:<ul>'
+        b'<li>[C-1-8] MUST have 123 MB.</li>'
+        b'<li>[C-1-9] MUST have 456 MB.</li></ul></li>',
+    )
+    monkeypatch.setattr(web_sources, 'fetch_html', lambda *_args, **_kwargs: (body, '', ''))
+    provider.sync(source)
+    with provider._db() as db:
+        token = db.execute("SELECT token FROM clauses WHERE original='For 64-bit devices:'").fetchone()[0]
+    first = provider.read_cdd_scope(token, mode='context', limit=1, android_api_level=36)
+    assert first['total'] == 2 and first['next_offset'] == 1
+    assert first['results'][0]['requirement_id'] == 'C-1-8'
+    assert 'For 64-bit devices:' in first['results'][0]['condition']
+    second = provider.read_cdd_scope(token, mode='context', offset=1, limit=1, android_api_level=36)
+    assert second['results'][0]['requirement_id'] == 'C-1-9'
+    assert second['next_offset'] is None and not second['coverage_complete']
+    section = provider.read_cdd_scope(token, mode='section', android_api_level=36)
+    assert section['total'] > first['total']
+    assert all(row['source_anchors'][0]['url'].endswith('#tts') for row in section['results'])
+    assert not provider.read_cdd_scope(token, mode='context', android_api_level=37)['results']
+    monkeypatch.setattr(web_sources, 'fetch_html',
+                        lambda *_args, **_kwargs: (body.replace(b'123 MB', b'789 MB'), '', ''))
+    provider.sync(source)
+    assert not provider.read_cdd_scope(token, mode='context')['results']
