@@ -63,10 +63,10 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                                 return actions.children.length === 4 && singleLine(actions.children)
                                     && actions.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1;
                             }),
-                            annotationWidth: rows.every(row => {
+                            commandWidth: rows.every(row => {
                                 const command = row.querySelector('code').getBoundingClientRect();
                                 const comment = row.querySelector('.aoa-command-comment').getBoundingClientRect();
-                                return comment.width >= command.width * 1.45;
+                                return command.width >= comment.width * 1.9;
                             }),
                             comments: rows.every(row => {
                                 const comment = row.querySelector('.aoa-command-comment');
