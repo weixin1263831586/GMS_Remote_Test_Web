@@ -1,12 +1,8 @@
-"""DailyBriefService 编排测试（不启动真实 kkagent/Redmine）。
-
-preflight fail-closed 语义（2026-09 收紧）由 kkagent/preflight 的
-专项单测覆盖；本文件的编排路径统一把 preflight patch 为通过。
-run_payload 执行视图/脱敏契约见 test_daily_brief_execution_view.py。
-"""
+"""Daily Brief orchestration, authorization preflight, analyzer binding and execution-view tests."""
 
 from __future__ import annotations
 
+import asyncio
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,6 +13,7 @@ from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 from features.redmine.analysis.kkagent.evidence_preflight import EvidencePreflight
 from features.redmine.config import RedmineConfig
 from features.redmine.daily_brief.config import DEFAULT_BRIEF_CONFIG, normalize_daily_brief_config
+from features.redmine.daily_brief.report import DEFAULT_MODEL_LABEL
 from features.redmine.daily_brief.repository import DailyBriefRepository
 from features.redmine.daily_brief.service import DailyBriefService
 
@@ -915,6 +912,314 @@ class DeleteIssueHistoryTests(unittest.TestCase):
         result = self.service.delete_issue_history(42)
         self.assertEqual(result, {"issue_id": 42, "deleted_runs": 0})
 
+
+class AuthPreflightTests(unittest.TestCase):
+    """A revoked token fails fast before a run spends AI turns on MCP errors."""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = make_service(Path(self._tmp.name))
+        # 默认放行 preflight（编排路径聚焦 token 吊销场景）；各测试方法内
+        # 可用 _patch_preflight 覆盖为拦截语义。
+        default_ok = patch(
+            "features.redmine.daily_brief.service.preflight_gms_auth",
+            AsyncMock(return_value=(True, "")),
+        )
+        default_ok.start()
+        self.addCleanup(default_ok.stop)
+        # 成功路径契约：reanalysis 通过 preflight 后还要过 Redmine 实时
+        # revalidation 才能标 completed（单测必须 mock 该
+        # 新契约，否则 owner_revalidation_failed 把 completed 压成 failed）。
+        owner_revalidation = patch(
+            "features.redmine.daily_brief.service.revalidate_issue_pending_for_owner",
+            AsyncMock(return_value={
+                "pending": True,
+                "assigned_to_name": "张三",
+                "status_name": "New",
+            }),
+        )
+        owner_revalidation.start()
+        self.addCleanup(owner_revalidation.stop)
+
+    @staticmethod
+    def _patch_preflight(ok: bool, reason: str):
+        return patch(
+            "features.redmine.daily_brief.service.preflight_gms_auth",
+            AsyncMock(return_value=(ok, reason)),
+        )
+
+    def test_revoked_token_fails_whole_run_before_analysis(self):
+        started = self.service.start_run("nightly")
+        reason = (
+            "GMS agent token 失效（profile 'kkagent-host'）。"
+            "请重新注册: gms-rt-agent-enroll <CODE>"
+        )
+        with self._patch_preflight(False, reason), patch.object(
+            self.service, "build_triage"
+        ) as triage:
+            run = asyncio.run(self.service.execute_run(started["run_id"]))
+        self.assertEqual(run.status, "failed")
+        self.assertIn("gms-rt-agent-enroll", run.error)
+        triage.assert_not_called()
+
+    def test_revoked_token_blocks_reanalyze(self):
+        async def ok_analyze(_entry):
+            return KkAgentAnalysisResult(ok=True, result=dict(VALID))
+
+        started = self.service.start_run("manual")
+        run_id = started["run_id"]
+        with patch.object(
+            self.service,
+            "build_triage",
+            AsyncMock(return_value=dict(SNAPSHOT)),
+        ), patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = ok_analyze
+            completed = asyncio.run(self.service.execute_run(run_id))
+
+        reason = "GMS agent token 失效。请重新注册: gms-rt-agent-enroll <CODE>"
+        with self._patch_preflight(False, reason), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder:
+            builder.return_value.analyze = ok_analyze
+            result = asyncio.run(
+                self.service.reanalyze_issue(completed.brief_date, 101)
+            )
+        self.assertIn("gms-rt-agent-enroll", result.get("error", ""))
+
+        with self._patch_preflight(True, ""), patch.object(
+            self.service, "_build_analyzer"
+        ) as builder:
+            builder.return_value.analyze = ok_analyze
+            result = asyncio.run(
+                self.service.reanalyze_issue(completed.brief_date, 101)
+            )
+        self.assertEqual(result.get("status"), "completed")
+
+
+class AnalyzerBindingTests(unittest.TestCase):
+    """kkagent 分析器必须绑定 owner 的 profile，且不继承他人身份。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = make_service(Path(self._tmp.name))
+
+    def test_profile_binds_mcp_identity_env(self):
+        analyzer = self.service._build_analyzer({"agent_profile": "owner-a"})
+        self.assertEqual(analyzer.env_extra.get("GMS_RT_PROFILE"), "owner-a")
+        self.assertEqual(analyzer.env_extra.get("GMS_AGENT_AUTH_MODE"), "service-token")
+
+    def test_without_profile_no_identity_injected(self):
+        analyzer = self.service._build_analyzer({})
+        self.assertNotIn("GMS_RT_PROFILE", analyzer.env_extra)
+        self.assertNotIn("GMS_AUTH_TOKEN_FILE", analyzer.env_extra)
+
+    def test_profile_is_sanitized(self):
+        config = normalize_daily_brief_config({"agent_profile": "bad name;rm -rf"})
+        self.assertEqual(config["agent_profile"], "")
+
+    def test_analysis_has_no_hard_budget(self):
+        analyzer = self.service._build_analyzer({})
+        self.assertEqual(analyzer.max_turns, 0)
+        self.assertEqual(analyzer.timeout_seconds, 0)
+
+
+
+class CrashRecoveryTests(unittest.TestCase):
+    """启动前把中断遗留的 run 标记为 failed。"""
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = make_service(Path(self._tmp.name))
+
+    def test_start_run_recovers_interrupted(self):
+        from datetime import datetime, timedelta
+
+        from features.redmine.daily_brief.models import DailyBriefRun
+
+        # brief_date 必须避开"今天"：恢复把 stale run 标记 failed 后，
+        # start_run 会按产品逻辑复用【当天】的 nightly run 并重置为
+        # pending 重试——与当天同日的 stale run 会遮蔽恢复断言
+        # （该断言只在非当天日期下成立）。
+        brief_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+        stale = DailyBriefRun(
+            owner_id="u1", brief_date=brief_date, mode="nightly",
+            run_id="db_stale", status="analyzing",
+            started_at=(datetime.now() - timedelta(days=3)).isoformat(timespec="seconds"),
+        )
+        self.service.repository.create_run(stale)
+        self.service.start_run("nightly")
+        recovered = self.service.repository.get_run("db_stale")
+        self.assertEqual(recovered.status, "failed")
+        self.assertEqual(recovered.error, "interrupted by process restart")
+
+
+    def test_old_running_job_is_not_interrupted_by_age(self):
+        from features.redmine.daily_brief.models import DailyBriefRun
+
+        run = DailyBriefRun(owner_id='u1', brief_date='2020-01-01', mode='manual',
+                            run_id='old-live', status='analyzing', started_at='2020-01-01T00:00:00')
+        self.service.repository.create_run_and_enqueue_job(run)
+        self.service.repository.update_run(run)
+        self.service._recover_interrupted_runs({})
+        self.assertEqual(self.service.repository.get_run('old-live').status, 'analyzing')
+
+
+class RunPayloadExecutionViewTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.service = make_service(Path(self._tmp.name))
+        preflight = patch_preflight_ok()
+        preflight.start()
+        self.addCleanup(preflight.stop)
+
+    def _patch_snapshot(self):
+        mock = AsyncMock(return_value=dict(SNAPSHOT))
+        return patch.object(self.service, "build_triage", mock)
+
+    def _execute_with_analyzer(self, fake_analyze):
+        run = self.service.start_run("manual")
+        run_id = run["run_id"]
+        with self._patch_snapshot(), patch.object(self.service, "_build_analyzer") as builder:
+            builder.return_value.analyze = fake_analyze
+            asyncio.run(self.service.execute_run(run_id))
+        return self.service.run_payload(self.service.repository.get_run(run_id))
+
+    def test_run_payload_hides_raw_response(self):
+        async def fake_analyze(entry):
+            return KkAgentAnalysisResult(
+                ok=True,
+                result=dict(VALID),
+                raw_output="SECRET-RAW",
+                trace={
+                    "session_id": "sess-1",
+                    "status": "completed",
+                    "tool_call_count": 2,
+                    "input_tokens": 120,
+                    "output_tokens": 30,
+                    "history_search_count": 2,
+                    "distinct_history_search_count": 2,
+                    "repair_attempts": 1,
+                    "tools": [
+                        {
+                            "tool_name": "gms_rt_redmine_issue_fetch",
+                            "status": "succeeded",
+                            "output_sha256": "abc",
+                            "output_preview": "PRIVATE",
+                        },
+                        {
+                            "tool_name": "gms_rt_devices_snapshot",
+                            "status": "succeeded",
+                            "output_sha256": "device",
+                        }
+                    ],
+                },
+            )
+
+        payload = self._execute_with_analyzer(fake_analyze)
+        for issue in payload["issues"]:
+            self.assertNotIn("raw_response", issue)
+            self.assertEqual(issue["ai_execution"]["session_id"], "sess-1")
+            self.assertTrue(issue["ai_execution"]["issue_fetched"])
+            self.assertEqual(issue["ai_execution"]["device_evidence_status"], "succeeded")
+            self.assertNotIn("tools", issue["ai_execution"])
+            self.assertNotIn("PRIVATE", str(issue["ai_execution"]))
+        statistics = payload["issues"][0]["ai_statistics"]
+        self.assertEqual(statistics["execution_count"], 1)
+        self.assertEqual(statistics["tokens"]["input_tokens"], 120)
+        self.assertEqual(statistics["tokens"]["output_tokens"], 30)
+        self.assertEqual(
+            statistics["timing"]["total_duration_ms"],
+            payload["issues"][0]["ai_execution"]["duration_ms"],
+        )
+        self.assertEqual(statistics["gms_tool_call_count"], 2)
+        self.assertEqual(statistics["models"][0]["model_name"], DEFAULT_MODEL_LABEL)
+        self.assertNotIn("PRIVATE", str(statistics))
+
+    def test_failed_attempt_exposes_observed_gate_without_publishing_a_report(self):
+        from features.redmine.analysis.kkagent.trace import KkAgentTrace, ToolTrace
+        from features.redmine.daily_brief.models import DailyBriefIssue
+        from features.redmine.daily_brief.report import issue_payload
+
+        trace = KkAgentTrace()
+        trace.tool_calls = [
+            ToolTrace(tool_call_id="a", tool_name="gms_rt_redmine_issue_fetch",
+                      tool_input={"issue_id": 123}, status="succeeded",
+                      evidence_issue_ids=[123], snapshot_ids=["snapshot"]),
+            ToolTrace(tool_call_id="b", tool_name="gms_rt_redmine_journals",
+                      tool_input={"snapshot_id": "snapshot"}, status="succeeded"),
+            ToolTrace(tool_call_id="c", tool_name="gms_rt_redmine_attachments",
+                      tool_input={"snapshot_id": "snapshot"}, status="succeeded",
+                      attachment_manifest_parsed=True, attachment_count=0),
+            ToolTrace(tool_call_id="d", tool_name="gms_rt_sdk_search",
+                      status="succeeded", source_evidence_valid=False,
+                      source_result_count=0),
+        ]
+        record = DailyBriefIssue(run_id="db", issue_id=123, subject="CTS failure", buckets=[])
+        attempt = {
+            **trace.to_summary(), "final_ok": False,
+            "failure_stage": "evidence_gate_failed",
+            "analysis_review_findings": ["source version mismatch"],
+        }
+        payload = issue_payload(record, attempt)
+        observed = payload["ai_execution"]["failed_attempt_evidence"]
+        self.assertTrue(observed["issue_fetched"])
+        self.assertTrue(observed["journals_checked"])
+        self.assertTrue(observed["attachments_checked"])
+        self.assertFalse(payload["ai_execution"]["source_evidence_checked"])
+        self.assertEqual(payload["ai_execution"]["source_evidence_tool_count"], 0)
+        self.assertEqual(payload["ai_execution"]["review_findings_count"], 1)
+        self.assertNotIn("source version mismatch", str(observed))
+        self.assertEqual(record.result, {})
+
+    def test_successful_source_search_with_zero_hits_is_not_evidence(self):
+        from features.redmine.daily_brief.models import DailyBriefIssue
+        from features.redmine.daily_brief.report import issue_payload
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "final_ok": False,
+            "tools": [{"tool_name": "gms_rt_sdk_search", "status": "succeeded",
+                       "source_evidence_valid": False, "source_result_count": 0}],
+        })
+        self.assertFalse(payload["ai_execution"]["source_evidence_checked"])
+        self.assertEqual(payload["ai_execution"]["source_evidence_tool_count"], 0)
+
+    def test_device_service_outage_is_not_presented_as_a_device_failure(self):
+        from features.redmine.daily_brief.models import DailyBriefIssue
+        from features.redmine.daily_brief.report import issue_payload
+
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "tools": [{
+                "tool_name": "gms_rt_devices_snapshot", "status": "failed",
+                "failure_kind": "service_unavailable",
+            }],
+        })
+        self.assertEqual(
+            payload["ai_execution"]["device_evidence_status"], "service_unavailable"
+        )
+
+    def test_pending_device_trace_on_failed_run_is_not_presented_as_collecting(self):
+        from features.redmine.daily_brief.models import DailyBriefIssue
+        from features.redmine.daily_brief.report import issue_payload
+
+        payload = issue_payload(DailyBriefIssue(
+            run_id="db", issue_id=1, buckets=[]
+        ), {
+            "final_ok": False,
+            "failure_stage": "kkagent_error",
+            "tools": [{
+                "tool_name": "gms_rt_devices_snapshot", "status": "pending",
+            }],
+        })
+        self.assertEqual(
+            payload["ai_execution"]["device_evidence_status"], "unavailable"
+        )
 
 if __name__ == "__main__":
     unittest.main()

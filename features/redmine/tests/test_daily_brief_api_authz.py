@@ -20,6 +20,8 @@ import features.redmine.daily_brief.api as daily_brief_api
 import features.redmine.daily_brief.repository as brief_repo
 from features.auth import CurrentUser
 from features.redmine.analysis.kkagent import KkAgentAnalysisResult
+from features.redmine.daily_brief.owner_policy import is_daily_brief_owner_eligible
+from features.redmine.daily_brief.service import DailyBriefService
 from features.redmine.tests.test_daily_brief_api import TRIAGE, VALID
 
 
@@ -263,6 +265,32 @@ class DailyBriefApiAuthzTests(unittest.TestCase):
             unavailable.json()["code"], "DEPENDENCY_UNAVAILABLE",
         )
 
+
+class DailyBriefOwnerPolicyTests(unittest.TestCase):
+    def test_admin_owner_is_rejected(self):
+        with patch(
+            "features.redmine.daily_brief.owner_policy.auth_service.get_enabled_user",
+            return_value=SimpleNamespace(role="admin"),
+        ):
+            self.assertFalse(is_daily_brief_owner_eligible("gms"))
+
+    def test_ordinary_and_unmanaged_owners_are_eligible(self):
+        with patch(
+            "features.redmine.daily_brief.owner_policy.auth_service.get_enabled_user",
+            side_effect=[SimpleNamespace(role="user"), None],
+        ):
+            self.assertTrue(is_daily_brief_owner_eligible("ordinary"))
+            self.assertTrue(is_daily_brief_owner_eligible("development-owner"))
+
+    def test_starter_rejects_admin_before_writing_a_job(self):
+        starter = DailyBriefService.__new__(DailyBriefService)
+        starter.owner_id = "gms"
+        with patch(
+            "features.redmine.daily_brief.service.is_daily_brief_owner_eligible",
+            return_value=False,
+        ):
+            result = starter.start_run("manual")
+        self.assertEqual(result["code"], "ADMIN_OWNER_FORBIDDEN")
 
 if __name__ == "__main__":
     unittest.main()

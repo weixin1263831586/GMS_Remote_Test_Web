@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
+
 from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
 from features.redmine.daily_brief.repository import (
     DailyBriefIssueHistoryActiveError,
@@ -804,6 +806,92 @@ class IssueHistoryDeletionTests(unittest.TestCase):
         self.assertEqual(deleted, 1)
         self.assertIsNone(self.repo.get_run(run.run_id))
 
+
+class DailyBriefJobClaimTests(unittest.TestCase):
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.repo = DailyBriefRepository(Path(self._tmp.name))
+
+    def _create_run(self, date: str) -> DailyBriefRun:
+        run = DailyBriefRun(
+            owner_id="u1",
+            brief_date=date,
+            mode="nightly",
+            run_id=new_run_id(),
+            status="completed",
+        )
+        self.repo.create_run(run)
+        return run
+
+    def _enqueue_issue(self, run: DailyBriefRun, issue_id: int) -> None:
+        self.repo.upsert_issue(DailyBriefIssue(
+            run_id=run.run_id,
+            issue_id=issue_id,
+            buckets=[],
+            status="completed",
+        ))
+        self.repo.enqueue_job(run.run_id, kind="issue", issue_id=issue_id)
+
+    def test_workers_serialize_jobs_per_run_without_blocking_other_runs(self):
+        first_run = self._create_run("2026-09-13")
+        second_run = self._create_run("2026-09-14")
+        self._enqueue_issue(first_run, 100)
+        self._enqueue_issue(first_run, 200)
+        self._enqueue_issue(second_run, 300)
+
+        first = self.repo.claim_next_job("worker-a", lease_seconds=30)
+        second = self.repo.claim_next_job("worker-b", lease_seconds=30)
+
+        self.assertEqual(
+            {first["run_id"], second["run_id"]},
+            {first_run.run_id, second_run.run_id},
+        )
+        self.assertIsNone(self.repo.claim_next_job("worker-c", lease_seconds=30))
+
+
+@pytest.fixture
+def repository(tmp_path: Path) -> DailyBriefRepository:
+    return DailyBriefRepository(tmp_path / "u1")
+
+
+def _issue(run_id: str, issue_id: int, status: str) -> DailyBriefIssue:
+    return DailyBriefIssue(
+        run_id=run_id, issue_id=issue_id, buckets=[], status=status,
+    )
+
+
+def test_settle_pending_issues_converges_active_rows(repository):
+    repository.upsert_issue(_issue("run-1", 661066, "pending"))
+    repository.upsert_issue(_issue("run-1", 661067, "analyzing"))
+    repository.upsert_issue(_issue("run-1", 661068, "completed"))
+
+    changed = repository.settle_pending_issues("run-1", "failed", "identity preflight failed")
+
+    assert changed == 2
+    settled = repository.get_issue("run-1", 661066)
+    assert settled.status == "failed"
+    assert settled.error == "identity preflight failed"
+    assert settled.finished_at  # terminal rows carry a timestamp
+    # An issue that already reached a terminal state keeps its own verdict.
+    assert repository.get_issue("run-1", 661068).status == "completed"
+
+
+def test_settle_pending_issues_is_scoped_to_one_run(repository):
+    repository.upsert_issue(_issue("run-1", 661066, "pending"))
+    repository.upsert_issue(_issue("run-2", 661066, "pending"))
+
+    repository.settle_pending_issues("run-1", "failed")
+
+    assert repository.get_issue("run-1", 661066).status == "failed"
+    assert repository.get_issue("run-2", 661066).status == "pending"
+
+
+def test_settle_pending_issues_is_idempotent(repository):
+    repository.upsert_issue(_issue("run-1", 661066, "pending"))
+    assert repository.settle_pending_issues("run-1", "failed") == 1
+    # Second pass has nothing left in flight.
+    assert repository.settle_pending_issues("run-1", "failed") == 0
 
 if __name__ == "__main__":
     unittest.main()
