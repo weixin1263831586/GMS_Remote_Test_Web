@@ -18,10 +18,13 @@
             return result && result.data !== undefined ? result.data : result;
         }
 
-        async function kbFetch(url, options) {
+        async function kbFetch(url, options, retried = false) {
             const response = await fetch(url, {credentials: 'same-origin', ...(options || {})});
             const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.success === false) throw new Error(result.error || result.message || `HTTP ${response.status}`);
+            if (!retried && url.startsWith('/api/knowledge/external/') && response.status === 403 && result.detail?.elevation_required && typeof window.requestElevatedAccess === 'function') {
+                if (await window.requestElevatedAccess('管理外部知识源')) return kbFetch(url, options, true);
+            }
+            if (!response.ok || result.success === false) throw new Error(result.error || result.message || result.detail?.message || `HTTP ${response.status}`);
             return kbApiData(result);
         }
 
@@ -69,7 +72,7 @@
                 try {
                     if (partnerEnabled === null) { await loadGrant(); return; }
                     const enabled = !partnerEnabled;
-                    if (enabled && !window.confirm('确认当前账号有权访问 Google Partner 文档，并已获得将相关片段交给本系统配置的 AI 分析模型处理的许可？')) return;
+                    if (enabled && !await window.showConfirmDialog('授权 Google Partner 政策分析', '确认当前账号有权访问 Google Partner 文档，并已获得将相关片段交给当前所有已启用的 AI 分析模型处理的许可？模型目录改变后需要重新授权。')) return;
                     await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
                     await loadGrant();
@@ -121,8 +124,8 @@
                             status.textContent = '正在同步…';
                             await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
                         })),
-                        button('删除', () => {
-                            if (window.confirm('删除此知识源及其索引？')) {
+                        button('删除', async () => {
+                            if (await window.showConfirmDialog('删除外部知识源', '删除此知识源及其索引和历史修订？')) {
                                 run(async () => {
                                     await kbFetch(api + '/' + encodeURIComponent(source.id), {method: 'DELETE'});
                                     if (editing === source.id) reset();
