@@ -13,6 +13,7 @@ from .semantic import (
 )
 from .service import (
     RankedBatch,
+    RankingEvaluationCase,
     RetrievalHit,
     RetrievalQuery,
     RetrievalResult,
@@ -21,6 +22,8 @@ from .service import (
     collect_ranked_sources,
     compact_observation,
     evaluate_ranking,
+    evaluate_ranking_comparison,
+    evaluate_root_cause_comparison,
     fuse_rankings,
 )
 
@@ -28,6 +31,7 @@ from .service import (
 __all__ = [
     "LocalEmbedding",
     "RankedBatch",
+    "RankingEvaluationCase",
     "RetrievalHit",
     "RetrievalQuery",
     "RetrievalResult",
@@ -38,6 +42,8 @@ __all__ = [
     "compact_observation",
     "embedding_configuration_issue",
     "evaluate_ranking",
+    "evaluate_ranking_comparison",
+    "evaluate_root_cause_comparison",
     "evidence_followup_required",
     "evidence_plan_context",
     "fuse_rankings",
