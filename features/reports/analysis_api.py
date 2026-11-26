@@ -48,7 +48,6 @@ from .diagnosis_recalls import (
     search_system_background,
 )
 from .display import report_display_name
-from .rag_context import public_cdd_context
 from .repository import test_report_db
 from .service import test_report_manager
 
@@ -502,6 +501,8 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                 background_query, android_api_level=background_api_level
             ),
         )
+
+        from features.knowledge import public_cdd_context
 
         retrieval_context = public_cdd_context(system_background_results)
         ai_result = await _run_ai_analysis(retrieval_context)
