@@ -15,6 +15,7 @@ from .service import RetrievalHit, RetrievalResult
 MAX_QUERIES = 8
 MAX_READS = 6
 MAX_EVIDENCE = 18
+MAX_EVIDENCE_CHARS = 32000
 MAX_TEXT = 3500
 MAX_MODEL_CALLS = 5
 MAX_SECONDS = 180
@@ -62,6 +63,7 @@ class IntelligentRAG:
         self.events = []
         self.calls = 0
         self.deadline = time.monotonic() + MAX_SECONDS
+        self.initial = True
 
     def _current(self):
         for hit in self.hits.values():
@@ -97,7 +99,9 @@ class IntelligentRAG:
                 continue
             if any(old.identity == hit.identity for old in self.hits.values()):
                 continue
-            if len(self.hits) >= MAX_EVIDENCE:
+            cap = min(self.limit, 8) if self.initial else MAX_EVIDENCE
+            chars = sum(len(old.text) + len(str(old.metadata)) for old in self.hits.values())
+            if len(self.hits) >= cap or chars + len(hit.text[:MAX_TEXT]) + len(str(hit.metadata)) > MAX_EVIDENCE_CHARS:
                 break
             self.hits[f"E{len(self.hits) + 1}"] = RetrievalHit(
                 hit.source, hit.reference, hit.revision, hit.text[:MAX_TEXT],
@@ -115,11 +119,12 @@ class IntelligentRAG:
         query = query.strip()[:512]
         key = (source_id, " ".join(query.casefold().split()))
         if (not query or key in self.seen_queries or len(self.seen_queries) >= MAX_QUERIES
+                or (self.initial and len(self.seen_queries) >= 5)
                 or time.monotonic() >= self.deadline):
             return
         self.seen_queries.add(key)
         try:
-            self._collect(source, source.search(query, min(self.limit, 5)), "search")
+            self._collect(source, source.search(query, min(self.limit, 2 if self.initial else 4)), "search")
         except Exception as exc:
             self.events.append({"stage": "search", "source": source_id,
                                 "status": "error", "detail": type(exc).__name__})
@@ -137,7 +142,7 @@ class IntelligentRAG:
                     continue
                 hit = self.hits.get(action["id"])
                 page = action.get("page", 0)
-                if not hit or type(page) is not int or not 0 <= page <= 8:
+                if not hit or type(page) is not int or not -4 <= page <= 8:
                     continue
                 source = self.sources[hit.source]
                 key = (hit.identity, page)
@@ -170,7 +175,7 @@ class IntelligentRAG:
                     break
                 hit = self.hits.get(cite["id"])
                 quote = cite.get("quote")
-                if not hit or not isinstance(quote, str) or not 4 <= len(quote) <= 800 or quote not in hit.text:
+                if not hit or not isinstance(quote, str) or not 4 <= len(quote) <= 800 or (quote not in hit.text and quote not in str(hit.metadata.get("condition") or "")):
                     break
                 checked.append({"id": cite["id"], "quote": quote})
             if len(checked) == len(citations):
@@ -194,12 +199,13 @@ class IntelligentRAG:
             for source_id in self.sources:
                 self._search(source_id, question)
             self._actions(plan)
+            self.initial = False
             for _ in range(2):
                 review = self._model("inspect",
                     '阅读证据，判断是否缺少定义、条件、例外、版本或关联章节。'
                     '返回 {"searches":[{"source":"来源ID","query":"改写查询"}],'
                     '"reads":[{"id":"已取得的证据ID","page":0}]}。充分时两个数组为空。'
-                    '读取只能指定现有证据ID和页序号，不能虚构ID。',
+                    '读取只能指定现有证据ID和页序号，不能虚构ID。个人文档 page=0 读取开头，正负页读取命中前后；网页只接受非负章节页。',
                     {"question": question, "sources": sources, "evidence": self._rows()})
                 before = (len(self.seen_queries), len(self.seen_reads))
                 self._actions(review)
@@ -230,6 +236,7 @@ class IntelligentRAG:
             claims = []
             status = "authorization_changed"
         except Exception as exc:
+            self.initial = False
             self.events.append({"stage": "model", "status": "error", "detail": type(exc).__name__})
             status = "model_unavailable"
             if not self.seen_queries:
