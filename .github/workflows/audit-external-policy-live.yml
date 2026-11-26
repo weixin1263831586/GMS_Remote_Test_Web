@@ -3,8 +3,15 @@ on:
   push:
     branches: ['audit/**']
     paths:
-      - 'features/knowledge/external/**'
-      - 'features/knowledge/tests/test_web_sources*.py'
+      - 'features/knowledge/**'
+      - 'features/redmine/analysis/kkagent/**'
+      - 'features/redmine/tests/test_reference_recall.py'
+      - 'features/reports/diagnosis_recalls.py'
+      - 'features/redmine/ui/**'
+      - 'web/shell/pages/notes.html'
+      - 'web/static/js/shell/shell-personal-knowledge.js'
+      - 'agent/gms-remote-test/runtime/cli/redmine.sh'
+      - 'agent/gms-remote-test/runtime/mcp_tool_schemas.py'
       - 'tools/scripts/testing/audit_external_policy_live.py'
       - 'features/redmine/reference_recall.py'
       - '.github/workflows/audit-external-policy-live.yml'
@@ -37,7 +44,11 @@ jobs:
           scratch=$(mktemp -d "$RUNNER_TEMP/external-policy.XXXXXXXX")
           trap 'rm -rf -- "$scratch"' EXIT
           export GMS_DATA_ROOT="$scratch/data"
-          python3 -m pytest -q -s features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py --basetemp="$scratch/pytest"
+          python3 -m pytest -q -s \
+            features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py \
+            features/knowledge/tests/test_policy_imports.py features/redmine/tests/test_reference_recall.py \
+            features/reports/tests/test_diagnosis_system_background.py \
+            --basetemp="$scratch/pytest"
 
       - name: Replay existing Redmine snapshots without changing production data
         shell: bash
