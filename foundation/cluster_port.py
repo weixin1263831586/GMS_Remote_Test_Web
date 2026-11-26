@@ -86,7 +86,7 @@ ClusterServiceProvider = Callable[[], ClusterServiceContract]
 WorkerTokens = Callable[[], dict[str, str]]
 CancelJob = Callable[[str, Request], dict[str, Any]]
 AuthenticateWorker = Callable[[str, str | None], None]
-DeviceActionRequest = Callable[[Request, dict[str, Any]], Awaitable[Any]]
+DeviceActionRequest = Callable[[Request, dict[str, Any]], Awaitable[dict[str, Any]]]
 AoaPlaybackControl = Callable[[str, str, str, str], Awaitable[dict[str, Any]]]
 FirmwareRecoveryCheck = Callable[[dict[str, Any] | None], None]
 
@@ -205,7 +205,7 @@ def control_aoa_playback(control_id: str, worker_id: str, owner_id: str, action:
     return _aoa_playback_control(control_id, worker_id, owner_id, action)
 
 
-def submit_device_action(request: Request, payload: dict[str, Any]) -> Awaitable[Any]:
+def submit_device_action(request: Request, payload: dict[str, Any]) -> Awaitable[dict[str, Any]]:
     """Submit through the configured device ownership and execution boundary."""
     if _device_action_request is None:
         raise RuntimeError('cluster device actions are not configured')
