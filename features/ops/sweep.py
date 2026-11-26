@@ -70,12 +70,7 @@ def _dispatch(store: Any, event: dict[str, Any], cfg: dict[str, Any]) -> bool:
     attempts = int(event.get("notify_attempts") or 0) + 1
     try:
         dispatch = notify_incident(event, cfg=cfg)
-        # notify_incident 返回 {"ok": bool}；兼容旧 {"sent": [...]} 形状。
-        if "ok" in dispatch:
-            ok = bool(dispatch["ok"])
-        else:
-            sent = dispatch.get("sent") or []
-            ok = bool(sent) and all(item.get("sent") for item in sent)
+        ok = bool(dispatch["ok"])
     except Exception:
         logger.exception("ops notification dispatch failed for %s", event_id)
         ok = False

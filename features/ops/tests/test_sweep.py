@@ -47,7 +47,7 @@ class SweepTests(unittest.TestCase):
                 "features.ops.service.get_ops_store", return_value=store
             ), mock.patch(
                 "features.ops.sweep.notify_incident",
-                return_value={"sent": [{"transport": "webhook", "sent": True}]},
+                return_value={"ok": True, "sent": [{"transport": "webhook", "sent": True}]},
             ) as notify:
                 first = run_ops_sweep(cfg)
                 second = run_ops_sweep(cfg)

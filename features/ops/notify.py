@@ -218,7 +218,7 @@ def notify_incident(incident: dict[str, Any], *, cfg: dict[str, Any] | None = No
     """Dispatch one incident to the enabled transports. Never raises."""
     effective = cfg or load_ops_alerts_config()
     if not effective.get("enabled"):
-        return {"sent": [], "reason": "ops alerts disabled"}
+        return {"ok": False, "sent": [], "reason": "ops alerts disabled"}
     results = []
     if effective.get("webhook_url"):
         results.append(send_webhook(incident, effective))
