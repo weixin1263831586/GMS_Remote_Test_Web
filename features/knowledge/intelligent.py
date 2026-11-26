@@ -229,5 +229,8 @@ def render_rag_answer(result):
     for claim in claims:
         refs = " ".join(f'[{cite["id"]}]' for cite in claim["citations"])
         lines.append(f'{claim["statement"]} {refs}')
+    unresolved = result.get("unresolved") or []
+    if unresolved:
+        lines.append("尚未确认：" + "；".join(str(item) for item in unresolved))
     lines.append("以上为本地模型基于已读取证据的复核结果，并非完整语料覆盖或独立人工验证。")
     return "\n\n".join(lines)
