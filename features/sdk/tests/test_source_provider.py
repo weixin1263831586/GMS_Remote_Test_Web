@@ -574,5 +574,35 @@ class RegistryStateTests(unittest.TestCase):
         self.assertEqual(self.sp.registry_state(), "UNINITIALIZED")
         self.assertIsNone(self.sp.sdk_sources_available())
 
+
+
+def test_indexed_source_search_uses_android_project_and_exact_location():
+    from features.sdk.source_codesearch import search_indexed_source
+
+    config = {"opengrok": {
+        "base_url": "https://source.invalid",
+        "default_project": "Android16",
+        "project_mapping": {"15": "Android15"},
+    }}
+    response = subprocess.CompletedProcess(
+        [], 0, stdout="[definition] framework/base/Test.java\nproject: Android15\n"
+    )
+    with unittest.mock.patch(
+        "features.sdk.source_codesearch.ConfigManager"
+    ) as manager, unittest.mock.patch(
+        "features.sdk.source_codesearch.run_codesearch_process",
+        return_value=response,
+    ) as run:
+        manager.return_value.load_config.return_value = config
+        hits = search_indexed_source(
+            "android.Test", {"file_name": "Test", "file_type": "java", "line_number": 12},
+            android_version="15",
+        )
+    assert hits[0]["path"] == "framework/base/Test.java"
+    assert hits[0]["url"] == "https://source.invalid/xref/Android15/framework/base/Test.java#12"
+    assert hits[0]["is_exact_location"] is True
+    assert run.call_args.args[0][-2:] == ["--project", "Android15"]
+
+
 if __name__ == "__main__":
     unittest.main()

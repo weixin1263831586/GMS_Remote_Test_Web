@@ -712,10 +712,10 @@ class ReportFailureAnalyzer(UniversalAIAnalyzer):
                               f"// 该文件为 {first_result.get('file_type', 'java')} 格式\n"
                 }
 
-                logger.info(f"成功通过 rk_codesearch 获取源码信息: {first_result.get('path', 'unknown')}")
+                logger.info(f"成功通过 CodeSearch 获取源码信息: {first_result.get('path', 'unknown')}")
                 return result
             else:
-                logger.warning(f"rk_codesearch 未找到类 {class_name} 的源码")
+                logger.warning(f"CodeSearch 未找到类 {class_name} 的源码")
                 return None
 
         except ImportError:

@@ -1,6 +1,12 @@
 """Android SDK registration and reproducible source search public surface."""
 
 from . import source_api, source_manage_api
+from .source_codesearch import (
+    codesearch_script_location,
+    get_opengrok_project_for_android_version,
+    run_codesearch_process,
+    search_indexed_source,
+)
 from .source_provider import initialize_source_runtime, registry_state, sdk_sources_available
 from .source_repo_rank import configure_codesearch_hints, configure_knowledge_hints
 
@@ -39,12 +45,16 @@ def list_sdk_sources(request):
 
 
 __all__ = [
+    "codesearch_script_location",
     "configure_codesearch_hints",
     "configure_knowledge_hints",
+    "get_opengrok_project_for_android_version",
     "initialize_source_runtime",
     "list_sdk_sources",
     "registry_state",
+    "run_codesearch_process",
     "sdk_sources_available",
+    "search_indexed_source",
     "source_api",
     "source_manage_api",
 ]

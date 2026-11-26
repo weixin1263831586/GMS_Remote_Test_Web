@@ -1,11 +1,4 @@
-"""Enrollment-code service (split from agent_tokens.py).
-
-AgentTokenEnrollmentMixin holds the one-shot enrollment-code lifecycle
-(``create_agent_enrollment`` / ``redeem_agent_enrollment``). Mixed into
-AuthService after AgentTokenServiceMixin; reuses its
-_connect/_lock/hash_token/normalize_scopes/_normalize_acl helpers and the
-shared authentication timestamp helpers.
-"""
+"""One-shot enrollment codes for Agent Service Tokens."""
 
 from __future__ import annotations
 

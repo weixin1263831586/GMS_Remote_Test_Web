@@ -19,6 +19,7 @@ from features.redmine.agent import RedmineAgent
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.service import RedmineService
 from features.reports import ReportAnalyzer, ReportFailureAnalyzer
+from features.sdk import search_indexed_source
 from foundation.config import ConfigManager, RuntimeSettings, settings
 from foundation.device_locks import configure_display_name_resolver
 
@@ -42,7 +43,7 @@ def _report_failure_analyzer_factory(config=None):
 
     def _codesearch_source_search(class_name: str) -> list[dict]:
         try:
-            return ReportAnalyzer().rk_codesearch(class_name, max_results=3) or []
+            return search_indexed_source(class_name, max_results=3) or []
         except Exception:
             return []
 
@@ -94,14 +95,12 @@ def _wire_sdk_source_rank_hints() -> None:
     def _codesearch_hints(query: str) -> list[tuple[str, float]]:
         """OpenGrok 符号落点 → 仓前缀提示（权重最高：真实代码索引）。
 
-        ``rk_codesearch`` 返回 dict 或 path/line 列表；两种形状都按路径
+        ``search_indexed_source`` 返回 dict 或 path/line 列表；两种形状都按路径
         前两段归一化成子仓相对前缀。任何异常静默降级（排序失败不得
         阻塞检索）。
         """
         try:
-            from features.reports import ReportAnalyzer
-
-            results = ReportAnalyzer().rk_codesearch(str(query or ""), max_results=5) or []
+            results = search_indexed_source(str(query or ""), max_results=5) or []
         except Exception:
             return []
         hints: dict[str, float] = {}

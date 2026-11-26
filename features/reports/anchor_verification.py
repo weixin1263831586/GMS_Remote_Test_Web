@@ -41,9 +41,12 @@ import re
 import time
 from typing import Any
 
+from features.sdk import (
+    codesearch_script_location,
+    get_opengrok_project_for_android_version,
+    run_codesearch_process,
+)
 from foundation.redaction import redact_sensitive_text
-
-from .archive import codesearch_script_location, run_codesearch_process
 
 
 logger = logging.getLogger(__name__)
@@ -104,8 +107,6 @@ def verify_anchor_in_codesearch(
     if not term or len(term) > _MAX_ANCHOR_FIELD_LEN or "/" not in str(anchor.get("path") or ""):
         # 没有路径级 anchor（如 url-only）无从溯源。
         return {"path_present": None, "evidence_level": EVIDENCE_UNKNOWN, "verification": None}
-    from .archive import get_opengrok_project_for_android_version
-
     codesearch_script, codesearch_dir = codesearch_script_location()
     opengrok_config: dict[str, Any] = {}
     try:

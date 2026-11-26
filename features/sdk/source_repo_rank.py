@@ -150,7 +150,7 @@ def configure_codesearch_hints(provider=None) -> None:
     """注入 codesearch（OpenGrok）→ 仓前缀提示提取器。
 
     提取器签名同为 ``(query) -> [(prefix, weight)]``；bootstrap 侧用
-    ``ReportAnalyzer().rk_codesearch`` 实现：符号在代码索引中的真实落点
+    ``search_indexed_source`` 实现：符号在代码索引中的真实落点
     是最强的"哪个模块"先验，权重高于静态映射。异常纪律同 knowledge。
     """
     global _CODESEARCH_HINT_PROVIDER
