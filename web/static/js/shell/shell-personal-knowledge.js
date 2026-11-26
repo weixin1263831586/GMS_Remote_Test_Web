@@ -125,10 +125,16 @@
             async function semanticIndex(endpoint, trigger) {
                 const status = await kbFetch(endpoint);
                 const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
-                const scheduling = status.auto_index_enabled === true
+                const understanding = status.document_understanding;
+                const understandingInfo = understanding && understanding.status !== 'disabled'
+                    ? '；LLM 文档理解：' + (understanding.processed ?? 0) + '/' + (understanding.total ?? 0)
+                        + '（有效提取 ' + (understanding.enriched ?? 0) + '，失败 ' + (understanding.errors ?? 0)
+                        + '，截断 ' + (understanding.bounded ?? 0) + '）'
+                    : '';
+                const scheduling = (status.auto_index_enabled === true
                     ? 'Controller 自动索引已配置' + (status.last_auto_index_attempt
                         ? '；最近调度：' + status.last_auto_index_attempt : '；尚无调度记录')
-                    : '手动索引';
+                    : '手动索引') + understandingInfo;
                 trigger.title = '语义索引覆盖：' + counts(status) + '；' + scheduling;
                 const reasons = {
                     disabled: 'Controller 尚未启用 retrieval.enabled，请配置本地语义检索。',
@@ -140,7 +146,7 @@
                     configuration_error: 'Controller 本地语义检索配置读取失败。'
                 };
                 if (status.configuration_issue && reasons[status.configuration_issue]) {
-                    showToast(reasons[status.configuration_issue], 'warning');
+                    showToast(reasons[status.configuration_issue] + understandingInfo, 'warning');
                     return;
                 }
                 if (!['empty', 'partial', 'ready'].includes(status.status)) {
