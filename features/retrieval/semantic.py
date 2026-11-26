@@ -155,6 +155,35 @@ def local_reranker(source="cdd"):
     return _reranker(path, revision)
 
 
+def run_scheduled_index_batches(jobs, attempts, mark_attempt, *, max_sources=1, batch_size=128):
+    """Rotate bounded index jobs using caller-owned persistent attempt records.
+
+    Each job supplies its current coverage and synchronization callbacks.
+    The caller owns the process lock, authorization and durable transaction.
+    A failed status or batch cannot prevent another source from being scheduled.
+    """
+    if max_sources < 1:
+        return []
+    outcomes = []
+    for source_id, (inspect, sync) in sorted(jobs.items(), key=lambda item: (attempts.get(item[0], ""), item[0])):
+        try:
+            status = inspect()
+        except Exception as exc:
+            status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+        if status.get("coverage_complete") is True:
+            continue
+        mark_attempt(source_id)
+        if status.get("status") not in {"disabled", "unavailable", "stale", "busy"}:
+            try:
+                status = sync(batch_size=max(1, min(batch_size, MAX_BATCH)))
+            except Exception as exc:
+                status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+        outcomes.append({**status, "source_id": source_id, "operation": "semantic_index"})
+        if len(outcomes) >= min(max_sources, 4):
+            break
+    return outcomes
+
+
 def _unit(vector):
     values = tuple(float(value) for value in vector)
     if not values or len(values) > MAX_DIMENSION or any(not math.isfinite(x) for x in values):
