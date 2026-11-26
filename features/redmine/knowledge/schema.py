@@ -260,8 +260,3 @@ class KnowledgeSchemaMixin:
             except Exception:
                 item[key] = {}
         return item
-
-    @staticmethod
-    def _fts_query(query: str) -> str:
-        tokens = [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
-        return " OR ".join(f'"{token}"' for token in tokens) or '"empty"'

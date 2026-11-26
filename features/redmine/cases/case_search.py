@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..knowledge.repository import RedmineKnowledgeDB
+from ..utils import detect_android_version, detect_soc_platform, similarity_level
 from .case_extractor import RedmineCaseExtractor
 
 
@@ -47,7 +48,7 @@ class RedmineCaseSearch:
                 "reply_template": fact.get("reply_template") or "",
                 "doc_excerpt": fact.get("doc_excerpt") or "",
                 "score": round(score, 1),
-                "similarity_level": self._level(score),
+                "similarity_level": similarity_level(score),
                 "match_details": breakdown,
             })
         results.sort(key=lambda item: item["score"], reverse=True)
@@ -59,8 +60,8 @@ class RedmineCaseSearch:
             signature = RedmineCaseExtractor._detect_error_signature(issue_or_text)
             return {
                 "query_text": issue_or_text,
-                "chip_platform": RedmineCaseExtractor._detect_chip_platform(issue_or_text, "", ""),
-                "android_version": RedmineCaseExtractor._detect_android_version(issue_or_text, "", ""),
+                "chip_platform": detect_soc_platform(issue_or_text, "", ""),
+                "android_version": detect_android_version(issue_or_text, "", "", major_only=True),
                 "certification_type": RedmineCaseExtractor._detect_certification_type(issue_or_text),
                 "module": RedmineCaseExtractor._detect_module(issue_or_text, []),
                 "error_signature": signature,
@@ -124,11 +125,3 @@ class RedmineCaseSearch:
             score += 5.0
 
         return score, breakdown
-
-    @staticmethod
-    def _level(score: float) -> str:
-        if score >= 70:
-            return "high"
-        if score >= 40:
-            return "medium"
-        return "low"

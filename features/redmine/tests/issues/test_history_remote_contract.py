@@ -42,7 +42,7 @@ class HistoryRemoteFilteringTests(unittest.IsolatedAsyncioTestCase):
             return [row for row in rows if status_id == "*" or row["is_closed"]][:limit]
 
         client = SimpleNamespace(search_issues_by_subject=search, close=AsyncMock())
-        repo = SimpleNamespace(search_history=lambda *a, **k: [], history_query_tokens=lambda q: [],
+        repo = SimpleNamespace(search_history=lambda *a, **k: [],
                                corpus_token_stats=lambda tokens: {})
         service = SimpleNamespace(repository=repo, agent=SimpleNamespace(_make_client=lambda: client))
         result = await search_issue_history(service, "failure", limit=10, resolved_only=True)
@@ -61,7 +61,6 @@ class HistoryRemoteFilteringTests(unittest.IsolatedAsyncioTestCase):
             search_history=lambda *args, **kw: [
                 {"issue_id": 101, "subject": "local", "is_resolved": True},
             ],
-            history_query_tokens=lambda q: ["failure"],
             corpus_token_stats=lambda tokens: {},
         )
         service = SimpleNamespace(repository=repo, agent=SimpleNamespace(_make_client=lambda: client))
@@ -79,7 +78,6 @@ class HistoryRemoteFilteringTests(unittest.IsolatedAsyncioTestCase):
         local = [{"issue_id": 8, "subject": "local", "is_resolved": True}]
         repo = SimpleNamespace(
             search_history=lambda *args, **kw: local.copy(),
-            history_query_tokens=lambda q: [],
             corpus_token_stats=lambda x: {},
         )
         result = await search_issue_history(

@@ -15,6 +15,7 @@ import re
 from typing import Any
 
 from ..cert_rules import detect_certification_errors, detect_certification_type
+from ..utils import detect_android_version, detect_soc_platform
 
 
 # 无有效分析时的占位文本，不参与知识匹配。
@@ -233,8 +234,8 @@ class RedmineCaseExtractor:
             )
         )
 
-        chip_platform = cls._detect_chip_platform(subject, description, fixed_version)
-        android_version = cls._detect_android_version(subject, description, fixed_version)
+        chip_platform = detect_soc_platform(subject, description, fixed_version)
+        android_version = detect_android_version(subject, description, fixed_version, major_only=True)
         certification_type = cls._detect_certification_type(full_text)
         module = cls._detect_module(full_text, failures)
         error_signature = cls._detect_error_signature(full_text)
@@ -318,21 +319,6 @@ class RedmineCaseExtractor:
         ]
 
     # Detection rules
-
-    @staticmethod
-    def _detect_chip_platform(subject: str, description: str, fixed_version: str) -> str:
-        match = re.search(r"(RK\d{4,})", f"{subject} {description} {fixed_version}", re.IGNORECASE)
-        return match.group(1).upper() if match else ""
-
-    @staticmethod
-    def _detect_android_version(subject: str, description: str, fixed_version: str) -> str:
-        match = re.search(r"android\s*(\d+(?:\.\d+)*)", f"{subject} {description} {fixed_version}", re.IGNORECASE)
-        if not match:
-            return ""
-        # Normalise to the major version (Android16, not Android16.0) so the
-        # similarity score aligns across "Android16" / "Android 16.0" forms.
-        major = match.group(1).split(".")[0]
-        return f"Android{major}"
 
     _detect_certification_type = staticmethod(detect_certification_type)
 

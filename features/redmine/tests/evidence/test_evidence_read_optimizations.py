@@ -26,7 +26,7 @@ from features.redmine.evidence import api as evidence_api
 from features.redmine.evidence import search_api as evidence_search_api
 from features.redmine.evidence.search_api import COLLAPSE_GAP_CHARS
 from features.redmine.evidence.text import derive_member_index
-from features.redmine.repository.storage import RepositoryStorageMixin
+from features.redmine.utils import build_search_fts_query
 
 
 class _EvidenceOptimizeTests(unittest.TestCase):
@@ -375,8 +375,8 @@ class HistoryFtsQueryTests(unittest.TestCase):
     """测试名（下划线/驼峰）在 FTS 查询里转为短语匹配。"""
 
     def test_test_name_becomes_phrase(self):
-        query = RepositoryStorageMixin._fts_query(
-            "testSdkSandbox_whenBackground_blocked LoadSdkException"
+        query = build_search_fts_query(
+            "testSdkSandbox_whenBackground_blocked LoadSdkException", phrase_symbols=True,
         )
         self.assertIn('"whenBackground"', query)
         # 短语：三段连在一起；普通词仍是单独 OR 项。
@@ -384,14 +384,14 @@ class HistoryFtsQueryTests(unittest.TestCase):
         self.assertIn('OR "LoadSdkException"', query)
 
     def test_plain_query_unchanged(self):
-        query = RepositoryStorageMixin._fts_query("camera bind failure")
+        query = build_search_fts_query("camera bind failure", phrase_symbols=True)
         self.assertEqual(query, '"camera" OR "bind" OR "failure"')
 
     def test_fts_match_prefers_real_test_name(self):
         import sqlite3
 
-        query = RepositoryStorageMixin._fts_query(
-            "testSdkSandbox_whenBackground_blocked"
+        query = build_search_fts_query(
+            "testSdkSandbox_whenBackground_blocked", phrase_symbols=True,
         )
         conn = sqlite3.connect(":memory:")
         conn.execute("CREATE VIRTUAL TABLE t USING fts5(doc)")

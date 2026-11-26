@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from .users import RESOLVED_STATUS_NAMES
+from .utils import search_query_tokens
 
 
 logger = logging.getLogger(__name__)
@@ -46,7 +47,7 @@ async def search_issue_history(
     # 归档库（DF 是检索语料属性，与单条结果来源无关），命中判定按条目自身
     # 文本。统计不可用时保持字段缺省，消费方按无区分度信息处理。
     token_stats = (
-        service.repository.corpus_token_stats(service.repository.history_query_tokens(q))
+        service.repository.corpus_token_stats(search_query_tokens(q))
         if remaining
         else {}
     )

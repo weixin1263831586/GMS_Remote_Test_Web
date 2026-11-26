@@ -6,7 +6,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
@@ -25,7 +24,7 @@ from features.redmine.repository import (
 from features.redmine.repository import (
     RedmineAgentDB,
 )
-from features.redmine.utils import to_iso8601
+from features.redmine.utils import detect_android_version, detect_soc_platform, to_iso8601
 from foundation.config import settings
 
 
@@ -126,12 +125,12 @@ class RedmineAgent:
             "description": str(issue.description or ""),
             "fixed_version": fixed_version,
             "component": self._extract_custom_field(issue, "Component_fae"),
-            "soc_platform": self._parse_soc_platform(
+            "soc_platform": detect_soc_platform(
                 str(issue.subject or ""),
                 str(issue.description or ""),
                 fixed_version,
             ),
-            "android_version": self._parse_android_version(
+            "android_version": detect_android_version(
                 str(issue.subject or ""),
                 str(issue.description or ""),
                 fixed_version,
@@ -585,8 +584,8 @@ class RedmineAgent:
             "description": description,
             "fixed_version": fixed_version,
             "component": RedmineAgent._extract_custom_field(issue_stub, "Component_fae"),
-            "soc_platform": RedmineAgent._parse_soc_platform(subject, description, fixed_version),
-            "android_version": RedmineAgent._parse_android_version(subject, description, fixed_version),
+            "soc_platform": detect_soc_platform(subject, description, fixed_version),
+            "android_version": detect_android_version(subject, description, fixed_version),
             "start_date": _iso(issue_stub.start_date),
             "due_date": _iso(issue_stub.due_date),
             "closed_on": _iso(issue_stub.closed_on),
@@ -599,23 +598,6 @@ class RedmineAgent:
         for keyword, category in (("VTS", "VTS"), ("GTS", "GTS"), ("CTS", "CTS"), ("GSI", "GSI"), ("GMS", "GMS认证")):
             if keyword in text:
                 return category
-        return ""
-
-    @staticmethod
-    def _parse_soc_platform(subject: str, description: str, fixed_version: str) -> str:
-        """Extract SoC platform (e.g. RK3576, RK3399) from subject, description or version."""
-        text = f"{subject} {description} {fixed_version}"
-        match = re.search(r"(RK\d{4,})", text, re.IGNORECASE)
-        return match.group(1).upper() if match else ""
-
-    @staticmethod
-    def _parse_android_version(subject: str, description: str, fixed_version: str) -> str:
-        """Extract Android version (e.g. Android16, Android14) from text."""
-        text = f"{subject} {description} {fixed_version}"
-        # Match "Android16", "Android 14", "ANDROID16.0", "ANDROID12_SDK"
-        match = re.search(r"android\s*(\d+(?:\.\d+)*)", text, re.IGNORECASE)
-        if match:
-            return f"Android{match.group(1)}"
         return ""
 
     @staticmethod

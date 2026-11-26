@@ -12,6 +12,7 @@ import sqlite3
 from typing import Any
 
 from ..users import _now
+from ..utils import build_search_fts_query
 from .schema import KnowledgeSchemaMixin
 
 
@@ -327,7 +328,7 @@ class RedmineKnowledgeDB(KnowledgeSchemaMixin):
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (self._fts_query(query), limit),
+                    (build_search_fts_query(query), limit),
                 ).fetchall()
             except Exception:
                 like = f"%{query[:80]}%"

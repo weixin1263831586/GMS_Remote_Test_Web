@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 from features.redmine.analysis import _truncate
 from features.redmine.analysis.ai import IssueModelAnalysis
 from features.redmine.client import RedmineClient
+from features.redmine.utils import similarity_level
 
 
 if TYPE_CHECKING:
@@ -19,8 +20,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-SIMILARITY_THRESHOLD_HIGH = 70  # score >= this → "high" similarity
-SIMILARITY_THRESHOLD_MEDIUM = 40  # score >= this → "medium" similarity
 MAX_REFERENCES = 5
 TOP_CANDIDATES_FOR_AI = 8
 
@@ -100,13 +99,7 @@ class IssueSimilarity:
                     candidates[ref_id]["reason"] = (candidates[ref_id].get("reason") or "") + f" | AI语义相似 {ai_score:.2f}"
 
         for ref in candidates.values():
-            s = ref["score"]
-            if s >= SIMILARITY_THRESHOLD_HIGH:
-                ref["similarity_level"] = "high"
-            elif s >= SIMILARITY_THRESHOLD_MEDIUM:
-                ref["similarity_level"] = "medium"
-            else:
-                ref["similarity_level"] = "low"
+            ref["similarity_level"] = similarity_level(ref["score"])
         return sorted(
             [ref for ref in candidates.values() if ref["similarity_level"] != "low"],
             key=lambda item: item["score"],

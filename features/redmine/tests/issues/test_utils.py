@@ -2,7 +2,15 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.utils import attachment_content_disposition, sanitize_attachment_filename
+from features.redmine.utils import (
+    attachment_content_disposition,
+    build_search_fts_query,
+    detect_android_version,
+    detect_soc_platform,
+    sanitize_attachment_filename,
+    search_query_tokens,
+    similarity_level,
+)
 
 
 class RedmineUtilsTests(unittest.TestCase):
@@ -31,6 +39,21 @@ class RedmineUtilsTests(unittest.TestCase):
         self.assertIn("filename*=UTF-8''bad_name_.zip", header)
         self.assertNotIn("\n", header)
         self.assertNotIn("../", header)
+
+
+class SearchRuleTests(unittest.TestCase):
+    def test_version_precision_remains_context_specific(self):
+        self.assertEqual(detect_soc_platform("rk3576", "", ""), "RK3576")
+        self.assertEqual(detect_android_version("Android 16.0", "", ""), "Android16.0")
+        self.assertEqual(detect_android_version("Android 16.0", "", "", major_only=True), "Android16")
+
+    def test_fts_preserves_distinct_query_policies(self):
+        self.assertEqual(search_query_tokens('"test_x_y" a failure'), ["test_x_y", "failure"])
+        self.assertEqual(build_search_fts_query("test_name failure"), '"test_name" OR "failure"')
+        self.assertEqual(build_search_fts_query("test_name failure", phrase_symbols=True), '"test" "name" OR "failure"')
+
+    def test_similarity_display_thresholds(self):
+        self.assertEqual([similarity_level(x) for x in (39, 40, 69, 70)], ["low", "medium", "medium", "high"])
 
 
 if __name__ == "__main__":

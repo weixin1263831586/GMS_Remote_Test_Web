@@ -14,6 +14,8 @@ from ..users import (
     name_keys,
 )
 
+from ..utils import build_search_fts_query, search_query_tokens
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +36,7 @@ class RepositoryStorageMixin:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (self._fts_query(query), limit),
+                    (build_search_fts_query(query, phrase_symbols=True), limit),
                 ).fetchall()
             except Exception as exc:
                 # FTS index/query failure silently degrades to LIKE, which has
@@ -109,7 +111,7 @@ class RepositoryStorageMixin:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (self._fts_query(query), exclude_issue_id, limit),
+                    (build_search_fts_query(query, phrase_symbols=True), exclude_issue_id, limit),
                 ).fetchall()
             except Exception as exc:
                 logger.warning("search_similar FTS failed, falling back to LIKE: %s", exc)
@@ -144,16 +146,6 @@ class RepositoryStorageMixin:
     # SoC 型号 / Android 版本即使占比低也只是背景词（如本例 RK3588 8%），
     # 不计入 distinctive_matches，避免“只命中芯片名”被当成同型问题。
     CONTEXT_TERM_RE = re.compile(r"^(?:rk\d{3,5}\w*|android\d*)$", re.IGNORECASE)
-
-    @staticmethod
-    def history_query_tokens(query: str) -> list[str]:
-        """与 _fts_query 一致的查询分词（供命中标注与远端结果标注复用）。
-
-        空格切词；含 ``_`` 的整段 token（测试名/符号名，如
-        ``testSdkSandbox_whenBackground_blocked``）原样保留——它们在
-        _fts_query 里转为短语匹配，是测试类 issue 最强检索键。
-        """
-        return [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
 
     def corpus_token_stats(self, tokens: list[str], conn: sqlite3.Connection | None = None) -> dict[str, dict[str, float]]:
         """每个 token 在归档 FTS 语料中的 idf 与 df 占比。
@@ -225,7 +217,7 @@ class RepositoryStorageMixin:
         exclude = int(exclude_issue_id or 0)
         limit = max(1, min(int(limit or 8), 20))
         resolved_filter = " AND i.is_resolved = 1" if resolved_only else ""
-        query_tokens = self.history_query_tokens(query)
+        query_tokens = search_query_tokens(query)
         with self.connect() as conn:
             try:
                 stats = self.corpus_token_stats(query_tokens, conn=conn)
@@ -238,7 +230,7 @@ class RepositoryStorageMixin:
                     ORDER BY rank
                     LIMIT ?
                     """,
-                    (self._fts_query(query), exclude, limit * 3),
+                    (build_search_fts_query(query, phrase_symbols=True), exclude, limit * 3),
                 ).fetchall()
             except Exception as exc:
                 logger.warning("search_history FTS failed, falling back to LIKE: %s", exc)
@@ -409,26 +401,6 @@ class RepositoryStorageMixin:
             params.extend([like, like, like, like, like])
         where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
         return where, params
-
-    @staticmethod
-    def _fts_query(query: str) -> str:
-        """OR 连接各查询词；含 ``_`` 的词（测试名/符号名）转为短语匹配。
-
-        FTS5 unicode61 分词器把 ``testSdkSandbox_whenBackground_blocked``
-        在文档与查询两侧都切成相邻碎片；整段 OR 匹配会让 "blocked" 这类
-        通用碎片命中大量无关单。短语匹配（"testsdk... whenbackground
-        blocked"）只在碎片相邻连续出现时命中，保留测试名的强区分度。
-        """
-        tokens = [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
-        clauses = []
-        for token in tokens:
-            if "_" in token:
-                parts = [part for part in re.split(r"[^A-Za-z0-9]+", token) if len(part) >= 2]
-                if len(parts) >= 2:
-                    clauses.append(" ".join(f'"{part}"' for part in parts))
-                    continue
-            clauses.append(f'"{token}"')
-        return " OR ".join(clauses) or '"empty"'
 
     @staticmethod
     def _json_value(value: Any) -> str:
