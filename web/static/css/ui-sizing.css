@@ -75,10 +75,8 @@
     padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
     vertical-align: middle;
 }
-.suite-file-table-head, .suite-file-row {
-    min-height: var(--ui-table-header-height);
-    align-items: center;
-}
+.suite-file-table-head, .suite-file-row { align-items: center; }
+.suite-file-table-head { min-height: var(--ui-table-header-height); }
 .suite-file-row { min-height: var(--ui-table-row-height); }
 
 /* Shared page perimeter for the Shell template and independent workspaces.
