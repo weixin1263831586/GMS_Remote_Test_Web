@@ -96,7 +96,6 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 // 数据区加载占位：超新星动画（.loading-orbit 舞台，样式见 loading-orbit.css）。
-// redmine 页面不引 utils.js，此处独立提供（与 utils.js 同名同实现）。
 // stage=true 启用视口锚定舞台（.loading-orbit--stage，fixed 居中）。
 function loadingOrbitHtml(text, stage) {
   return '<div class="loading-orbit' + (stage ? ' loading-orbit--stage' : '') + '" role="status" aria-label="' + esc(text) + '">'
@@ -294,16 +293,18 @@ function updateRedmineToolbar() {
   if (action) {
     action.hidden = !isAnalysisTab;
     action.setAttribute('aria-hidden', String(!isAnalysisTab));
-    action.disabled = false;
-    action.title = '';
-    if (currentTab === 'cases') {
-      action.textContent = '📚 导入';
-      action.title = '批量导入工单并进行结构化分析';
-    } else {
-      action.textContent = '🔍 扫描';
-      action.title = currentTab === 'runs'
-        ? '扫描最近 48 小时工单并生成扫描记录'
-        : '扫描最近 48 小时工单并更新工单分析';
+    if (action.getAttribute('aria-busy') !== 'true') {
+      action.disabled = false;
+      action.title = '';
+      if (currentTab === 'cases') {
+        action.textContent = '📚 导入';
+        action.title = '批量导入工单并进行结构化分析';
+      } else {
+        action.innerHTML = '<svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 扫描';
+        action.title = currentTab === 'runs'
+          ? '扫描最近 48 小时工单并生成扫描记录'
+          : '扫描最近 48 小时工单并更新工单分析';
+      }
     }
   }
   if (refresh) {
@@ -318,23 +319,8 @@ async function runRedmineContextAction() {
   return startScan();
 }
 
-function setRefreshButtonBusy(busy) {
-  var btn = document.getElementById('refreshBtn');
-  if (!btn) return;
-  btn.disabled = busy;
-  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
-  btn.textContent = busy ? '⏳ 刷新中' : '🔃 刷新';
-}
-
-// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
-// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
-async function withRefreshButtonBusy(task) {
-  setRefreshButtonBusy(true);
-  try {
-    await task();
-  } finally {
-    setRefreshButtonBusy(false);
-  }
+function withRefreshButtonBusy(task) {
+  return withActionButtonBusy(document.getElementById('refreshBtn'), '刷新中', task);
 }
 
 async function reloadCurrentTabView() {
