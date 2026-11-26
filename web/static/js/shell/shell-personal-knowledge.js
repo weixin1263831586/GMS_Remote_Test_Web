@@ -122,6 +122,31 @@
                     body: JSON.stringify({url: source.url, name: source.name || '', enabled})
                 });
             }
+            async function documentUnderstanding(trigger) {
+                const approved = await showConfirmDialog('文档理解范围',
+                    '是否处理本人已授权导入的规范？取消则处理本人普通文档。');
+                const endpoint = '/api/knowledge/semantic-index?kind=understanding&approved_only=' + (approved ? 'true' : 'false');
+                const before = await kbFetch(endpoint);
+                const counts = value => (value.processed ?? 0) + '/' + (value.total ?? 0);
+                trigger.title = 'LLM 文档理解：' + counts(before);
+                if (before.status === 'disabled') {
+                    showToast('尚未启用本地个人文档理解，请检查 Controller retrieval 配置。', 'warning');
+                    return;
+                }
+                if (!await showConfirmDialog('本地 LLM 文档理解',
+                    '已处理 ' + counts(before) + '。继续处理最多四个原文窗口？')) return;
+                trigger.disabled = true;
+                try {
+                    const result = await kbFetch(endpoint + '&batch_size=4', {method: 'POST'});
+                    const message = 'LLM 文档理解 ' + counts(result)
+                        + '；有效 ' + (result.enriched ?? 0) + '；失败 ' + (result.errors ?? 0)
+                        + (result.corpus_bounded ? '；当前语料范围受限' : '');
+                    trigger.title = message;
+                    showToast(message + '；' + result.status, result.coverage_complete ? 'success' : 'warning');
+                } finally {
+                    trigger.disabled = false;
+                }
+            }
             async function semanticIndex(endpoint, trigger) {
                 const status = await kbFetch(endpoint);
                 const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
@@ -269,6 +294,9 @@
                 personalActions.append(button('语义索引', event => {
                     semanticIndex('/api/knowledge/semantic-index', event.currentTarget)
                         .catch(error => showToast(error.message, 'warning'));
+                }));
+                personalActions.append(button('文档理解', event => {
+                    documentUnderstanding(event.currentTarget).catch(error => showToast(error.message, 'warning'));
                 }));
                 const partner = body.insertRow();
                 partner.dataset.kbSource = 'gms_requirements';
