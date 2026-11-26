@@ -296,7 +296,7 @@
     display: grid;
 
     gap: 6px;
-    grid-template-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) 60.5px 156px;
+    grid-template-columns: 3ch minmax(0, 1fr) minmax(0, 1.5fr) 60.5px 156px;
     grid-template-rows: auto;
 }
 .aoa-command-list-header {
