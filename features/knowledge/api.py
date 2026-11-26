@@ -486,6 +486,9 @@ async def ask_knowledge(request: Request):
         limit = int(data.get("limit") or 8)
     except (TypeError, ValueError):
         return error_response("limit 必须是整数", 422)
+    include_imports = data.get("include_authorized_imports") is True
+    if include_imports:
+        require_human_principal(request)
     result = await asyncio.to_thread(
         _service.ask,
         _user(request),
@@ -493,6 +496,7 @@ async def ask_knowledge(request: Request):
         space_id=str(data.get("space_id") or ""),
         limit=limit,
         include_external=data.get("include_external") is True,
+        include_authorized_imports=include_imports,
     )
     return success_response(data=result)
 
