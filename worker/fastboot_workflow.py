@@ -6,16 +6,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
-# Canonical CommandResult lives in foundation; re-exported here so the
-# existing `from worker.fastboot_workflow import CommandResult`
-# call sites keep working (features/firmware, features/devices).
-from foundation.command_result import CommandResult
+from foundation import command_result
 
 
 __all__ = [
     "ANDROID_17_VENDOR_API_LEVEL",
     "BootloaderOemProfile",
-    "CommandResult",
     "FastbootPreparationError",
     "FastbootPreparer",
     "PreparedFastbootDevice",
@@ -126,11 +122,11 @@ class FastbootPreparationError(RuntimeError):
     pass
 
 
-Runner = Callable[[list[str], int], CommandResult]
+Runner = Callable[[list[str], int], command_result.CommandResult]
 TransportResetCallback = Callable[[str, str], None]
 
 
-def subprocess_runner(argv: list[str], timeout: int) -> CommandResult:
+def subprocess_runner(argv: list[str], timeout: int) -> command_result.CommandResult:
     try:
         completed = subprocess.run(
             argv,
@@ -139,9 +135,9 @@ def subprocess_runner(argv: list[str], timeout: int) -> CommandResult:
             timeout=timeout,
             check=False,
         )
-        return CommandResult(completed.stdout, completed.stderr, completed.returncode)
+        return command_result.CommandResult(completed.stdout, completed.stderr, completed.returncode)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return CommandResult(stderr=str(exc), code=-1)
+        return command_result.CommandResult(stderr=str(exc), code=-1)
 
 
 class FastbootPreparer:
@@ -181,7 +177,7 @@ class FastbootPreparer:
         *,
         timeout: int = 30,
         required: bool = True,
-    ) -> CommandResult:
+    ) -> command_result.CommandResult:
         result = self.runner(argv, timeout)
         if required and result.code != 0:
             detail = result.output or f"exit code {result.code}"
