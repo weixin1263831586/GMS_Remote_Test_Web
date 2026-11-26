@@ -30,6 +30,11 @@ CREATE TABLE IF NOT EXISTS sources (
 CREATE TABLE IF NOT EXISTS partner_model_grants (
  owner_id TEXT PRIMARY KEY, model_catalog_hash TEXT NOT NULL, approved_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS owner_import_grants (
+ owner_id TEXT NOT NULL, doc_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+ model_catalog_hash TEXT NOT NULL, approved_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id, doc_id)
+);
 CREATE TABLE IF NOT EXISTS revisions (
  source_id TEXT NOT NULL, revision TEXT NOT NULL, fetched_at TEXT NOT NULL,
  PRIMARY KEY(source_id, revision)
@@ -108,6 +113,29 @@ class WebKnowledgeProvider:
                                   (owner_id, fingerprint)).fetchone() is not None
         except (sqlite3.Error, OSError, ValueError, TypeError):
             return False
+
+    def approve_import(self, owner_id, doc_id, content_hash):
+        fingerprint = model_catalog_fingerprint()
+        if not owner_id or not doc_id or not fingerprint:
+            raise ValueError('Owner, document and configured model catalog required')
+        with self._db(write=True) as db:
+            db.execute('INSERT OR REPLACE INTO owner_import_grants VALUES (?,?,?,?,?)',
+                       (owner_id, doc_id, content_hash, fingerprint, datetime.now(timezone.utc).isoformat()))
+
+    def approved_imports(self, owner_id):
+        if not owner_id or not self._path().is_file():
+            return {}
+        try:
+            fingerprint = model_catalog_fingerprint()
+            if not fingerprint:
+                return {}
+            with self._db() as db:
+                return {row['doc_id']: row['content_hash'] for row in db.execute(
+                    'SELECT doc_id,content_hash FROM owner_import_grants WHERE owner_id=? AND model_catalog_hash=?',
+                    (owner_id, fingerprint),
+                )}
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            return {}
 
     def list_sources(self):
         if not self._path().is_file():
