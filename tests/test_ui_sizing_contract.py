@@ -265,6 +265,20 @@ class UiSizingContractTests(unittest.TestCase):
         scene = (ROOT / "web/static/js/pages/architecture-scenes.js").read_text(encoding="utf-8")
         self.assertIn('class="ui-detail-table"', scene)
 
+    def test_detail_tables_are_explicit_and_data_tables_have_no_cell_overrides(self):
+        redmine = (ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(redmine, r"\.dept-table\s+td\.col-person\s*\{[^}]*padding")
+        for selector in (".info-table th {", ".info-table td {"):
+            rule = redmine.split(selector, 1)[1].split("}", 1)[0]
+            self.assertNotIn("padding:", rule)
+        issues = (ROOT / "features/redmine/ui/issues.js").read_text(encoding="utf-8")
+        self.assertIn('class="info-table ui-detail-table"', issues)
+        components = (CSS / "common-components.css").read_text(encoding="utf-8")
+        self.assertNotIn(".dcfg-tab table:not(:has(> thead))", components)
+        sizing = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        self.assertNotIn(".dcfg-tab", sizing)
+        self.assertIn("table.ui-detail-table > tbody > tr > :is(th, td)", sizing)
+
     def test_existing_single_line_layouts_not_replaced_by_wrapping(self):
         cases = {
             "common.css": ("white-space: nowrap;", ".page-header-actions"),

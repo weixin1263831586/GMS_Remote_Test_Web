@@ -170,7 +170,7 @@ function renderIssueCard(item) {
     </h3>
 
     <div class="field-label">📋 基本信息</div>
-    <table class="info-table">
+    <table class="info-table ui-detail-table">
       <tr>
         <th>SoC</th><td><strong>${esc(item.soc_platform || '-')}</strong></td>
         <th>Android</th><td><strong>${esc(item.android_version || '-')}</strong></td>
