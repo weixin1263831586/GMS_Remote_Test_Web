@@ -163,3 +163,31 @@ def test_pending_tokens_and_coverage_resume_authorized_manifest(tmp_path):
     assert not index.coverage("owner", "v1", ["a"], corpus_complete=False)["coverage_complete"]
     assert index.coverage("owner", "v1", ["a"])["coverage_complete"]
     assert index.pending_tokens("other", "v1", ["a"]) == ["a"]
+
+
+def test_semantic_model_configuration_requires_explicit_opt_in(monkeypatch):
+    from features.retrieval import semantic
+
+    config = {"retrieval": {"enabled": "false", "enabled_sources": ["redmine_cases"],
+                            "model_path": "/local/model", "model_revision": "v1",
+                            "reranker_path": "/local/ranker", "reranker_revision": "v1"}}
+    monkeypatch.setattr(semantic.config_manager, "load_config", lambda: config)
+    assert semantic.embedding_configuration_issue("redmine_cases") == "invalid_config"
+    assert semantic.local_embedding("redmine_cases") is None
+    assert semantic.local_reranker("redmine_cases") is None
+    config["retrieval"] = ["invalid"]
+    assert semantic.local_embedding() is None
+    assert semantic.local_reranker() is None
+
+
+def test_semantic_model_revision_must_be_nonempty_string(monkeypatch):
+    from features.retrieval import semantic
+
+    config = {"retrieval": {"enabled": True, "model_path": "/local/model",
+                            "model_revision": None, "reranker_path": "/local/ranker",
+                            "reranker_revision": 1}}
+    monkeypatch.setattr(semantic.config_manager, "load_config", lambda: config)
+    with pytest.raises(ValueError, match="embedding path and revision"):
+        semantic.local_embedding()
+    with pytest.raises(ValueError, match="reranker path and revision"):
+        semantic.local_reranker()
