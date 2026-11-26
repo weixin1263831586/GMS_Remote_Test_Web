@@ -196,3 +196,18 @@ The source owns its current authorized manifest, document resolution and reset
 coordination. A complete vector manifest is not evidence of complete upstream
 coverage. Semantic failure and omitted earlier observations remain visible to
 the shared evidence planner.
+
+
+### Paired evaluation
+
+Use `RankingEvaluationCase` and `evaluate_ranking_comparison` with the same
+historical queries, pinned corpus revision and human-labelled relevant
+evidence for lexical-only and hybrid retrieval. Use
+`evaluate_root_cause_comparison` with paired human review verdicts of
+`correct`, `incorrect`, `abstained` or `unreviewed`. Unlabelled retrieval
+cases and unreviewed root-cause pairs are counted separately; abstentions
+remain in the root-cause accuracy denominator. These functions calculate
+metrics from supplied labels, not model-generated ground truth. Do not
+include the target issue's verified root cause or later replies in its query
+or index snapshot. Run actual evaluations against the authorized local
+Redmine archive; synthetic fixtures do not establish real quality gains.
