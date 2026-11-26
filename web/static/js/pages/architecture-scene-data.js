@@ -6,7 +6,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['entry','用户与入口','统一接入','users','access',34,92,226,166,['Web 工作台','主机桌面 / 终端','测试套件 / ATS',['对话 Agent','对话 / CLI Agent']]],
    ['controller','Controller','控制与调度中心','server','control',387,85,328,181,['认证与权限','任务调度','设备 Claim / Lease','设备管理','服务编排','审计 / 报告索引']],
    ['workers','Worker 集群','执行与结果采集','network','worker',861,92,215,166,[['Worker A','Linux Worker A'],['Worker B','Linux Worker B'],['Tradefed','Tradefed / 测试'],['原生结果 / 日志','原生 results / logs']]],
-   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine','Gerrit','知识库','构建服务器']],
+   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine / Gerrit',['源码 / AI','SDK / CodeSearch / AI'],['内外部知识','个人知识、Wiki / CDD / Web'],['构建服务','受审计 SSH / 构建服务器']]],
    ['usbip','USB/IP','设备通道','plug','channel',310,350,198,143,['USB 映射','设备透传','热插拔 / 重枚举']],
    ['device','测试设备','物理资源','device','resource',576,350,199,143,[['TV / STB','Android TV / STB'],'手机 / 平板','本地 USB','远端 USB']],
    ['adb','ADB Proxy','调试代理','terminal','teal',842,350,233,143,['ADB 连接','多设备代理','命令转发']]],
@@ -20,7 +20,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M508 424 H576','both','USB 连接',542,403],['M775 424 H842','both','受控 ADB',809,403]
   ],
   legend:[['access','入口 / Agent'],['control','控制与调度'],['worker','Worker 执行'],['resource','设备 / USB'],['external','外部协同']],
-  boundary:['Worker 主动 Heartbeat / Poll，命令随 Poll 返回并以 ACK 汇报。','USB/IP 转发 USB 总线；ADB Proxy 代理受控 ADB 会话。','工单、代码、知识与构建服务均是外部协同能力。']
+  boundary:['Worker 主动 Heartbeat / Poll，命令随 Poll 返回并以 ACK 汇报。','USB/IP 转发 USB 总线；ADB Proxy 代理受控 ADB 会话。','Controller 通过受控接口集成工单、源码、模型、知识与构建服务。','Feature 通过公共接口 / Foundation Port 交互；Bootstrap 组装运行时依赖。']
  },
  usbip: {
   h:535,nodes:[
@@ -40,7 +40,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M444 224 V167','command','SSH / bind',498,199],['M444 344 V402','command','SSH / bind',498,382]
   ],
   legend:[['resource','Android 物理设备'],['channel','Source / USB/IP'],['control','Controller 协调'],['worker','Worker / Tradefed']],
-  boundary:['Windows / Linux Source 各自运行 USB/IP 导出服务。','物理 USB 设备经 TCP 3240 透传，Worker 使用 vhci_hcd。','Loader / MaskROM 重枚举时必须重新发现和 attach。'],
+  boundary:['Windows / Linux Source 各自运行 USB/IP 导出服务；SSH / bind 受审计。','物理 USB 设备经 TCP 3240 透传，Worker 使用 vhci_hcd。','租约与设备归属由 Controller 管理；重枚举须重新发现和 attach。'],
   cards:[
    ['接入链路分层','access',[['1','Source','导出物理 USB 设备'],['2','Worker','usbip attach 映射远端资源'],['3','Controller','协调绑定、租约、任务']]],
    ['关键职责 / 边界','worker',[['设备','物理 USB 连接'],['Source','导出 USB / 维护映射'],['Controller','SSH / bind；Poll 命令协调'],['Linux Worker','attach / ADB / 测试']]],
@@ -64,7 +64,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M455 382 V506 H908','report','ADB liveness / 状态校验',685,483]
   ],
   legend:[['access','AOA 工作台'],['control','Controller / AOA'],['worker','回放 / AOAv2'],['resource','Profile / Android']],
-  boundary:['Profile 与设备屏幕、密度、方向和版本相关。','AOAv2 / HID 注入是设备操作通道，不依赖已有 ADB。','AOA 回放完成不保证 ADB 可用，需检查调试授权与设备连通性。'],
+  boundary:['Profile 按 owner 隔离，关联屏幕、密度、方向和版本。','AOAv2 / HID 注入是设备操作通道，不依赖已有 ADB。','AOA 回放完成不保证 ADB 可用，需检查调试授权与设备连通性。'],
   cards:[
    ['执行链路分层','access',[['AOA 工作台','录制、标定、选取 Profile'],['Controller','授权 / 调度 / 回报'],['Worker','执行并报告事件'],['AOAv2','Accessory / HID 输入'],['Android','向导完成 / USB 调试']]],
    ['Profile / 回放说明','worker',[['Profile','HID 参数与触点坐标'],['回放','Worker 按步骤执行'],['异常','关键步骤结果实时回报'],['适配','设备屏幕差异须重新校验']]],
@@ -87,7 +87,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M980 244 V337','report','写入回执',1046,291],['M855 208 H699','report','状态 / 重试',777,230]
   ],
   legend:[['access','固件 / 设备输入'],['control','Controller / 调度'],['worker','Worker 执行'],['resource','镜像写入 / 校验']],
-  boundary:['本地 USB 与 USB/IP 来源整包烧写的执行者不同。','Loader / MaskROM 重枚举需要重识别，不能复用旧身份。','校验版本和启动后状态，不把执行结束当作成功。'],
+  boundary:['本地 USB 由 Worker 烧写；Windows USB/IP 交还 Source 后用 RKDevTool。','Linux USB/IP 整包烧写不支持；ADB Proxy 不提供 Fastboot / RockUSB。','Loader / MaskROM 重枚举需要重识别，不能复用旧身份。','校验版本和启动后状态，不把执行结束当作成功。'],
   cards:[
    ['烧写阶段说明','access',[['1','固件选择与兼容性'],['2','任务下发 / 来源确认'],['3','设备识别 / 模式判断'],['4','切换 ADB / Fastboot / Loader'],['5','执行镜像写入'],['6','重启、校验与归档']]],
    ['模式切换与关键边界','worker',[['ADB / Fastboot','按可用协议切换'],['Loader / MaskROM','重新枚举 / 识别'],['USB/IP 来源','Source 能力决定烧写主体'],['设备失联','先识别当前模式再恢复']]],
@@ -97,10 +97,10 @@ window.ArchitectureSceneData = Object.freeze({
  'test-flow':{
   h:680,nodes:[
    ['plan','测试计划 / 任务创建','测试入口','test','access',35,45,244,160,['测试计划管理','套件 / 用例选择','设备要求']],
-   ['control','Controller 调度','任务与资源','server','control',400,48,282,151,['任务队列','资源调度','并发调配','状态审计']],
+   ['control','Controller 调度','任务与资源','server','control',400,48,282,151,['权限 / 预检','Claim / Lease',['任务队列','ATS / Cluster Job'],'状态审计']],
    ['worker','Worker 执行','Tradefed 测试运行','server','worker',843,45,235,160,['任务领取','Tradefed 执行','异常上报']],
    ['repair','修复验证 / Gerrit','回归验证','branch','channel',38,299,238,162,['修复变更','构建 / 再测试','结果比对']],
-   ['prep','设备准备','执行前检查','shield','resource',393,260,294,120,['设备预约','镜像 / 环境','健康检查']],
+   ['prep','设备准备','执行前检查','shield','resource',393,260,294,120,['设备租约','镜像 / 环境','能力 / 健康检查']],
    ['engines','测试套件生态','Tradefed','package','control',393,444,294,118,['CTS','GTS','VTS','STS']],
    ['logs','Worker 原生结果','results / logs','chart','channel',839,340,237,165,[['Tradefed 日志','Logcat / Tradefed'],'Pass / Fail','原生 Workdir']],
    ['report','报告浏览 / 登记','按需汇总与分析','book','control',839,564,237,104,['结果查看','按需登记 / 分析']],
@@ -109,12 +109,12 @@ window.ArchitectureSceneData = Object.freeze({
    ['M279 125 H400','command','创建任务',338,108],['M682 125 H843','command','Poll / 任务',762,107],
    ['M983 205 V340','data','执行日志',1034,282],['M843 175 H682','report','事件 / ACK',762,193],
    ['M539 199 V260','command','预检 / 租约',603,230],['M540 380 V444','data','套件准备',594,420],
-   ['M687 487 H839','data','测试执行',756,467],['M958 505 V564','report','结果索引',1014,537],
+   ['M687 487 H790 V235 H930 V205','data','本地套件',748,465],['M958 505 V564','report','结果索引',1014,537],
    ['M839 616 H272','data','按需提单',552,593],['M157 564 V461','command','提交修复',209,514],
    ['M157 299 V205','report','回归反馈',210,270]
   ],
   legend:[['access','任务入口 / 缺陷'],['control','Controller / 套件'],['worker','Worker 执行'],['resource','设备与环境']],
-  boundary:['任务与设备租约、原生工作目录均有明确属主。','Worker 失联不自动等于任务可跨主机续跑。','修复应关联 Gerrit 变更和真实的回归验证结果。'],
+  boundary:['任务与设备租约、原生工作目录均有明确属主。','Worker 失联不自动等于任务可跨主机续跑。','原生 results / logs 与 Controller 已登记报告分开；诊断按需进行。','修复应关联 Gerrit 变更和真实的回归验证结果。'],
   cards:[
    ['闭环阶段','access',[['计划','套件 / 设备 / 用例'],['调度','租约 / 能力预检'],['执行','Worker 跑 CTS / GTS / VTS / STS'],['分析','原生结果 / 失败项'],['修复','Redmine + Gerrit'],['回归','重跑并归档']]],
    ['角色边界','worker',[['测试工程师','任务配置 / 结果分析'],['Controller','资源、队列、状态'],['Worker','测试、日志、回执'],['开发 / 质量','修复 / 构建 / 验证']]],
@@ -123,31 +123,32 @@ window.ArchitectureSceneData = Object.freeze({
  },
  'agent-analysis':{
   h:675,nodes:[
-   ['input','用户 / 对话 Agent','工单与工具规划','message','access',28,44,236,177,['问题 / 工单','Gerrit 关联','kkagent / CLI','设备 / 版本']],
+   ['input','用户 / 对话 Agent','工单与工具规划','message','access',28,44,236,177,['问题 / 工单','每日晨报',['kkagent / CLI','kkagent / CLI / MCP'],'设备 / 版本']],
    ['control','Controller / 工具网关','权限门禁与任务状态','server','control',389,35,342,190,['Service Token','权限与审计','受控工具调用','任务校验 / 入队','run_id / 状态','报告索引']],
-   ['worker','设备执行 Worker','按权限受控操作','server','worker',867,44,210,180,['Worker A','Worker B',['ADB / 测试','ADB / Tradefed'],'回执 / 日志']],
-   ['evidence','分析 Worker / 取证','Redmine 后台执行','search','access',28,302,214,161,['工单 / 附件','日志 / 报告','补丁 / 代码','APK / SDK']],
-   ['reason','诊断推理','根因定位','chip','control',317,305,193,158,['证据关联','原因分析','多证据复核']],
-   ['fix','修复建议','可执行方案','tool','resource',592,305,186,158,['修复方案',['代码补丁','代码 / Patch'],'验证计划']],
-   ['verify','远程执行 / 验证','受控动作','play','channel',859,305,214,158,['设备联调','自动化验证','真实回执','状态回送']],
-   ['redmine','Redmine','工单闭环','workflow','external',27,518,216,112,['结论 / 进度回写']],
-   ['gerrit','Gerrit','变更关联','branch','external',306,518,216,112,['补丁 / 审核']],
-   ['knowledge','知识库','经验沉淀','book','external',577,518,216,112,['可复用知识']],
-   ['report','报告系统','诊断输出','chart','external',858,518,216,112,['证据与结果']]],
+   ['worker','设备执行 Worker','按需授权 / 独立执行','server','worker',867,44,210,180,['Worker A','Worker B',['ADB / 测试','ADB / Tradefed'],'回执 / 日志']],
+   ['evidence','实际证据来源','当前工单与匹配版本','search','access',28,302,214,161,['工单 / 附件','日志 / 报告',['Gerrit / 补丁','Gerrit / Mainline / Critical Fix'],['APK / SDK','APK / SDK / CodeSearch']]],
+   ['collect','分析 Worker / 取证','Redmine 后台执行','search','access',317,302,193,161,['证据快照','版本匹配','引用召回','覆盖检查']],
+   ['review','诊断推理 / 复核','模型分析与补证','chip','control',592,302,186,161,[['证据门禁','Evidence Gate / 证据门禁'],['结论复核','Claim Review / 结论复核'],'根因 / 不确定性','补证 / 源码验证']],
+   ['report','诊断结果 / 状态','结论与建议（非执行）','chart','resource',859,302,214,161,['引用 / 结论','修复建议','验证计划','报告 / run_id']],
+   ['owner','授权参考文档','独立 owner 范围','book','external',27,518,216,112,[['PDF / HTML','owner 授权 PDF / HTML'],['GMS 规范','授权 GMS Requirements']]],
+   ['sources','外部知识源','只读 / 来源可追溯','book','external',306,518,216,112,[['Wiki','Android Internals Wiki'],['CDD / Web','Android CDD / Web 文档']]],
+   ['knowledge','知识联邦检索','背景知识 / 版本过滤','search','external',577,518,216,112,['索引 / RRF','来源状态']],
+   ['output','诊断结果消费','读模型 / 会话反馈','workflow','external',858,518,216,112,[['原会话 / 晨报','原会话 / 每日晨报'],['报告 / 知识','报告 / 按需知识沉淀']]]
+  ],
   edges:[
    ['M264 132 H389','command','Service Token',325,114],['M731 132 H867','command','按需受控执行',799,114],
-   ['M867 198 H731','report','验证回执',795,213],['M463 225 V271 H135 V302','command','后台取证',320,256],
-   ['M242 384 H317','data','检索证据',280,367],['M510 384 H592','data','修复规划',551,367],
-   ['M778 384 H859','data','执行验证',818,367],['M966 224 V305','command','工具授权',1023,272],
-   ['M135 463 V518','report','工单',182,493],['M414 463 V518','data','变更',462,491],
-   ['M685 463 V518','report','沉淀',731,492],['M966 463 V518','report','报告',1012,492]
+   ['M867 198 H731','report','验证回执',795,213],['M463 225 V271 H414 V302','command','校验入队',529,254],
+   ['M242 383 H317','data','工单取证',280,366],['M510 383 H592','data','证据包',551,366],['M778 383 H859','report','复核结果',818,366],
+   ['M135 518 V490 H367 V463','data','授权召回',220,481],['M414 518 V463','data','规范召回',472,491],
+   ['M522 574 H577','data','检索',550,554],['M685 518 V463','data','背景知识',741,491],
+   ['M966 463 V518','report','状态 / 结果',1030,491]
   ],
-  legend:[['access','用户 / 证据'],['control','Agent 与调度'],['worker','设备执行'],['resource','修复建议'],['external','知识 / 工单']],
-  boundary:['kkagent / CLI 在 Controller 外独立运行，以 Service Token 通过权限与审计门禁。','Redmine 后台分析 Worker 与设备执行 Worker 相互独立，不能视为同一执行资源。','run_id 跟踪当前后台任务；取消前端 Agent 跟踪不等于取消后台分析任务。'],
+  legend:[['access','用户 / 证据'],['control','Agent 与调度'],['worker','设备执行'],['resource','诊断输出'],['external','知识 / 结果消费']],
+  boundary:['Redmine 后台分析 Worker 与设备执行 Worker 独立；设备操作须另行授权。','外部联邦命中为 background；官方规范是要求依据，不单独证明问题根因。','授权 PDF / HTML 与 GMS 规范按 owner / 授权范围召回，不进入公共索引。','run_id 跟踪权威任务状态；恢复跟踪不等于任务完成或取消。'],
   cards:[
-   ['诊断链路','access',[['上下文','Agent 规划，附工单 / 设备信息'],['预采集','日志、APK、SDK、源码'],['推理','证据关联、根因定位'],['验证','受控命令 / 真实回执'],['沉淀','结论、修复与知识']]],
-   ['证据来源','worker',[['Redmine','工单、附件及历史记录'],['Gerrit','代码变更 / 审查'],['日志报告','崩溃、测试与诊断证据'],['APK / SDK','版本、配置及实现'],['源码','代码搜索与机制分析']]],
-   ['结果输出','risk',[['诊断结论','明确引用和不确定性'],['修复建议','受控执行步骤 / 补丁'],['验证结果','实际设备或 Worker 回执'],['报告','问题、证据、方案、验证'],['知识条目','适用条件与可复用经验']]]
+   ['诊断链路','access',[['入口','对话 / 晨报 / 工单'],['取证','快照、版本与覆盖'],['召回','官方引用 / 背景知识'],['复核','证据门禁 / Claim Review'],['输出','诊断读模型 / run_id']]],
+   ['证据来源','worker',[['Redmine / 日志','当前工单、附件及历史'],['Gerrit / SDK','变更、APK / 版本源码'],['官方规范','Mainline / CF / CDD'],['知识联邦','Wiki / Web，background'],['授权资料','owner PDF / HTML、GMS']]],
+   ['结果输出','risk',[['结论','引用、不确定性、证据缺口'],['修复建议','方案 / 补丁候选 / 验证计划'],['设备验证','另行授权 / Worker 回执'],['报告','统一读模型 / 原会话'],['沉淀','按需回写 / 经验知识']]]
   ]
  }
 });
