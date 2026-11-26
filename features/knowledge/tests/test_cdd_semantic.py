@@ -40,3 +40,50 @@ def test_unconfigured_embedding_keeps_lexical_behavior(tmp_path, monkeypatch):
     assert provider.search_with_status("memory") == ([], {
         "status": "disabled", "coverage_complete": False, "indexed": 0, "total": 0
     })
+
+
+def test_public_scheduler_resumes_batches_and_rotates_after_failure(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    import features.retrieval as retrieval
+    from features.knowledge.external import web_sources
+
+    config = {"retrieval": {"auto_index_public_cdd": True}}
+    monkeypatch.setattr(web_sources.config_manager, "load_config", lambda: config)
+    monkeypatch.setattr(retrieval, "embedding_configuration_issue", lambda: None)
+    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: Encoder())
+    path = tmp_path / "web.sqlite3"
+    provider = WebKnowledgeProvider(path)
+    ids = []
+    for version in (16, 17):
+        url = f"https://source.android.com/docs/compatibility/{version}/android-{version}-cdd"
+        source = provider.save(name=f"CDD {version}", url=url, kind="cdd",
+                               android_version=version, license="CC-BY-4.0")
+        ids.append(source)
+        with provider._db(write=True) as db:
+            db.execute("UPDATE sources SET revision='r1' WHERE id=?", (source,))
+            db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r1", "2026-01-01"))
+            for i in range(2):
+                db.execute("INSERT INTO clauses VALUES(?,?,?,?,?,?,?,?,?)",
+                           (source, "r1", "Memory", "", "MUST", "", "memory",
+                            url, f"{source}-{i}"))
+    first, second = sorted(ids)
+
+    def fail_once(source_id, **kwargs):
+        assert source_id == first
+        raise RuntimeError("private error")
+
+    monkeypatch.setattr(provider, "sync_semantic", fail_once)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    result = provider.sync_due_semantic(now=now, batch_size=1)
+    assert result == [{"source_id": first, "status": "error", "coverage_complete": False,
+                       "detail": "RuntimeError", "operation": "semantic_index"}]
+    # New instance simulates a controller restart; the attempt order is durable.
+    restarted = WebKnowledgeProvider(path)
+    for offset, expected in enumerate((second, first, second, first), 1):
+        result = restarted.sync_due_semantic(now=now + timedelta(minutes=offset), batch_size=1)
+        assert result[0]["source_id"] == expected
+        assert result[0]["indexed"] == (1 if offset <= 2 else 2)
+    assert restarted.sync_due_semantic() == []
+    config["retrieval"]["auto_index_public_cdd"] = "true"
+    assert restarted.sync_due_semantic() == []
