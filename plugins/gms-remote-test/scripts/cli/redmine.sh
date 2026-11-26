@@ -869,23 +869,21 @@ gms-rt-knowledge-search() {
     done
     [ -z "$query" ] && { error "Usage: gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]"; return "$GMS_RT_EXIT_USAGE"; }
     check_jq
-    local url="/knowledge/android-internals/search?q=$(_urlencode "$query")&limit=$limit"
-    if [ -n "$android_api_level" ]; then
-        url="$url&android_api_level=$(_urlencode "$android_api_level")"
-    fi
+    local url="/knowledge/external/search" body
+    body=$(jq -n --arg query "$query" --arg limit "$limit" --arg api "$android_api_level" '{query:$query,limit:($limit|tonumber),android_api_level:(if $api == "" then null else ($api|tonumber) end)}') || return "$GMS_RT_EXIT_USAGE"
     if [ "$GMS_RT_OUTPUT" = "json" ]; then
-        api_call "$url" "GET" | jq '.'
+        api_call "$url" "POST" "$body" | jq '.'
         return $?
     fi
-    api_call "$url" "GET" | jq -r '.data |
+    api_call "$url" "POST" "$body" | jq -r '.data |
         (.sources_status | map(select(.status != "ready"))) as $bad |
-        "background hits: \(.results | length)" +
+        "knowledge hits: \(.results | length)" +
         (if ($bad | length) > 0
          then " (sources: " + ([$bad[] | "\(.source)=\(.status)"] | join(", ")) + ")"
          else "" end),
         (.results[] |
-            (if .extra.section.start_line and .extra.section.start_line > 0
+            (if (.extra.section | type) == "object" and .extra.section.start_line and .extra.section.start_line > 0
              then " @ L\(.extra.section.start_line)-L\(.extra.section.end_line)"
              else "" end) as $range |
-            "[\(.chapter // "-")] \(.title)\($range)\n  \(.snippet)\n  versions: \(.applicable_versions // "-") · confidence: \(.confidence // "-") · verified: \(.last_verified // "-")\n  src: \(.source_path) @ \(.source_revision[0:8] // "-") · \(.license)\n")'
+            "[\(.chapter // "-")] \(.title // .name // .section)\($range)\n  \(.snippet // .original)\n  versions: \(.applicable_versions // "-") · confidence: \(.confidence // "-") · verified: \(.last_verified // "-")\n  src: \(.source_path // .token) @ \((.source_revision // .revision // "-")[0:8]) · \(.license)\n")'
 }
