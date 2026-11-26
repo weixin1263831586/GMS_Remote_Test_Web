@@ -22,8 +22,8 @@
 .inventory-refresh { margin-left: auto; }
 #devices-main-view .devices-table-wrap { flex: 1; min-height: 160px; margin: 0; background: var(--card-bg); }
 #devices-main-view .device-management-table { min-width: 1264px; table-layout: fixed; }
-#devices-main-view .device-management-table th { position: sticky; top: 0; z-index: 1; background: var(--light-bg); height: var(--ui-table-header-height); padding: 8px; white-space: nowrap; color: var(--text-secondary); }
-#devices-main-view .device-management-table td { height: var(--ui-table-row-height); padding: 4px 8px !important; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#devices-main-view .device-management-table th { position: sticky; top: 0; z-index: 1; background: var(--light-bg); white-space: nowrap; color: var(--text-secondary); }
+#devices-main-view .device-management-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #devices-main-view .device-management-table tbody tr[data-device-id]:hover { background: var(--light-bg); }
 #devices-main-view .device-management-table tbody tr.is-selected { background: color-mix(in srgb, var(--primary-color) 8%, var(--card-bg)); }
 #devices-main-view .device-management-table .ui-stack { flex-direction: row; align-items: center; gap: 8px; }
