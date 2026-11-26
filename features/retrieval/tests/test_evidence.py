@@ -186,3 +186,16 @@ def test_sdk_gerrit_relation_requires_exact_project_and_current_commit():
                       "sdk_reference": "frameworks/base/Test.java:12",
                       "gerrit_reference": "gerrit:frameworks/base:1",
                       "relation": "same_project_and_commit", "applicability_verified": False}]
+
+
+def test_index_integrity_and_truncation_survive_context_budget():
+    evidence = summarize_evidence("knowledge_search", {"data": {
+        "coverage_complete": True, "index_consistent": False, "truncated": True,
+        "results": [{"reference": "r", "source_revision": "v"}],
+    }})
+    assert not evidence["coverage_complete"]
+    assert {"incomplete_evidence_index", "bounded_or_unconfirmed"} <= set(evidence["gaps"])
+    context = evidence_plan_context([{"evidence": evidence}] +
+                                    [{"evidence": {"coverage_complete": True}}] * 9)
+    assert "incomplete_evidence_index" in context["unresolved_gaps"]
+    assert context["has_unresolved_scope"]

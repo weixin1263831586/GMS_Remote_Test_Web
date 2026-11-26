@@ -111,10 +111,10 @@ def _local_links(node):
 def _note_kind(node, value):
     identity = node.get('id', '')
     if (node.get('role') == 'doc-footnote'
-            or re.match(r'^(?:fn|footnote)[-_]?\\d', identity, re.I)
-            or re.match(r'^Footnotes?\\s*[:.]', value, re.I)):
+            or re.match(r'^(?:fn|footnote)[-_]?\d', identity, re.I)
+            or re.match(r'^Footnotes?\s*[:.]', value, re.I)):
         return 'footnote'
-    if re.match(r'^Notes?\\s*:', value, re.I):
+    if re.match(r'^Notes?\s*:', value, re.I):
         return 'note'
     return ''
 

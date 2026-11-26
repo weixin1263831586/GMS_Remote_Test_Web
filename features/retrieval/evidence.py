@@ -77,7 +77,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("bounded_or_unconfirmed")
     if data.get("source_coverage_complete") is False:
         gaps.append("incomplete_source_scope")
-    if data.get("index_complete") is False or data.get("index_warnings"):
+    if data.get("index_complete") is False or data.get("index_consistent") is False or data.get("index_warnings"):
         gaps.append("incomplete_evidence_index")
     retrieval_status = data.get("retrieval")
     if isinstance(retrieval_status, dict):
@@ -124,7 +124,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("bounded_or_unconfirmed")
     if any(row.get("total") == 0 for row in batch_rows):
         gaps.append("batch_query_without_match")
-    if data.get("possibly_truncated") is True or data.get("latest_confirmed") is False:
+    if (data.get("possibly_truncated") is True or data.get("truncated") is True
+            or data.get("latest_confirmed") is False or data.get("latest_scan_confirmed") is False):
         gaps.append("bounded_or_unconfirmed")
     if tool_failed:
         gaps.append("tool_failed")
@@ -230,7 +231,10 @@ def evidence_plan_context(observations: list, *, limit=8) -> dict:
                         "relation": "same_project_and_commit", "applicability_verified": False}
                 if link not in links and len(links) < 16:
                     links.append(link)
+    gaps = list(dict.fromkeys(gap for item in evidence for gap in item.get("gaps", [])
+                             if isinstance(gap, str)))
     return {"retrievals": selected, "omitted_retrievals": max(0, len(evidence) - len(selected)),
+            "unresolved_gaps": gaps[:24], "omitted_gaps": max(0, len(gaps) - 24),
             "sdk_gerrit_links": links,
             "has_unresolved_scope": any(not item.get("coverage_complete") or item.get("gaps")
                                         for item in evidence)}
