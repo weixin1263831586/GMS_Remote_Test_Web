@@ -270,7 +270,8 @@ def sync_web_source(request: Request, source_id: str):
 @handle_api_errors
 def semantic_index_status(request: Request, source_id: str):
     require_elevated_admin(request)
-    result = WebKnowledgeProvider().semantic_status(source_id)
+    provider = WebKnowledgeProvider()
+    result = {**provider.semantic_status(source_id), **provider.semantic_schedule_status(source_id)}
     issue = embedding_configuration_issue("cdd")
     if issue:
         result = {**result, "configuration_issue": issue}
@@ -296,6 +297,7 @@ def wiki_semantic_status(request: Request):
     provider = _federated_provider("android_internals")
     result = (provider.semantic_status() if provider is not None
               else {"status": "unavailable", "indexed": 0, "total": 0})
+    result = {**result, **WebKnowledgeProvider().semantic_schedule_status("android_internals", wiki=True)}
     issue = embedding_configuration_issue("android_internals")
     if issue:
         result = {**result, "configuration_issue": issue}
