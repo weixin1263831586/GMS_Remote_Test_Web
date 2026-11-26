@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+from lxml import etree
+
 from foundation.tradefed_report_type import report_test_type
 
 from .models import TestFailure, TestReport
@@ -10,47 +12,24 @@ from .models import TestFailure, TestReport
 logger = logging.getLogger(__name__)
 
 
-# Prefer the hardened lxml parser; use ElementTree when lxml is unavailable.
-try:
-    from lxml import etree
-except ImportError:
-    import xml.etree.ElementTree as ET
-
-    USE_LXML = False
-    etree = None
-else:
-    USE_LXML = True
-    ET = None
-
-# Reports are untrusted. Do not resolve entities or fetch network resources.
-_LXML_PARSER = (
-    etree.XMLParser(
-        remove_blank_text=True,
-        huge_tree=True,
-        recover=True,
-        resolve_entities=False,
-        no_network=True,
-    )
-    if USE_LXML
-    else None
+# Reports are untrusted. Allow large reports without expanding entities or accessing the network.
+_LXML_PARSER = etree.XMLParser(
+    remove_blank_text=True,
+    huge_tree=True,
+    recover=True,
+    resolve_entities=False,
+    no_network=True,
 )
 
 
 class XMLReportParser:
     """XML报告解析器 - 统一处理test_result.xml解析"""
 
-    def __init__(self):
-        self.parent_map = None
-
     def parse_file(self, xml_path: str) -> TestReport | None:
         """解析XML文件"""
         try:
-            if USE_LXML:
-                tree = etree.parse(xml_path, _LXML_PARSER)
-                root = tree.getroot()
-            else:
-                tree = ET.parse(xml_path)
-                root = tree.getroot()
+            tree = etree.parse(xml_path, _LXML_PARSER)
+            root = tree.getroot()
 
             return self._parse_root(root)
         except Exception as e:
@@ -60,10 +39,7 @@ class XMLReportParser:
     def parse_content(self, xml_content: str) -> TestReport | None:
         """解析XML内容字符串"""
         try:
-            if USE_LXML:
-                root = etree.fromstring(xml_content.encode('utf-8'), _LXML_PARSER)
-            else:
-                root = ET.fromstring(xml_content)
+            root = etree.fromstring(xml_content.encode('utf-8'), _LXML_PARSER)
 
             return self._parse_root(root)
         except Exception as e:
@@ -72,12 +48,6 @@ class XMLReportParser:
 
     def _parse_root(self, root) -> TestReport | None:
         """解析XML根节点"""
-        # lxml元素自带getparent()，不需要为大报告构建全量父节点映射。
-        if USE_LXML:
-            self.parent_map = None
-        else:
-            self.parent_map = {c: p for p in root.iter() for c in p}
-
         test_type = self._get_test_type(root)
         device = self._get_device_info(root)
         suite_version = self._get_suite_version(root)
@@ -202,18 +172,11 @@ class XMLReportParser:
 
         return failures
 
-    def _get_parent(self, element):
-        if USE_LXML:
-            return element.getparent()
-        if self.parent_map:
-            return self.parent_map.get(element)
-        return None
-
     def _get_module_name(self, test_case) -> str:
         """获取测试所属模块"""
         current = test_case
         while current is not None:
-            current = self._get_parent(current)
+            current = current.getparent()
             if current is None:
                 break
             if current.tag == 'Module':
@@ -226,7 +189,7 @@ class XMLReportParser:
 
         # 如果是Test节点，尝试组合完整名称
         if test_case.tag == 'Test':
-            parent = self._get_parent(test_case)
+            parent = test_case.getparent()
             if parent is not None and parent.tag == 'TestCase':
                 class_name = parent.get('name', '')
                 if class_name and test_name:

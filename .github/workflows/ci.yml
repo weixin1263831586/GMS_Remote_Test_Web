@@ -110,8 +110,7 @@ jobs:
   #   边界在源码以 `# nosemgrep: <rule>` 就地豁免并写明理由；
   # - WARNING 级作为存量改进清单随 artifact 上传，不阻断；
   # - 刻意排除的规则（纯 import 告警/与平台约定冲突的误报）逐条列出：
-  #   B404(仅 import subprocess)、B313..B410 组合族(与 use-defused-xml
-  #   同源：标准库 ET 不解析外部实体，lxml 已在 _LXML_PARSER 显式关闭)、
+  #   B404(仅 import subprocess)、B313..B410 组合族(XML 解析显式禁用外部实体与网络访问)、
   #   B101(assert 是测试与防御式检查的合法用法)。
   static-sast:
     name: static-sast
