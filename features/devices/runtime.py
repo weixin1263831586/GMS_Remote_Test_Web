@@ -10,6 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from foundation.config import ConfigManager
 from foundation.runtime_contracts import (
     ApiHelpProvider,
     ClientIdResolver,
@@ -24,7 +25,7 @@ from foundation.runtime_contracts import (
 
 @dataclass
 class DeviceRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     global_state: object | None = None
     ssh_manager: object | None = None
     store_notification: NotificationStore | None = None
@@ -56,7 +57,7 @@ def __getattr__(name: str) -> object:
 
 def configure_runtime(
     *,
-    selected_config_manager: object,
+    selected_config_manager: ConfigManager,
     selected_global_state: object,
     selected_ssh_manager: object,
     selected_store_notification: NotificationStore,
@@ -92,7 +93,7 @@ def configure_runtime(
 def configure_device_dependencies(
     *,
     ssh_manager: object,
-    config_manager: object,
+    config_manager: ConfigManager,
     global_state: object,
     store_notification: NotificationStore,
     generate_help_or_continue: ApiHelpProvider,
