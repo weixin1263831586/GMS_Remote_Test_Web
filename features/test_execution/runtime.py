@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from foundation.config import ConfigManager
 from foundation.runtime_contracts import (
     ApiHelpProvider,
     ApkFilenameNormalizer,
@@ -17,9 +19,13 @@ from foundation.runtime_contracts import (
 )
 
 
+if TYPE_CHECKING:
+    from .suite_tasks import SuiteTaskStore
+
+
 @dataclass
 class TestExecutionRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     ssh_manager: object | None = None
     global_state: object | None = None
     project_root: Path | None = None
@@ -34,7 +40,7 @@ class TestExecutionRuntime:
     safe_join: SafePathJoin | None = None
     cleanup_files: FileCleanup | None = None
     start_cluster_test: ClusterTestStarter | None = None
-    suite_task_store: object | None = None
+    suite_task_store: SuiteTaskStore | None = None
 
 
 _runtime = TestExecutionRuntime()
@@ -53,7 +59,7 @@ def __getattr__(name: str) -> object:
 
 def configure_runtime(
     *,
-    selected_config_manager: object,
+    selected_config_manager: ConfigManager,
     selected_ssh_manager: object,
     selected_global_state: object,
     selected_project_root: Path,
@@ -68,7 +74,7 @@ def configure_runtime(
     selected_safe_join: SafePathJoin | None = None,
     selected_cleanup_files: FileCleanup | None = None,
     selected_start_cluster_test: ClusterTestStarter | None = None,
-    selected_suite_task_store: object | None = None,
+    selected_suite_task_store: SuiteTaskStore | None = None,
 ) -> None:
     for name in _RUNTIME_FIELDS:
         globals().pop(name, None)
@@ -94,7 +100,7 @@ def configure_runtime(
 
 def configure_test_execution_dependencies(
     *,
-    config_manager: object,
+    config_manager: ConfigManager,
     ssh_manager: object,
     global_state: object,
     project_root: Path,
@@ -109,7 +115,7 @@ def configure_test_execution_dependencies(
     safe_join: SafePathJoin,
     cleanup_files: FileCleanup,
     start_cluster_test: ClusterTestStarter | None = None,
-    suite_task_store: object | None = None,
+    suite_task_store: SuiteTaskStore | None = None,
 ) -> None:
     configure_runtime(
         selected_config_manager=config_manager,
