@@ -468,8 +468,8 @@ class WebKnowledgeProvider:
             ).fetchall()
         return dict(rows[0]) if len(rows) == 1 else None
 
-    def read_cdd_scope(self, token, *, mode, offset=0, limit=3, android_api_level=None):
-        """Read a current CDD section or rows carrying an indexed condition."""
+    def read_cdd_scope(self, token, *, mode, offset=0, limit=3, android_api_level=None, include_documents=False):
+        """Read a current section; approved document readers may also select Web records."""
         if mode not in {'context', 'section'} or not 0 <= offset <= 30000:
             raise ValueError('Invalid scope or offset')
         limit = min(max(limit, 1), 3)
@@ -484,8 +484,8 @@ class WebKnowledgeProvider:
             anchors = db.execute(
                 """SELECT DISTINCT c.*,s.android_version,s.error FROM clauses c JOIN sources s
                    ON c.source_id=s.id AND c.revision=s.revision
-                   WHERE c.token=? AND s.enabled=1 AND s.kind='cdd'
-                   AND (? IS NULL OR s.android_version=?) LIMIT 2""", (token, version, version)
+                   WHERE c.token=? AND s.enabled=1 AND (?=1 OR s.kind='cdd')
+                   AND (? IS NULL OR s.android_version=?) LIMIT 2""", (token, int(include_documents), version, version)
             ).fetchall()
             if len(anchors) != 1:
                 return result
