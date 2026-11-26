@@ -1,9 +1,11 @@
 """通用 AI 模型网关：provider 选择、文本生成、failover 与健康探针。"""
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlsplit
 
 from features.kkagent.health import (
     is_local_provider as _is_local_provider,
@@ -106,6 +108,62 @@ class UniversalAIAnalyzer:
             }
         except Exception as e:
             return {'success': False, 'error': f'AI调用失败: {redact_sensitive_text(e)}'}
+
+    def rag_local_provider(self, preferred: str | None = None) -> str | None:
+        """Select a pinned local text route, never a name-based remote fallback."""
+        if self.config.get("enabled") is not True:
+            return None
+        providers = self.config.get("providers") or {}
+        if not isinstance(providers, dict):
+            return None
+        primary = self.config.get("primary_provider")
+        names = [preferred] if preferred else ([primary] if primary in providers else [])
+        if not preferred:
+            names.extend(name for name in providers if name != primary)
+        for name in names:
+            provider = providers.get(name)
+            if not isinstance(provider, dict) or provider.get("enabled") is not True:
+                continue
+            if not provider.get("model"):
+                continue
+            try:
+                url = urlsplit(provider.get("base_url") or "")
+                if (url.scheme not in {"http", "https"} or url.username or url.password
+                        or url.query or url.fragment):
+                    continue
+                host = url.hostname or ""
+                address = ipaddress.ip_address(host) if host != "localhost" else ipaddress.ip_address("127.0.0.1")
+                if (address.is_loopback or address in ipaddress.ip_network("10.0.0.0/8")
+                        or address in ipaddress.ip_network("172.16.0.0/12")
+                        or address in ipaddress.ip_network("192.168.0.0/16")
+                        or address in ipaddress.ip_network("fc00::/7")):
+                    return name
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    def generate_local_rag(self, user_prompt: str, *, system_prompt: str, max_tokens: int = 1600,
+                           provider_name: str) -> dict:
+        """Read-only local inference with a fixed route and no redirects or failover."""
+        if not provider_name or self.rag_local_provider(provider_name) != provider_name:
+            return {"success": False, "error": "未配置有效的本地 RAG LLM"}
+        try:
+            provider = self.config["providers"][provider_name]
+            url, headers, body, fmt = build_chat_request(
+                provider_name, provider,
+                messages=[{"role": "system", "content": system_prompt},
+                          {"role": "user", "content": user_prompt}],
+                max_tokens=max(1, min(int(max_tokens), int(provider.get("max_tokens") or 4096), 4096)),
+                system_prompt=system_prompt,
+            )
+            response = self._post_chat(url, headers, body, fmt, allow_redirects=False)
+            if response.status_code != 200:
+                return {"success": False, "error": "本地 RAG 模型调用失败"}
+            content = self._parse_response_raw(response.json(), fmt).strip()
+            return {"success": bool(content), "content": content, "provider": provider_name}
+        except Exception:
+            # Never echo document text or credentials from a failed provider response.
+            return {"success": False, "error": "本地 RAG 模型调用失败"}
 
     def image_provider(self) -> str | None:
         """Select an explicitly vision-enabled local provider, without remote fallback."""
