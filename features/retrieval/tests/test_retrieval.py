@@ -191,3 +191,35 @@ def test_semantic_model_revision_must_be_nonempty_string(monkeypatch):
         semantic.local_embedding()
     with pytest.raises(ValueError, match="reranker path and revision"):
         semantic.local_reranker()
+
+
+def test_paired_ranking_evaluation_excludes_unlabelled_cases():
+    from features.retrieval import RankingEvaluationCase, evaluate_ranking_comparison
+
+    cases = [
+        RankingEvaluationCase("one", ["a"], ["b", "a"], ["a", "b"]),
+        RankingEvaluationCase("two", ["c"], [], ["c"]),
+        RankingEvaluationCase("unlabelled", [], ["x"], ["x"]),
+    ]
+    result = evaluate_ranking_comparison(cases, k=1)
+    assert result["labelled_cases"] == 2 and result["unlabelled_cases"] == 1
+    assert result["metrics"]["recall_at_k"] == {"baseline": 0.0, "candidate": 1.0, "delta": 1.0}
+    assert evaluate_ranking_comparison(cases[2:])["metrics"]["recall_at_k"]["delta"] is None
+    with pytest.raises(ValueError, match="unique"):
+        evaluate_ranking_comparison([cases[0], cases[0]])
+
+
+def test_paired_root_cause_review_keeps_abstentions_and_missing_reviews_visible():
+    from features.retrieval import evaluate_root_cause_comparison
+
+    result = evaluate_root_cause_comparison([
+        ("one", "incorrect", "correct"),
+        ("two", "correct", "abstained"),
+        ("three", "unreviewed", "correct"),
+    ])
+    assert result["paired_cases"] == 2 and result["unreviewed_cases"] == 1
+    assert result["baseline"]["accuracy"] == result["candidate"]["accuracy"] == 0.5
+    assert result["candidate"]["answered_accuracy"] == 1.0
+    assert result["candidate"]["abstained"] == 1
+    assert result["accuracy_delta"] == 0.0
+    assert evaluate_root_cause_comparison([])["accuracy_delta"] is None
