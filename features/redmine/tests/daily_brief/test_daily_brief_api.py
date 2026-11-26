@@ -591,7 +591,7 @@ class DailyBriefApiTests(unittest.TestCase):
 
     def test_agent_profiles_expose_names_only(self):
         profiles = {"profiles": ["kkagent-local"], "default_profile": "kkagent-local"}
-        with patch.object(daily_brief_api, "list_daily_brief_agent_profiles", return_value=profiles):
+        with patch.object(daily_brief_api, "list_agent_profiles", return_value=profiles):
             response = self.client.get("/api/redmine-agent/daily-brief/agent-profiles")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["data"], profiles)

@@ -152,7 +152,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M966 463 V518','report','状态 / 结果',1030,491]
   ],
   legend:[['access','用户 / 证据'],['control','Agent 与调度'],['worker','设备执行'],['resource','诊断输出'],['external','知识 / 结果消费']],
-  boundary:['Redmine 后台分析 Worker 与设备执行 Worker 独立；设备操作须另行授权。','外部联邦命中为 background；官方规范是要求依据，不单独证明问题根因。','授权 PDF / HTML 按 owner、内容版本及模型目录召回；共享 Partner 扫描仅供人工查询。','run_id 跟踪权威任务状态；恢复跟踪不等于任务完成或取消。'],
+  boundary:['Redmine 后台分析 Worker 与设备执行 Worker 独立；设备操作须另行授权。','外部联邦命中为 background；官方规范是要求依据，不单独证明问题根因。','授权 PDF / HTML 按 owner、内容版本及模型目录召回；共享 Partner 扫描仅供人工查询；授权资料不进入公共索引。','run_id 跟踪权威任务状态；恢复跟踪不等于任务完成或取消。'],
   cards:[
    ['诊断链路','access',[['入口','对话 / 晨报 / 工单'],['取证','快照、版本与覆盖'],['召回','混合召回 / 原文引用'],['复核','证据门禁 / Claim Review'],['输出','诊断读模型 / run_id']]],
    ['证据来源','worker',[['Redmine / 日志','正文、回复、附件及日志'],['Gerrit / SDK','变更、APK / 版本源码'],['官方规范','Mainline / CF / CDD'],['知识联邦','Wiki / CDD / Web，background'],['授权资料','owner PDF / HTML、模型路由绑定']]],

@@ -114,12 +114,11 @@ html[data-ui-type-root="shell"] .modal-form-row input[type="number"],
 html[data-ui-type-root="shell"] .modal-form-row input[type="search"],
 html[data-ui-type-root="shell"] .modal-form-row select,
 html[data-ui-type-root="shell"] .modal-form-row textarea { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #config-modal .modal-title { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .config-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .config-section > .config-note,
 html[data-ui-type-root="shell"] .config-section > small { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .config-section.config-section-notice { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] #config-modal .config-section-notice code { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #system-config-body .config-section-notice code { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .modal-info-text { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .modal-hint-text { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .firmware-target-list { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-mono); }

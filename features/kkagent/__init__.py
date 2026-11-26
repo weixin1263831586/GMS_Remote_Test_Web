@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from . import config_api
 from .analyzer import (
     UniversalAIAnalyzer,
     call_provider_chain,
@@ -26,7 +27,9 @@ from .config import (
     analysis_command,
     context_limited_config,
     default_model_alias,
+    list_agent_profiles,
     list_model_options,
+    normalize_agent_profile_name,
     model_config,
     resolve_model_spec,
 )
@@ -118,13 +121,16 @@ __all__ = [
     "consume_line",
     "context_length_limit",
     "context_limited_config",
+    "config_api",
     "default_model_alias",
     "endpoint_url",
     "extract_turn_events",
     "first_local_provider",
     "interrupted_exit",
     "is_local_provider",
+    "list_agent_profiles",
     "list_model_options",
+    "normalize_agent_profile_name",
     "llm_stream_timeout",
     "model_config",
     "parse_response_text",

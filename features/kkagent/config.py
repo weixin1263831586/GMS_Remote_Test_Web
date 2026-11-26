@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -257,3 +258,44 @@ def context_limited_config(model: str, limit: int, env_extra: dict[str, str]):
 def analysis_command(command: list[str], entry: dict[str, Any]) -> list[str]:
     path = entry.get("_kkagent_config_path")
     return [command[0], "--config", str(path), *command[1:]] if path else command
+
+
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
+
+
+def normalize_agent_profile_name(value: Any) -> str:
+    name = str(value or "").strip()
+    return name if _PROFILE_NAME_RE.fullmatch(name) else ""
+
+
+def list_agent_profiles(
+    profiles_root: Path | None = None,
+) -> dict[str, Any]:
+    """List local kkagent profile names without reading token material into memory."""
+    root = profiles_root or (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        / "gms-agent" / "profiles"
+    )
+    if not root.is_dir():
+        return {"profiles": [], "default_profile": ""}
+    profiles: list[str] = []
+    for path in sorted(root.glob("*.toml")):
+        name = path.stem
+        if not _PROFILE_NAME_RE.fullmatch(name) or not path.is_file():
+            continue
+        try:
+            # The profile's client declaration is enough for this selector.
+            # Never parse or return controller, CA, or token-file fields.
+            with path.open(encoding="utf-8", errors="replace") as stream:
+                contents = stream.read(8192)
+        except OSError:
+            continue
+        if _KKAGENT_CLIENT_RE.search(contents):
+            profiles.append(name)
+    return {
+        "profiles": profiles,
+        "default_profile": profiles[0] if len(profiles) == 1 else "",
+    }
+
+

@@ -150,10 +150,10 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
 
     def _prepare_content(self, page, modal_id: str):
         # A visible frame alone cannot validate a lazily populated workspace.
-        if modal_id == "config-modal":
-            page.evaluate("() => { void showConfig(); }")
-            expect(page.locator("#config-modal-body input").first).to_be_visible()
-            expect(page.locator("#config-modal-footer")).to_be_visible()
+        if modal_id == "sidebar-visibility-modal":
+            page.evaluate("openSidebarVisibilityModal('system', 'runtime')")
+            expect(page.locator("#system-config-body input").first).to_be_visible()
+            expect(page.locator("#system-config-footer")).to_be_visible()
             expect(page.locator("#elevate-modal")).to_be_hidden()
         elif modal_id == "radar-settings-modal":
             page.evaluate("() => { void GmsUpdateRadarSettings.open(); }")

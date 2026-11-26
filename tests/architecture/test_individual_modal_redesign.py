@@ -15,7 +15,7 @@ SOURCE_FILES = (
 
 def test_every_shell_dialog_has_its_own_structural_variant() -> None:
     dialog_files = sorted(DIALOG_ROOT.glob("*.html"))
-    assert len(dialog_files) == 40
+    assert len(dialog_files) == 38
     for path in dialog_files:
         source = path.read_text(encoding="utf-8")
         assert "tech-dialog--" + ("tailscale" if path.stem == "tailscale-info" else path.stem) in source, path.name
@@ -29,7 +29,7 @@ def test_every_shell_dialog_has_its_own_structural_variant() -> None:
 
 def test_standalone_dialogs_have_independent_variants() -> None:
     expected = {
-        "features/redmine/ui/page.html": 11,
+        "features/redmine/ui/page.html": 10,
         "features/gerrit/ui/page.html": 7,
         "features/cluster/ui/page.html": 2,
         "features/devices/ui/page.html": 1,

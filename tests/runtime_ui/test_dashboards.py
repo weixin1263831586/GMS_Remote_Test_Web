@@ -528,12 +528,11 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
             redmine = self.frame_for(page, "#redmine-agent-frame")
             redmine.wait_for_function("typeof showSettingsModal === 'function'")
             redmine.evaluate("showSettingsModal()")
-            expect(redmine.locator("#settingsModal")).to_have_class(re.compile(r"show"))
-            redmine.wait_for_function(
-                "document.activeElement?.id === 'settingStaleDays'"
-            )
-            redmine.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape'}))")
-            expect(redmine.locator("#settingsModal")).not_to_have_class(re.compile(r"show"))
+            expect(page.locator("#sidebar-visibility-modal")).to_be_visible()
+            settings = page.frame_locator("#system-redmine-settings-frame")
+            expect(settings.locator("#settingStaleDays")).to_be_visible()
+            page.locator("#sidebar-visibility-modal .modal-close").click()
+            expect(page.locator("#sidebar-visibility-modal")).to_be_hidden()
 
             page.locator('.sidebar-item[data-page="gerrit-dashboard"]').click()
             gerrit = self.frame_for(page, "#gerrit-dashboard-frame")
@@ -598,7 +597,6 @@ class RuntimeDashboardsTests(RuntimeUiHarness):
             redmine.locator('.tab[data-tab="runs"]').press("Home")
             expect(redmine.locator('.tab[data-tab="department"]')).to_have_class(re.compile(r"active"))
 
-            self.assert_frame_modal_closes_with_escape(redmine, "showSettingsModal()", "#settingsModal")
             self.assert_frame_modal_closes_with_escape(redmine, "showAddUserModal()", "#addUserModal")
             self.assert_frame_modal_closes_with_escape(redmine, "showAddDepartmentModal()", "#addDepartmentModal")
             self.assert_frame_modal_closes_with_escape(redmine, "showAddProjectModal()", "#addProjectModal")

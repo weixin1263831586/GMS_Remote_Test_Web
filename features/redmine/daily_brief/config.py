@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import os
 import re
-from pathlib import Path
 from typing import Any
 
+from features.kkagent import normalize_agent_profile_name
 from foundation.config import config_manager
 
 from ..analysis.kkagent import KkAgentRedmineAnalyzer
@@ -42,8 +41,6 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     "list_limit": DEFAULT_LIST_LIMIT,
 }
 RUNTIME_CONFIG_KEY = "redmine_daily_brief"
-_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
-_KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
 _DEVICE_SERIAL_RE = re.compile(r"^[A-Za-z0-9:._-]{2,64}$")
 _TRIGGER_TIME_RE = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 # 注意：kkagent 0.4.x 不提供按次覆盖 reasoning effort 的环境变量或 CLI
@@ -65,35 +62,6 @@ def list_daily_brief_model_options(
     return list_model_options(
         ai_config if ai_config is not None else config_manager.get_ai_config()
     )
-
-
-def list_daily_brief_agent_profiles(
-    profiles_root: Path | None = None,
-) -> dict[str, Any]:
-    """List local kkagent profile names without reading token material into memory."""
-    root = profiles_root or (
-        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-        / "gms-agent" / "profiles"
-    )
-    if not root.is_dir():
-        return {"profiles": [], "default_profile": ""}
-    profiles: list[str] = []
-    for path in sorted(root.glob("*.toml")):
-        name = path.stem
-        if not _PROFILE_NAME_RE.fullmatch(name) or not path.is_file():
-            continue
-        try:
-            # The profile's client declaration is enough for this selector.
-            # Never parse or return controller, CA, or token-file fields.
-            contents = path.read_text(encoding="utf-8", errors="replace")[:8192]
-        except OSError:
-            continue
-        if _KKAGENT_CLIENT_RE.search(contents):
-            profiles.append(name)
-    return {
-        "profiles": profiles,
-        "default_profile": profiles[0] if len(profiles) == 1 else "",
-    }
 
 
 def analyzer_env_extra(
@@ -163,7 +131,7 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
     config["model"] = str(payload.get("model") or "").strip()
     # profile 名只允许安全字符，避免注入 env / 路径。
     profile = str(payload.get("agent_profile") or "").strip()
-    config["agent_profile"] = profile if _PROFILE_NAME_RE.fullmatch(profile) else ""
+    config["agent_profile"] = normalize_agent_profile_name(profile)
     # 设备 serial 出现在 prompt 与 MCP 调用参数里，只允许安全字符。
     serial = str(payload.get("device_serial") or "").strip()
     config["device_serial"] = serial if _DEVICE_SERIAL_RE.fullmatch(serial) else ""
@@ -191,7 +159,6 @@ __all__ = [
     "RUNTIME_CONFIG_KEY",
     "analyzer_env_extra",
     "build_brief_analyzer",
-    "list_daily_brief_agent_profiles",
     "list_daily_brief_model_options",
     "normalize_daily_brief_config",
 ]

@@ -74,3 +74,14 @@ def test_shared_diagnosis_helpers_serve_from_core_js(client):
     assert "function singleIssueAnalysisMeta(" in core.text
     assert "function dailyBriefPolicyEvidence(" in core.text
     assert client.get("/redmine-agent/assets/daily-brief-diagnosis.js").status_code == 404
+
+
+def test_redmine_settings_has_dedicated_view(client):
+    page = client.get("/redmine-agent").text
+    settings = client.get("/redmine-agent?settings=1").text
+    assert 'id="settingsModal"' not in page
+    assert 'id="settingStaleDays"' not in page
+    assert 'id="redmine-system-settings"' in settings
+    assert 'id="settingStaleDays"' in settings
+    assert 'data-daily-brief-setting="model"' in settings
+    assert 'assets/page.js' not in settings

@@ -31,6 +31,7 @@ from features.auth import (
     require_agent_scope,
     require_human_principal_when_auth_required,
 )
+from features.kkagent import list_agent_profiles
 from features.users import owner_id_from_request
 from foundation.error_model import ApiError, record_internal_error
 
@@ -40,7 +41,6 @@ from ..statistics_api import _has_redmine_credentials, _missing_credentials_payl
 from .analysis_events import event_store_for_repository, progress_to_payload
 from .config import (
     DEFAULT_BRIEF_CONFIG,
-    list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
     normalize_daily_brief_config,
 )
@@ -429,7 +429,7 @@ async def get_daily_brief_model_options(request: Request):
 async def get_daily_brief_agent_profiles(request: Request):
     """Expose only local kkagent profile names for explicit human selection."""
     _require_read(request)
-    return {"success": True, "data": list_daily_brief_agent_profiles()}
+    return {"success": True, "data": list_agent_profiles()}
 
 
 @router.put("/daily-brief/config")

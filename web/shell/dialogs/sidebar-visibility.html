@@ -8,6 +8,7 @@
                 <div class="modal-body">
                     <div class="sidebar-settings-tabs" role="tablist" aria-label="导航设置与项目帮助">
                         <button type="button" class="sidebar-settings-tab active" data-sidebar-settings-tab="visibility" role="tab" aria-selected="true" aria-controls="sidebar-settings-panel-visibility" data-click="switchSidebarSettingsTab" data-a0="visibility">导航显示设置</button>
+                        <button type="button" class="sidebar-settings-tab" data-sidebar-settings-tab="system" role="tab" aria-selected="false" aria-controls="sidebar-settings-panel-system" data-click="switchSidebarSettingsTab" data-a0="system">系统配置</button>
                         <button type="button" class="sidebar-settings-tab" data-sidebar-settings-tab="guide" role="tab" aria-selected="false" aria-controls="sidebar-settings-panel-guide" data-click="switchSidebarSettingsTab" data-a0="guide">📘 项目操作指导</button>
                     </div>
                     <section id="sidebar-settings-panel-visibility" class="sidebar-settings-panel" data-sidebar-settings-panel="visibility" role="tabpanel">
@@ -18,6 +19,38 @@
                         <div id="sidebar-visibility-list" class="sidebar-visibility-list"></div>
                         <div class="modal-info-text" style="margin-top: 12px;">至少保留一个页面可见；左侧导航可拖拽调整顺序。</div>
 
+                    </section>
+                    <section id="sidebar-settings-panel-system" class="sidebar-settings-panel" data-sidebar-settings-panel="system" role="tabpanel" hidden>
+                        <div class="sidebar-settings-tabs" role="group" aria-label="系统配置分类">
+                            <button type="button" class="sidebar-settings-tab active" data-system-settings-tab="runtime" data-click="switchSystemSettingsSection" data-a0="runtime">运行与邮件</button>
+                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="models" data-click="switchSystemSettingsSection" data-a0="models">大模型 / KKAgent</button>
+                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="redmine" data-click="switchSystemSettingsSection" data-a0="redmine">Redmine</button>
+                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="external" data-click="switchSystemSettingsSection" data-a0="external">外部服务</button>
+                        </div>
+                        <section data-system-settings-panel="runtime">
+                            <div id="system-config-body" aria-live="polite"></div>
+                            <div class="modal-buttons" id="system-config-footer" hidden>
+                                <button type="button" class="btn-xxs btn-primary" data-click="saveConfig">保存运行配置</button>
+                            </div>
+                        </section>
+                        <section data-system-settings-panel="models" hidden>
+                            <div class="config-section">
+                                <div class="config-section-title">统一模型目录</div>
+                                <p class="modal-info-text">模型由 Controller 的 configs/local/config.json 中 ai_models 统一管理。对话 Agent、报告分析、Redmine 和检索分别使用授权的模型能力及路由，凭据不在页面回显。</p>
+                                <button type="button" class="btn-xxs" data-click="loadSystemModelCatalog">刷新模型状态</button>
+                                <div id="system-model-catalog" aria-live="polite"></div>
+                            </div>
+                        </section>
+                        <section data-system-settings-panel="redmine" hidden>
+                            <iframe id="system-redmine-settings-frame" title="Redmine 统计、凭据及每日晨报配置" style="width:100%;height:60vh;border:0;display:block"></iframe>
+                        </section>
+                        <section data-system-settings-panel="external" hidden>
+                            <div class="config-section">
+                                <div class="config-section-title">GMS 助手服务</div>
+                                <div class="modal-form-row"><label for="gms-assistant-url">服务地址:</label><input type="url" id="gms-assistant-url" autocomplete="off" /></div>
+                                <div class="modal-buttons"><button type="button" class="btn-xxs btn-primary" data-click="saveGmsAssistantConfig">保存</button></div>
+                            </div>
+                        </section>
                     </section>
                     <section id="sidebar-settings-panel-guide" class="sidebar-settings-panel project-guide" data-sidebar-settings-panel="guide" role="tabpanel" hidden>
                         <div class="project-guide-hero">

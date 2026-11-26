@@ -39,7 +39,7 @@ def test_skin_is_solid_and_does_not_own_modal_lifecycle():
     assert ".modal-content.modal-pin" not in css
     assert ".modal-content.modal-workspace" not in css
     assert "#route-check-dialog" in css
-    assert "#config-modal" in css
+    assert "#config-modal " not in css
     assert "#radar-settings-save" in css
 
 

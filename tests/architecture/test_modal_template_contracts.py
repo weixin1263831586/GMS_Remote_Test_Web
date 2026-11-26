@@ -9,7 +9,9 @@ DIALOGS = ROOT / "web/shell/dialogs"
 
 def test_all_shell_dialogs_share_frame_and_header_glyph():
     templates = sorted(DIALOGS.glob("*.html"))
-    assert len(templates) >= 40
+    assert len(templates) >= 38
+    assert not (DIALOGS / 'config.html').exists()
+    assert not (DIALOGS / 'gms-assistant-config.html').exists()
     for file in templates:
         markup = file.read_text(encoding="utf-8")
         count = len(re.findall(r'class="[^"]*\bmodal-content\b[^"]*\btech-dialog\b', markup))

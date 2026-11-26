@@ -1002,52 +1002,7 @@ select option {
     border-color: var(--primary-color);
 }
 
-/* ==================== Config Modal ==================== */
-/* 系统配置弹框外框。检查路由连通性单独走科技风外框。其它弹框仍走 modal.css。 */
-#config-modal .modal-content {
-    background: var(--dark-bg);
-    border: 1px solid color-mix(in srgb, var(--primary-color) 46%, var(--border-color));
-    border-radius: var(--radius-surface);
-    box-shadow:
-        var(--shadow-lg),
-        0 0 0 1px color-mix(in srgb, var(--primary-color) 18%, transparent);
-}
-
-#config-modal .modal-header {
-    background: var(--primary-gradient);
-    border-bottom: 0;
-    padding: 13px 16px 13px 20px;
-}
-
-#config-modal .modal-title {
-    margin: 0;
-    color: var(--text-on-accent);
-
-    letter-spacing: 0.2px;
-}
-
-#config-modal .modal-close {
-    color: var(--text-on-accent);
-    background: color-mix(in srgb, #fff 16%, transparent);
-}
-
-#config-modal .modal-close:hover {
-    color: var(--text-on-accent);
-    background: color-mix(in srgb, #fff 30%, transparent);
-}
-
-#config-modal .modal-body {
-    background: var(--dark-bg);
-    padding: 16px 18px 18px;
-}
-
-#config-modal .modal-content > .modal-buttons {
-    background: var(--card-bg);
-    border-top: 1px solid color-mix(in srgb, var(--primary-color) 32%, var(--border-color));
-    padding: 12px 18px 14px;
-}
-
-/* 系统配置弹框的卡片式分块：深色底上的抬升卡片，标题带用各块 accent。 */
+/* System configuration sections. */
 .config-section {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
@@ -1100,7 +1055,7 @@ select option {
     line-height: 1.6;
 }
 
-#config-modal .config-section-notice code {
+#system-config-body .config-section-notice code {
     padding: 1px 6px;
     border-radius: 4px;
     background: var(--darker-bg);

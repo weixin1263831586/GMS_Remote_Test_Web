@@ -524,7 +524,6 @@ class RuntimeModalsTests(RuntimeUiHarness):
             page.wait_for_function("typeof ModalManager === 'object'")
             for modal_id, expected_focus in (
                 ("wifi-modal", "wifi-ssid"),
-                ("gms-assistant-config-modal", "gms-assistant-url"),
             ):
                 with self.subTest(modal=modal_id):
                     page.evaluate("id => ModalManager.open(id)", modal_id)

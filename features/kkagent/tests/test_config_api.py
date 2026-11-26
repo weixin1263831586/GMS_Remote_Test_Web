@@ -4,8 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.assistant import config_api
-from features.users import runtime as users_runtime
+from features.kkagent import config_api
 
 
 class AiConfigApiTests(unittest.TestCase):
@@ -37,7 +36,7 @@ class AiConfigApiTests(unittest.TestCase):
     def test_config_status_does_not_claim_enabled_provider_is_online(self):
         with (
             patch.object(
-                users_runtime,
+                config_api,
                 "config_manager",
                 SimpleNamespace(get_ai_config=lambda: self._config()),
             ),
@@ -73,7 +72,7 @@ class AiConfigApiTests(unittest.TestCase):
         }
         with (
             patch.object(
-                users_runtime,
+                config_api,
                 "config_manager",
                 SimpleNamespace(get_ai_config=lambda: self._config()),
             ),

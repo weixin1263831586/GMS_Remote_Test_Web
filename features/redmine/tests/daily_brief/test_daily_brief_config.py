@@ -3,10 +3,10 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from features.kkagent import list_agent_profiles
 from features.redmine.daily_brief.config import (
     analyzer_env_extra,
     build_brief_analyzer,
-    list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
     normalize_daily_brief_config,
 )
@@ -24,7 +24,7 @@ def test_agent_profiles_list_only_local_kkagent_profile_names():
         (profiles_root / "invalid name.toml").write_text(
             'client = "kkagent"\n', encoding="utf-8"
         )
-        assert list_daily_brief_agent_profiles(profiles_root) == {
+        assert list_agent_profiles(profiles_root) == {
             "profiles": ["kkagent-local"],
             "default_profile": "kkagent-local",
         }
