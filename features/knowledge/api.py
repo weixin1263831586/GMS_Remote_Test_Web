@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from features.auth import require_elevated_admin, require_human_principal_when_auth_required
+from features.auth import require_elevated_admin, require_human_principal, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
@@ -358,6 +358,7 @@ async def search_docs(
 @personal_router.get("/semantic-index")
 @handle_api_errors
 async def personal_semantic_status(request: Request):
+    require_human_principal(request)
     owner = _user(request)
     try:
         result = await asyncio.to_thread(lambda: PersonalSemantic(_service.store, owner).status())
@@ -369,6 +370,7 @@ async def personal_semantic_status(request: Request):
 @personal_router.post("/semantic-index")
 @handle_api_errors
 async def sync_personal_semantic(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    require_human_principal(request)
     owner = _user(request)
     try:
         result = await asyncio.to_thread(
