@@ -1,7 +1,11 @@
 <div class="container page-content page-ui-rework" id="page-notes">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📚</span> 个人知识库{% include 'components/page-header-actions.html' %}
-            <button type="button" class="btn-xs" data-kb-view="personal" aria-pressed="true">个人知识库</button>
-            <button type="button" class="btn-xs" data-kb-view="external" aria-pressed="false">外部知识源</button>
+                <div class="users-view-tabs" role="tablist" aria-label="知识库视图">
+                    <button class="btn-xs active" type="button" role="tab" aria-selected="true" data-kb-view="personal">个人知识库</button>
+                    <div>
+                        <button class="btn-xs" type="button" role="tab" aria-selected="false" data-kb-view="external">外部知识源</button>
+                    </div>
+                </div>
             {% include 'components/page-header-end.html' %}
             <div class="kb-layout split-layout">
                 <div class="pane">
@@ -46,9 +50,6 @@
                 </div>
             </div>
             <section class="pane" data-kb-external hidden>
-                <div class="pane-bar spread"><span class="pane-title">外部知识源</span><button type="button" class="btn-xs" data-kb-import>授权文档导入</button><button type="button" class="btn-xs" data-kb-refresh>刷新</button></div>
-                <div class="pane-label" data-kb-status role="status"></div>
-                <div class="pane-scroll" data-kb-sources></div>
                 <form class="pane-bar" data-kb-source-form>
                     <input type="text" name="name" class="combo-box" placeholder="知识源名称" required maxlength="160" />
                     <input type="url" name="url" class="combo-box pane-grow" placeholder="HTTPS 网址" required maxlength="2048" />
@@ -57,7 +58,10 @@
                     <input name="license" class="combo-box" placeholder="内容使用许可" required maxlength="240" />
                     <label><input name="enabled" type="checkbox" checked /> 启用</label>
                     <button type="submit" class="btn-xs btn-primary">保存</button><button type="button" class="btn-xs" data-kb-reset>取消编辑</button>
+                    <button type="button" class="btn-xs" data-kb-import>授权文档导入</button>
+                    <button type="button" class="btn-xs" data-kb-refresh>刷新</button>
                 </form>
+                <div class="pane-scroll list-table-wrap" data-kb-sources></div>
                 <div class="pane-bar"><span>Google Partner · GMS Certification Requirements</span><button type="button" class="btn-xs" data-kb-partner-grant>查询授权状态</button><a href="/gms-update-center" class="btn-xs">GMS 更新中心</a></div>
                 <div class="pane-label">公开网页使用独立索引；Google Partner 政策复用 GMS 更新中心已授权的扫描结果。仅对当前授权账号启用。其他受限文档可导入 PDF/HTML，文档修订或模型变更后须重新授权。</div>
             </section>
