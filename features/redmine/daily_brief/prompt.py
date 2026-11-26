@@ -66,9 +66,12 @@ gate distinguishes "read" from "coverage-completely searched"):
    hypothesis, NOT the root cause by itself; check ordering and causality.
 4. Repeat searches of an area you already covered need a NEW reason (a new
    hypothesis or a different keyword), not restated hope.
-5. coverage_complete=false means parts of the evidence were NOT scanned:
-   a zero hit is NOT negative evidence — say so in missing_information
-   instead of claiming "X does not occur in the logs".
+5. coverage_complete=false means parts of the selected evidence were not scanned.
+   source_coverage_complete=false means the complete source set was not verified,
+   even if all downloaded text was scanned. A zero hit in either incomplete
+   scope is NOT negative evidence; record the gap in missing_information.
+   Semantic history candidates are leads only: verify the cited journal and
+   current issue evidence before transferring a previous root cause.
 6. Bind every conclusion to concrete evidence (log line + timestamp /
    source path / test APK), and list what remains unverified.
 
@@ -393,8 +396,13 @@ DIAGNOSTIC REASONING REQUIREMENTS:
   (or each batch row's next_offset via per_query_offset) until relevant matches
   are read. Use artifact_char_index for artifact_read on ZIP member matches;
   char_index is relative to that member. Do not declare a signature absent
-  unless index_complete AND coverage_complete are true. Explicitly disclose
-  extraction/download failures; never turn an unread member into negative evidence.
+  unless index_complete, coverage_complete AND source_coverage_complete are true
+  for the relevant unfiltered source. Explicitly disclose extraction/download
+  failures and scope restrictions; never turn an unread member into negative evidence.
+  A fixed SDK commit and repository scope must match the failure build. Gerrit
+  query results and Mainline/Bulletin records are candidates until the actual
+  change and applicability are verified; do not infer a missing patch from a
+  bounded or failed search.
 - A failed archive read is a tool limitation, not proof its members lack logs.
   Name the unread attachment and distinguish not extracted from not present.
   A reporter's DPI statement does not independently eliminate that hypothesis.

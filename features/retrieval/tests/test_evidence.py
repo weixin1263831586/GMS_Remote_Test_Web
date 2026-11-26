@@ -43,3 +43,31 @@ def test_batch_evidence_references_and_scope_gaps():
     assert evidence_followup_required(observations)
     assert not evidence_followup_required(observations + [{"evidence_followup": True}])
     assert not evidence_followup_required([{"evidence": {"gaps": []}}])
+
+
+def test_sdk_and_gerrit_scope_and_pinned_source_citations():
+    commit = "a" * 40
+    sdk = summarize_evidence("sdk_search", {"data": {
+        "source_id": "sdk", "commit": commit, "reproducible": True,
+        "coverage_complete": True, "global_coverage_complete": False,
+        "repo_scope": "frameworks/base", "matches": [{"path": "Test.java", "line": 12}]}})
+    assert sdk["references"] == [{"source": "sdk", "reference": "frameworks/base/Test.java:12",
+                                  "revision": commit}]
+    assert "selected_sdk_scope_only" in sdk["gaps"]
+    dynamic = summarize_evidence("sdk_search", {"data": {
+        "source_id": "opengrok", "revision": "Android 16", "commit": "", "reproducible": False,
+        "matches": [{"path": "Test.java", "revision": "Android 16", "line": 12}]}})
+    assert not dynamic["references"]
+    assert "sdk_revision_unpinned" in dynamic["gaps"]
+    gerrit = summarize_evidence("gerrit_changes", {"data": {
+        "configured": True, "items": [{"number": 42}], "stats": {"moreChanges": True}}})
+    assert "more_result_pages" in gerrit["gaps"]
+
+
+def test_existing_history_reference_reaches_common_evidence_plan():
+    evidence = summarize_evidence("redmine_history_search", {"data": {
+        "items": [{"issue_id": 42, "journal_reference": {"reference": "journal-token",
+                                                         "source_revision": "rev"}}],
+        "coverage_complete": False}})
+    assert evidence["references"] == [{"source": "redmine_journals",
+                                       "reference": "journal-token", "revision": "rev"}]

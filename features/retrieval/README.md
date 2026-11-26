@@ -104,3 +104,11 @@ the snapshot, artifact or journal coordinate. Project Agent recognizes
 batch-result pagination, missing sources and incomplete evidence and permits
 one extra planning round within the existing tool budget. This is not proof
 of a verified root cause or a guarantee that a missing source can be reached.
+
+
+The evidence planner also preserves fixed SDK commit/file/line citations,
+selected-repository limits, dynamic OpenGrok uncertainty and Gerrit pagination.
+Daily Brief prompts distinguish completed text scans from complete source
+coverage and require independent verification of historical candidates and
+patch applicability. These are shared evidence rules, not a cross-source
+search service or unrestricted access to protected documents.

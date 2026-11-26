@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 
@@ -24,8 +25,11 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     if records is None and batch_rows:
         records = [item for row in batch_rows for item in (row.get("matches") or [])[:30]
                    if isinstance(item, dict)]
+    sdk = bool(data.get("source_id")) and isinstance(data.get("matches"), list) and (
+        "reproducible" in data or "commit" in data)
+    gerrit = "gerrit" in tool and records is not None
     is_retrieval = (isinstance(source_status, list) or "coverage_complete" in data
-                    or "retrieval" in data or (records is not None
+                    or "retrieval" in data or sdk or gerrit or (records is not None
                         and any(part in tool for part in ("search", "recall", "knowledge", "evidence"))))
     if not is_retrieval:
         return None
@@ -40,6 +44,23 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("incomplete_evidence_index")
     if data.get("remote_search_error"):
         gaps.append("remote_search_failed")
+    if sdk and data.get("global_coverage_complete") is False:
+        gaps.append("selected_sdk_scope_only")
+    if sdk and data.get("reproducible") is False:
+        gaps.append("sdk_revision_unpinned")
+    if gerrit:
+        if data.get("configured") is False:
+            gaps.append("source:gerrit:not_configured")
+        if data.get("error"):
+            gaps.append("source:gerrit:error")
+        stats = data.get("stats")
+        if isinstance(stats, dict) and stats.get("moreChanges"):
+            gaps.append("more_result_pages")
+    meta = payload.get("meta")
+    if isinstance(meta, dict) and isinstance(meta.get("total"), int) and records is not None:
+        offset = meta.get("offset", 0)
+        if isinstance(offset, int) and offset + len(records) < meta["total"]:
+            gaps.append("more_result_pages")
     if data.get("limited") is True or data.get("next_offset") is not None or any(
         row.get("truncated") or row.get("next_offset") is not None for row in batch_rows
     ):
@@ -77,9 +98,24 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         extra = item.get("extra") if isinstance(item.get("extra"), dict) else {}
         reference = item.get("reference") or extra.get("reference") or item.get("source_path")
         revision = item.get("source_revision") or item.get("revision")
+        origin = item.get("source") or tool
+        journal = item.get("journal_reference")
+        if isinstance(journal, dict) and journal.get("reference") and journal.get("source_revision"):
+            reference, revision, origin = journal["reference"], journal["source_revision"], "redmine_journals"
+        if sdk:
+            # Request labels (HEAD, Android release, OpenGrok index) are not commits.
+            commit = str(item.get("commit") or data.get("commit") or "")
+            path = str(item.get("path") or "")
+            reference, revision = "", ""
+            if path and re.fullmatch(r"[0-9a-fA-F]{40}|[0-9a-fA-F]{64}", commit):
+                repo = str(item.get("repo") or data.get("repo_scope") or "")
+                reference = f"{repo + '/' if repo else ''}{path}:{item.get('line') or ''}"
+                revision, origin = commit, data["source_id"]
+            else:
+                gaps.append("sdk_revision_unpinned")
         if reference and revision:
             ref = {"reference": str(reference)[:300], "revision": str(revision)[:128],
-                   "source": str(item.get("source") or tool)[:80]}
+                   "source": str(origin)[:80]}
             if ref not in references:
                 references.append(ref)
         if extra.get("status") == "stale":
@@ -112,6 +148,7 @@ def evidence_followup_required(observations: list) -> bool:
         return False
     actionable = {"incomplete_coverage", "incomplete_source_scope", "incomplete_evidence_index",
                   "remote_search_failed", "more_result_pages", "batch_query_without_match",
-                  "no_match_in_returned_scope", "bounded_or_unconfirmed"}
+                  "no_match_in_returned_scope", "bounded_or_unconfirmed",
+                  "selected_sdk_scope_only", "sdk_revision_unpinned"}
     return any(gap in actionable or gap.startswith(("source:", "semantic:", "source_revision_not_current:"))
                for gap in evidence.get("gaps", []) if isinstance(gap, str))
