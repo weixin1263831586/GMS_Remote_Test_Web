@@ -86,7 +86,7 @@ def _port_authenticate_worker(worker_id: str, authorization: str | None) -> None
     authenticate_worker(worker_id, authorization)
 
 
-async def _port_device_action_request(request: Request, payload: dict[str, Any]) -> Any:
+async def _port_device_action_request(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         body = ClusterDeviceAction(**payload)
     except ValidationError as exc:
