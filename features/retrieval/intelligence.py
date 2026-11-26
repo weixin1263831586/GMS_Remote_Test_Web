@@ -35,6 +35,8 @@ class IntelligentSource:
     current: Callable[[RetrievalHit], bool]
     read: Callable[[RetrievalHit, int], RetrievalResult] | None = None
     inventory: Callable[[], list[RetrievalHit]] | None = None
+    manifest: Callable[[], tuple[dict[str, RetrievalHit], bool]] | None = None
+    resolve: Callable[[str, str], RetrievalHit | None] | None = None
 
 
 def _object(value):
