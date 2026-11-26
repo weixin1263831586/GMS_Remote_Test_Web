@@ -519,23 +519,23 @@ def knowledge_agent_tools() -> list[AgentTool]:
             name="android_internals_search",
             category="knowledge",
             description=(
-                "搜索 Android 系统机制背景知识（android-internals-wiki，非内部案例）。"
-                "命中后按 📚机制解释（引用 chapter/适用版本/last_verified）→ "
-                "🧪结合当前测试现象 → 🔍建议补充的设备/源码取证 组织回答；"
+                "搜索外部知识源：Android CDD 等公开规范及 android-internals-wiki 系统机制。"
+                "规范问题引用具体条款、适用版本和原文；机制问题引用 chapter/适用版本/last_verified。"
+                "区分规范要求与背景解释，检查 sources_status 和适用条件；"
                 "背景知识不得作为已证实根因"
             ),
             api_path="/api/knowledge/external/search",
             method="POST",
             params=[
-                {"name": "query", "type": "string", "required": True, "desc": "机制/关键词，如 LMKD、Binder 超时"},
-                {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源（默认全部）"},
+                {"name": "query", "type": "string", "required": True, "desc": "规范条款或机制关键词，如 Android 16 RAM、LMKD、Binder 超时"},
+                {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源：web_documents（公开网页规范）、android_internals（机制 Wiki）；默认全部"},
                 {"name": "limit", "type": "integer", "required": False, "desc": "返回数量（1-10）"},
                 {"name": "android_api_level", "type": "integer", "required": False,
                  "desc": "目标 Android API level（A13/14/15/16/17 → 33/34/35/36/37），用于版本匹配重排"},
             ],
             keywords=_kw(
                 "knowledge", "系统机制", "原理", "Android机制", "LMKD", "Binder",
-                "ANR", "内存", "SurfaceFlinger", "Perfetto", "背景知识",
+                "ANR", "内存", "SurfaceFlinger", "Perfetto", "背景知识", "CDD", "RAM", "兼容性", "规范",
             ),
             is_readonly=True,
             is_dangerous=False,
