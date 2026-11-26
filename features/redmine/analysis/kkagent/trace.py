@@ -128,6 +128,7 @@ class ToolTrace(_EngineToolTrace):
     # 搜索调用命中的 artifact id（从 matches/artifact_id 提取，供覆盖归属）。
     search_artifact_ids: list[str] = field(default_factory=list)
     reference_lookup: dict[str, Any] = field(default_factory=dict)
+    retrieval_evidence: dict[str, Any] = field(default_factory=dict)
 
     def to_summary(self) -> dict[str, Any]:
         return {
@@ -145,6 +146,7 @@ class ToolTrace(_EngineToolTrace):
             "search_coverage_complete": self.search_coverage_complete,
             "search_artifact_ids": self.search_artifact_ids,
             "reference_lookup": self.reference_lookup,
+            "retrieval_evidence": self.retrieval_evidence,
         }
 
 
@@ -443,6 +445,20 @@ class KkAgentTrace(KkAgentStreamTrace):
     def record_tool_result(self, call: ToolTrace, event: dict[str, Any]) -> None:
         """引擎通用记录后的取证域富化（issue/artifact/snapshot/源码语义）。"""
         output = event.get("output")
+        if any(marker in call.tool_name for marker in ("search", "references", "recall")):
+            from features.retrieval import summarize_evidence
+            from foundation.redaction import redact_sensitive_data
+
+            value = output
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except ValueError:
+                    value = {}
+            if isinstance(value, dict):
+                call.retrieval_evidence = summarize_evidence(
+                    call.tool_name, redact_sensitive_data(value),
+                ) or {}
         if any(marker in call.tool_name for marker in ("apk_", "sdk_", "codesearch")):
             call.source_context = source_context(output)
         if "history_search" in call.tool_name or "redmine_issue_fetch" in call.tool_name:
