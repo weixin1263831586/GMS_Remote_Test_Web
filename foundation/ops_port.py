@@ -11,13 +11,85 @@ open (no incidents recorded, no sweep, advancement not paused).
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 
 DEFAULT_STAGE_MAX_AGE_DAYS = 7
 DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS = 7
 
-AlertSweep = Callable[[], dict[str, int]]
+class OpsEvent(TypedDict):
+    id: str
+    created_at: str
+    severity: str
+    kind: str
+    subject: str
+    dedup_key: str
+    message: str
+    next_actions_json: str
+    status: str
+    acknowledged_at: str
+    acknowledged_by: str
+    notified_at: str
+    notify_state: str
+    notify_attempts: int
+    notify_attempted_at: str
+    notify_retry_at: str
+
+
+class IncidentResult(TypedDict):
+    event: OpsEvent | None
+    suppressed: bool
+
+
+class AlertSweepResult(TypedDict):
+    evaluated: int
+    recorded: int
+    notified: int
+
+
+class DirectorySize(TypedDict):
+    path: str
+    size_gb: float
+
+
+class _StageCandidateFields(DirectorySize):
+    age_days: float
+    run_id: str
+    deletable: bool
+
+
+class StageCandidate(_StageCandidateFields, total=False):
+    protection_reason: str
+
+
+class DiskCleanupPreview(TypedDict):
+    disk_free_gb: float | None
+    candidates: list[StageCandidate]
+    candidate_count: int
+    candidate_size_gb: float
+    deletable_count: int
+    protected_count: int
+    largest_dirs: list[DirectorySize]
+
+
+class _DiskCleanupCounts(TypedDict):
+    dry_run: bool
+    freed_bytes: int
+    removed_files: int
+
+
+class DiskCleanupResult(_DiskCleanupCounts, total=False):
+    include_stage: bool
+    disk_free_gb: float | None
+    candidates: list[StageCandidate]
+    candidate_count: int
+    candidate_size_gb: float
+    deletable_count: int
+    protected_count: int
+    largest_dirs: list[DirectorySize]
+
+
+AlertSweep = Callable[[], AlertSweepResult]
 
 
 class IncidentRecorder(Protocol):
@@ -31,7 +103,7 @@ class IncidentRecorder(Protocol):
         dedup_key: str = '',
         next_actions: list[dict[str, Any]] | None = None,
         suppress_minutes: int = 60,
-    ) -> dict[str, Any]: ...
+    ) -> IncidentResult: ...
 
 
 class DiskHygiene(Protocol):
@@ -42,7 +114,7 @@ class DiskHygiene(Protocol):
         upload_temp_max_age_days: int = DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
         include_stage: bool = False,
         dry_run: bool = True,
-    ) -> dict[str, Any]: ...
+    ) -> DiskCleanupResult: ...
 
 
 class DiskInventory(Protocol):
@@ -78,7 +150,7 @@ def record_incident(
     dedup_key: str = '',
     next_actions: list[dict[str, Any]] | None = None,
     suppress_minutes: int = 60,
-) -> dict[str, Any]:
+) -> IncidentResult:
     """Record an ops incident; no-op until the ops feature registers."""
     if _incident_recorder is None:
         return {"event": None, "suppressed": True}
@@ -88,7 +160,7 @@ def record_incident(
     )
 
 
-def run_alert_sweep() -> dict[str, int]:
+def run_alert_sweep() -> AlertSweepResult:
     if _alert_sweep is None:
         return {"evaluated": 0, "recorded": 0, "notified": 0}
     return _alert_sweep()
@@ -100,7 +172,7 @@ def run_disk_hygiene(
     upload_temp_max_age_days: int = DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
     include_stage: bool = False,
     dry_run: bool = True,
-) -> dict[str, Any]:
+) -> DiskCleanupResult:
     if _disk_hygiene is None:
         return {"dry_run": dry_run, "freed_bytes": 0, "removed_files": 0}
     return _disk_hygiene(

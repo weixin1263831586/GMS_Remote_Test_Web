@@ -14,6 +14,7 @@ import threading
 from typing import Any
 
 from foundation.config import settings
+from foundation.ops_port import IncidentResult
 
 from .store import OPS_FLAG_PAUSED, OpsStore
 
@@ -87,7 +88,7 @@ def record_incident(
     dedup_key: str = '',
     next_actions: list[dict[str, Any]] | None = None,
     suppress_minutes: int = 60,
-) -> dict[str, Any]:
+) -> IncidentResult:
     """Record an incident without interrupting watchdog execution."""
     try:
         return get_ops_store().record_incident(

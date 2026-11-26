@@ -18,6 +18,7 @@ import logging
 from typing import Any
 
 from foundation.cluster_port import get_cluster_service
+from foundation.ops_port import AlertSweepResult
 
 from .notify import load_ops_alerts_config, notify_incident
 from .rules import evaluate
@@ -99,7 +100,7 @@ def _deliver_pending(cfg: dict[str, Any]) -> int:
     return notified
 
 
-def run_ops_sweep(cfg: dict[str, Any] | None = None) -> dict[str, int]:
+def run_ops_sweep(cfg: dict[str, Any] | None = None) -> AlertSweepResult:
     """One alert sweep; safe to call from the maintenance tick every pass."""
     from . import record_incident
 

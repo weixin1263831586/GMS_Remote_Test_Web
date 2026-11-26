@@ -96,6 +96,19 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
 
 
 class OpsPortContractTests(unittest.TestCase):
+    def test_unregistered_incident_and_sweep_match_contracts(self):
+        self.addCleanup(ops_port.configure_incident_recorder, ops_port._incident_recorder)
+        self.addCleanup(ops_port.configure_alert_sweep, ops_port._alert_sweep)
+        ops_port.configure_incident_recorder(None)
+        ops_port.configure_alert_sweep(None)
+        incident = ops_port.record_incident(severity='info', kind='test', message='test')
+        self.assertEqual(set(incident), ops_port.IncidentResult.__required_keys__)
+        self.assertEqual(incident, {'event': None, 'suppressed': True})
+        sweep = ops_port.run_alert_sweep()
+        self.assertEqual(set(sweep), ops_port.AlertSweepResult.__required_keys__)
+        self.assertEqual(sweep, {'evaluated': 0, 'recorded': 0, 'notified': 0})
+
+
     def test_unregistered_cleanup_preserves_requested_mode(self):
         self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
         ops_port.configure_disk_hygiene(None)
@@ -104,10 +117,10 @@ class OpsPortContractTests(unittest.TestCase):
 
     def test_cleanup_default_is_dry_run(self):
         self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
-        cleanup = MagicMock(return_value={'dry_run': True})
+        cleanup = MagicMock(return_value={'dry_run': True, 'freed_bytes': 0, 'removed_files': 0})
         ops_port.configure_disk_hygiene(cleanup)
 
-        self.assertEqual(ops_port.run_disk_hygiene(), {'dry_run': True})
+        self.assertEqual(ops_port.run_disk_hygiene(), {'dry_run': True, 'freed_bytes': 0, 'removed_files': 0})
         cleanup.assert_called_once_with(
             stage_max_age_days=ops_port.DEFAULT_STAGE_MAX_AGE_DAYS,
             upload_temp_max_age_days=ops_port.DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
@@ -117,12 +130,12 @@ class OpsPortContractTests(unittest.TestCase):
 
     def test_incident_forwards_named_contract(self):
         self.addCleanup(ops_port.configure_incident_recorder, ops_port._incident_recorder)
-        recorder = MagicMock(return_value={'suppressed': False})
+        recorder = MagicMock(return_value={'event': None, 'suppressed': False})
         ops_port.configure_incident_recorder(recorder)
 
         self.assertEqual(
             ops_port.record_incident(severity='warning', kind='worker', message='offline'),
-            {'suppressed': False},
+            {'event': None, 'suppressed': False},
         )
         recorder.assert_called_once_with(
             severity='warning', kind='worker', message='offline', subject='',
