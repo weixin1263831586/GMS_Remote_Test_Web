@@ -515,3 +515,26 @@ async def test_guard_pauses_for_human_elevation_then_retries_the_exact_query(mod
     assert "share-1" in turn.await_args.kwargs["context"]
     assert current["agent_question"]["fields"][0]["options"][0]["value"] == "share-1"
     assert not current.get("agent_retry")
+
+
+@pytest.mark.asyncio
+async def test_partner_policy_chat_routes_without_disclosing_scan_to_model(model, monkeypatch):
+    from features.assistant import api
+    from features.assistant.tests.test_agent_session_safety import _bare_request, _seed_confirm_session
+
+    turn, execute = model
+    saved = dict(api._agent_sessions)
+    try:
+        current = _seed_confirm_session(api, {})
+        current["pending_plan"] = None
+        current["status"] = "idle"
+        monkeypatch.setattr(api, "cleanup_due", lambda: False)
+        await api.agent_chat(_bare_request(), api.AgentChatRequest(
+            session_id="s-confirm", message="过GMS认证，Android17设备RAM要求，Go和非Go"))
+        assert current["messages"][-1]["data"]["gms_policy_lookup"] == "section:Low RAM"
+        assert "此结果不进入模型上下文" in current["messages"][-1]["content"]
+        turn.assert_not_awaited()
+        execute.assert_not_awaited()
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)

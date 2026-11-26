@@ -21,15 +21,19 @@ CLAUSE_ID = re.compile(r"\b(?:GMS(?:X|-VSR)?|VSR)-[0-9][A-Z0-9_.-]*", re.I)
 def policy_lookup_target(message: str) -> str:
     """Recognize explicit policy URLs/IDs and certification memory questions."""
     for url in re.findall(r"https?://[^\s<>，。；]+", message):
-        parsed = urlsplit(url.rstrip(").,;"))
+        try:
+            parsed = urlsplit(url.rstrip(").,;"))
+        except ValueError:
+            continue
         if (parsed.scheme == "https" and parsed.netloc == "docs.partner.android.com"
                 and parsed.path.rstrip("/") == urlsplit(SOURCE_URL).path):
-            return parsed._replace(query="").geturl()
+            target = parsed._replace(query="").geturl()
+            return target if len(target) <= 256 else ""
     match = CLAUSE_ID.search(message)
     if match:
         return "section:" + match.group(0).rstrip(".-").upper()
-    if re.search(r"\bGMS\b|GMS认证|GMS\s*认证", message, re.I) and re.search(
-        r"\bRAM\b|Low\s*RAM|内存|运存|isLowRamDevice", message, re.I
+    if re.search(r"(?<![A-Za-z0-9])GMS(?![A-Za-z0-9])", message, re.I) and re.search(
+        r"(?<![A-Za-z0-9])RAM(?![A-Za-z0-9])|Low\s*RAM|内存|运存|isLowRamDevice", message, re.I
     ):
         # Query the policy topic, not a hardcoded answer or a CDD substitute.
         return "section:Low RAM"
@@ -49,20 +53,27 @@ def lookup_requirement_sections(conn, query):
         return {"status": "not_indexed", "sections": [], "coverage_complete": False}
     coverage = json.loads(row["coverage_json"])
     revision = coverage.get("source_revision") or ""
+    if not revision:
+        return {"status": "revision_missing", "sections": [], "coverage_complete": False}
     latest = conn.execute(
         "SELECT run_id,state FROM gms_update_source_results WHERE source_key=? ORDER BY run_id DESC LIMIT 1",
         (SOURCE,),
     ).fetchone()
     params = [SOURCE]
     keys = []
-    parsed = urlsplit(query) if query.startswith(("https://", "http://")) else None
+    try:
+        parsed = urlsplit(query) if query.startswith(("https://", "http://")) else None
+    except ValueError:
+        return {"status": "invalid_url", "sections": [], "coverage_complete": False}
+    order = "level DESC, section_key"
+    order_params = []
     if parsed:
         if (parsed.scheme != "https" or parsed.netloc != "docs.partner.android.com"
                 or parsed.path.rstrip("/") != urlsplit(SOURCE_URL).path or not parsed.fragment):
             return {"status": "anchor_required", "sections": [], "coverage_complete": False}
         anchor = unquote(parsed.fragment)
         keys = [key for key, value in (coverage.get("section_anchors") or {}).items()
-                if value == anchor]
+                if value == anchor][:MAX_ROWS]
         # Previously indexed revisions may still have exact clause URLs.
         for hit in conn.execute(
             "SELECT DISTINCT section_key FROM gms_update_requirement_clauses "
@@ -85,9 +96,11 @@ def lookup_requirement_sections(conn, query):
             return {"status": "query_required", "sections": [], "coverage_complete": False}
         predicate = ('(title LIKE ? ESCAPE "\\" OR text_excerpt LIKE ? ESCAPE "\\")')
         params.extend([_like(term), _like(term)])
+        order = 'CASE WHEN title LIKE ? ESCAPE "\\\\" THEN 0 ELSE 1 END, level DESC, section_key'
+        order_params.append(_like(term))
     sections = conn.execute(
         "SELECT * FROM gms_update_requirement_sections WHERE source_key=? AND " + predicate
-        + " ORDER BY level DESC, section_key LIMIT ?", (*params, MAX_SECTIONS + 1)
+        + " ORDER BY " + order + " LIMIT ?", (*params, *order_params, MAX_SECTIONS + 1)
     ).fetchall()
     result = []
     for section in sections[:MAX_SECTIONS]:

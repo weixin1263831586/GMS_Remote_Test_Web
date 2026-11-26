@@ -123,3 +123,30 @@ def test_low_ram_section_lookup_preserves_table_note_and_real_anchor(tmp_path):
             assert section['table_rows'][0]['values'] == ['Android 16 or higher', '3 GB', '4 GB', 'Less than 3 GB']
         assert lookup_requirement_sections(conn, SOURCE.url + '#missing')['status'] == 'anchor_not_indexed'
         assert lookup_requirement_sections(conn, 'https://example.com/#low-ram')['status'] == 'anchor_required'
+
+
+def test_protected_section_lookup_requires_human_and_elevated_session(monkeypatch):
+    from unittest.mock import Mock
+
+    import pytest
+    from fastapi import HTTPException
+
+    from features.gms import queries
+
+    connect_db = Mock()
+    monkeypatch.setattr(queries, '_get_db', connect_db)
+    elevated = Mock(side_effect=HTTPException(403))
+    human = Mock()
+    monkeypatch.setattr(queries, 'require_elevated_admin', elevated)
+    monkeypatch.setattr(queries, 'require_human_principal', human)
+    with pytest.raises(HTTPException) as exc:
+        queries.list_gms_requirement_clauses(None, q='section:Low RAM')
+    assert exc.value.status_code == 403
+    human.assert_not_called()
+    connect_db.assert_not_called()
+    elevated.side_effect = None
+    human.side_effect = HTTPException(403)
+    with pytest.raises(HTTPException) as exc:
+        queries.list_gms_requirement_clauses(None, q='section:Low RAM')
+    assert exc.value.status_code == 403
+    connect_db.assert_not_called()

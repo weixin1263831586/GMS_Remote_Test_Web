@@ -354,7 +354,10 @@ function renderAgentMessages(session) {
                 const result = (await response.json()).data || {};
                 const lines = ['来源：GMS Requirements（本地授权扫描）',
                     '索引时间：' + (result.indexed_at || '未知'),
-                    '状态：' + (result.status || '未知'),
+                    '状态：' + ({matched: '已找到章节', not_indexed: '尚未建立条款索引',
+                        anchor_not_indexed: '未索引指定锚点', anchor_required: '需要指定章节锚点',
+                        no_match: '未找到匹配章节', revision_missing: '索引缺少修订信息'}
+                        [result.status] || result.status || '未知'),
                     '未核验上游完整性、实时版本及产品适用性。'];
                 if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引。');
                 if (result.truncated) lines.push('返回范围受限，请缩小章节范围。');
@@ -372,6 +375,7 @@ function renderAgentMessages(session) {
                 block.style.whiteSpace = 'pre-wrap';
                 block.textContent = lines.join('\n');
                 output.replaceChildren(block);
+                if (output.isConnected) container.scrollTop = container.scrollHeight;
             } catch (_) {
                 output.textContent = 'GMS 政策检索失败，请重新读取。';
             } finally {
@@ -819,6 +823,11 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             return;
         }
         renderAgentSession(result.data.session);
+        const last = result.data.session.messages?.at(-1);
+        if (last?.data?.gms_policy_lookup && !execute) {
+            const buttons = $('agent-chat-messages')?.querySelectorAll('[data-gms-policy-query]');
+            buttons?.[buttons.length - 1]?.click();
+        }
     } catch (error) {
         const indicator = document.getElementById('agent-typing');
         if (indicator) indicator.remove();

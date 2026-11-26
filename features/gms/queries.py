@@ -8,8 +8,9 @@ import sqlite3
 from contextlib import closing
 
 from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
-from features.auth import require_elevated_admin
+from features.auth import require_elevated_admin, require_human_principal
 
 from .mainline_records import escape_like
 from .repository import DB_PATH, connect
@@ -651,13 +652,11 @@ def list_gms_requirement_clauses(request: Request, q: str = Query('', max_length
                                  limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     require_elevated_admin(request)
     if q.startswith(("https://", "http://", "section:")):
-        from features.auth import require_human_principal
-
         require_human_principal(request)
         with closing(_get_db()) as conn, conn:
             conn.execute("BEGIN")
             data = lookup_requirement_sections(conn, q)
-        return {'success': True, 'data': data}
+        return JSONResponse({'success': True, 'data': data}, headers={'Cache-Control': 'no-store'})
     where = ['source_key=?']
     params: list[str | int] = ['gms_requirements']
     if requirement_id:
