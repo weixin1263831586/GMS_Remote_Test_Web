@@ -10,12 +10,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from features.auth import require_human_principal_when_auth_required
+from features.auth import require_elevated_admin, require_human_principal_when_auth_required
 from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
+from .policy_imports import MAX_IMPORT_BYTES, IMPORT_SUFFIXES, approve_policy_import, import_model_available, is_policy_import
 from .service import KnowledgeService
 from .storage import ATTACHMENT_DIR, DEFAULT_SPACES
 
@@ -402,7 +403,16 @@ async def upload_doc_file(
     if not file or not file.filename:
         return error_response("未提供文件", 400)
     user_id = _user(request)
+    policy_import = is_policy_import(tags)
+    if policy_import:
+        require_elevated_admin(request)
+        if Path(file.filename).suffix.lower() not in IMPORT_SUFFIXES:
+            return error_response('授权规范导入仅支持 PDF、HTML', 422)
+        if not import_model_available():
+            return error_response('当前模型目录无法验证', 422)
     async with _stage_upload(file, user_id) as (tmp_path, safe_name):
+        if policy_import and tmp_path.stat().st_size > MAX_IMPORT_BYTES:
+            return error_response('授权规范文件超过 12 MB', 413)
         doc = await asyncio.to_thread(
             _service.create_doc_from_file,
             user_id,
@@ -414,6 +424,11 @@ async def upload_doc_file(
         )
     if doc.get("error"):
         return error_response(doc["error"], 400)
+    if policy_import:
+        try:
+            await asyncio.to_thread(approve_policy_import, user_id, doc)
+        except ValueError:
+            return error_response("文档已保存，但模型授权未生效", 409)
     return success_response(data=doc, message="文件已入库")
 
 
