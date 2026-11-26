@@ -246,6 +246,10 @@ class UiSizingContractTests(unittest.TestCase):
             "web/static/js/pages/test-reports.js",
             "web/static/js/pages/security-audit.js",
             "web/static/js/shell/shell-device-management.js",
+            "web/static/js/pages/firmware-burn-share.js",
+            "web/shell/dialogs/firmware-share.html",
+            "web/static/js/shell/shell-device-groups.js",
+            "web/static/js/pages/test-control.js",
             "web/static/js/pages/test-suite-browser-reports.js",
         )
         for path in paths:
@@ -254,6 +258,8 @@ class UiSizingContractTests(unittest.TestCase):
                 self.assertNotRegex(
                     source, r"""<(?:th|td|tr)\b[^>]*style=["'][^"']*(?:height|padding|vertical-align)\s*:"""
                 )
+        test_control = (ROOT / "web/static/js/pages/test-control.js").read_text(encoding="utf-8")
+        self.assertNotRegex(test_control, r"\bcell\.style\.(?:padding\w*|height|verticalAlign)\s*=")
         suite = (ROOT / paths[-1]).read_text(encoding="utf-8")
         self.assertNotIn("style: 'padding:", suite)
         notes = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
