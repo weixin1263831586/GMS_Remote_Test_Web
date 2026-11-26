@@ -3,6 +3,7 @@
 Domain providers own access checks, source revisions and document content.
 """
 from .evidence import evidence_followup_required, evidence_plan_context, summarize_evidence
+from .intelligence import IntelligentRAG, IntelligentSource
 from .semantic import (
     LocalEmbedding,
     VectorIndex,
@@ -30,6 +31,8 @@ from .service import (
 
 
 __all__ = [
+    "IntelligentRAG",
+    "IntelligentSource",
     "LocalEmbedding",
     "RankedBatch",
     "RankingEvaluationCase",
