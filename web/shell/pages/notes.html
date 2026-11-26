@@ -51,18 +51,12 @@
             </div>
             <section class="pane" data-kb-external hidden>
                 <form class="pane-bar" data-kb-source-form>
-                    <input type="text" name="name" class="combo-box" placeholder="知识源名称" required maxlength="160" />
-                    <input type="url" name="url" class="combo-box pane-grow" placeholder="HTTPS 网址" required maxlength="2048" />
-                    <select name="kind" class="combo-box" aria-label="来源类型"><option value="cdd">Android CDD</option><option value="document">公开技术文档</option></select>
-                    <input name="android_version" type="number" min="1" max="100" class="combo-box" placeholder="Android 版本" aria-label="适用 Android 版本" />
-                    <input name="license" class="combo-box" placeholder="内容使用许可" required maxlength="240" />
-                    <label><input name="enabled" type="checkbox" checked /> 启用</label>
-                    <button type="submit" class="btn-xs btn-primary">保存</button><button type="button" class="btn-xs" data-kb-reset>取消编辑</button>
-                    <button type="button" class="btn-xs" data-kb-import>授权文档导入</button>
+                    <input type="text" name="name" class="combo-box" placeholder="知识源名称（选填，留空自动获取）" aria-label="知识源名称（选填）" maxlength="160" />
+                    <input type="url" name="url" class="combo-box pane-grow" placeholder="请输入外部知识源 HTTPS 网址" aria-label="知识源网址" required maxlength="2048" />
+                    <button type="submit" class="btn-xs btn-primary" data-kb-submit>添加</button>
+                    <button type="button" class="btn-xs" data-kb-reset hidden style="display: none;">取消编辑</button>
                     <button type="button" class="btn-xs" data-kb-refresh>刷新</button>
                 </form>
                 <div class="pane-scroll list-table-wrap" data-kb-sources></div>
-                <div class="pane-bar"><span>Google Partner · GMS Certification Requirements</span><button type="button" class="btn-xs" data-kb-partner-grant>查询授权状态</button><a href="/gms-update-center" class="btn-xs">GMS 更新中心</a></div>
-                <div class="pane-label">公开网页使用独立索引；Google Partner 政策复用 GMS 更新中心已授权的扫描结果。仅对当前授权账号启用。其他受限文档可导入 PDF/HTML，文档修订或模型变更后须重新授权。</div>
             </section>
         </div>
