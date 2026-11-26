@@ -502,9 +502,12 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             ),
         )
 
-        from features.knowledge import public_cdd_context
+        from features.knowledge import retrieve_public_cdd_context
 
-        retrieval_context = public_cdd_context(system_background_results)
+        retrieval_context = await asyncio.to_thread(
+            retrieve_public_cdd_context, background_query, android_api_level=background_api_level,
+            existing_hits=system_background_results,
+        )
         ai_result = await _run_ai_analysis(retrieval_context)
         source_search_results = []
         search_terms = list(class_names[:3])
