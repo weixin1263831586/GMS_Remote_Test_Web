@@ -142,12 +142,13 @@ class UiSizingContractTests(unittest.TestCase):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
             "common-components.css": ("--ui-control-height-dense", "--ui-control-height-large"),
-            "other-workspaces.css": ("--ui-table-row-height", "--ui-stat-height"),
-            "device-inventory.css": ("--ui-table-header-height", "--ui-control-height"),
-            "api-docs-workbench.css": ("--ui-table-row-height", "--ui-stat-height"),
+            "other-workspaces.css": ("--ui-stat-height",),
+            "device-inventory.css": ("--ui-control-height",),
+            "api-docs-workbench.css": ("--ui-stat-height",),
             "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
-            "data-table-page.css": ("--ui-table-header-height", "--ui-control-height"),
+            "data-table-page.css": ("--ui-control-height",),
+            "ui-sizing.css": ("--ui-table-header-height", "--ui-table-row-height", "--ui-table-cell-padding-block", "--ui-table-cell-padding-inline"),
         }
         for name, roles in mapping.items():
             source = (CSS / name).read_text(encoding="utf-8")
@@ -164,10 +165,6 @@ class UiSizingContractTests(unittest.TestCase):
             ),
             "web/static/css/apk-workbench.css": (
                 "--ui-tab-height", "--ui-tab-height-narrow", "--ui-control-height-dense",
-            ),
-            "web/static/css/other-workspaces.css": (
-                "--ui-table-header-height", "--ui-table-row-height",
-                "--ui-table-header-height-dense",
             ),
             "web/static/css/common-layout.css": ("--ui-control-height-icon",),
             "web/static/css/agent-access.css": ("--ui-control-height-dialog",),
@@ -186,7 +183,7 @@ class UiSizingContractTests(unittest.TestCase):
                 "--ui-control-height-icon",
             ),
             "features/cluster/ui/page.html": (
-                "--ui-table-row-height-dense", "--ui-touch-target-height",
+                "--ui-touch-target-height",
             ),
             "features/gerrit/ui/page.html": ("--ui-control-height-icon",),
             "features/gms/radar/ui/page.html": ("--ui-control-height",),
@@ -218,18 +215,28 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertIn("var(--ui-control-height-dialog-field)", (
             ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8"))
 
-    def test_audit_table_geometry_uses_same_role_as_common_table(self):
-        source = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
-        for suffix in ("audit-log-table", "audit-mail-table"):
-            for row_kind, role in (
-                ("thead th", "table-header-height"),
-                ("tbody td", "table-row-height"),
-            ):
-                with self.subTest(table=suffix, part=row_kind):
-                    selector = "." + suffix + " " + row_kind
-                    self.assertIn(selector, source)
-                    rule = source.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
-                    self.assertIn("var(--ui-" + role + ")", rule)
+    def test_data_table_geometry_has_one_shared_template(self):
+        source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        for selector, role in (
+            ("> thead > tr > :is(th, td)", "table-header-height"),
+            ("> tbody > tr:not(:where(.device-group-row, .group-row)) > :is(td, th)", "table-row-height"),
+            (".suite-file-table-head", "table-header-height"),
+            (".suite-file-row", "table-row-height"),
+        ):
+            with self.subTest(selector=selector):
+                rule = source.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
+                self.assertIn("var(--ui-" + role + ")", rule)
+        self.assertNotIn("--ui-table-header-height-dense", source)
+        self.assertNotIn("--ui-table-row-height-dense", source)
+        for name in (
+            "ui-foundations.css", "other-workspaces.css", "device-inventory.css",
+            "agent-access.css", "audit-disk.css", "api-docs-workbench.css",
+            "data-table-page.css",
+        ):
+            with self.subTest(name=name):
+                local = (CSS / name).read_text(encoding="utf-8")
+                self.assertNotIn("var(--ui-table-header-height", local)
+                self.assertNotIn("var(--ui-table-row-height", local)
 
 
     def test_existing_single_line_layouts_not_replaced_by_wrapping(self):
