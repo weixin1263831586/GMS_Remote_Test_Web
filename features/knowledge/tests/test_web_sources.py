@@ -116,11 +116,15 @@ def test_disabled_source_does_not_return_cached_content(tmp_path, monkeypatch):
     assert provider.status().status == 'disabled'
 
 
-def test_partner_grants_are_owner_bound_and_revocable(tmp_path):
+def test_partner_grants_are_owner_bound_and_revocable(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-a')
     provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
     assert not provider.has_partner_grant('owner-a')
     provider.set_partner_grant('owner-a', True)
     assert provider.has_partner_grant('owner-a')
     assert not provider.has_partner_grant('owner-b')
+    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-b')
+    assert not provider.has_partner_grant('owner-a')
+    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-a')
     provider.set_partner_grant('owner-a', False)
     assert not provider.has_partner_grant('owner-a')
