@@ -102,7 +102,7 @@ def test_low_ram_section_lookup_preserves_table_note_and_real_anchor(tmp_path):
     <p>[GMS-10.0-001] Example low memory declaration.</p>
     <p>Note: Example upgrade restriction.</p>
     <table><tr><th>OS Version</th><th>Must be Low RAM</th><th>Optionally Low RAM</th>
-    <th>Not qualified</th></tr><tr><td>Android 16 or higher</td><td>3 GB</td><td>4 GB</td>
+    <th>Not qualified for GMS</th></tr><tr><td>Android 16 or higher</td><td>3 GB</td><td>4 GB</td>
     <td>Less than 3 GB</td></tr></table><p>Example footnote.</p>
     <p>End of changed requirements</p><h3>Next section</h3><p>Unrelated text.</p></article>"""
     with closing(connect(tmp_path / 'lookup.sqlite3')) as conn, conn:

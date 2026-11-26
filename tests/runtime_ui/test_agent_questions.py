@@ -364,3 +364,41 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             self.assertIsNone(page.evaluate('state.elevatedUntil'))
         finally:
             page.close()
+
+
+    def test_gms_policy_version_summary_and_historical_rows(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            headers = ['OS Version', 'Must be Low RAM', 'Optionally Low RAM', 'Not qualified for GMS']
+            current = {'headers': headers, 'values': ['Android 16 or higher', 'Example A', 'Example B', 'Example C'],
+                       'table_index': 1, 'row_index': 1}
+            old = {'headers': headers, 'values': ['Android 15', 'Historical A', 'Historical B', 'Historical C'],
+                   'table_index': 1, 'row_index': 2}
+            data = {'status': 'matched', 'requested_android_version': 17, 'lookup_scope': 'low_ram_declaration',
+                    'sections': [{'title': 'Declare Low RAM devices', 'context_limited': True,
+                                  'clauses': [{'requirement_id': 'GMS-10.0-001', 'original_text': 'Example rule'}],
+                                  'table_rows': [current, old], 'version_rows': [current]}]}
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': data})))
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM;android=17'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            evidence = page.locator('.agent-policy-evidence')
+            expect(evidence).to_contain_text('Android 17：政策表格对应要求')
+            expect(evidence).to_contain_text('必须声明 Low RAM：Example A')
+            expect(evidence).to_contain_text('不符合 GMS 资格：Example C')
+            expect(evidence.locator('table tbody tr')).to_have_count(1)
+            expect(evidence.locator('table')).not_to_contain_text('Historical A')
+            expect(evidence.locator('details')).not_to_have_attribute('open', '')
+            evidence.locator('summary').click()
+            expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
+        finally:
+            page.close()

@@ -165,6 +165,7 @@ def lookup_requirement_sections(conn, query):
             "ORDER BY table_index,row_index LIMIT ?", (SOURCE, key, MAX_ROWS + 1)
         ).fetchall()
         text = section["text_excerpt"]
+        bounded = len(clauses) > MAX_ROWS or len(rows) > MAX_ROWS
         context_limited = False
         if ram_scope:
             # Older indexes may attach neighboring storage policy to this heading.
@@ -172,7 +173,7 @@ def lookup_requirement_sections(conn, query):
             filtered_clauses = [item for item in clauses if item["requirement_id"] == "GMS-10.0-001"]
             filtered_rows = [item for item in rows if _ram_table(json.loads(item["headers_json"]))]
             context_limited = (len(filtered_clauses) != len(clauses) or len(filtered_rows) != len(rows)
-                               or len(clauses) > MAX_ROWS or len(rows) > MAX_ROWS)
+                               or bounded)
             clauses, rows = filtered_clauses, filtered_rows
             if context_limited:
                 # The flattened legacy excerpt cannot reliably separate notes and
@@ -207,7 +208,7 @@ def lookup_requirement_sections(conn, query):
             "table_rows": table_rows,
             "media": [] if context_limited else [item for item in coverage.get("media", [])
                                                  if item.get("section_key") == key][:MAX_ROWS],
-            "truncated": (len(text) > MAX_TEXT or len(rows) > MAX_ROWS or len(clauses) > MAX_ROWS),
+            "truncated": (len(text) > MAX_TEXT or bounded),
         })
     return {"status": "matched" if result else "no_match", "sections": result,
             "requested_android_version": android_version,

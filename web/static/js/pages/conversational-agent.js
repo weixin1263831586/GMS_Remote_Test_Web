@@ -497,7 +497,7 @@ function renderAgentMessages(session) {
                             addText(block, 'p', '未找到明确适用的版本行，不推断 RAM 准入数值。');
                         } else {
                             for (const row of matchedRows) {
-                                const headers = row.headers.map(value => String(value).trim().toLowerCase());
+                                const headers = row.headers.map(value => String(value).trim().toLowerCase().replace(/\s+/g, ' '));
                                 for (const [header, label] of [
                                     ['must be low ram', '必须声明 Low RAM'],
                                     ['optionally low ram', '可选声明 Low RAM'],
