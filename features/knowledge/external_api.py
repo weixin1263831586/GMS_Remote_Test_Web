@@ -268,6 +268,30 @@ def sync_semantic_index(request: Request, source_id: str, batch_size: int = Quer
     return success_response(data=result)
 
 
+@router.get("/wiki-semantic-index")
+@handle_api_errors
+def wiki_semantic_status(request: Request):
+    require_elevated_admin(request)
+    provider = _federated_provider("android_internals")
+    if provider is None:
+        return success_response(data={"status": "unavailable", "indexed": 0, "total": 0})
+    return success_response(data=provider.semantic_status())
+
+
+@router.post("/wiki-semantic-index")
+@handle_api_errors
+def sync_wiki_semantic_index(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    require_elevated_admin(request)
+    provider = _federated_provider("android_internals")
+    if provider is None:
+        return error_response("Wiki 知识源未配置", 409)
+    try:
+        return success_response(data=provider.sync_semantic(batch_size=batch_size))
+    except Exception as exc:
+        logger.warning("Wiki semantic index synchronization failed: %s", type(exc).__name__)
+        return error_response("语义索引未完成，请检查本地模型及已批准的 Wiki 索引", 502)
+
+
 class PartnerGrantRequest(BaseModel):
     enabled: bool
     authorized_for_ai_processing: bool = False

@@ -108,6 +108,23 @@
                     body: JSON.stringify({url: source.url, name: source.name || '', enabled})
                 });
             }
+            async function semanticIndex(endpoint, trigger) {
+                const status = await kbFetch(endpoint);
+                const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
+                if (!['empty', 'partial', 'ready'].includes(status.status)) {
+                    showToast('语义索引未启用或不可用，请检查 Controller 本地模型配置', 'warning');
+                    return;
+                }
+                if (status.coverage_complete) {
+                    showToast('语义索引已完整：' + counts(status), 'success');
+                    return;
+                }
+                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '。构建下一批（最多128条）？')) return;
+                run(async () => {
+                    const result = await kbFetch(endpoint + '?batch_size=128', {method: 'POST'});
+                    showToast('语义索引覆盖：' + counts(result), result.coverage_complete ? 'success' : 'info');
+                }, trigger, '索引中');
+            }
             async function load() {
                 const data = await kbFetch(api);
                 const table = document.createElement('table');
@@ -150,7 +167,26 @@
                                 });
                             }
                         }));
+                    if (source.kind === 'cdd' && source.enabled && source.revision) {
+                        actions.append(button('语义索引', event => {
+                            semanticIndex(api + '/' + encodeURIComponent(source.id) + '/semantic-index',
+                                event.currentTarget).catch(error => showToast(error.message, 'warning'));
+                        }));
+                    }
                 }
+                const wiki = body.insertRow();
+                for (const value of ['Android Internals Wiki', '本地已批准索引', '多版本', '—', '支持混合检索']) {
+                    const cell = wiki.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const wikiActions = document.createElement('div');
+                wikiActions.className = 'kb-source-actions';
+                wiki.insertCell().append(wikiActions);
+                wikiActions.append(button('语义索引', event => {
+                    semanticIndex('/api/knowledge/external/wiki-semantic-index',
+                        event.currentTarget).catch(error => showToast(error.message, 'warning'));
+                }));
                 const partner = body.insertRow();
                 for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
                     '支持账号文件导入']) {

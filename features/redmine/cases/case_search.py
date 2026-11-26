@@ -31,12 +31,12 @@ class RedmineCaseSearch:
             return []
 
         # 扩大全文检索候选池，再按评分规则重排。
-        budget = min(100, max(limit * 5, 30))
+        budget = max(limit * 5, 30)
         pool = self.db.search_case_facts(query_text, limit=budget)
         lexical_ids = [int(row["issue_id"]) for row in pool if row.get("issue_id")]
         dense = []
         try:
-            dense = CaseSemantic(self.db).search(query_text, limit=budget)
+            dense = CaseSemantic(self.db).search(query_text, limit=min(100, budget))
         except Exception as exc:
             logger.warning("Case semantic retrieval unavailable: %s", type(exc).__name__)
         dense_scores = {int(row["issue_id"]): score for row, score in dense}

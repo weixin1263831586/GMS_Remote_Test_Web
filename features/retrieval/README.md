@@ -53,3 +53,7 @@ An optional local cross encoder is configured with `reranker_path` and
 `reranker_revision` in the same section; it ranks bounded case candidates
 without network access. No GMS Partner documents, raw attachments or
 live device data are included in these indexes.
+
+### Android Internals Wiki
+
+Add `android_internals` to `retrieval.enabled_sources` to opt in. Approve and reindex the Wiki using the existing workflow first. The external knowledge page provides a semantic-index action (also available through GET/POST `/api/knowledge/external/wiki-semantic-index`). Build bounded batches until coverage is complete. Semantic tokens are tied to the approved revision and section content; changed policy requires reindex. Existing lexical search remains available when semantic retrieval is disabled or unavailable.
