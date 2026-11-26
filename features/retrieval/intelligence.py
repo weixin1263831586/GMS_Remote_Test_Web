@@ -34,6 +34,7 @@ class IntelligentSource:
     search: Callable[[str, int], RetrievalResult]
     current: Callable[[RetrievalHit], bool]
     read: Callable[[RetrievalHit, int], RetrievalResult] | None = None
+    inventory: Callable[[], list[RetrievalHit]] | None = None
 
 
 def _object(value):
@@ -58,6 +59,7 @@ class IntelligentRAG:
         self.model = model
         self.limit = max(1, min(int(limit), 12))
         self.hits = {}
+        self.locators = {}
         self.seen_queries = set()
         self.seen_reads = set()
         self.events = []
@@ -70,6 +72,24 @@ class IntelligentRAG:
             if not self.sources[hit.source].current(hit):
                 raise PermissionError("Evidence no longer authorized or current")
 
+    def _inventory(self):
+        for source in self.sources.values():
+            if source.inventory is None:
+                continue
+            try:
+                for hit in source.inventory()[:8]:
+                    if (isinstance(hit, RetrievalHit) and hit.source == source.source_id
+                            and source.current(hit) and len(self.locators) < 24):
+                        self.locators[f'D{len(self.locators) + 1}'] = hit
+            except Exception as exc:
+                self.events.append({'stage': 'inventory', 'source': source.source_id,
+                                    'status': 'error', 'detail': type(exc).__name__})
+
+    def _documents(self):
+        # A locator is not evidence until the model chooses to open it.
+        return [{'id': key, 'source': hit.source, 'title': hit.metadata.get('title', '')}
+                for key, hit in self.locators.items() if self.sources[hit.source].current(hit)]
+
     def _rows(self):
         return [{"id": key, "source": hit.source, "reference": hit.reference,
                  "revision": hit.revision, "text": hit.text,
@@ -79,6 +99,8 @@ class IntelligentRAG:
         if self.calls >= MAX_MODEL_CALLS or time.monotonic() >= self.deadline:
             raise TimeoutError("RAG budget exhausted")
         self._current()
+        if "documents" in data:
+            data = {**data, "documents": self._documents()}
         self.calls += 1
         result = self.model(json.dumps({"stage": stage, **data}, ensure_ascii=False),
                             system_prompt=_SYSTEM + instruction, max_tokens=2400)
@@ -130,6 +152,19 @@ class IntelligentRAG:
                                 "status": "error", "detail": type(exc).__name__})
 
     def _actions(self, plan):
+        opens = plan.get("open")
+        if isinstance(opens, list):
+            for key in opens[:MAX_READS]:
+                if not isinstance(key, str):
+                    continue
+                hit = self.locators.get(key)
+                if not hit or (hit.identity, 0) in self.seen_reads or len(self.seen_reads) >= MAX_READS:
+                    continue
+                source = self.sources[hit.source]
+                if time.monotonic() >= self.deadline or not source.current(hit):
+                    continue
+                self.seen_reads.add((hit.identity, 0))
+                self._collect(source, RetrievalResult([hit], "matched"), "read")
         searches = plan.get("searches")
         if isinstance(searches, list):
             for action in searches[:MAX_QUERIES]:
@@ -191,10 +226,11 @@ class IntelligentRAG:
         claims = []
         status = "insufficient_evidence"
         try:
+            self._inventory()
             plan = self._model("plan",
-                '理解问题、拆解子问题，生成中英文检索词。返回 {"searches":[{"source":"已列出的来源ID","query":"检索词"}]}。'
+                '理解问题、拆解子问题，生成中英文检索词。返回 {"searches":[{"source":"已列出的来源ID","query":"检索词"}],"open":["D1"]}。可以按目录标题选择打开文档；目录不是证据。'
                 '对比问题应分别检索各版本、设备类别、条件和例外，不猜测答案。',
-                {"question": question, "sources": sources})
+                {"question": question, "sources": sources, "documents": []})
             # Always retain the user's original wording; model rewriting cannot suppress it.
             for source_id in self.sources:
                 self._search(source_id, question)
@@ -204,9 +240,9 @@ class IntelligentRAG:
                 review = self._model("inspect",
                     '阅读证据，判断是否缺少定义、条件、例外、版本或关联章节。'
                     '返回 {"searches":[{"source":"来源ID","query":"改写查询"}],'
-                    '"reads":[{"id":"已取得的证据ID","page":0}]}。充分时两个数组为空。'
+                    '"reads":[{"id":"已取得的证据ID","page":0}],"open":["D1"]}。充分时所有数组为空。'
                     '读取只能指定现有证据ID和页序号，不能虚构ID。个人文档 page=0 读取开头，正负页读取命中前后；网页只接受非负章节页。',
-                    {"question": question, "sources": sources, "evidence": self._rows()})
+                    {"question": question, "sources": sources, "documents": [], "evidence": self._rows()})
                 before = (len(self.seen_queries), len(self.seen_reads))
                 self._actions(review)
                 if before == (len(self.seen_queries), len(self.seen_reads)):
