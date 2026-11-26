@@ -207,3 +207,8 @@ def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=
                          "source_revision": item["revision"], "snippet": item["text"],
                          "title": item["metadata"].get("title"), "extra": item["metadata"],
                          "evidence_level": "background"} for item in result["evidence"]]}
+
+
+def run_authorized_rag(question, sources, *, limit=8, recall_only=False):
+    """Use the injected model gateway with domain-owned, request-authorized adapters."""
+    return local_document_rag(question, sources, _ask_analyzer_factory, limit=limit, recall_only=recall_only)
