@@ -87,53 +87,6 @@ def _daily_triage_failure(exc: BaseException) -> JSONResponse:
     return ApiError.internal(message).to_response()
 
 
-def enqueue_run(
-    service: DailyBriefService, *, mode: str = "manual", force: bool = False
-) -> dict[str, Any]:
-    """start_run 入队 + 补齐 job 字段（原 daily_brief_dispatch，已并回 API 层）。"""
-    started = service.start_run(mode=mode, force=force)
-    return _with_job_fields(service, started)
-
-
-def enqueue_refresh(service: DailyBriefService, brief_date: str) -> dict[str, Any]:
-    started = service.start_refresh(brief_date)
-    return _with_job_fields(service, started)
-
-
-def enqueue_reanalysis(
-    service: DailyBriefService, brief_date: str, issue_id: int,
-    run_id: str | None = None,
-) -> dict[str, Any]:
-    """单 issue 重新分析入队。
-
-    优先绑定显式 run_id 精确操作；未提供时才回落
-    该日期最新 run（旧 API 兼容）。
-    """
-    if run_id:
-        run = service.repository.get_run(run_id)
-        if run is None or run.owner_id != service.owner_id:
-            return {"error": f"daily brief run not found: {run_id}"}
-    else:
-        run = service.latest_run(brief_date)
-        if run is None:
-            return {"error": f"no daily brief run for {brief_date}"}
-    record = service.repository.get_issue(run.run_id, issue_id)
-    if record is None:
-        return {"error": f"issue {issue_id} not in run {run.run_id}"}
-    if run.status not in ("completed", "partial", "failed", "cancelled"):
-        return {"error": f"run {run.run_id} is still executing; retry after it finishes", "code": "STATE_CONFLICT"}
-    job, created = service.repository.enqueue_job(
-        run.run_id, kind="issue", issue_id=issue_id
-    )
-    return {
-        "run_id": run.run_id,
-        "job_id": job["job_id"],
-        "issue_id": issue_id,
-        "status": "pending",
-        "queued": created,
-    }
-
-
 def _with_job_fields(service: DailyBriefService, started: dict[str, Any]) -> dict[str, Any]:
     """start_run/start_refresh 的结果补齐 job_id/queued 字段（已有则透传）。"""
     if "run_id" not in started:
@@ -526,7 +479,7 @@ async def run_daily_brief(
             content={"success": False, "error": "force must be a boolean"},
             status_code=400,
         )
-    started = enqueue_run(service, mode=mode, force=force)
+    started = _with_job_fields(service, service.start_run(mode=mode, force=force))
     if "run_id" not in started:
         return JSONResponse(
             content={"success": False, "error": started.get("error", "failed to start run")},
@@ -563,7 +516,7 @@ async def refresh_daily_brief(request: Request, brief_date: str):
             status_code=400,
         )
     service = _service_for_request(request)
-    result = enqueue_refresh(service, brief_date)
+    result = _with_job_fields(service, service.start_refresh(brief_date))
     if "run_id" not in result:
         return JSONResponse(
             content={"success": False, "error": result.get("error", "refresh not started")},
@@ -577,7 +530,7 @@ async def reanalyze_issue_in_run(request: Request, run_id: str, issue_id: int):
     """按 run_id 精确重新分析单个 issue（优先入口；date 回落见下方兼容路由）。"""
     _require_human(request)
     service = _service_for_request(request)
-    result = enqueue_reanalysis(service, "", issue_id, run_id=run_id)
+    result = service.enqueue_reanalysis("", issue_id, run_id=run_id)
     if "run_id" in result:
         return {"success": True, "data": result}
     return ApiError(code=result.get("code", "NOT_FOUND"), message=result.get("error", "reanalyze failed")).to_response()
@@ -587,7 +540,7 @@ async def reanalyze_issue_in_run(request: Request, run_id: str, issue_id: int):
 async def reanalyze_issue(request: Request, brief_date: str, issue_id: int):
     _require_human(request)
     service = _service_for_request(request)
-    result = enqueue_reanalysis(service, brief_date, issue_id)
+    result = service.enqueue_reanalysis(brief_date, issue_id)
     if "run_id" in result:
         return {"success": True, "data": result}
     return ApiError(code=result.get("code", "NOT_FOUND"), message=result.get("error", "reanalyze failed")).to_response()

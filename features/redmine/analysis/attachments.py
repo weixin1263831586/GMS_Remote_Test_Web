@@ -14,9 +14,6 @@ from typing import Any
 from features.redmine.analysis import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
 from features.redmine.client import RedmineAttachment, RedmineClient
-from features.redmine.tesseract_finder import (
-    configure_usable_tesseract,
-)
 from features.redmine.utils import sanitize_attachment_filename
 
 
@@ -243,35 +240,15 @@ class AttachmentAnalysisMixin:
 
     @staticmethod
     def _run_ocr(path: str) -> str:
-        """Best-effort OCR via pytesseract. Returns '' if unavailable or it fails.
-
-        Uses a bundled tesseract binary (tools/tesseract) when the system one is
-        not installed, so screenshot analysis works without apt/sudo access.
-        Full-image tiling mirrors evidence_images so both OCR paths behave
-        identically with the evidence-pipeline OCR path.
-        """
+        """Best-effort OCR for the issue summary; full evidence is stored separately."""
         try:
             import pytesseract
             from PIL import Image
 
-            # OCR 限额从 evidence_images 延迟导入：该模块经 evidence →
-            # evidence_fetch 回指本包，顶层导入会造成循环（agent.py →
-            # analysis_attachments → evidence_images → evidence →
-            # evidence_fetch → evidence_images）。
-            from features.redmine.evidence.images import (
-                ocr_image_text,
-            )
-        except Exception:
-            return ""
-        try:
-            # OCR engine selection is cached; the shared configurator also
-            # resets library paths when falling back to system Tesseract.
-            cmd = configure_usable_tesseract()
-            if cmd:
-                import pytesseract.pytesseract as _pt
-                _pt.tesseract_cmd = cmd
-            with Image.open(path) as image:
-                return ocr_image_text(image, pytesseract)
+            from features.redmine.evidence.images import read_image_ocr
+
+            text, note = read_image_ocr(path, pytesseract, Image)
+            return f"{text}\n[{note}]" if note else text
         except Exception as exc:
             logger.debug("[RedmineAgent] OCR skipped for %s: %s", path, exc)
             return ""

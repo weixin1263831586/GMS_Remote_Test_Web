@@ -517,6 +517,40 @@ class DailyBriefService:
         )
         return self._enqueue_new_run(run)
 
+    def enqueue_reanalysis(
+        self, brief_date: str, issue_id: int,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """单 issue 重新分析入队。
+
+        优先绑定显式 run_id 精确操作；未提供时才回落
+        该日期最新 run（旧 API 兼容）。
+        """
+        if run_id:
+            run = self.repository.get_run(run_id)
+            if run is None or run.owner_id != self.owner_id:
+                return {"error": f"daily brief run not found: {run_id}"}
+        else:
+            run = self.latest_run(brief_date)
+            if run is None:
+                return {"error": f"no daily brief run for {brief_date}"}
+        record = self.repository.get_issue(run.run_id, issue_id)
+        if record is None:
+            return {"error": f"issue {issue_id} not in run {run.run_id}"}
+        if run.status not in TERMINAL_RUN_STATUSES:
+            return {"error": f"run {run.run_id} is still executing; retry after it finishes", "code": "STATE_CONFLICT"}
+        job, created = self.repository.enqueue_job(
+            run.run_id, kind="issue", issue_id=issue_id
+        )
+        return {
+            "run_id": run.run_id,
+            "job_id": job["job_id"],
+            "issue_id": issue_id,
+            "status": "pending",
+            "queued": created,
+        }
+
+
     def _enqueue_new_run(self, run: DailyBriefRun) -> dict[str, Any]:
         created, job, job_created = self.repository.create_run_and_enqueue_job(run)
         persisted = self.repository.get_run(job["run_id"])
