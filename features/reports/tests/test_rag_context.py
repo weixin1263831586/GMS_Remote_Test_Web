@@ -1,5 +1,5 @@
 from features.reports.failure_analysis import ReportFailureAnalyzer
-from features.reports.rag_context import public_cdd_context
+from features.knowledge import public_cdd_context
 
 
 def _hit(**extra):
