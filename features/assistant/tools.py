@@ -526,6 +526,7 @@ def knowledge_agent_tools() -> list[AgentTool]:
                 "规范问题引用具体条款、适用版本和原文；机制问题引用 chapter/适用版本/last_verified。"
                 "区分规范要求与背景解释，检查 sources_status 和适用条件；"
                 "背景知识不得作为已证实根因。"
+                "复杂公开 CDD 问题优先使用 query=analyze:完整自然语言问题，由本地 LLM 规划、补证及复核。"
                 "若命中 POL- 引用但仅返回片段，使用该完整引用作为 query 单独读取原条款；"
                 "条件引导句使用 context:POL-引用|0 展开同条件的下属记录；"
                 "section:POL-引用|0 分页读取同章节，按 next_query 继续。"
