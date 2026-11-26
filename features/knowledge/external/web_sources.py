@@ -75,19 +75,52 @@ CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
 
 
 def model_catalog_fingerprint(config=None):
-    """Bind approval to the enabled model routes without retaining credentials."""
+    """Bind owner approval to the complete enabled model routing catalog."""
     if config is None:
         config = config_manager.get_ai_config()
-    if not config.get('enabled'):
-        return ''
-    routes = {
-        name: {key: str(provider.get(key) or '') for key in ('model', 'base_url', 'api_format')}
-        for name, provider in (config.get('providers') or {}).items()
-        if isinstance(provider, dict) and provider.get('enabled') and provider.get('model')
-    }
-    if not routes or any(not route['base_url'] for route in routes.values()):
-        return ''
-    return hashlib.sha256(json.dumps(routes, sort_keys=True).encode()).hexdigest()
+    if not isinstance(config, dict) or config.get("enabled") is not True:
+        return ""
+    providers = config.get("providers")
+    if not isinstance(providers, dict):
+        return ""
+    routes = []
+    for name, provider in providers.items():
+        if not isinstance(name, str) or not isinstance(provider, dict):
+            return ""
+        enabled = provider.get("enabled", False)
+        if not isinstance(enabled, bool):
+            return ""
+        if not enabled:
+            continue
+        model, base_url = provider.get("model"), provider.get("base_url")
+        if not isinstance(model, str) or not model.strip() or not isinstance(base_url, str) or not base_url.strip():
+            return ""
+        try:
+            parsed = urlsplit(base_url)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                    or parsed.username or parsed.password or parsed.query or parsed.fragment):
+                return ""
+        except ValueError:
+            return ""
+        api_format = provider.get("api_format") or (
+            "anthropic" if "anthropic" in base_url.lower() or base_url.endswith("/messages") else "openai"
+        )
+        if api_format not in {"anthropic", "openai"}:
+            return ""
+        routes.append({"name": name, "model": model, "base_url": base_url,
+                       "api_format": api_format, "auth_required": provider.get("auth_required", True)})
+    if not routes:
+        return ""
+    primary = config.get("primary_provider")
+    if not isinstance(primary, str) and primary is not None:
+        return ""
+    names = [route["name"] for route in routes]
+    primary = primary if primary in names else names[0]
+    ordered = [route for route in routes if route["name"] == primary]
+    ordered.extend(route for route in routes if route["name"] != primary)
+    # Do not store credentials; a route/catalog change invalidates prior approval.
+    payload = {"version": 2, "routes": ordered}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def index_path():
