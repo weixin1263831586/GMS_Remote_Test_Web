@@ -1,10 +1,13 @@
 """Authorized document adapters for the shared local LLM retrieval engine."""
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from urllib.parse import urlsplit
 
-from features.retrieval import IntelligentRAG, IntelligentSource, RetrievalHit, RetrievalResult
+from features.retrieval import (IntelligentRAG, IntelligentSource, PassageInsightIndex, RetrievalHit,
+                                RetrievalResult, fuse_rankings, passage_token)
 from foundation.config import config_manager
 from foundation.redaction import redact_sensitive_text
 
@@ -13,6 +16,24 @@ from .personal_semantic import _redacted_body, _revision, retrieve_personal_cont
 from .policy_imports import IMPORT_TAG, _approved_content, content_hash, is_policy_import, policy_import_filter
 
 PAGE_SIZE = 2800
+
+
+def understanding_model_key(flag):
+    config = (config_manager.load_config() or {}).get("retrieval") or {}
+    if not isinstance(config, dict) or config.get(flag) is not True:
+        return ""
+    catalog = model_catalog_fingerprint()
+    preferred = config.get("llm_provider", "")
+    if not catalog or not isinstance(preferred, str):
+        return ""
+    return hashlib.sha256(json.dumps(["passage-understanding-v1", catalog, preferred]).encode()).hexdigest()
+
+
+def personal_insight_index(store, owner, *, approved_only=False):
+    identity = hashlib.sha256(owner.encode()).hexdigest()
+    kind = "approved" if approved_only else "ordinary"
+    key = understanding_model_key("allow_local_personal_llm_understanding")
+    return PassageInsightIndex(store.db_path.parent / "understanding" / identity / (kind + ".sqlite3"), key)
 
 
 def personal_source(store, owner, *, space_id="", approved_only=False, catalog_hash=""):
@@ -94,7 +115,11 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
                 hit = passage(doc, max(0, start - 350))
                 if hit:
                     rows.append(hit)
-        return RetrievalResult(rows, "matched" if rows else "no_match")
+        index = personal_insight_index(store, owner, approved_only=approved_only)
+        hints = index.search(re.findall(r"[\w.-]{2,}", query), resolve, limit=limit)
+        pool = {item.identity: item for item in [*hints, *rows]}
+        ranked = fuse_rankings([[item.identity for item in rows], [item.identity for item in hints]], limit=limit)
+        return RetrievalResult([pool[key] for key in ranked], "matched" if ranked else "no_match")
 
     def read(hit, page):
         doc = get(hit.metadata["doc_id"])
@@ -117,8 +142,37 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
                 break
         return rows
 
+    def resolve(reference, rev):
+        try:
+            doc_id, offset = reference.rsplit(":", 1)
+            doc = get(doc_id)
+            hit = passage(doc, int(offset)) if doc else None
+            return hit if hit and hit.revision == rev else None
+        except (ValueError, KeyError):
+            return None
+
+    def manifest():
+        ids = store.list_doc_ids(owner, space_id=space_id, tag=IMPORT_TAG if approved_only else "", limit=32)
+        complete = len(ids) < 32
+        rows = {}
+        for doc_id in ids:
+            doc = get(doc_id)
+            if not doc:
+                continue
+            body = _redacted_body(doc)
+            complete &= len(body) <= 64000
+            for start in range(0, min(len(body), 64000), 2400):
+                if len(rows) >= 512:
+                    return rows, False
+                # Ingestion uses 2400-character windows; query reads use the same
+                # resolver and may include up to PAGE_SIZE characters.
+                hit = passage(doc, start)
+                if hit:
+                    rows[passage_token(hit)] = hit
+        return rows, complete
+
     return IntelligentSource(source_id, "当前账号已授权导入规范" if approved_only else "当前账号普通知识文档",
-                             search, current, read, inventory)
+                             search, current, read, inventory, manifest, resolve)
 
 
 def web_source(*, android_api_level=None, cdd_only=False):
