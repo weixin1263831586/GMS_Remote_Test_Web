@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-
-RuntimeCallable = Callable[..., object]
+from foundation.runtime_contracts import ClientIdResolver
 
 
 @dataclass
 class ApkRuntime:
     config_manager: object | None = None
     global_state: object | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
     project_root: Path | None = None
     apk_upload_dir: Path | None = None
     apk_max_tasks: int = 20

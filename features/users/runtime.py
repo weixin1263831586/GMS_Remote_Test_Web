@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from foundation.runtime_contracts import UserStateProvider
 
 
 @dataclass
@@ -13,7 +14,7 @@ class UserRuntime:
     data_root: Path | None = None
     global_state: object | None = None
     ssh_async_manager: object | None = None
-    get_or_create_user_state: Callable[..., object] | None = None
+    get_or_create_user_state: UserStateProvider | None = None
 
 
 _runtime = UserRuntime()

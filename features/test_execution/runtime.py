@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-
-RuntimeCallable = Callable[..., object]
+from foundation.runtime_contracts import (
+    ApiHelpProvider,
+    ApkFilenameNormalizer,
+    ApkTaskCreator,
+    ClientIdResolver,
+    ClusterTestStarter,
+    FileCleanup,
+    SafePathJoin,
+    WebSocketSender,
+)
 
 
 @dataclass
@@ -16,17 +23,17 @@ class TestExecutionRuntime:
     ssh_manager: object | None = None
     global_state: object | None = None
     project_root: Path | None = None
-    safe_websocket_send: RuntimeCallable | None = None
-    generate_help_or_continue: RuntimeCallable | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
+    safe_websocket_send: WebSocketSender | None = None
+    generate_help_or_continue: ApiHelpProvider | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
     apk_max_file_size: int = 0
     apk_upload_dir: Path | None = None
     max_log_entries: int = 10000
-    create_apk_task: RuntimeCallable | None = None
-    normalize_apk_filename: RuntimeCallable | None = None
-    safe_join: RuntimeCallable | None = None
-    cleanup_files: RuntimeCallable | None = None
-    start_cluster_test: RuntimeCallable | None = None
+    create_apk_task: ApkTaskCreator | None = None
+    normalize_apk_filename: ApkFilenameNormalizer | None = None
+    safe_join: SafePathJoin | None = None
+    cleanup_files: FileCleanup | None = None
+    start_cluster_test: ClusterTestStarter | None = None
     suite_task_store: object | None = None
 
 
@@ -50,17 +57,17 @@ def configure_runtime(
     selected_ssh_manager: object,
     selected_global_state: object,
     selected_project_root: Path,
-    selected_safe_websocket_send: RuntimeCallable | None = None,
-    selected_generate_help_or_continue: RuntimeCallable | None = None,
-    selected_get_client_id_from_request: RuntimeCallable | None = None,
+    selected_safe_websocket_send: WebSocketSender | None = None,
+    selected_generate_help_or_continue: ApiHelpProvider | None = None,
+    selected_get_client_id_from_request: ClientIdResolver | None = None,
     selected_apk_max_file_size: int = 0,
     selected_apk_upload_dir: Path | None = None,
     selected_max_log_entries: int = 10000,
-    selected_create_apk_task: RuntimeCallable | None = None,
-    selected_normalize_apk_filename: RuntimeCallable | None = None,
-    selected_safe_join: RuntimeCallable | None = None,
-    selected_cleanup_files: RuntimeCallable | None = None,
-    selected_start_cluster_test: RuntimeCallable | None = None,
+    selected_create_apk_task: ApkTaskCreator | None = None,
+    selected_normalize_apk_filename: ApkFilenameNormalizer | None = None,
+    selected_safe_join: SafePathJoin | None = None,
+    selected_cleanup_files: FileCleanup | None = None,
+    selected_start_cluster_test: ClusterTestStarter | None = None,
     selected_suite_task_store: object | None = None,
 ) -> None:
     for name in _RUNTIME_FIELDS:
@@ -91,17 +98,17 @@ def configure_test_execution_dependencies(
     ssh_manager: object,
     global_state: object,
     project_root: Path,
-    safe_websocket_send: RuntimeCallable,
-    generate_help_or_continue: RuntimeCallable,
-    get_client_id_from_request: RuntimeCallable,
+    safe_websocket_send: WebSocketSender,
+    generate_help_or_continue: ApiHelpProvider,
+    get_client_id_from_request: ClientIdResolver,
     apk_max_file_size: int,
     apk_upload_dir: Path,
     max_log_entries: int,
-    create_apk_task: RuntimeCallable,
-    normalize_apk_filename: RuntimeCallable,
-    safe_join: RuntimeCallable,
-    cleanup_files: RuntimeCallable,
-    start_cluster_test: RuntimeCallable | None = None,
+    create_apk_task: ApkTaskCreator,
+    normalize_apk_filename: ApkFilenameNormalizer,
+    safe_join: SafePathJoin,
+    cleanup_files: FileCleanup,
+    start_cluster_test: ClusterTestStarter | None = None,
     suite_task_store: object | None = None,
 ) -> None:
     configure_runtime(

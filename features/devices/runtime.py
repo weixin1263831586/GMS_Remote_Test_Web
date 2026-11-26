@@ -7,12 +7,19 @@ an open-ended set of module globals.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-
-RuntimeCallable = Callable[..., object]
+from foundation.runtime_contracts import (
+    ApiHelpProvider,
+    ClientIdResolver,
+    ClientIpResolver,
+    LocalShellRunner,
+    NotificationStore,
+    TailscaleHostResolver,
+    WebSocketSender,
+    WindowsUsbipProbe,
+)
 
 
 @dataclass
@@ -20,15 +27,15 @@ class DeviceRuntime:
     config_manager: object | None = None
     global_state: object | None = None
     ssh_manager: object | None = None
-    store_notification: RuntimeCallable | None = None
-    generate_help_or_continue: RuntimeCallable | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
-    probe_windows_usbipd: RuntimeCallable | None = None
-    resolve_tailscale_device_host: RuntimeCallable | None = None
-    safe_websocket_send: RuntimeCallable | None = None
-    get_client_ip: RuntimeCallable | None = None
+    store_notification: NotificationStore | None = None
+    generate_help_or_continue: ApiHelpProvider | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
+    probe_windows_usbipd: WindowsUsbipProbe | None = None
+    resolve_tailscale_device_host: TailscaleHostResolver | None = None
+    safe_websocket_send: WebSocketSender | None = None
+    get_client_ip: ClientIpResolver | None = None
     client_manager: object | None = None
-    run_local_shell_command: RuntimeCallable | None = None
+    run_local_shell_command: LocalShellRunner | None = None
     project_root: Path | None = None
     device_cache_ttl: float = 15
 
@@ -52,15 +59,15 @@ def configure_runtime(
     selected_config_manager: object,
     selected_global_state: object,
     selected_ssh_manager: object,
-    selected_store_notification: RuntimeCallable,
-    selected_generate_help_or_continue: RuntimeCallable,
-    selected_get_client_id_from_request: RuntimeCallable,
-    selected_probe_windows_usbipd: RuntimeCallable,
-    selected_resolve_tailscale_device_host: RuntimeCallable,
-    selected_safe_websocket_send: RuntimeCallable | None = None,
-    selected_get_client_ip: RuntimeCallable | None = None,
+    selected_store_notification: NotificationStore,
+    selected_generate_help_or_continue: ApiHelpProvider,
+    selected_get_client_id_from_request: ClientIdResolver,
+    selected_probe_windows_usbipd: WindowsUsbipProbe,
+    selected_resolve_tailscale_device_host: TailscaleHostResolver,
+    selected_safe_websocket_send: WebSocketSender | None = None,
+    selected_get_client_ip: ClientIpResolver | None = None,
     selected_client_manager: object | None = None,
-    selected_run_local_shell_command: RuntimeCallable | None = None,
+    selected_run_local_shell_command: LocalShellRunner | None = None,
     selected_project_root: Path | None = None,
     selected_device_cache_ttl: float = 15,
 ) -> None:
@@ -87,15 +94,15 @@ def configure_device_dependencies(
     ssh_manager: object,
     config_manager: object,
     global_state: object,
-    store_notification: Callable[..., object],
-    generate_help_or_continue: Callable[..., object],
-    get_client_id_from_request: Callable[..., object],
-    probe_windows_usbipd: Callable[..., object],
-    resolve_tailscale_device_host: Callable[..., object],
-    safe_websocket_send: Callable[..., object],
-    get_client_ip: Callable[..., object],
+    store_notification: NotificationStore,
+    generate_help_or_continue: ApiHelpProvider,
+    get_client_id_from_request: ClientIdResolver,
+    probe_windows_usbipd: WindowsUsbipProbe,
+    resolve_tailscale_device_host: TailscaleHostResolver,
+    safe_websocket_send: WebSocketSender,
+    get_client_ip: ClientIpResolver,
     client_manager: object,
-    run_local_shell_command: Callable[..., object],
+    run_local_shell_command: LocalShellRunner,
     project_root: Path,
     device_cache_ttl: float,
 ) -> None:

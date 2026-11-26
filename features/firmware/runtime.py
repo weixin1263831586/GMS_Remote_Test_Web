@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-
-RuntimeCallable = Callable[..., object]
+from foundation.runtime_contracts import (
+    ApiHelpProvider,
+    ClientIdResolver,
+    DeviceLockRelease,
+    FirmwareDeviceLocker,
+    NotificationStore,
+    WebSocketSender,
+)
 
 
 @dataclass
@@ -15,14 +20,14 @@ class FirmwareRuntime:
     config_manager: object | None = None
     ssh_manager: object | None = None
     global_state: object | None = None
-    safe_websocket_send: RuntimeCallable | None = None
-    store_notification: RuntimeCallable | None = None
-    generate_help_or_continue: RuntimeCallable | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
+    safe_websocket_send: WebSocketSender | None = None
+    store_notification: NotificationStore | None = None
+    generate_help_or_continue: ApiHelpProvider | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
     project_root: Path | None = None
     firmware_transfer_timeout: int = 3600
-    lock_firmware_devices: RuntimeCallable | None = None
-    release_firmware_devices: RuntimeCallable | None = None
+    lock_firmware_devices: FirmwareDeviceLocker | None = None
+    release_firmware_devices: DeviceLockRelease | None = None
     firmware_share_store: object | None = None
 
 
