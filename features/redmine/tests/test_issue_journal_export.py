@@ -1,9 +1,9 @@
 """Older Redmine replies must remain discoverable in issue export metadata."""
 
-from features.redmine.analysis.reporting import ReportingAnalysisMixin
+from features.redmine.analysis.reporting import IssueReporting
 
 
-class _Reporter(ReportingAnalysisMixin):
+class _Reporter(IssueReporting):
     def _detect_version_type(self, version):
         return ""
 

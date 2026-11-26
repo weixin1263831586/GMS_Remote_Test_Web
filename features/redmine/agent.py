@@ -15,8 +15,7 @@ from typing import Any
 from features.redmine.analysis import _truncate
 from features.redmine.analysis.ai import AiAnalysisMixin
 from features.redmine.analysis.attachments import AttachmentAnalysisMixin
-from features.redmine.analysis.reporting import ReportingAnalysisMixin
-from features.redmine.analysis.resolution import ResolutionAnalysisMixin
+from features.redmine.analysis.reporting import IssueReporting
 from features.redmine.analysis.similarity import SimilarityAnalysisMixin
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
@@ -90,10 +89,10 @@ class RedmineAgent(
     AttachmentAnalysisMixin,
     SimilarityAnalysisMixin,
     AiAnalysisMixin,
-    ResolutionAnalysisMixin,
-    ReportingAnalysisMixin,
 ):
     """Batch agent for assigned Redmine issue triage."""
+
+    _reporting = IssueReporting()
 
     def __init__(
         self,
@@ -426,7 +425,7 @@ class RedmineAgent(
                                           analysis_status="failed", error=str(exc))
                     self.db.upsert_issue(failed_payload)
 
-            report = self._build_run_report(run_id, issue_results)
+            report = self._reporting._build_run_report(run_id, issue_results)
             report_path = self.db.write_run_report(run_id, report)
             summary = {
                 "assigned_to": assigned_to,
@@ -478,10 +477,10 @@ class RedmineAgent(
 
         ai_result = await self._summarize_with_model(issue_payload, failures, references)
 
-        structured = self._extract_structured_fields(ai_result, issue_payload, failures, references)
+        structured = self._reporting._extract_structured_fields(ai_result, issue_payload, failures, references)
         issue_payload.update(structured)
 
-        document = self._build_issue_document(issue_payload)
+        document = self._reporting._build_issue_document(issue_payload)
         doc_path = self.db.write_issue_doc(issue_id, document)
         issue_payload["doc_path"] = doc_path
         issue_payload["doc_content"] = document

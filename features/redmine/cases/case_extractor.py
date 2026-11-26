@@ -1,7 +1,7 @@
 """Structured case-fact extraction for the Redmine knowledge base.
 
 The knowledge base reuses the structured fields already produced during issue
-analysis (see :mod:`features.redmine.analysis.resolution`) rather than calling
+analysis (see :mod:`features.redmine.analysis.reporting`) rather than calling
 the AI model again. This module adds rule-based classification on top:
 chip platform, Android version, certification type, module, error signature,
 region — plus maps the issue's analysis text into the case-fact vocabulary

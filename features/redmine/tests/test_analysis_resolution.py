@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import unittest
 
-from features.redmine.agent import RedmineAgent
+from features.redmine.analysis.reporting import IssueReporting
 
 
 class ResolutionFallbackTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class ResolutionFallbackTests(unittest.TestCase):
             ],
         }
 
-        enriched = RedmineAgent.enrich_issue_display_fields(issue)
+        enriched = IssueReporting.enrich_issue_display_fields(issue)
 
         self.assertIn("run_log.txt", enriched["error_info"])
         self.assertIn("Actual: false", enriched["error_info"])
@@ -67,7 +67,7 @@ class ResolutionFallbackTests(unittest.TestCase):
             "attachments_json": [],
         }
 
-        enriched = RedmineAgent.enrich_issue_display_fields(issue)
+        enriched = IssueReporting.enrich_issue_display_fields(issue)
 
         self.assertIn("已验证", enriched["solution"])
         self.assertIn("修改 config.xml", enriched["solution"])
