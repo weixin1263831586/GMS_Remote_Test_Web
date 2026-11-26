@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from features.redmine.evidence.client_attachments import RedmineAttachmentMixin
+from features.redmine.client import RedmineClient
 
 
 class _UploadResponse:
@@ -25,10 +25,13 @@ class _UploadSession:
         return _UploadResponse()
 
 
-class _AttachmentClient(RedmineAttachmentMixin):
+class _AttachmentClient(RedmineClient):
     base_url = "https://redmine.example.test"
     username = "operator"
     password = "credential"
+
+    def __init__(self):
+        pass
 
     def _get_session(self):
         return _UploadSession()
@@ -39,7 +42,7 @@ class RedmineAttachmentSecurityTests(unittest.IsolatedAsyncioTestCase):
         filename = "customer-confidential-report.zip"
         token = "redmine-secret-upload-token-value"
 
-        with self.assertLogs("features.redmine.evidence.client_attachments", level="INFO") as logs:
+        with self.assertLogs("features.redmine.client", level="INFO") as logs:
             returned = await _AttachmentClient().upload_file(b"report", filename)
 
         output = "\n".join(logs.output)
@@ -90,7 +93,7 @@ class _DownloadSession:
         return self.responses.pop(0)
 
 
-class _DownloadClient(RedmineAttachmentMixin):
+class _DownloadClient(RedmineClient):
     base_url = "https://redmine.example.test"
     username = "operator"
     password = "credential"

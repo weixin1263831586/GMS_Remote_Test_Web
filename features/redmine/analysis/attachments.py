@@ -9,19 +9,15 @@ import re
 import shutil
 import tempfile
 import zipfile
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from features.redmine.analysis import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
-from features.redmine.evidence.client_attachments import RedmineAttachment
+from features.redmine.client import RedmineAttachment, RedmineClient
 from features.redmine.tesseract_finder import (
     configure_usable_tesseract,
 )
 from features.redmine.utils import sanitize_attachment_filename
-
-
-if TYPE_CHECKING:
-    from features.redmine.client import RedmineClient
 
 
 logger = logging.getLogger(__name__)

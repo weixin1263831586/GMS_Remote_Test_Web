@@ -1,7 +1,7 @@
 """Redmine 证据快照抓取服务（只读 evidence pipeline）。
 
 本模块与看板摘要
-通道（analysis/issue.py 的 2,000 字符截断）完全分离：
+通道（工单摘要的 2,000 字符截断）完全分离：
 
 - 直接请求 Redmine REST ``/issues/{id}.json?include=...``，原样保存返回的
   UTF-8 JSON 字节并计算 SHA-256；
