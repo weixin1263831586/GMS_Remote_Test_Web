@@ -80,3 +80,30 @@ function singleIssueAnalysisMeta(run, issue) {
   }
   return tags.join('');
 }
+
+
+function dailyBriefPolicyEvidence(result) {
+  var checks = ((result || {}).evidence_gate || {}).official_reference_checks || [];
+  var sources = {};
+  checks.forEach(function (check) {
+    ['web_documents', 'gms_requirements'].forEach(function (key) {
+      var source = (check.sources || {})[key];
+      if (source) sources[key] = source;
+    });
+  });
+  var keys = Object.keys(sources);
+  if (!keys.length) return '';
+  var labels = {web_documents: '公开 CDD / 技术规范', gms_requirements: 'Google GMS 政策'};
+  var statusLabels = {matched: '已召回候选条款', no_match: '未检索到候选', unavailable: '来源不可用', not_applicable: '未执行'};
+  return '<div class="daily-brief-section"><div class="daily-brief-section-body">'
+    + '<b>Google 官方规范论证</b><div class="muted">规范候选不是已验证根因，需结合设备版本及实际证据判断。</div>'
+    + keys.map(function (key) {
+      var source = sources[key];
+      var refs = (source.references || []).filter(function (ref) {
+        return /^(POL-|ref:gms-policy:)/.test(String(ref));
+      });
+      return '<div><b>' + esc(labels[key]) + '</b> · '
+        + esc(statusLabels[source.status] || '状态未知') + ' · ' + esc(source.count || 0) + ' 条'
+        + (refs.length ? '<div class="muted">' + esc(refs.join(' · ')) + '</div>' : '') + '</div>';
+    }).join('') + '</div></div>';
+}
