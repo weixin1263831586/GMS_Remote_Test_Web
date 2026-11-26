@@ -55,17 +55,14 @@ class UtilityToolsTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.status_code, 403)
 
-    def test_download_resolves_legacy_file_names(self):
-        self.assertEqual(
-            utility_tools_api._resolve_tool_id(
-                'gerrit_patch_export_and_apply_tool.sh'
-            ),
-            'gerrit-patch',
-        )
-        self.assertEqual(
-            utility_tools_api._resolve_tool_id('gerrit-patch'),
-            'gerrit-patch',
-        )
+    def test_download_only_accepts_manifest_ids(self):
+        response = asyncio.run(utility_tools_api.download_utility_tool('gerrit-patch'))
+        self.assertEqual(response.filename, 'gerrit_patch_export_and_apply_tool.sh')
+        for alias in ('gerrit_patch_export_and_apply_tool.sh',
+                      'scripts/utilities/gerrit_patch_export_and_apply.sh'):
+            with self.subTest(alias=alias), self.assertRaises(HTTPException) as raised:
+                utility_tools_api._resolve_allowed_utility_tool(alias)
+            self.assertEqual(raised.exception.status_code, 403)
 
     def test_remote_file_path_is_shell_quoted(self):
         command = assets._remote_list_command("/tmp/a' ; touch /tmp/injected; '")

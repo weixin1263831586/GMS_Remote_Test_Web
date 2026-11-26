@@ -279,7 +279,7 @@ _AGENT_UNSUPPORTED_DIRECT_PATHS = {
     "/api/apk/upload",
     "/api/favicon/fetch",
     "/api/favicon/proxy",
-    "/api/tools/download/{file_path:path}",
+    "/api/tools/download/{tool_id:path}",
 }
 
 

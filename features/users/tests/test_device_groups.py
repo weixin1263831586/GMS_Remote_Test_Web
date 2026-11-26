@@ -1,3 +1,4 @@
+import hashlib
 import json
 import tempfile
 import threading
@@ -75,7 +76,9 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         self.assertEqual(device_groups.load_device_groups('alice'), [])
 
     def test_only_canonical_owner_groups_are_loaded(self):
-        legacy_dir = Path(self.runtime_dir.name) / 'user_prefs' / 'agent_legacy'
+        old_owner = 'account.1'
+        digest = hashlib.sha256(old_owner.encode()).hexdigest()[:12]
+        legacy_dir = Path(self.runtime_dir.name) / 'user_prefs' / f'account_1_{digest}'
         legacy_dir.mkdir(parents=True)
         legacy_path = legacy_dir / 'device_groups.json'
         legacy_path.write_text(
@@ -83,14 +86,14 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
             encoding='utf-8',
         )
 
-        account_path = device_groups._device_groups_path('account-1')
-        self.assertEqual(device_groups.load_device_groups('account-1'), [])
+        account_path = device_groups._device_groups_path(old_owner)
+        self.assertEqual(device_groups.load_device_groups(old_owner), [])
         self.assertFalse(account_path.exists())
 
         current_groups = [{'id': 'current', 'name': 'Current', 'color': '#000000',
                            'device_ids': ['SERIAL2'], 'followed': False}]
-        self.assertTrue(device_groups.save_device_groups('account-1', current_groups))
-        self.assertEqual(device_groups.load_device_groups('account-1'), current_groups)
+        self.assertTrue(device_groups.save_device_groups(old_owner, current_groups))
+        self.assertEqual(device_groups.load_device_groups(old_owner), current_groups)
         self.assertEqual(json.loads(legacy_path.read_text())['groups'][0]['id'], 'lab')
 
     def test_concurrent_updates_do_not_lose_groups(self):
