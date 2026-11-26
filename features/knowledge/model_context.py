@@ -58,10 +58,12 @@ def public_cdd_context(hits, *, limit=4):
 
 def retrieve_public_cdd_context(query, *, limit=4):
     """Search the local public index only; no private sources or live network fetch."""
-    from .external.federation import federated_search
+    from .external.web_sources import WebKnowledgeProvider
 
     query = redact_sensitive_text(str(query or "")).strip()[:512]
     if not query:
         return []
-    result = federated_search(query, sources=["web_documents"], limit=12)
-    return public_cdd_context(result.get("results") or [], limit=limit)
+    hits, _ = WebKnowledgeProvider().search_with_status(
+        query, limit=12, public_cdd_only=True,
+    )
+    return public_cdd_context([hit.to_dict() for hit in hits], limit=limit)
