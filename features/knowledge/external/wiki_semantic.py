@@ -43,11 +43,6 @@ class WikiSemantic:
             manifest[token] = row[0]
         return revision, manifest
 
-    @staticmethod
-    def _status(total, indexed):
-        return {"status": "ready" if total and indexed == total else "partial" if indexed else "empty",
-                "coverage_complete": bool(total) and indexed == total, "indexed": indexed, "total": total}
-
     def status(self):
         if self.embedder is None:
             return {"status": "disabled", "coverage_complete": False, "indexed": 0, "total": 0}
@@ -56,8 +51,7 @@ class WikiSemantic:
         with self.provider._connect() as conn:
             conn.execute("BEGIN")
             _, manifest = self._manifest(conn)
-        indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
-        return self._status(len(manifest), len(indexed))
+        return self.index.coverage(self.namespace, self.embedder.identity, manifest)
 
     @staticmethod
     def _row(conn, rowid):
@@ -78,9 +72,8 @@ class WikiSemantic:
         with self.provider._connect() as conn:
             conn.execute("BEGIN")
             _, manifest = self._manifest(conn)
-            indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
             batch = {}
-            missing = [token for token in manifest if token not in indexed]
+            missing = self.index.pending_tokens(self.namespace, self.embedder.identity, manifest)
             for token in missing[:max(1, min(batch_size, MAX_BATCH))]:
                 row = self._row(conn, manifest[token])
                 if row:

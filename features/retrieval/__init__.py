@@ -3,7 +3,14 @@
 Domain providers own access checks, source revisions and document content.
 """
 from .evidence import evidence_followup_required, evidence_plan_context, summarize_evidence
-from .semantic import LocalEmbedding, VectorIndex, embedding_configuration_issue, local_embedding, local_reranker
+from .semantic import (
+    LocalEmbedding,
+    VectorIndex,
+    embedding_configuration_issue,
+    local_embedding,
+    local_reranker,
+    semantic_coverage,
+)
 from .service import (
     RankedBatch,
     RetrievalHit,
@@ -36,5 +43,6 @@ __all__ = [
     "fuse_rankings",
     "local_embedding",
     "local_reranker",
+    "semantic_coverage",
     "summarize_evidence",
 ]

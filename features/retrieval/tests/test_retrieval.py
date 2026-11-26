@@ -151,3 +151,15 @@ def test_shared_fanout_keeps_source_failure_and_total_result_bound():
     assert hits == ["a", "c"]
     assert statuses[1]["detail"] == "OSError"
     assert all(not status["coverage_complete"] for status in statuses)
+
+
+def test_pending_tokens_and_coverage_resume_authorized_manifest(tmp_path):
+    index = VectorIndex(tmp_path / "vectors.sqlite3")
+    index.upsert("owner", "v1", {"a": "memory", "obsolete": "audio"}, Encoder())
+    assert index.pending_tokens("owner", "v1", ["c", "a", "b", "c"]) == ["c", "b"]
+    assert index.coverage("owner", "v1", ["a", "b"]) == {
+        "status": "partial", "indexed": 1, "total": 2, "coverage_complete": False,
+    }
+    assert not index.coverage("owner", "v1", ["a"], corpus_complete=False)["coverage_complete"]
+    assert index.coverage("owner", "v1", ["a"])["coverage_complete"]
+    assert index.pending_tokens("other", "v1", ["a"]) == ["a"]

@@ -173,3 +173,9 @@ revision checks. The public feature exports are the only cross-feature entry;
 architecture tests prohibit retrieval from importing any other business feature
 or bootstrap. Do not move credentials, business persistence, model grants or
 feature-specific query rules into retrieval.
+
+Semantic adapters share VectorIndex.pending_tokens and coverage accounting.
+The source owns its current authorized manifest, document resolution and reset
+coordination. A complete vector manifest is not evidence of complete upstream
+coverage. Semantic failure and omitted earlier observations remain visible to
+the shared evidence planner.

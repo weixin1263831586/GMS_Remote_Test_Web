@@ -89,3 +89,15 @@ def test_source_gap_prevents_complete_coverage_claim():
     }})
     assert not result["coverage_complete"]
     assert "source_coverage:policy" in result["gaps"]
+
+
+def test_omitted_earlier_gap_and_nested_semantic_status():
+    failed = summarize_evidence("knowledge_search", {"data": {
+        "results": [{"reference": "r", "source_revision": "v"}],
+        "coverage_complete": True, "retrieval": {"status": "partial", "coverage_complete": False},
+    }})
+    assert not failed["coverage_complete"]
+    assert "semantic:knowledge_search:partial" in failed["gaps"]
+    observations = [{"evidence": failed}] + [{"evidence": {"coverage_complete": True}}] * 10
+    assert evidence_plan_context(observations)["has_unresolved_scope"]
+    assert evidence_followup_required(observations)

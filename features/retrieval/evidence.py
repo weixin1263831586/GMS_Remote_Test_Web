@@ -42,6 +42,12 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("incomplete_source_scope")
     if data.get("index_complete") is False or data.get("index_warnings"):
         gaps.append("incomplete_evidence_index")
+    retrieval_status = data.get("retrieval")
+    if isinstance(retrieval_status, dict):
+        if retrieval_status.get("status") in _SOURCE_FAILURES:
+            gaps.append("semantic:" + tool + ":" + str(retrieval_status["status"]))
+        elif retrieval_status.get("coverage_complete") is False and retrieval_status.get("status") != "disabled":
+            gaps.append("incomplete_evidence_index")
     if data.get("remote_search_error"):
         gaps.append("remote_search_failed")
     if sdk and data.get("global_coverage_complete") is False:
@@ -71,6 +77,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("bounded_or_unconfirmed")
     if payload.get("success") is False:
         gaps.append("tool_failed")
+    if payload.get("observation_truncated") is True:
+        gaps.append("bounded_or_unconfirmed")
     if records == []:
         gaps.append("no_match_in_returned_scope")
     if isinstance(source_status, list):
@@ -138,7 +146,7 @@ def evidence_plan_context(observations: list, *, limit=8) -> dict:
     selected = evidence[-max(1, min(limit, 8)):]
     return {"retrievals": selected, "omitted_retrievals": max(0, len(evidence) - len(selected)),
             "has_unresolved_scope": any(not item.get("coverage_complete") or item.get("gaps")
-                                        for item in selected)}
+                                        for item in evidence)}
 
 
 def evidence_followup_required(observations: list) -> bool:

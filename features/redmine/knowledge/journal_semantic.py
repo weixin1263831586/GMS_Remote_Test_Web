@@ -118,12 +118,9 @@ class JournalSemantic:
         return manifest, complete
 
     def _status(self, manifest, complete):
-        indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
-        covered = bool(manifest) and len(indexed) == len(manifest) and complete
-        return {"status": "ready" if covered else "partial" if indexed else "empty",
-                "indexed": len(indexed), "total": len(manifest),
-                "coverage_complete": covered, "corpus_bounded": not complete,
-                "scope": "owner_archived_non_private_journals"}
+        return {**self.index.coverage(self.namespace, self.embedder.identity, manifest,
+                                      corpus_complete=complete),
+                "corpus_bounded": not complete, "scope": "owner_archived_non_private_journals"}
 
     def status(self):
         if self.embedder is None:
@@ -155,12 +152,10 @@ class JournalSemantic:
             return {"status": "busy", "coverage_complete": False}
         try:
             manifest, _ = self._manifest()
-            indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
             documents = {}
             cache = {}
-            for token, chunk in manifest.items():
-                if token in indexed:
-                    continue
+            for token in self.index.pending_tokens(self.namespace, self.embedder.identity, manifest):
+                chunk = manifest[token]
                 text = self._resolve(chunk, cache)
                 if text is not None:
                     documents[token] = text

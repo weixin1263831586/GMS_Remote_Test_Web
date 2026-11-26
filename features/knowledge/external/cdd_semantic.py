@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from features.retrieval import VectorIndex, local_embedding
+from features.retrieval import VectorIndex, local_embedding, semantic_coverage
 
 
 MAX_CORPUS = 30000
@@ -60,8 +60,7 @@ class CddSemantic:
             tokens = self._manifest(source)
             total += len(tokens)
             indexed += len(self.index.indexed(self._scope(source), self.embedder.identity, tokens))
-        return {"status": "ready" if total and indexed == total else "partial" if indexed else "empty",
-                "coverage_complete": bool(total) and indexed == total, "indexed": indexed, "total": total}
+        return semantic_coverage(total, indexed)
 
     def sync(self, source_id, *, batch_size=MAX_BATCH):
         if self.embedder is None:
@@ -82,8 +81,7 @@ class CddSemantic:
         source_id = source["id"]
         tokens = self._manifest(source)
         scope, model = self._scope(source), self.embedder.identity
-        indexed = self.index.indexed(scope, model, tokens)
-        missing = [token for token in tokens if token not in indexed][:max(1, min(batch_size, MAX_BATCH))]
+        missing = self.index.pending_tokens(scope, model, tokens)[:max(1, min(batch_size, MAX_BATCH))]
         batch = {}
         for row in self._rows(source, missing):
             batch[row["token"]] = "\n".join(row[key] for key in
@@ -105,8 +103,7 @@ class CddSemantic:
             raise ValueError("Combined CDD corpus exceeds semantic search limit")
         indexed = sum(len(self.index.indexed(self._scope(source), self.embedder.identity, tokens))
                       for source, tokens in manifest)
-        status = {"status": "ready" if total and indexed == total else "partial" if indexed else "empty",
-                  "coverage_complete": bool(total) and indexed == total, "indexed": indexed, "total": total}
+        status = semantic_coverage(total, indexed)
         if not indexed:
             return [], status
         query_vector = self.embedder.encode([query])[0]

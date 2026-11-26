@@ -156,6 +156,15 @@ def _unit(vector):
     return tuple(x / norm for x in values)
 
 
+def semantic_coverage(total: int, indexed: int, *, corpus_complete: bool = True) -> dict:
+    """Coverage of the authorized manifest, not of the upstream source."""
+    if not 0 <= indexed <= total:
+        raise ValueError("Invalid semantic index counts")
+    complete = bool(total) and indexed == total and corpus_complete
+    return {"status": "ready" if complete else "partial" if indexed else "empty",
+            "coverage_complete": complete, "indexed": indexed, "total": total}
+
+
 class VectorIndex:
     """Store vectors only; callers supply the current authorized revision's manifest."""
 
@@ -202,6 +211,17 @@ class VectorIndex:
                    AND dimensions BETWEEN 1 AND ? AND length(vector)=dimensions*4""",
                 (namespace, model, MAX_DIMENSION)
             ) if row[0] in manifest}
+
+    def coverage(self, namespace, model, tokens, *, corpus_complete=True):
+        manifest = self._manifest(tokens)
+        return semantic_coverage(len(manifest), len(self.indexed(namespace, model, manifest)),
+                                 corpus_complete=corpus_complete)
+
+    def pending_tokens(self, namespace, model, tokens):
+        """Preserve manifest order while excluding valid committed vectors."""
+        ordered = list(dict.fromkeys(tokens))
+        indexed = self.indexed(namespace, model, ordered)
+        return [token for token in ordered if token not in indexed]
 
     def upsert(self, namespace, model, documents, embedder):
         """Compute one bounded batch; publish atomically or leave previous vectors."""

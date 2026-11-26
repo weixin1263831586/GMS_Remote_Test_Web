@@ -68,10 +68,8 @@ class PersonalSemantic:
         return manifest, complete
 
     def _status(self, manifest, complete):
-        indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
-        covered = bool(manifest) and len(indexed) == len(manifest) and complete
-        return {"status": "ready" if covered else "partial" if indexed else "empty",
-                "indexed": len(indexed), "total": len(manifest), "coverage_complete": covered,
+        return {**self.index.coverage(self.namespace, self.embedder.identity, manifest,
+                                      corpus_complete=complete),
                 "corpus_bounded": not complete, "scope": "owner_ordinary_documents"}
 
     def status(self):
@@ -88,12 +86,10 @@ class PersonalSemantic:
         try:
             exclude = policy_import_filter(self.owner)
             manifest, _ = self._manifest(exclude)
-            indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
             documents = {}
             cache = {}
-            for token, (doc_id, revision, start) in manifest.items():
-                if token in indexed:
-                    continue
+            for token in self.index.pending_tokens(self.namespace, self.embedder.identity, manifest):
+                doc_id, revision, start = manifest[token]
                 if doc_id not in cache:
                     cache[doc_id] = self.store.get_doc(self.owner, doc_id)
                 doc = cache[doc_id]

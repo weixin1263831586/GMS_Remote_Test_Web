@@ -45,10 +45,7 @@ class CaseSemantic:
         return {_token(row): int(row["issue_id"]) for row in rows}
 
     def _status(self, manifest):
-        indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
-        return {"status": "ready" if manifest and len(indexed) == len(manifest) else
-                "partial" if indexed else "empty", "indexed": len(indexed), "total": len(manifest),
-                "coverage_complete": bool(manifest) and len(indexed) == len(manifest)}
+        return self.index.coverage(self.namespace, self.embedder.identity, manifest)
 
     def status(self):
         if self.embedder is None:
@@ -63,8 +60,8 @@ class CaseSemantic:
             return {"status": "busy", "coverage_complete": False}
         try:
             manifest = self._manifest()
-            indexed = self.index.indexed(self.namespace, self.embedder.identity, manifest)
-            missing = [token for token in manifest if token not in indexed][:max(1, min(batch_size, MAX_BATCH))]
+            missing = self.index.pending_tokens(self.namespace, self.embedder.identity, manifest)
+            missing = missing[:max(1, min(batch_size, MAX_BATCH))]
             facts = self.db.get_case_facts_for_issue_ids([manifest[token] for token in missing])
             documents = {}
             for token in missing:
