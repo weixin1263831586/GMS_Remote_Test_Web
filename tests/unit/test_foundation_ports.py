@@ -8,9 +8,10 @@ behavior. Port registration must come from the composition root
 importing a feature package.
 """
 
+import asyncio
 import inspect
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from bootstrap import dependencies
 from features.redmine import api as redmine_api
@@ -83,14 +84,15 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
         session.assert_called_once_with('w1', '', 0)
 
     def test_device_action_request_is_late_bound(self):
-        submit = MagicMock(return_value="pending")
+        result = {"success": True, "accepted": True, "command_id": "c1"}
+        submit = AsyncMock(return_value=result)
         cluster_port.configure_cluster_access(device_action_request=submit)
 
         self.assertEqual(
-            cluster_port.submit_device_action("request", {"action": "aoa_probe"}),
-            "pending",
+            asyncio.run(cluster_port.submit_device_action("request", {"action": "aoa_probe"})),
+            result,
         )
-        submit.assert_called_once_with("request", {"action": "aoa_probe"})
+        submit.assert_awaited_once_with("request", {"action": "aoa_probe"})
 
 
 class OpsPortContractTests(unittest.TestCase):
