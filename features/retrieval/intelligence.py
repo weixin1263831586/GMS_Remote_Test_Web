@@ -217,13 +217,14 @@ class IntelligentRAG:
                 claims.append({"id": f"C{len(claims) + 1}", "statement": statement, "citations": checked})
         return claims
 
-    def run(self, question):
+    def run(self, question, *, recall_only=False):
         question = str(question or "").strip()[:4000]
         if not question:
             raise ValueError("Question required")
         sources = [{"id": source.source_id, "description": source.description,
                     "readable": source.read is not None} for source in self.sources.values()]
         claims = []
+        selected = []
         status = "insufficient_evidence"
         try:
             self._inventory()
@@ -236,18 +237,23 @@ class IntelligentRAG:
                 self._search(source_id, question)
             self._actions(plan)
             self.initial = False
-            for _ in range(2):
+            for _ in range(1 if recall_only else 2):
                 review = self._model("inspect",
                     '阅读证据，判断是否缺少定义、条件、例外、版本或关联章节。'
                     '返回 {"searches":[{"source":"来源ID","query":"改写查询"}],'
-                    '"reads":[{"id":"已取得的证据ID","page":0}],"open":["D1"]}。充分时所有数组为空。'
+                    '"reads":[{"id":"已取得的证据ID","page":0}],"open":["D1"],"selected":["E1"]}。证据充分时前三个数组为空，selected 按相关性排序。'
                     '读取只能指定现有证据ID和页序号，不能虚构ID。个人文档 page=0 读取开头，正负页读取命中前后；网页只接受非负章节页。',
                     {"question": question, "sources": sources, "documents": [], "evidence": self._rows()})
+                if isinstance(review.get("selected"), list):
+                    selected = [key for key in review["selected"][:MAX_EVIDENCE]
+                                if isinstance(key, str) and key in self.hits]
                 before = (len(self.seen_queries), len(self.seen_reads))
                 self._actions(review)
                 if before == (len(self.seen_queries), len(self.seen_reads)):
                     break
-            if self.hits:
+            if recall_only and self.hits:
+                status = "model_planned_recall"
+            elif self.hits:
                 draft = self._model("draft",
                     '逐项回答，返回 {"claims":[{"statement":"中文陈述，包含适用条件与不确定性",'
                     '"citations":[{"id":"E1","quote":"完全逐字的原文引句"}]}]}。'
@@ -284,7 +290,11 @@ class IntelligentRAG:
             self.hits.clear()
             claims = []
             status = "authorization_changed"
-        return {"status": status, "claims": claims, "evidence": self._rows(),
+        rows = self._rows()
+        if recall_only:
+            ranks = {key: index for index, key in enumerate(dict.fromkeys(selected))}
+            rows.sort(key=lambda row: ranks.get(row["id"], len(ranks)))
+        return {"status": status, "claims": claims, "evidence": rows,
                 "steps": self.events, "model_calls": self.calls,
                 "coverage_complete": False, "independent_verification": False}
 
