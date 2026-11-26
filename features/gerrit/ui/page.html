@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gerrit 看板</title>
-  <script src="/static/js/utils.js?v=20261113-shared-clipboard"></script>
+  <script src="/static/js/utils.js?v=20261126-action-busy"></script>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --panel2:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); --warn:var(--warning-color); --bad:var(--danger-color); --surface:var(--light-bg); --accent:var(--lighter-bg); }
@@ -30,7 +30,6 @@
     .header-toolbar .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
     /* 右对齐聚簇内的输入限宽，避免把 Tab 行挤爆（Redmine searchInput 同款）。 */
     #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
-    #queryBtn { flex:0 0 76px; width:76px; white-space:nowrap; }
     #queryBtn:disabled { cursor:wait; opacity:.7; }
     #owner { width:clamp(180px, 18vw, 260px); min-width:180px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
@@ -161,7 +160,7 @@
 
 </style>
 <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
-<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
+<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261126-action-busy">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action">
 <link rel="stylesheet" href="/static/css/form-controls.css?v=20261125-unified-password-control">
@@ -187,13 +186,13 @@
       <div id="queryFilters" hidden>
         <select id="profile" data-change="loadChanges" aria-label="查询场景"></select>
         <input id="query" placeholder="Gerrit query，例如 status:open owner:self">
-        <button id="queryBtn" type="button" class="secondary" data-click="loadChanges" aria-busy="false">查询</button>
+        <button id="queryBtn" data-busy-size="short" type="button" class="secondary" data-click="loadChanges" aria-busy="false">查询</button>
       </div>
       <div id="dynamicFilters" hidden></div>
     </div>
     <div class="btn-group">
-      <button id="syncMembersBtn" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
-      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+      <button id="syncMembersBtn" data-busy-size="plain" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
+      <button id="refreshBtn" data-busy-size="icon" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
       <button class="secondary" data-click="showSettings" title="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
     </div>
   </div>
