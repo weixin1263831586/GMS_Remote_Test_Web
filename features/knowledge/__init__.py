@@ -41,11 +41,13 @@ __all__ = [
     "recall_web_references",
     "router",
     "sync_due_web_sources",
+    "run_authorized_rag",
 ]
 
 
 _LAZY_API_EXPORTS = {
     "ExternalSearchRequest": ".external_api",
+    "run_authorized_rag": ".service",
 }
 
 
