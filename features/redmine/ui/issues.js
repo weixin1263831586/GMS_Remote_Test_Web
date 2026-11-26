@@ -25,24 +25,23 @@ async function smartSearch() {
 
 async function fetchIssueFromRedmine(issueId) {
   var btn = document.getElementById('scanBtn');
-  var origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ 拉取 #' + issueId + '...';
+  if (btn.disabled) return;
+  setActionButtonBusy(btn, true, '拉取中');
   try {
     var result = await api('/api/redmine-agent/issues/' + issueId + '/fetch', {method: 'POST'});
     if (result.action === 'exists') {
       document.getElementById('searchInput').value = '';
       return loadIssues();
     }
-    btn.textContent = '⏳ 分析 #' + issueId + '...';
+    setActionButtonBusy(btn, true, '分析中');
     await waitForRun(result.run_id, '拉取');
     document.getElementById('searchInput').value = '';
     return loadIssues();
   } catch (e) {
     notifyUser('拉取工单失败', e.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
+    setActionButtonBusy(btn, false);
+    updateRedmineToolbar();
   }
 }
 
