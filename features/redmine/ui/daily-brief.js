@@ -88,16 +88,26 @@ async function loadDailyBriefOnce() {
     if ((!data || data.account_available !== false) && !dailyBriefConfigCache) {
       try { dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config') || {}; } catch (_) {}
     }
-    dailyBriefCache = (data && data.success !== false) ? data : null;
-    card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+    const next = (data && data.success !== false) ? data : null;
+    const changed = JSON.stringify(next) !== JSON.stringify(dailyBriefCache);
+    dailyBriefCache = next;
+    if (changed || !card.dataset.loaded) {
+      card.innerHTML = renderDailyBriefInner(dailyBriefCache);
+      card.dataset.loaded = '1';
+    }
     updateRedmineToolbar();
     await loadSingleIssueAnalysisHistory();
     await restoreSingleIssueAnalysis();
     // Standalone Agent analysis can still be running after the daily batch ends.
     scheduleDailyBriefAutoRefresh(dailyBriefCache);
   } catch (e) {
-    card.innerHTML = renderDailyBriefInner(null);
-    updateRedmineToolbar();
+    if (e.status === 401 || e.status === 403 || !card.dataset.loaded) {
+      dailyBriefCache = null;
+      card.innerHTML = renderDailyBriefInner(null);
+      delete card.dataset.loaded;
+      updateRedmineToolbar();
+    }
+    notifyUser('晨报刷新失败', e.message || '请重试', 'warning');
   }
 }
 
