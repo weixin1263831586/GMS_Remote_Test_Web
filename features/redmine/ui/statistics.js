@@ -693,14 +693,15 @@ async function loadProjectDashboard(force) {
 
 async function startScan() {
   const btn = document.getElementById('scanBtn');
-  btn.disabled = true; btn.textContent = '⏳ 扫描中...';
+  if (btn.disabled) return;
+  setActionButtonBusy(btn, true, '扫描中');
   try {
     const started = await api('/api/redmine-agent/runs?hours=48&max_issues=50', {method:'POST'});
     const rid = started.run_id || '';
-    btn.textContent = '⏳ 等待结果...';
+    setActionButtonBusy(btn, true, '扫描中');
     await waitForRun(rid, '扫描');
   } catch (e) { notifyUser('扫描失败', e.message, 'error'); }
-  finally { btn.disabled = false; btn.textContent = '🔍 扫描'; }
+  finally { setActionButtonBusy(btn, false); updateRedmineToolbar(); }
 }
 
 async function triggerSync() {
@@ -713,13 +714,13 @@ async function triggerSync() {
   const params = new URLSearchParams({max_analyze: '30'});
   if (assignee) params.set('assignee_name', assignee);
   const btn = document.getElementById('syncBtn');
-  const oldText = btn ? btn.textContent : '';
+  if (btn?.disabled) return;
+  setActionButtonBusy(btn, true, '同步中');
   try {
     const started = await api(`/api/redmine-agent/sync?${params}`, {method:'POST'});
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ 同步中...'; }
     await waitForRun(started.run_id, '同步');
   } catch (e) { notifyUser('同步失败', e.message, 'error'); }
-  finally { if (btn) { btn.disabled = false; btn.textContent = oldText || '🔄 全量同步'; } }
+  finally { setActionButtonBusy(btn, false); }
 }
 
 function showResetModal() {
