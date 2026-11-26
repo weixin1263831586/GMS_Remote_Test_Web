@@ -23,12 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
+from foundation.ops_port import DEFAULT_STAGE_MAX_AGE_DAYS, DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS
 
 
 STAGE_SUBDIR = "automation/artifact-stage"
 STALE_PART_SECONDS = 24 * 3600
-DEFAULT_STAGE_MAX_AGE_DAYS = 7
-DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS = 7
 
 
 def disk_free_gb() -> float | None:

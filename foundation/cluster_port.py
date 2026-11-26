@@ -191,7 +191,7 @@ def run_worker_command(worker_id: str, command_type: str, payload: dict[str, Any
     """Execute a Worker command via the registered callable."""
     if _run_worker_command is None:
         raise RuntimeError("cluster worker commands are not configured")
-    return _run_worker_command(worker_id, command_type, payload, timeout)
+    return _run_worker_command(worker_id, command_type, payload, timeout=timeout)
 
 
 def require_worker_session(worker_id: str, session_id: str = '', generation: int = 0) -> None:
@@ -219,14 +219,14 @@ def prepare_local_firmware_recovery(request: Request, client_id: str, devices: l
     """Prepare a burn+AOA continuation via the registered cluster boundary."""
     if _prepare_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds)
+    return _prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds=boot_wait_seconds)
 
 
 def run_local_firmware_recovery(prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None) -> Awaitable[dict[str, Any]]:
     """Run a burn+AOA continuation via the registered cluster boundary."""
     if _run_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
-    return _run_local_firmware_recovery(prepared, on_event)
+    return _run_local_firmware_recovery(prepared, on_event=on_event)
 
 
 def validate_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:

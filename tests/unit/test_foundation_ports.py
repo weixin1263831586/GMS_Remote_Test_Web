@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 from bootstrap import dependencies
 from features.redmine import api as redmine_api
-from foundation import automation_port, cluster_port
+from foundation import automation_port, cluster_port, ops_port
 
 
 class ClusterPortConfigureSemanticsTests(unittest.TestCase):
@@ -66,7 +66,7 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
             cluster_port.run_worker_command(worker_id='w1', command_type='probe', payload={}),
             'pending',
         )
-        command.assert_called_once_with('w1', 'probe', {}, 10)
+        command.assert_called_once_with('w1', 'probe', {}, timeout=10)
         with self.assertRaises(TypeError):
             cluster_port.run_worker_command('w1', 'probe', {}, invalid=True)
 
@@ -90,6 +90,35 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
             "pending",
         )
         submit.assert_called_once_with("request", {"action": "aoa_probe"})
+
+
+class OpsPortContractTests(unittest.TestCase):
+    def test_cleanup_default_is_dry_run(self):
+        self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
+        cleanup = MagicMock(return_value={'dry_run': True})
+        ops_port.configure_disk_hygiene(cleanup)
+
+        self.assertEqual(ops_port.run_disk_hygiene(), {'dry_run': True})
+        cleanup.assert_called_once_with(
+            stage_max_age_days=ops_port.DEFAULT_STAGE_MAX_AGE_DAYS,
+            upload_temp_max_age_days=ops_port.DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
+            include_stage=False,
+            dry_run=True,
+        )
+
+    def test_incident_forwards_named_contract(self):
+        self.addCleanup(ops_port.configure_incident_recorder, ops_port._incident_recorder)
+        recorder = MagicMock(return_value={'suppressed': False})
+        ops_port.configure_incident_recorder(recorder)
+
+        self.assertEqual(
+            ops_port.record_incident(severity='warning', kind='worker', message='offline'),
+            {'suppressed': False},
+        )
+        recorder.assert_called_once_with(
+            severity='warning', kind='worker', message='offline', subject='',
+            dedup_key='', next_actions=None, suppress_minutes=60,
+        )
 
 
 class AutomationPortConfigureSemanticsTests(unittest.TestCase):
