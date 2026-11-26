@@ -69,6 +69,31 @@ def get_opengrok_project_for_android_version(android_version: str, opengrok_conf
     return opengrok_config.get('default_project', 'Android16')
 
 
+def search_indexed_paths(
+    path: str, *, android_version: str = "", timeout: float = 30.0,
+) -> tuple[str, list[str] | None]:
+    """Return the selected project and indexed paths; None means unavailable."""
+    script, cwd = codesearch_script_location()
+    config: dict[str, Any] = {}
+    with suppress(Exception):
+        config = ConfigManager().load_config().get("opengrok", {}) or {}
+    project = get_opengrok_project_for_android_version(android_version, config)
+    project_args = ["--project", project] if project else []
+    result = run_codesearch_process(
+        ["python3", script, "search", "--keywords", path,
+         "--search-field", "path", "--limit", "10", *project_args],
+        cwd, timeout=timeout,
+    )
+    if result is None:
+        return project, None
+    paths = []
+    for line in result.stdout.splitlines():
+        match = re.match(r"^\[[^\]]+\]\s+(.+)$", line.strip())
+        if match and match.group(1).strip():
+            paths.append(match.group(1).strip())
+    return project, paths
+
+
 def _attach_opengrok_url(item: dict[str, Any], base_url: str, project: str) -> None:
     """Build and attach an OpenGrok xref URL to a search result item, then clean temp keys."""
     path = item.get("path", "")
