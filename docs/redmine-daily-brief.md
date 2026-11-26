@@ -222,7 +222,7 @@ schema 迁移（建表、补列）必须满足：
   结构必须把 `_SCHEMA_VERSION` +1；
 - 迁移天然幂等：先判存在再补列，重复初始化（migration twice）、
   user_version 意外回退重放均安全；
-- 回归测试：`features/redmine/tests/test_daily_brief_repository.py` 的
+- 回归测试：`features/redmine/tests/daily_brief/test_daily_brief_repository.py` 的
   `CrossProcessConsistencyTests`（含 8 进程并发初始化用例）与
   `test_migration_stamps_user_version_and_fast_paths` /
   `test_user_version_rollback_is_safe_on_reopen`。

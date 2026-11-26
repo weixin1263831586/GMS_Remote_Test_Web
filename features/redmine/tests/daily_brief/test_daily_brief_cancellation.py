@@ -9,7 +9,7 @@ from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from features.redmine.analysis.kkagent import KkAgentAnalysisResult
-from features.redmine.tests.test_daily_brief_service import (
+from features.redmine.tests.daily_brief.test_daily_brief_service import (
     SNAPSHOT,
     VALID,
     make_service,

@@ -19,7 +19,7 @@ from features.redmine.daily_brief.models import (
 from features.redmine.daily_brief.report import issue_payload, render_daily_brief_markdown
 from features.redmine.tests.analysis.kkagent.test_evidence_gate import _full_trace
 from features.redmine.tests.analysis.kkagent.test_process import _valid_result
-from features.redmine.tests.test_daily_brief_service import make_service
+from features.redmine.tests.daily_brief.test_daily_brief_service import make_service
 
 
 @pytest.mark.parametrize("mode", ["manual", "delta"])

@@ -22,7 +22,7 @@ from features.auth import CurrentUser
 from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 from features.redmine.daily_brief.owner_policy import is_daily_brief_owner_eligible
 from features.redmine.daily_brief.service import DailyBriefService
-from features.redmine.tests.test_daily_brief_api import TRIAGE, VALID
+from features.redmine.tests.daily_brief.test_daily_brief_api import TRIAGE, VALID
 
 
 AGENT_HEADERS = {

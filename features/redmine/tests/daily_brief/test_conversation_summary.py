@@ -12,7 +12,7 @@ from features.redmine.analysis.kkagent.preflight import McpHealthProbe
 from features.redmine.daily_brief import service as daily_brief_service
 from features.redmine.tests.analysis.kkagent.review_support import review_trace
 from features.redmine.tests.analysis.kkagent.test_native_summary import ENTRY, complete_trace, final_trace
-from features.redmine.tests.test_daily_brief_service import make_service
+from features.redmine.tests.daily_brief.test_daily_brief_service import make_service
 
 
 SUMMARY = "当前证据指向构建签名配置。请先核对签名并复测；尚未验证修复效果。"

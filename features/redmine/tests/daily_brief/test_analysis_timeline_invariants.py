@@ -17,7 +17,7 @@ from features.redmine.daily_brief.analysis_events import (
     event_store_for_repository,
 )
 from features.redmine.daily_brief.models import DailyBriefIssue, DailyBriefRun
-from features.redmine.tests.test_daily_brief_service import make_service
+from features.redmine.tests.daily_brief.test_daily_brief_service import make_service
 
 
 TERMINAL_EVENTS = {"analysis_completed", "analysis_failed"}
