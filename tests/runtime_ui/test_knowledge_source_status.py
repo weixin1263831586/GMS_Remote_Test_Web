@@ -108,6 +108,30 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                     self.assertAlmostEqual(row["right"], metrics["rows"][0]["right"], delta=1)
                 if width == 1024:
                     self.assertTrue(metrics["scrollable"], metrics)
+                stable = table.evaluate("""table => {
+                    const measure = () => [...table.querySelectorAll('.kb-source-actions > button')]
+                        .map(button => {
+                            const r = button.getBoundingClientRect();
+                            return [r.x, r.y, r.width, r.height];
+                        });
+                    const same = (a, b) => a.length === b.length && a.every((rect, i) =>
+                        rect.every((value, j) => Math.abs(value - b[i][j]) <= 0.5));
+                    const buttons = [...table.querySelectorAll('.kb-source-actions > button')]
+                        .filter(button => ['语义索引', '同步'].includes(button.textContent) && !button.disabled);
+                    return buttons.map(button => {
+                        const label = button.textContent;
+                        const before = measure();
+                        setActionButtonBusy(button, true, label === '语义索引' ? '索引中' : '同步中');
+                        const during = measure();
+                        const busy = button.disabled && button.getAttribute('aria-busy') === 'true';
+                        setActionButtonBusy(button, false);
+                        return {label, busy, stable: same(before, during) && same(before, measure()),
+                            restored: button.textContent === label && !button.disabled};
+                    });
+                }""")
+                self.assertGreaterEqual(len(stable), 5)
+                for item in stable:
+                    self.assertTrue(item["busy"] and item["stable"] and item["restored"], item)
             page.set_viewport_size({"width": 1920, "height": 960})
             page.evaluate("""() => {
                 window.__openedSourceUrls = [];

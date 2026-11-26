@@ -97,6 +97,7 @@
                 b.className = 'btn-xs';
                 b.textContent = label;
                 if (label === '同步') b.dataset.busySize = 'short';
+                if (label === '语义索引') b.dataset.busySize = 'plain';
                 b.addEventListener('click', action);
                 return b;
             }
