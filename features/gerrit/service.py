@@ -13,10 +13,20 @@ from urllib.parse import quote, urlencode
 import aiohttp
 
 from features.gerrit.config import MAX_QUERY_PAGE_SIZE
-from foundation.outbound import UnsafeOutboundURL
+from foundation.outbound import ResolvedOutboundTarget, UnsafeOutboundURL, resolve_outbound_target
 from foundation.outbound_aiohttp import PinnedOutboundResolver
 
-from .outbound import resolve_gerrit_target
+
+def resolve_gerrit_target(url: str) -> ResolvedOutboundTarget:
+    """Resolve an outbound target using the operator's private-host allowlist."""
+    return resolve_outbound_target(
+        url,
+        allowed_private_hosts={
+            host.strip().lower().rstrip('.')
+            for host in os.getenv('GMS_GERRIT_ALLOWED_HOSTS', '').split(',')
+            if host.strip()
+        },
+    )
 
 
 async def post_gerrit_review(

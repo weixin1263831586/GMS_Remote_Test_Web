@@ -10,7 +10,12 @@ import sqlite3
 from contextlib import closing
 
 from features.gms import extract_reference_identifiers, recall_gms_requirements, recall_mainline_references
-from features.knowledge import partner_policy_allowed, policy_search_terms, recall_owner_policy_imports, recall_web_references
+from features.knowledge import (
+    partner_policy_allowed,
+    policy_search_terms,
+    recall_owner_policy_imports,
+    recall_web_references,
+)
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root

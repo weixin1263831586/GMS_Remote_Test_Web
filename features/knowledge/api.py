@@ -16,7 +16,13 @@ from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
-from .policy_imports import MAX_IMPORT_BYTES, IMPORT_SUFFIXES, approve_policy_import, import_model_available, is_policy_import
+from .policy_imports import (
+    IMPORT_SUFFIXES,
+    MAX_IMPORT_BYTES,
+    approve_policy_import,
+    import_model_available,
+    is_policy_import,
+)
 from .service import KnowledgeService
 from .storage import ATTACHMENT_DIR, DEFAULT_SPACES
 

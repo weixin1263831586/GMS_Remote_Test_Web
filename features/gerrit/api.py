@@ -33,13 +33,12 @@ from features.gerrit.service import (
     _owners_for_department_profile,
     _select_profile,
     query_gerrit_dual_mode,
+    resolve_gerrit_target,
 )
 from features.redmine import load_redmine_user_map_for_owner
 from features.users import owner_id_from_request
 from foundation.error_model import ApiError
 from foundation.outbound import UnsafeOutboundURL
-
-from .outbound import resolve_gerrit_target
 
 
 router = APIRouter(prefix="/api/gerrit-dashboard")

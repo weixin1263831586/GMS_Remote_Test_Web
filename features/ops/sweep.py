@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from foundation.cluster_port import get_cluster_service
+
 from .notify import load_ops_alerts_config, notify_incident
 from .rules import evaluate
 
@@ -27,25 +29,14 @@ logger = logging.getLogger(__name__)
 MAX_RETRY_EVENTS = 20
 
 
-def _safe_import_call(module: str, func: str) -> Any:
-    try:
-        target = __import__(module, fromlist=[func])
-        return getattr(target, func)()
-    except Exception:
-        logger.debug("ops sweep skipped %s.%s", module, func, exc_info=True)
-        return None
-
-
 def build_snapshot() -> dict[str, Any]:
     from foundation.config import settings
 
     snapshot: dict[str, Any] = {}
-    workers = _safe_import_call("features.cluster", "get_cluster_service")
-    if workers is not None:
-        try:
-            snapshot["workers"] = workers.list_workers()
-        except Exception:
-            logger.debug("ops sweep could not list workers", exc_info=True)
+    try:
+        snapshot["workers"] = get_cluster_service().list_workers()
+    except Exception:
+        logger.debug("ops sweep could not list workers", exc_info=True)
 
     try:
         from features.automation import get_automation_service, get_worker_status

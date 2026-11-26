@@ -3736,7 +3736,6 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Enabled"
           },
           "name": {
@@ -26351,7 +26350,7 @@
     },
     "/api/tools/download/{tool_id}": {
       "get": {
-        "description": "按稳定 tool_id 下载 tools/ 清单中的文件（兼容历史文件名）",
+        "description": "按 tool_id 下载清单中的文件",
         "parameters": [
           {
             "in": "path",

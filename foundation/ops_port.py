@@ -102,7 +102,7 @@ def run_disk_hygiene(
     dry_run: bool = True,
 ) -> dict[str, Any]:
     if _disk_hygiene is None:
-        return {"dry_run": False, "freed_bytes": 0, "removed_files": 0}
+        return {"dry_run": dry_run, "freed_bytes": 0, "removed_files": 0}
     return _disk_hygiene(
         stage_max_age_days=stage_max_age_days, upload_temp_max_age_days=upload_temp_max_age_days,
         include_stage=include_stage, dry_run=dry_run,

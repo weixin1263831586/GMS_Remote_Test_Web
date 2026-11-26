@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .api import page_router, router
-from .policy_imports import recall_owner_policy_imports
 from .external import (
     EVIDENCE_LEVEL_BACKGROUND,
     ExternalKnowledgeError,
@@ -14,7 +13,13 @@ from .external import (
     federated_search,
     federated_status,
 )
-from .external.web_sources import WebKnowledgeProvider, partner_policy_allowed, policy_search_terms, recall_web_references
+from .external.web_sources import (
+    WebKnowledgeProvider,
+    partner_policy_allowed,
+    policy_search_terms,
+    recall_web_references,
+)
+from .policy_imports import recall_owner_policy_imports
 
 
 __all__ = [
@@ -28,12 +33,12 @@ __all__ = [
     "federated_search",
     "federated_status",
     "page_router",
-    "sync_due_web_sources",
     "partner_policy_allowed",
     "policy_search_terms",
-    "recall_web_references",
     "recall_owner_policy_imports",
+    "recall_web_references",
     "router",
+    "sync_due_web_sources",
 ]
 
 

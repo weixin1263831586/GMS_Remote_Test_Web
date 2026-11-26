@@ -94,6 +94,12 @@ class ClusterPortConfigureSemanticsTests(unittest.TestCase):
 
 
 class OpsPortContractTests(unittest.TestCase):
+    def test_unregistered_cleanup_preserves_requested_mode(self):
+        self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
+        ops_port.configure_disk_hygiene(None)
+        self.assertEqual(ops_port.run_disk_hygiene(), {'dry_run': True, 'freed_bytes': 0, 'removed_files': 0})
+        self.assertFalse(ops_port.run_disk_hygiene(dry_run=False)['dry_run'])
+
     def test_cleanup_default_is_dry_run(self):
         self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
         cleanup = MagicMock(return_value={'dry_run': True})
