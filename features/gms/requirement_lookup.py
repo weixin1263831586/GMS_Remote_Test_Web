@@ -15,7 +15,7 @@ SOURCE_URL = next(source.url for source in SOURCES if source.key == SOURCE)
 MAX_SECTIONS = 5
 MAX_ROWS = 200
 MAX_TEXT = 32000
-CLAUSE_ID = re.compile(r"\b(?:GMS(?:X|-VSR)?|VSR)-[0-9][A-Z0-9_.-]*", re.I)
+CLAUSE_ID = re.compile(r"(?<![A-Za-z0-9])(?:GMS(?:X|-VSR)?|VSR)-[0-9][A-Z0-9_.-]*", re.I)
 
 
 def policy_lookup_target(message: str) -> str:
@@ -96,7 +96,7 @@ def lookup_requirement_sections(conn, query):
             return {"status": "query_required", "sections": [], "coverage_complete": False}
         predicate = ('(title LIKE ? ESCAPE "\\" OR text_excerpt LIKE ? ESCAPE "\\")')
         params.extend([_like(term), _like(term)])
-        order = 'CASE WHEN title LIKE ? ESCAPE "\\\\" THEN 0 ELSE 1 END, level DESC, section_key'
+        order = 'CASE WHEN title LIKE ? ESCAPE "\\" THEN 0 ELSE 1 END, level DESC, section_key'
         order_params.append(_like(term))
     sections = conn.execute(
         "SELECT * FROM gms_update_requirement_sections WHERE source_key=? AND " + predicate
