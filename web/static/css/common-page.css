@@ -1015,19 +1015,13 @@ body.apk-resizing {
     transition: none;
 }
 
-#agent-access-entry,
-#sdk-config-entry,
-#audit-outbox-entry,
-#audit-disk-entry {
+.users-view-tabs > div {
     display: flex;
     align-items: stretch;
     border-left: 1px solid var(--border-color);
 }
 
-#agent-access-entry > .btn-xs,
-#sdk-config-entry > .btn-xs,
-#audit-outbox-entry > .btn-xs,
-#audit-disk-entry > .btn-xs {
+.users-view-tabs > div > .btn-xs {
     flex: 1;
 }
 
