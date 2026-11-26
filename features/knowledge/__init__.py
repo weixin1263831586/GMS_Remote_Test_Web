@@ -13,7 +13,7 @@ from .external import (
     federated_search,
     federated_status,
 )
-from .external.web_sources import partner_policy_allowed, policy_search_terms, recall_web_references
+from .external.web_sources import WebKnowledgeProvider, partner_policy_allowed, policy_search_terms, recall_web_references
 
 
 __all__ = [
@@ -27,6 +27,7 @@ __all__ = [
     "federated_search",
     "federated_status",
     "page_router",
+    "sync_due_web_sources",
     "partner_policy_allowed",
     "policy_search_terms",
     "recall_web_references",
@@ -49,3 +50,7 @@ def __getattr__(name: str):
     value = getattr(import_module(module_path, __name__), name)
     globals()[name] = value
     return value
+
+
+def sync_due_web_sources():
+    return WebKnowledgeProvider().sync_due()
