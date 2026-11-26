@@ -36,7 +36,7 @@ class SearchSystemBackgroundTests(unittest.TestCase):
         self.assertEqual(len(out), diagnosis_recalls.BACKGROUND_LIMIT)
         fed.assert_called_once_with(
             "lmkd",
-            sources=["android_internals"],
+            sources=["android_internals", "web_documents"],
             limit=diagnosis_recalls.BACKGROUND_LIMIT,
             android_api_level=None,
         )
@@ -51,7 +51,7 @@ class SearchSystemBackgroundTests(unittest.TestCase):
         self.assertEqual(len(out), 1)
         fed.assert_called_once_with(
             "lmkd",
-            sources=["android_internals"],
+            sources=["android_internals", "web_documents"],
             limit=diagnosis_recalls.BACKGROUND_LIMIT,
             android_api_level=36,
         )
