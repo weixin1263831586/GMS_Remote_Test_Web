@@ -183,6 +183,98 @@ def web_source(*, android_api_level=None, cdd_only=False):
                              search, current, read)
 
 
+def wiki_source(*, android_api_level=None):
+    """Read only approved indexed Wiki content with explicit local-model use approval."""
+    from .external.android_internals import AndroidInternalsProvider
+    from .external.frontmatter import _scalarize
+
+    def state():
+        config = config_manager.load_config() or {}
+        retrieval = config.get("retrieval") or {}
+        if not isinstance(retrieval, dict) or retrieval.get("allow_local_wiki_llm") is not True:
+            return None, ""
+        provider = AndroidInternalsProvider.from_config(config)
+        if provider is None:
+            return None, ""
+        status = provider.status()
+        policy = provider.load_policy()
+        rev = status.source_revision
+        if (status.status != "ready" or not rev or rev != status.approved_revision
+                or rev != status.available_revision or policy.degraded or not policy.license_expression):
+            return None, ""
+        return provider, rev
+
+    def passage(provider, rev, path, start):
+        import json
+
+        with provider._connect() as db:
+            db.execute("BEGIN")
+            meta = dict(db.execute("SELECT key,value FROM wiki_meta").fetchall())
+            policy = provider.load_policy()
+            if (policy.degraded or meta.get("source_revision") != rev
+                    or meta.get("approved_revision") != rev
+                    or json.loads(meta.get("policy_state") or "{}").get("content_hash") != policy.content_hash):
+                return None
+            row = db.execute("SELECT path,title,content,frontmatter FROM wiki_pages WHERE path=?", (path,)).fetchone()
+            if row is None:
+                return None
+            fm = provider._load_frontmatter(row["frontmatter"])
+            if not policy.is_eligible(path, fm.get("tags") or []):
+                return None
+            body = redact_sensitive_text(row["content"])
+            if not 0 <= start < len(body):
+                return None
+            return RetrievalHit("android_internals", f"{path}:{start}", rev, body[start:start + PAGE_SIZE],
+                                "background", {"path": path, "start": start, "total_chars": len(body),
+                                "title": redact_sensitive_text(row["title"])[:200],
+                                "applicable_versions": _scalarize(fm.get("applicable_versions")),
+                                "license": policy.license_expression,
+                                "applicability_verified": False, "offset_basis": "redacted_indexed_document"})
+
+    def current(hit):
+        provider, rev = state()
+        if not provider or rev != hit.revision:
+            return False
+        fresh = passage(provider, rev, hit.metadata["path"], hit.metadata["start"])
+        return fresh == hit
+
+    def search(query, limit):
+        provider, rev = state()
+        if not provider:
+            return RetrievalResult([], "unavailable")
+        rows = []
+        for hit in provider.search(query, limit=limit, android_api_level=android_api_level):
+            if hit.source_revision != rev:
+                continue
+            # FTS snippets can contain highlighting; locate by indexed section line or page start.
+            with provider._connect() as db:
+                row = db.execute("SELECT content FROM wiki_pages WHERE path=?", (hit.source_path,)).fetchone()
+            if row is None:
+                continue
+            start_line = (hit.extra.get("section") or {}).get("start_line")
+            body = row["content"]
+            # The indexed page does not include frontmatter. Use heading matching
+            # rather than claiming an exact original source line for a redacted passage.
+            heading = (hit.extra.get("section") or {}).get("heading")
+            text = redact_sensitive_text(body)
+            pos = text.find(str(heading)) if heading and start_line else 0
+            item = passage(provider, rev, hit.source_path, max(0, pos - 200))
+            if item:
+                rows.append(item)
+        return RetrievalResult(rows, "matched" if rows else "no_match")
+
+    def read(hit, page):
+        provider, rev = state()
+        if not provider or rev != hit.revision:
+            return RetrievalResult([], "stale")
+        start = 0 if page == 0 else max(0, hit.metadata["start"] + page * PAGE_SIZE)
+        fresh = passage(provider, rev, hit.metadata["path"], start)
+        return RetrievalResult([fresh] if fresh else [], "matched" if fresh else "no_match")
+
+    return IntelligentSource("android_internals", "已批准版本且获本地模型处理授权的 Android 机制 Wiki（背景证据）",
+                             search, current, read)
+
+
 def local_document_model(analyzer_factory, *, preferred=None, catalog_hash=""):
     """Select the local route once and reject mid-run catalog changes."""
     try:
