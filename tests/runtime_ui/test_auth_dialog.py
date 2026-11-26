@@ -344,7 +344,7 @@ class AuthDialogTests(RuntimeUiHarness):
                 page.set_viewport_size(viewport)
                 for path, selector in (
                     ('/gerrit-dashboard', '#settingRestPass'),
-                    ('/redmine-agent', '#settingRedminePass'),
+                    ('/redmine-agent?settings=1', '#settingRedminePass'),
                     ('/cluster', '#worker-password'),
                     ('/automation', '#build-password-input'),
                 ):
@@ -357,7 +357,7 @@ class AuthDialogTests(RuntimeUiHarness):
                         elif path == '/automation':
                             page.wait_for_function("typeof promptBuildPassword === 'function'")
                             page.evaluate("void promptBuildPassword()")
-                        else:
+                        elif path != '/redmine-agent?settings=1':
                             page.wait_for_function("typeof showModal === 'function'")
                             page.evaluate("showModal('settingsModal')")
                         page.evaluate("new Promise(resolve => requestAnimationFrame(() => resolve()))")
@@ -373,6 +373,9 @@ class AuthDialogTests(RuntimeUiHarness):
                             page.keyboard.press('Escape')
                             expect(page.locator('#onboarding')).to_be_hidden()
                             expect(field).to_have_attribute('type', 'password')
+                        elif path == '/redmine-agent?settings=1':
+                            page.reload(wait_until='domcontentloaded')
+                            expect(page.locator(selector)).to_have_attribute('type', 'password')
                         else:
                             page.evaluate("hideModal('settingsModal')")
                             expect(field).to_have_attribute('type', 'password')

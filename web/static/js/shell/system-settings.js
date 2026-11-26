@@ -33,6 +33,9 @@ async function loadSystemModelCatalog() {
         summary.textContent = '默认 Provider：' + (data.status?.primary_provider || '未配置')
             + '；本地 Provider：' + (data.status?.local_provider || '未配置');
         output.append(summary);
+        const engine = document.createElement('p');
+        engine.textContent = 'KKAgent：' + (data.status?.kkagent_installed ? '已安装（不代表模型在线）' : '未检测到可执行文件');
+        output.append(engine);
         for (const provider of providers) {
             const row = document.createElement('p');
             row.textContent = [provider.provider, provider.model, provider.status || provider.state].filter(Boolean).join(' · ');

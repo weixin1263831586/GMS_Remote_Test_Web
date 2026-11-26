@@ -60,15 +60,17 @@
         .modal-content { max-height:calc(100dvh - 16px); }
     }
 
-    /* 统计设置弹框：标题字号与其他页面统一 */
-
-    /* Long modal forms scroll; do not shrink field cards into overlap. */
     #redmine-system-settings {
-        overflow-y:auto;
-        overflow-x:hidden;
+        display:flex;
+        flex-direction:column;
+        gap:8px;
+        padding:8px;
         align-items:stretch;
         min-height:0;
     }
+    #redmine-system-settings label { color:var(--muted); }
+    #redmine-system-settings input:not([type=checkbox]),
+    #redmine-system-settings select { width:100%; min-width:0; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; }
     #redmine-system-settings > * {
         flex:0 0 auto;
     }

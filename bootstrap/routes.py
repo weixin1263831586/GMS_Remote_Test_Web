@@ -14,7 +14,7 @@ from features.apk.service import (
     safe_join,
 )
 from features.assistant import api as assistant
-from features.assistant import config_api as assistant_config
+from features.kkagent import config_api as model_config_api
 from features.auth import router as auth_router
 from features.auth.api import configure_client_ssh_authenticator
 from features.automation import api as automation
@@ -120,7 +120,7 @@ set_ask_analyzer_factory(get_universal_analyzer)
 
 ALL_ROUTERS = [
     assistant.router,
-    assistant_config.router,
+    model_config_api.router,
     assets.router,
     audit.router,
     auth_router,
