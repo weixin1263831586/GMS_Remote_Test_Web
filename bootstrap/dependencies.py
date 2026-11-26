@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
-from features.devices import register_devices_port
+from features.devices.inventory.host import register_devices_port
 from features.devices.locks import devices_display_name_resolver
 from features.email import (
     configure_attachment_resolver,

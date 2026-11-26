@@ -20,6 +20,7 @@ __all__ = [
     "EVIDENCE_LEVEL_BACKGROUND",
     "ExternalKnowledgeError",
     "ExternalKnowledgeProvider",
+    "ExternalSearchRequest",
     "KnowledgeHit",
     "ProviderStatus",
     "federated_reindex",
@@ -34,9 +35,7 @@ __all__ = [
 
 
 _LAZY_API_EXPORTS = {
-    "AndroidInternalsProvider": ".external.android_internals",
     "ExternalSearchRequest": ".external_api",
-    "index_db_path": ".external.android_internals",
 }
 
 
