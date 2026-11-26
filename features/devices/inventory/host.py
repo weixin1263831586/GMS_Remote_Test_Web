@@ -134,7 +134,7 @@ def _attached_usbip_serial_map() -> dict[tuple[str, str], str]:
         return {}
 
 
-def _enumerate(device_host: str) -> dict[str, Any]:
+def _enumerate(device_host: str) -> devices_port.HostInventory:
     result = usbip_manager.list_source_devices(device_host)
     if not result.get("success"):
         return {
@@ -184,8 +184,7 @@ def _enumerate(device_host: str) -> dict[str, Any]:
 
 def _refresh(device_host: str) -> None:
     try:
-        entry = _enumerate(device_host)
-        entry["updated_at"] = time.time()
+        entry = {**_enumerate(device_host), "updated_at": time.time()}
         with _lock:
             _cache[device_host] = entry
             _inflight.discard(device_host)
@@ -204,7 +203,7 @@ def _refresh(device_host: str) -> None:
             }
 
 
-def host_local_device_inventory(device_host: str) -> dict[str, Any] | None:
+def host_local_device_inventory(device_host: str) -> devices_port.HostInventory | None:
     """Return the cached inventory for ``user@ip``; refresh in background.
 
     Returns ``None`` before the first enumeration completes. Stale entries

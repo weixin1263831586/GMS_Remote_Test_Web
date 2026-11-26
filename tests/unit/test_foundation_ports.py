@@ -218,6 +218,9 @@ class ClusterContractTests(unittest.TestCase):
         self.assertTrue(callable(ClusterService.list_workers))
         self.assertTrue(callable(ClusterService.has_command_agent))
         self.assertIsInstance(ClusterService.effective_enabled, property)
+        self.assertIsInstance(cluster_port.ClusterServiceContract.offline_seconds, property)
+        service = ClusterService(MagicMock(), offline_seconds=73)
+        self.assertEqual(service.offline_seconds, 73)
 
 
 class CrossFeatureWiringTests(unittest.TestCase):
