@@ -8,7 +8,7 @@ from features.auth import CurrentUser
 from features.cluster import ClusterConfig, ClusterRepository, ClusterService
 from features.cluster import api as cluster_api
 from features.test_execution import execution_api
-from features.test_execution.models import TestStartRequest as StartRequest
+from foundation.runtime_contracts import TestStartRequest as StartRequest
 
 
 class TestDurableStartTests(unittest.IsolatedAsyncioTestCase):

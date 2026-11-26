@@ -435,9 +435,9 @@ def test_plan_operation_id_flows_to_cluster_idempotency_key(monkeypatch):
     """
     from features.assistant import test_runs
     from features.assistant.session_registry import AgentRequestShim
-    from features.test_execution import models as te_models
+    from foundation.runtime_contracts import TestStartRequest as StartRequest
 
-    captured: list[te_models.TestStartRequest] = []
+    captured: list[StartRequest] = []
 
     async def fake_start_test(_shim, help, req):
         captured.append(req)

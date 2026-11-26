@@ -47,6 +47,7 @@ from features.cluster import (
 from features.devices import get_or_create_user_state
 from features.users import owner_id_from_request
 from foundation.error_model import record_internal_error
+from foundation.runtime_contracts import TestStartRequest
 
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ MAX_AGENT_RETRIES = 3
 
 
 async def _start_test_with_plan(session: dict[str, Any], request_shim: AgentRequestShim, plan: dict[str, Any], retry_timestamp: str = "") -> dict[str, Any]:
-    from features.test_execution import TestStartRequest, start_test
+    from features.test_execution import start_test
 
     active_run = session.get("active_run")
     req_data = dict(plan.get("request") or {})

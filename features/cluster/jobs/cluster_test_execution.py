@@ -3,15 +3,16 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Any
 
 from fastapi import HTTPException
+from starlette.responses import Response
 
 from features.cluster import build_argv_from_spec, get_cluster_service, request_fingerprint
 from foundation.cache import TTLCache
 from foundation.error_model import ApiError
 from foundation.execution_spec import SUITE_MODULE_EXTENSIONS
 from foundation.responses import error_response, success_response
+from foundation.runtime_contracts import TestStartRequest
 
 
 logger = logging.getLogger(__name__)
@@ -123,7 +124,7 @@ def _resolve_test_module(tools_path: str, module: str, worker_id: str = "") -> s
     )
 
 
-def start_cluster_test(request: Any, client_id: str):
+def start_cluster_test(request: TestStartRequest, client_id: str) -> Response:
     """Translate the existing test form into a durable remote Worker job."""
     repository = get_cluster_service().repository
     owner_id = client_id
@@ -161,8 +162,8 @@ def start_cluster_test(request: Any, client_id: str):
 
 
 def _start_cluster_test_guarded(
-    request: Any, client_id: str, fingerprint: str | None,
-):
+    request: TestStartRequest, client_id: str, fingerprint: str | None,
+) -> Response:
     repository = get_cluster_service().repository
     owner_id = client_id
     reservation = None

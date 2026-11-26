@@ -20,6 +20,7 @@ from features.assistant.response import format_payload as _format_payload
 from features.assistant.response import json_body as _json_body
 from features.assistant.tools import AgentTool
 from foundation.error_model import ApiError
+from foundation.runtime_contracts import TestStartRequest
 
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,6 @@ def get_model_by_tool() -> dict[str, type]:
         from features.test_execution import (
             SuiteApkAnalyzeRequest,
             TestParseArgsRequest,
-            TestStartRequest,
             TradefedListResultsRequest,
         )
         from features.users import ClientInfoRequest

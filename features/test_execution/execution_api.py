@@ -14,9 +14,10 @@ from typing import Annotated
 from fastapi import APIRouter, Body, Query, Request
 
 from foundation.responses import error_response
+from foundation.runtime_contracts import TestStartRequest
 
 from . import runtime
-from .models import ACTIVE_JOB_STATUSES, TestStartRequest
+from .models import ACTIVE_JOB_STATUSES
 
 
 logger = logging.getLogger(__name__)
