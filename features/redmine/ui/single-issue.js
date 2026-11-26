@@ -326,6 +326,7 @@ function singleIssueAnalysisReportBody(item) {
   if (report) {
     return previousNotice + dailyBriefSystemMetadata(displayedResult, dailyBriefQualityChip(displayedResult))
       + dailyBriefEvidenceGateNotice(displayedResult)
+      + dailyBriefPolicyEvidence(displayedResult)
       + '<div class="daily-brief-section daily-brief-section-md"><div class="daily-brief-section-body analysis-doc">'
       + renderMarkdownDoc(report) + '</div></div>';
   }
