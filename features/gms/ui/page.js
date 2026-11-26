@@ -72,7 +72,11 @@
     async function fetchJson(url) {
       const r = await fetch(url);
       const data = await r.json();
-      if (!r.ok || !data.success) throw new Error(data.error || 'HTTP ' + r.status);
+      if (!r.ok || !data.success) {
+        const error = new Error(data.error || 'HTTP ' + r.status);
+        error.status = r.status;
+        throw error;
+      }
       return data;
     }
     function sectionBadgeText(text) {
@@ -641,7 +645,12 @@
       } catch (err) {
         if (generation !== queryGeneration || request !== criticalGerritRequest || tab !== 'critical') return;
         criticalGerritMessage = err && err.message ? err.message : 'Gerrit 核对失败';
-        if (criticalGerritReady && gerritByPatch) {
+        if (err.status === 401 || err.status === 403) {
+          gerritByPatch = {};
+          criticalGerritReady = true;
+          populateCriticalFilters();
+          renderCritical(true);
+        } else if (criticalGerritReady && gerritByPatch) {
           criticalGerritMessage += '（保留上次核对结果）';
           paintGerritBadge(criticalGerritMessage);
         } else {
@@ -771,8 +780,40 @@
     function runQuery() {
       return reload(true).catch(showQueryError);
     }
-    function reload(reset=false) {
-      return withActionButtonBusy(document.getElementById('gms-query-btn'), '查询中', () => reloadData(reset));
+    let activeQueryRequest = 0;
+    let displayedQueryScope = '';
+    async function reload(reset=false) {
+      const request = ++activeQueryRequest;
+      if (reset) offset = 0;
+      const button = document.getElementById('gms-query-btn');
+      const area = document.getElementById('tables-area');
+      const q = document.getElementById('q').value.trim();
+      const scope = q ? JSON.stringify(['search', q]) : JSON.stringify([tab, tab === 'critical' ? 0 : offset,
+        ...Array.from(document.querySelectorAll('.filters input,.filters select')).filter(el => el.getClientRects().length).map(el => [el.id, el.value])]);
+      const sameScope = displayedQueryScope === scope;
+      if (!sameScope) {
+        area.innerHTML = '<span class="muted">查询中…</span>';
+        sectionBadgeText('');
+      }
+      setActionButtonBusy(button, true, '查询中');
+      area.setAttribute('aria-busy', 'true');
+      try {
+        await reloadData(reset);
+        if (request === activeQueryRequest) displayedQueryScope = scope;
+      } catch (err) {
+        if (request === activeQueryRequest) {
+          if (!sameScope || err.status === 401 || err.status === 403) {
+            area.textContent = err.message || '查询失败';
+            displayedQueryScope = '';
+          }
+          notifyUser('查询失败', err.message || '请重试', 'error');
+        }
+      } finally {
+        if (request === activeQueryRequest) {
+          setActionButtonBusy(button, false);
+          area.setAttribute('aria-busy', 'false');
+        }
+      }
     }
     async function reloadData(reset=false) {
       if (reset) offset = 0;
@@ -837,8 +878,12 @@
         catch (err) {
           if (generation === queryGeneration && tab === 'critical') {
             setGerritBusy(false);
-            if (area.querySelector('.critical-matrix')) notifyUser('公告刷新失败', err.message, 'error');
-            else area.textContent = err.message;
+            if (err.status === 401 || err.status === 403) {
+              criticalItems = null;
+              gerritByPatch = null;
+              criticalGerritReady = false;
+            }
+            throw err;
           }
         }
         return;
