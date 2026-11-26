@@ -83,6 +83,20 @@ def search_external(request: Request, payload: ExternalSearchRequest):
     query = payload.query.strip()
     if not query:
         return error_response("检索词不能为空", 422)
+    # Exact citation retrieval and version comparison use the existing search contract.
+    if query.startswith('POL-') or query.startswith('compare:'):
+        if payload.sources and 'web_documents' not in payload.sources:
+            return error_response('请求的来源不包含外部网页', 422)
+        provider = WebKnowledgeProvider()
+        if query.startswith('POL-'):
+            item = provider.read_requirement(query)
+            return success_response(data={'results': [item] if item else [], 'sources_status': federated_status()})
+        parts = query.removeprefix('compare:').rsplit('|', 1)
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            return error_response('对比格式：compare:章节|条款编号', 422)
+        rows = provider.compare_requirements(parts[0].strip(), parts[1].strip())
+        return success_response(data={'results': rows, 'sources_status': federated_status(),
+                                      'comparison_scope': 'current revisions; exact section and requirement ID'})
     if payload.sources:
         unknown = _validate_sources(payload.sources)
         if unknown:
