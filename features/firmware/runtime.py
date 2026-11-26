@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from foundation.config import ConfigManager
 from foundation.runtime_contracts import (
     ApiHelpProvider,
     ClientIdResolver,
@@ -17,7 +18,7 @@ from foundation.runtime_contracts import (
 
 @dataclass
 class FirmwareRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     ssh_manager: object | None = None
     global_state: object | None = None
     safe_websocket_send: WebSocketSender | None = None
@@ -28,7 +29,7 @@ class FirmwareRuntime:
     firmware_transfer_timeout: int = 3600
     lock_firmware_devices: FirmwareDeviceLocker | None = None
     release_firmware_devices: DeviceLockRelease | None = None
-    firmware_share_store: object | None = None
+    firmware_share_store: str | Path | None = None
 
 
 _runtime = FirmwareRuntime()
