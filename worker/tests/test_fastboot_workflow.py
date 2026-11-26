@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from foundation.command_result import CommandResult
 from worker.fastboot_workflow import (
-    CommandResult,
     FastbootPreparationError,
     FastbootPreparer,
     vendor_partition,
