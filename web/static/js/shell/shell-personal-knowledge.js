@@ -122,11 +122,16 @@
                     showToast(error.message, 'warning');
                 }
                 const table = document.createElement('table');
-                table.className = 'list-table';
+                table.className = 'list-table kb-source-table';
+                const columns = ['知识源名称', '网址', '版本', '索引条目', '状态', '操作'];
+                const colgroup = document.createElement('colgroup');
+                for (let i = 0; i < columns.length; i++) colgroup.append(document.createElement('col'));
+                table.append(colgroup);
                 const header = table.createTHead().insertRow();
-                for (const title of ['知识源名称', '网址', '版本', '索引条目', '状态', '操作']) {
+                for (const title of columns) {
                     const th = document.createElement('th');
                     th.textContent = title;
+                    th.scope = 'col';
                     header.append(th);
                 }
                 const body = table.createTBody();
@@ -139,7 +144,9 @@
                         cell.textContent = String(value);
                         cell.title = String(value);
                     }
-                    const actions = row.insertCell();
+                    const actions = document.createElement('div');
+                    actions.className = 'kb-source-actions';
+                    row.insertCell().append(actions);
                     actions.append(button('编辑', () => edit(source)),
                         button('同步', event => run(async () => {
                             const result = await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
@@ -162,7 +169,9 @@
                     cell.textContent = value;
                     cell.title = value;
                 }
-                const actions = partner.insertCell();
+                const actions = document.createElement('div');
+                actions.className = 'kb-source-actions';
+                partner.insertCell().append(actions);
                 actions.append(button(partnerEnabled ? '撤销授权' : '授权', () => run(() => grantPartner(!partnerEnabled))),
                     button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
                     button('导入授权文档', async () => {
