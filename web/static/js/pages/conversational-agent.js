@@ -304,10 +304,76 @@ function renderAgentPlanContent(content) {
     return introHtml + gridHtml + noteHtml;
 }
 
+function openAgentImagePreview(button) {
+    if (document.querySelector('.agent-image-viewer-modal.show')) return;
+    const thumbnail = button.querySelector('img');
+    if (!thumbnail) return;
+    const chat = $('agent-chat-messages');
+    const sessionId = agentSessionId;
+    const scrollTop = chat?.scrollTop || 0;
+    const {modal, modalId} = createAnalysisModal('agent-image', '图片预览', '');
+    modal.classList.add('agent-image-viewer-modal');
+    modal.setAttribute('aria-label', '图片预览');
+    const content = modal.querySelector('.modal-content');
+    content.classList.replace('modal-m', 'modal-workspace');
+    const body = modal.querySelector('.modal-body');
+    const toolbar = document.createElement('div');
+    toolbar.className = 'agent-image-viewer-toolbar';
+    const zoom = document.createElement('button');
+    zoom.type = 'button';
+    zoom.className = 'btn-xs';
+    zoom.textContent = '原始尺寸';
+    zoom.setAttribute('aria-pressed', 'false');
+    zoom.disabled = true;
+    const viewport = document.createElement('div');
+    viewport.className = 'agent-image-viewer-viewport';
+    const image = document.createElement('img');
+    image.alt = thumbnail.alt;
+    const status = document.createElement('div');
+    status.className = 'agent-image-viewer-status';
+    status.setAttribute('role', 'status');
+    status.textContent = '正在加载图片…';
+    image.hidden = true;
+    image.addEventListener('load', () => {
+        image.hidden = false;
+        status.hidden = true;
+        zoom.disabled = false;
+    });
+    image.addEventListener('error', () => {
+        image.hidden = true;
+        status.hidden = false;
+        status.textContent = '图片不存在或无法读取。';
+        zoom.disabled = true;
+    });
+    zoom.addEventListener('click', () => {
+        const original = viewport.classList.toggle('is-original-size');
+        zoom.setAttribute('aria-pressed', String(original));
+        viewport.scrollTop = 0;
+        viewport.scrollLeft = 0;
+    });
+    toolbar.append(zoom);
+    viewport.append(image, status);
+    body.replaceChildren(toolbar, viewport);
+    ModalManager.onClose(modalId, () => {
+        modal.remove();
+        if (chat && sessionId === agentSessionId) {
+            chat.scrollTop = scrollTop;
+            const current = [...chat.querySelectorAll('.agent-message-images button')]
+                .find(item => item.querySelector('img')?.src === thumbnail.src);
+            current?.focus({preventScroll: true});
+        }
+    });
+    modal.addEventListener('click', event => {
+        if (event.target === modal) ModalManager.close(modalId);
+    });
+    image.src = thumbnail.src;
+}
+
 function renderAgentMessages(session) {
     const container = $('agent-chat-messages');
     if (!container) return;
 
+    const previousTop = container.scrollTop;
     const messages = session?.messages || [];
     if (!messages.length) {
         container.innerHTML = '<div class="agent-chat-empty">可以问：每个页面功能、rk3572设备、最近报告、测试套件、VPN状态；也可以说：跑 CtsWifiTestCases，失败 retry 2 次并分析报告</div>';
@@ -403,8 +469,8 @@ function renderAgentMessages(session) {
         const imageHtml = attachments.length ? '<div class="agent-message-images">' + attachments.map((image, index) => {
             const url = '/api/agent/sessions/' + encodeURIComponent(session.session_id)
                 + '/images/' + encodeURIComponent(image.id);
-            return '<a class="agent-image-preview" href="' + url + '" target="_blank" rel="noopener noreferrer" title="查看图片 ' + (index + 1) + '">'
-                + '<img src="' + url + '" loading="lazy" alt="查看图片 ' + (index + 1) + '"></a>';
+            return '<button type="button" class="agent-image-preview" aria-label="查看图片 ' + (index + 1) + '" title="查看图片 ' + (index + 1) + '">'
+                + '<img src="' + url + '" loading="lazy" alt="查看图片 ' + (index + 1) + '"></button>';
         }).join('') + '</div>' : '';
         const contentHtml = (isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent)
             + imageCount + imageHtml + (data.question ? renderAgentQuestion(message, session) : '');
@@ -424,6 +490,9 @@ function renderAgentMessages(session) {
             </div>
         `;
     }).join('');
+    container.querySelectorAll('.agent-message-images button').forEach(button => {
+        button.addEventListener('click', () => openAgentImagePreview(button));
+    });
     container.querySelectorAll('[data-gms-policy-query]').forEach(button => {
         button.addEventListener('click', async () => {
             const output = button.parentElement.nextElementSibling;
@@ -681,7 +750,8 @@ function renderAgentMessages(session) {
             }
         });
     });
-    container.scrollTop = container.scrollHeight;
+    container.scrollTop = document.querySelector('.agent-image-viewer-modal.show')
+        ? previousTop : container.scrollHeight;
 
     const lastAutoOpen = [...messages].reverse().find(message =>
         message.role !== 'user'
