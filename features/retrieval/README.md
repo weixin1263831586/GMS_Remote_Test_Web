@@ -108,6 +108,12 @@ of a verified root cause or a guarantee that a missing source can be reached.
 
 The evidence planner also preserves fixed SDK commit/file/line citations,
 selected-repository limits, dynamic OpenGrok uncertainty and Gerrit pagination.
+For exact `commit:<full SHA>` Gerrit queries the existing authorized dashboard
+route requests the current patchset identity, without returning added commit
+bodies. The evidence plan links only reproducible SDK evidence and the current
+Gerrit patchset with the same project and full commit. It never infers device
+integration from this link or treats an old patchset, a branch label or a
+matching subject as proof.
 Daily Brief prompts distinguish completed text scans from complete source
 coverage and require independent verification of historical candidates and
 patch applicability. Native Redmine MCP traces and controller reference preflight
@@ -179,15 +185,21 @@ in one confirmed operation. It stops on completion, no progress, busy or error,
 and can resume committed batches later. It is not a persistent background
 scheduler; closing the page stops further client-side requests.
 
-### Automatic public CDD index maintenance
+### Automatic CDD and approved Wiki index maintenance
 
 Set `retrieval.auto_index_public_cdd` to the JSON boolean `true` in addition
 to the existing local embedding configuration to enable bounded automatic
 maintenance. The Controller's existing external-knowledge lifecycle tick
-runs at most one public CDD batch (up to 128 vectors) by default. An attempt
+runs at most one batch (up to 128 vectors) by default, shared between CDD and
+Wiki. Enable `retrieval.auto_index_approved_wiki` separately and allow
+`android_internals` in `retrieval.enabled_sources`. The indexed, approved and
+available Wiki revisions must match; the scheduler never approves or reindexes
+an upstream revision. An attempt
 timestamp is persisted before inference, so restarts and failures rotate to
-other sources fairly and resume from committed vectors. Disabled, stale or
-non-CDD sources are not scheduled. Owner-scoped and restricted indexes are
+other sources fairly and resume from committed vectors. Disabled or stale
+sources are not embedded. The existing semantic-index status endpoints include
+`auto_index_enabled` and `last_auto_index_attempt`; the knowledge source UI
+shows this metadata without changing button geometry. Owner-scoped and restricted indexes are
 not automatically scheduled by this option. The derived index still reflects
 only the retained authorized manifest, not upstream coverage.
 
