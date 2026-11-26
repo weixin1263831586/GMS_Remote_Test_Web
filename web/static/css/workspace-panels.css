@@ -134,6 +134,44 @@
 /* Clipboard previews occupy space only when images are attached. */
 .agent-image-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 0; background: var(--card-bg); }
 .agent-image-previews[hidden] { display: none; }
-.agent-image-preview { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; }
-.agent-image-preview img { width: 72px; height: 56px; object-fit: contain; background: var(--darker-bg); }
-.agent-image-preview button { flex-shrink: 0; }
+.agent-image-preview {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+.agent-image-preview img { display: block; width: 72px; height: 56px; object-fit: contain; background: var(--darker-bg); }
+.agent-image-preview .agent-image-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #202127;
+    color: #fff;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+}
+.agent-image-preview:hover .agent-image-remove,
+.agent-image-preview .agent-image-remove:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.agent-image-preview .agent-image-remove:hover { background: #454650; }
+.agent-image-preview .agent-image-remove:disabled { opacity: 0; pointer-events: none; }
+@media (hover: none) {
+    .agent-image-preview .agent-image-remove:not(:disabled) { opacity: 1; pointer-events: auto; }
+}

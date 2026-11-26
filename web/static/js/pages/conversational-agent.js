@@ -72,8 +72,9 @@ function renderAgentImageDrafts() {
         image.alt = '待发送图片 ' + (index + 1);
         const remove = document.createElement('button');
         remove.type = 'button';
-        remove.className = 'btn-xs';
-        remove.textContent = '移除';
+        remove.className = 'agent-image-remove';
+        remove.textContent = '×';
+        remove.title = '移除图片';
         remove.setAttribute('aria-label', '移除图片 ' + (index + 1));
         remove.disabled = agentImageSendFlight;
         remove.addEventListener('click', () => {
