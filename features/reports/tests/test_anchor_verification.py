@@ -47,7 +47,7 @@ class AnchorVerificationTests(unittest.TestCase):
     def test_path_matched_anchor_reports_local_path(self):
         path = "services/core/java/com/android/server/am/OomAdjuster.java"
         stub = _CodesearchStub({path})
-        with patch.object(av, "run_codesearch_process", stub), \
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub), \
                 patch.dict(av.__dict__, {"MAX_VERIFIED_ANCHORS": 4}):
             out = av.verify_background_anchors(
                 [_hit("LMKD", [_anchor()])], android_version="17"
@@ -67,7 +67,7 @@ class AnchorVerificationTests(unittest.TestCase):
 
     def test_path_missing_anchor_is_false_not_removed(self):
         stub = _CodesearchStub(set())
-        with patch.object(av, "run_codesearch_process", stub):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub):
             out = av.verify_background_anchors([_hit("LMKD", [_anchor()])])
         self.assertEqual(len(out), 1)
         self.assertFalse(out[0]["path_present"])
@@ -77,7 +77,7 @@ class AnchorVerificationTests(unittest.TestCase):
     def test_url_only_anchor_is_skipped_without_search(self):
         stub = _CodesearchStub(set())
         anchor = {"repo": "", "path": "", "url": "https://example.com/x"}
-        with patch.object(av, "run_codesearch_process", stub):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub):
             out = av.verify_background_anchors([_hit("t", [anchor])])
         self.assertEqual(stub.calls, [])
         # url-only anchor 无从溯源：整体跳过，不产生条目。
@@ -88,7 +88,7 @@ class AnchorVerificationTests(unittest.TestCase):
         hits = [
             _hit(f"h{i}", [_anchor(path=f"a/b/File{i}.java")]) for i in range(8)
         ] + [_hit("dup", [_anchor(path="a/b/File0.java")])]
-        with patch.object(av, "run_codesearch_process", stub):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub):
             out = av.verify_background_anchors(hits)
         self.assertEqual(len(stub.calls), av.MAX_VERIFIED_ANCHORS)
         # 预算内的 anchor 跑子进程（path_missing，无 reason）；超出预算的
@@ -113,7 +113,7 @@ class AnchorVerificationTests(unittest.TestCase):
             _hit("bare", [{"repo": "r", "path": "Utils.java"}]),
             _hit("real", [_anchor()]),
         ]
-        with patch.object(av, "run_codesearch_process", stub):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub):
             out = av.verify_background_anchors(hits)
         self.assertEqual(stub.calls, [_ for _ in stub.calls])  # stub 收到调用
         self.assertEqual(len(stub.calls), 1)
@@ -124,14 +124,14 @@ class AnchorVerificationTests(unittest.TestCase):
         def boom(cmd: list[str], cwd: str, *, timeout: float = 30.0):
             raise RuntimeError("codesearch down")
 
-        with patch.object(av, "run_codesearch_process", boom):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", boom):
             out = av.verify_background_anchors([_hit("t", [_anchor()])])
         self.assertEqual(len(out), 1)
         self.assertIsNone(out[0]["path_present"])
         self.assertEqual(out[0]["evidence_level"], av.EVIDENCE_UNKNOWN)
 
     def test_unavailable_codesearch_is_unknown(self):
-        with patch.object(av, "run_codesearch_process", return_value=None):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", return_value=None):
             out = av.verify_background_anchors([_hit("t", [_anchor()])])
         self.assertIsNone(out[0]["path_present"])
         self.assertEqual(out[0]["evidence_level"], av.EVIDENCE_UNKNOWN)
@@ -140,10 +140,23 @@ class AnchorVerificationTests(unittest.TestCase):
         result = CommandResult(
             stdout="[path] unrelated/module/OomAdjuster.java\n  project: Android17\n"
         )
-        with patch.object(av, "run_codesearch_process", return_value=result):
+        with patch("features.sdk.source_codesearch.run_codesearch_process", return_value=result):
             out = av.verify_background_anchors([_hit("t", [_anchor()])])
         self.assertFalse(out[0]["path_present"])
         self.assertEqual(out[0]["evidence_level"], av.EVIDENCE_PATH_MISSING)
+
+
+    def test_shared_path_lookup_preserves_each_anchor_metadata(self):
+        first = _anchor()
+        second = {**first, "revision": "android-16.0.0_r1", "evidence_type": "other"}
+        stub = _CodesearchStub({first["path"]})
+        with patch("features.sdk.source_codesearch.run_codesearch_process", stub):
+            out = av.verify_background_anchors([_hit("first", [first]), _hit("second", [second])])
+        self.assertEqual(len(stub.calls), 1)
+        self.assertEqual(out[0]["verification"]["revision"], first["revision"])
+        self.assertEqual(out[1]["verification"]["revision"], second["revision"])
+        self.assertEqual(out[1]["verification"]["evidence_type"], "other")
+        self.assertIsNot(out[0]["verification"], out[1]["verification"])
 
 
 if __name__ == "__main__":
