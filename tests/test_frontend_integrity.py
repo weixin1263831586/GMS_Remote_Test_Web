@@ -841,8 +841,8 @@ class FrontendIntegrityTests(unittest.TestCase):
         self.assertIn('id="refresh-suites-btn" class="btn-xxs ui-refresh-action"', main_text)
         self.assertIn('data-click="refreshTestSuites"', main_text)
         self.assertIn("await loadTestSuites(true)", navigation_text)
-        self.assertIn("button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…'", navigation_text)
-        self.assertIn("button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新套件'", navigation_text)
+        self.assertIn("setActionButtonBusy(button, true, '刷新中')", navigation_text)
+        self.assertIn("setActionButtonBusy(button, false)", navigation_text)
         self.assertIn("if (forceRefresh) return loadTestSuites(true)", navigation_text)
 
     def test_single_mode_hides_multi_host_controls_and_sidebar_has_descriptions(self):
