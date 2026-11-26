@@ -388,3 +388,39 @@ def test_web_firmware_and_platform_preserve_execution_ownership():
     assert "['source-device','Source 物理设备'" in firmware
     assert 'Linux USB/IP 整包烧写不支持' in firmware
     assert '重建 USB/IP' in firmware
+
+
+def test_scene_routes_attach_to_nodes_and_keep_all_labels_visible():
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    for view in ARCHITECTURE_VIEWS:
+        key = f"'{view}':" if '-' in view else f'{view}:'
+        scene = data.split(key, 1)[1].split('legend:', 1)[0]
+        nodes = [tuple(map(int, match)) for match in re.findall(
+            r"^\s*\['[^']+','[^']+','[^']+','[^']+','[^']+',(\d+),(\d+),(\d+),(\d+),",
+            scene, re.MULTILINE)]
+        boxes = [(x, y, x + w, y + h) for x, y, w, h in nodes]
+        routes = re.findall(
+            r"\['(M\d+ \d+(?: [HV]\d+)*)','(?:data|command|report|both)','([^']+)',(\d+),(\d+)\]",
+            scene)
+        assert boxes and routes, view
+        labels = []
+        for route, label, lx, ly in routes:
+            parts = re.findall(r'[MHV]|\d+', route)
+            x, y = map(int, parts[1:3])
+            points = [(x, y)]
+            for op, value in zip(parts[3::2], parts[4::2]):
+                x, y = (int(value), y) if op == 'H' else (x, int(value))
+                points.append((x, y))
+            for px, py in (points[0], points[-1]):
+                assert any((px in (l, r) and t <= py <= b) or
+                           (py in (t, b) and l <= px <= r)
+                           for l, t, r, b in boxes), (view, route)
+            for a, b in pairwise(points):
+                assert not any(_hits_box(a, b, box) for box in boxes), (view, route)
+            width = min(190, max(46, 14 + sum(12 if ord(ch) > 127 else 7 for ch in label)))
+            lx, ly = int(lx), int(ly)
+            rect = (lx - width / 2, ly - 15, lx + width / 2, ly + 6)
+            assert not any(_overlaps(rect, box) for box in boxes), (view, label)
+            assert not any(_overlaps((rect[0]-5, rect[1]-3, rect[2]+5, rect[3]+3), box)
+                           for box in labels), (view, label)
+            labels.append(rect)

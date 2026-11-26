@@ -35,7 +35,8 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
                     const paths = [...svg.querySelectorAll('.arch-scene-path')];
                     return paths.length > 0 &&
                         svg.querySelectorAll('.arch-scene-path-halo').length === 0 &&
-                        paths.every(path => getComputedStyle(path).filter === 'none');
+                        paths.every(path => getComputedStyle(path).filter === 'none') &&
+                        svg.querySelectorAll('.arch-scene-edge-pill').length === paths.length;
                 }'''), name)
                 expect(pane.locator('.arch-scene-ground')).to_have_count(0)
                 if name == 'test-flow':

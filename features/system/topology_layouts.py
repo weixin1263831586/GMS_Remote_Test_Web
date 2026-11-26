@@ -157,7 +157,7 @@ LAYOUTS = {
         positions={
             'Chat': (140, 68), 'Planner': (460, 68), 'Guard': (780, 68), 'Run': (1100, 68),
             'Evidence': (1100, 260), 'Collect': (780, 260), 'References': (460, 260),
-            'Knowledge': (140, 260),
+            'Knowledge': (1100, 452),
             'Review': (780, 452), 'Monitor': (460, 452), 'Reply': (140, 452),
         },
         kinds={
@@ -173,8 +173,7 @@ LAYOUTS = {
             ('Evidence', 'Collect'): Route(('left', 0), ('right', 0), label=(940, 260)),
             ('References', 'Collect'): Route(label=(620, 260)),
             ('Collect', 'Review'): Route(('bottom', 0), ('top', 0), label=(780, 356), label_width=150),
-            ('Knowledge', 'Review'): Route(('bottom', 0), ('top', -70),
-                                           ((140, 352), (710, 352)), (550, 352), 100),
+            ('Knowledge', 'Review'): Route(('left', 0), ('right', 0), label=(940, 452), label_width=100),
             ('Review', 'Monitor'): Route(('left', 0), ('right', 0), label=(620, 452), label_width=100),
             ('Planner', 'Monitor'): Route(('bottom', 0), ('top', 0),
                                          ((460, 164), (300, 164), (300, 384), (460, 384)), (300, 300)),

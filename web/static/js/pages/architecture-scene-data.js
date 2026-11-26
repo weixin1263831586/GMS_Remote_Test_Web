@@ -75,7 +75,7 @@ window.ArchitectureSceneData = Object.freeze({
   h:550,nodes:[
    ['firmware','固件库 / 共享固件','固件来源','package','access',28,26,218,139,['固件选择','机型 / 版本','路径 / 校验']],
    ['controller','Controller 调度','权限 / 归属 / 烧写编排','server','control',383,26,320,139,['任务创建','设备租约','来源路由','状态 / 回执']],
-   ['worker','本地 USB Worker','本地 Worker / Windows Source 分流','server','worker',859,26,218,139,['本地 USB','Fastboot / RK','执行 / 日志']],
+   ['worker','本地 USB Worker','本地 USB 执行','server','worker',859,26,218,139,['本地 USB','Fastboot / RK','执行 / 日志']],
    ['source','Windows Source Agent','交还后在 Source 执行','monitor','channel',28,225,218,135,['解除 USB/IP','RKDevTool','重建 USB/IP']],
    ['source-device','Source 物理设备','Android / USB','device','resource',365,225,218,135,['Loader / MaskROM','重枚举 / 重启']],
    ['loader','本地烧写工具','Loader / RockUSB / Fastboot','tool','worker',859,225,218,135,['upgrade_tool','fastboot','模式 / 镜像校验']],
@@ -87,15 +87,15 @@ window.ArchitectureSceneData = Object.freeze({
    ['M703 84 H859','command','Poll / 烧写',781,66],
    ['M859 138 H703','report','状态 / ACK',781,155],
    ['M423 165 V193 H137 V225','command','交还 / 调度',280,184],
-   ['M190 225 V208 H485 V165','report','结果 / 回执',352,218],
+   ['M190 225 V208 H485 V165','report','结果 / 回执',550,190],
    ['M246 292 H365','data','RKDevTool',305,274],
    ['M968 165 V225','command','本地烧写',1021,195],
    ['M968 360 V420','data','重启 / 校验',1031,390],
-   ['M859 112 H750 V472 H583','command','可选 AOA',799,396],
+   ['M900 165 V195 H750 V390 H474 V420','command','可选 AOA',610,378],
    ['M583 472 H859','data','ADB 校验',715,454]
   ],
   legend:[['access','固件输入'],['control','Controller / 调度'],['worker','本地 Worker / 工具'],['channel','Source / AOA'],['resource','物理设备']],
-  boundary:['本地 Worker 与 Windows Source 执行整包烧写是两条路径；USB/IP 设备须先交还 Source。','Linux USB/IP 整包烧写不支持；ADB Proxy 不提供 Fastboot / RockUSB。','Loader / MaskROM 重枚举须重识别；烧写结束不等于启动与 ADB 校验成功。'],
+  boundary:['本地 Worker / Windows Source 是两条整包烧写路径；USB/IP 设备须先交还 Source。','Linux USB/IP 整包烧写不支持；ADB Proxy 不提供 Fastboot / RockUSB。','Loader / MaskROM 重枚举须重识别；烧写结束不等于启动与 ADB 校验成功。'],
   cards:[
    ['烧写阶段说明','access',[['1','固件选择与校验'],['2','权限、租约及来源确认'],['3','本地 Worker 或 Windows Source'],['4','模式识别 / 镜像写入'],['5','重启、校验与回执']]],
    ['执行与所有权','worker',[['本地 USB','Worker / upgrade_tool / Fastboot'],['Windows Source','交还 USB/IP / RKDevTool'],['Linux Source','整包烧写拒绝'],['AOA','按需恢复 / ADB 检查']]],
