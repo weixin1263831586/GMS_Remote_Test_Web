@@ -18,6 +18,7 @@ from features.knowledge import (
     recall_owner_policy_imports,
     recall_web_references,
 )
+from features.retrieval import summarize_evidence
 from foundation.config_paths import sanitize_owner_id
 from foundation.error_model import ApiError
 
@@ -242,6 +243,7 @@ def reference_check_summary(data):
     sources = data.get("sources") or {}
     return {
         "coverage_complete": data.get("coverage_complete") is True,
+        "retrieval_evidence": summarize_evidence("redmine_references", data) or {},
         "identifiers": data.get("identifiers") or [],
         "queried_at": data.get("queried_at") or "",
         "sources": {name: {"status": value.get("status"), "count": len(value.get("items") or []),
