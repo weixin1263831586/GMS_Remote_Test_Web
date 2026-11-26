@@ -6,14 +6,14 @@ window.ArchitectureSceneData = Object.freeze({
    ['entry','用户与入口','统一接入','users','access',34,92,226,166,['Web 工作台','主机桌面 / 终端','测试套件 / ATS',['对话 Agent','对话 / CLI Agent']]],
    ['controller','Controller','控制与调度中心','server','control',387,85,328,181,['认证与权限','任务调度','设备 Claim / Lease','设备管理','服务编排','审计 / 报告索引']],
    ['workers','Worker 集群','执行与结果采集','network','worker',861,92,215,166,[['Worker A','Linux Worker A'],['Worker B','Linux Worker B'],['Tradefed','Tradefed / 测试'],['原生结果 / 日志','原生 results / logs']]],
-   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine / Gerrit',['源码 / AI','SDK / CodeSearch / AI'],['内外部知识','个人知识、Wiki / CDD / Web'],['构建服务','受审计 SSH / 构建服务器']]],
+   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine / Gerrit',['源码 / AI','SDK / CodeSearch / AI'],['Wiki / CDD','个人知识、Wiki / CDD / Web'],['构建服务','受审计 SSH / 构建服务器']]],
    ['usbip','USB/IP','设备通道','plug','channel',310,350,198,143,['USB 映射','设备透传','热插拔 / 重枚举']],
    ['device','测试设备','物理资源','device','resource',576,350,199,143,[['TV / STB','Android TV / STB'],'手机 / 平板','本地 USB','远端 USB']],
    ['adb','ADB Proxy','调试代理','terminal','teal',842,350,233,143,['ADB 连接','多设备代理','命令转发']]],
   edges:[
    ['M260 175 H387','command','HTTPS / Token',322,155],['M715 175 H861','command','Poll / 命令',788,155],
    ['M861 222 H715','report','Poll / ACK',788,246],
-   ['M244 422 H285 V235 H387','command','受控协同',320,293],
+   ['M387 235 H285 V422 H244','command','受控协同',320,293],
    ['M409 266 V350','command','USB/IP',460,313],
    ['M958 258 V350','command','调试代理',1020,312],
    ['M897 258 V312 H676 V350','data','设备测试',796,290],
@@ -73,25 +73,33 @@ window.ArchitectureSceneData = Object.freeze({
  },
  firmware:{
   h:550,nodes:[
-   ['firmware','固件库 / 共享固件','固件来源','package','access',35,72,223,172,[['正式 / 测试','正式 / 测试版本'],['分支 / 回滚','客户分支 / 回滚'],'机型 / 版本',['路径 / 校验','路径 / 校验信息']]],
-   ['detect','设备状态识别','可刷写性','target','access',35,337,219,149,['USB 连接','机型 / 芯片','当前模式','可刷写检查']],
-   ['controller','Controller 调度','流程控制','server','control',395,74,304,173,['任务创建','资源归属','策略下发','重试 / 回退']],
-   ['worker','按来源执行','本地 Worker / Windows Source','server','worker',855,72,226,172,['本地 Worker',['Windows','Windows Source'],['Fastboot / RK','Fastboot / RK 工具'],'结果 / 回执']],
-   ['mode','进入刷机模式','模式识别','chip','channel',326,337,196,149,['ADB','Fastboot','Loader','MaskROM']],
-   ['tool','烧写工具','镜像写入','tool','resource',604,337,201,149,[['update.img','update.img 整包'],'分区镜像',['RK / fastboot','fastboot / RK 工具'],'执行回执']],
-   ['verify','结果校验 / 回执','日志与状态归档','shield','channel',880,337,201,149,[['镜像校验','镜像 / 版本校验'],'重启 / ADB','失败原因','报告状态']]],
-  edges:[
-   ['M258 158 H395','command','固件选择',326,140],['M699 158 H855','command','任务 / 来源路由',779,140],
-   ['M254 412 H326','data','模式识别',290,392],['M424 247 V337','command','模式切换',487,290],
-   ['M522 412 H604','data','镜像写入',563,391],['M805 412 H880','data','校验',844,391],
-   ['M980 244 V337','report','写入回执',1046,291],['M855 208 H699','report','状态 / 重试',777,230]
+   ['firmware','固件库 / 共享固件','固件来源','package','access',28,26,218,139,['固件选择','机型 / 版本','路径 / 校验']],
+   ['controller','Controller 调度','权限 / 归属 / 烧写编排','server','control',383,26,320,139,['任务创建','设备租约','来源路由','状态 / 回执']],
+   ['worker','本地 USB Worker','本地 Worker / Windows Source 分流','server','worker',859,26,218,139,['本地 USB','Fastboot / RK','执行 / 日志']],
+   ['source','Windows Source Agent','交还后在 Source 执行','monitor','channel',28,225,218,135,['解除 USB/IP','RKDevTool','重建 USB/IP']],
+   ['source-device','Source 物理设备','Android / USB','device','resource',365,225,218,135,['Loader / MaskROM','重枚举 / 重启']],
+   ['loader','本地烧写工具','Loader / RockUSB / Fastboot','tool','worker',859,225,218,135,['upgrade_tool','fastboot','模式 / 镜像校验']],
+   ['aoa','可选 AOA 恢复','向导 / 调试授权','settings','channel',365,420,218,105,['HID 回放','ADB 就绪']],
+   ['device','本地 Android 设备','重启 / 实际结果','device','resource',859,420,218,105,['启动 / 版本','ADB 校验']]
   ],
-  legend:[['access','固件 / 设备输入'],['control','Controller / 调度'],['worker','Worker 执行'],['resource','镜像写入 / 校验']],
-  boundary:['本地 USB 由 Worker 烧写；Windows USB/IP 交还 Source 后用 RKDevTool。','Linux USB/IP 整包烧写不支持；ADB Proxy 不提供 Fastboot / RockUSB。','Loader / MaskROM 重枚举需要重识别，不能复用旧身份。','校验版本和启动后状态，不把执行结束当作成功。'],
+  edges:[
+   ['M246 95 H383','command','上传 / 校验',314,77],
+   ['M703 84 H859','command','Poll / 烧写',781,66],
+   ['M859 138 H703','report','状态 / ACK',781,155],
+   ['M423 165 V193 H137 V225','command','交还 / 调度',280,184],
+   ['M190 225 V208 H485 V165','report','结果 / 回执',352,218],
+   ['M246 292 H365','data','RKDevTool',305,274],
+   ['M968 165 V225','command','本地烧写',1021,195],
+   ['M968 360 V420','data','重启 / 校验',1031,390],
+   ['M859 112 H750 V472 H583','command','可选 AOA',799,396],
+   ['M583 472 H859','data','ADB 校验',715,454]
+  ],
+  legend:[['access','固件输入'],['control','Controller / 调度'],['worker','本地 Worker / 工具'],['channel','Source / AOA'],['resource','物理设备']],
+  boundary:['本地 Worker 与 Windows Source 执行整包烧写是两条路径；USB/IP 设备须先交还 Source。','Linux USB/IP 整包烧写不支持；ADB Proxy 不提供 Fastboot / RockUSB。','Loader / MaskROM 重枚举须重识别；烧写结束不等于启动与 ADB 校验成功。'],
   cards:[
-   ['烧写阶段说明','access',[['1','固件选择与兼容性'],['2','任务下发 / 来源确认'],['3','设备识别 / 模式判断'],['4','切换 ADB / Fastboot / Loader'],['5','执行镜像写入'],['6','重启、校验与归档']]],
-   ['模式切换与关键边界','worker',[['ADB / Fastboot','按可用协议切换'],['Loader / MaskROM','重新枚举 / 识别'],['USB/IP 来源','Source 能力决定烧写主体'],['设备失联','先识别当前模式再恢复']]],
-   ['风险点 / 回退策略','risk',[['固件不匹配','拒绝下发并记录原因'],['断线 / 设备变更','重新确认稳定设备身份'],['写入失败','有界重试并保留原始日志'],['不可刷写','明确拒绝并提示处理']]]
+   ['烧写阶段说明','access',[['1','固件选择与校验'],['2','权限、租约及来源确认'],['3','本地 Worker 或 Windows Source'],['4','模式识别 / 镜像写入'],['5','重启、校验与回执']]],
+   ['执行与所有权','worker',[['本地 USB','Worker / upgrade_tool / Fastboot'],['Windows Source','交还 USB/IP / RKDevTool'],['Linux Source','整包烧写拒绝'],['AOA','按需恢复 / ADB 检查']]],
+   ['风险与恢复','risk',[['模式切换','Loader / MaskROM 重枚举'],['设备失联','重新识别稳定设备身份'],['来源烧写','重建 USB/IP 连接'],['验证','真实启动、版本与 ADB 状态']]]
   ]
  },
  'test-flow':{
@@ -110,7 +118,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['M983 205 V340','data','执行日志',1034,282],['M843 175 H682','report','事件 / ACK',762,193],
    ['M539 199 V260','command','预检 / 租约',603,230],['M540 380 V444','data','套件准备',594,420],
    ['M687 487 H790 V235 H930 V205','data','本地套件',748,465],['M958 505 V564','report','结果索引',1014,537],
-   ['M839 616 H272','data','按需提单',552,593],['M157 564 V461','command','提交修复',209,514],
+   ['M839 616 H272','data','按需提单',552,593],['M157 564 V461','data','按需修复',209,514],
    ['M157 299 V205','report','回归反馈',210,270]
   ],
   legend:[['access','任务入口 / 缺陷'],['control','Controller / 套件'],['worker','Worker 执行'],['resource','设备与环境']],

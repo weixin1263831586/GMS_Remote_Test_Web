@@ -51,8 +51,7 @@ Web「系统架构」的六个默认视图由 `web/static/js/pages/architecture-
 
 ## 四个主要角色
 
-Web「系统架构 → 平台总览」的「分层职责、部署与接入边界」按接入与规划、Controller
-控制与编排、Worker 执行与结果、设备与接入资源展示职责。外部集成和构建
+Web「系统架构 → 平台总览」的「模块职责与依赖」按接入、Controller、Worker、设备通道、外部协同、Knowledge、Bootstrap / Runtime 与 Feature / Foundation 展示职责。外部集成和构建
 主机单独列示，具体部署关系与消息方向以总体拓扑为准。Worker 原生结果位于
 套件 `results` / `logs`，从测试套件浏览器访问；已登记报告由 Controller
 索引，从报告管理访问。

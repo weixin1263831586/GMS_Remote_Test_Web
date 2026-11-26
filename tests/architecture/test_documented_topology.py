@@ -377,3 +377,14 @@ def test_diagnostic_topology_preserves_knowledge_and_execution_boundaries():
                  'Android CDD / Web', 'owner 授权 PDF / HTML', '不进入公共索引',
                  '结论与建议（非执行）', '设备操作须另行授权', '诊断结果消费'):
         assert term in data, term
+
+
+def test_web_firmware_and_platform_preserve_execution_ownership():
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    assert "'M387 235 H285 V422 H244','command','受控协同'" in data
+    firmware = data.split(' firmware:{', 1)[1].split(" 'test-flow':{", 1)[0]
+    assert "['worker','本地 USB Worker'" in firmware
+    assert "['source','Windows Source Agent'" in firmware
+    assert "['source-device','Source 物理设备'" in firmware
+    assert 'Linux USB/IP 整包烧写不支持' in firmware
+    assert '重建 USB/IP' in firmware

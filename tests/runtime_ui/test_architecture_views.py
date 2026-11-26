@@ -11,7 +11,7 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
         page = self.new_page()
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
-        expected = {'platform': 7, 'usbip': 7, 'aoa': 7, 'firmware': 7,
+        expected = {'platform': 7, 'usbip': 7, 'aoa': 7, 'firmware': 8,
                     'test-flow': 9, 'agent-analysis': 11}
         try:
             self.goto_shell(page)
