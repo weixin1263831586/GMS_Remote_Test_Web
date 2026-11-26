@@ -14,9 +14,14 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             self.goto_shell(page)
             calls = []
             deny = [False]
+            submitted = []
 
             def sources(route):
                 calls.append(route.request.method)
+                if route.request.method == 'POST':
+                    submitted.append(route.request.post_data_json)
+                    route.fulfill(json={'success': True, 'data': {'id': 'new', 'sync': {'status': 'ready'}}})
+                    return
                 if deny[0]:
                     route.fulfill(status=403, json={
                         'detail': {'message': 'Elevation required', 'elevation_required': True},
@@ -51,6 +56,22 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(panel.locator('[data-kb-status]')).to_have_count(0)
             expect(panel.locator('form [data-kb-refresh]')).to_be_visible()
             expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            expect(panel.locator('form [name="kind"], form [name="license"], form [name="android_version"]')).to_have_count(0)
+            expect(panel.locator('[data-kb-reset]')).to_be_hidden()
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('GMS Certification Requirements')
+            form = panel.locator('form')
+            url = 'https://source.android.com/docs/compatibility/17/android-17-cdd'
+            form.locator('[name="url"]').fill(url)
+            form.locator('[data-kb-submit]').click()
+            expect(form.locator('[name="url"]')).to_have_value('')
+            expect(form.locator('[data-kb-submit]')).to_be_enabled()
+            self.assertEqual(submitted[-1], {'url': url, 'name': ''})
+            form.locator('[name="url"]').fill(url)
+            form.locator('[name="name"]').fill('手写名称')
+            form.locator('[data-kb-submit]').click()
+            expect(form.locator('[name="url"]')).to_have_value('')
+            expect(form.locator('[data-kb-submit]')).to_be_enabled()
+            self.assertEqual(submitted[-1], {'url': url, 'name': '手写名称'})
             deny[0] = True
             page.evaluate('window.requestElevatedAccess = async () => false')
             panel.locator('[data-kb-refresh]').click()
