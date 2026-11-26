@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlsplit
 
+from foundation.config import config_manager
 from foundation.redaction import redact_sensitive_text
 
 
@@ -56,14 +57,35 @@ def public_cdd_context(hits, *, limit=4):
     return result
 
 
-def retrieve_public_cdd_context(query, *, limit=4):
-    """Search the local public index only; no private sources or live network fetch."""
+def model_planned_cdd_hits(query, *, android_api_level=None, limit=4):
+    """Opt-in local LLM recall for diagnostic workflows; never use a remote fallback."""
+    try:
+        config = (config_manager.load_config() or {}).get("retrieval") or {}
+        if not isinstance(config, dict) or config.get("llm_background_recall") is not True:
+            return []
+        from .service import analyze_public_cdd
+
+        result = analyze_public_cdd(query, limit=limit, android_api_level=android_api_level, recall_only=True)
+        if result["rag"]["status"] == "model_planned_recall":
+            return result["results"]
+    except Exception:
+        pass
+    return []
+
+
+def retrieve_public_cdd_context(query, *, limit=4, android_api_level=None, existing_hits=None):
+    """Public background only; share model planning with report and image paths."""
     from .external.web_sources import WebKnowledgeProvider
 
     query = redact_sensitive_text(str(query or "")).strip()[:512]
     if not query:
-        return []
+        return public_cdd_context(existing_hits or [], limit=limit)
+    planned = model_planned_cdd_hits(query, android_api_level=android_api_level, limit=limit)
+    if planned:
+        return public_cdd_context([*planned, *(existing_hits or [])], limit=limit)
+    if existing_hits is not None:
+        return public_cdd_context(existing_hits, limit=limit)
     hits, _ = WebKnowledgeProvider().search_with_status(
-        query, limit=12, public_cdd_only=True,
+        query, limit=12, public_cdd_only=True, android_api_level=android_api_level,
     )
     return public_cdd_context([hit.to_dict() for hit in hits], limit=limit)
