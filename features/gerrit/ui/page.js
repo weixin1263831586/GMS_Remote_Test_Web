@@ -426,11 +426,13 @@ async function loadDepartment(refresh) {
     }
   }
 }
+let renderedGerritQueryScope = '';
 async function loadChanges() {
   if (currentTab !== 'query') return;
   const requestGeneration = ++gerritDashboardRequestGeneration.query;
   const profileId = document.getElementById('profile').value || '';
   const query = document.getElementById('query').value || '';
+  const scope = JSON.stringify([profileId, query]);
   const button = document.getElementById('queryBtn');
   const rows = document.getElementById('rows');
   const panel = document.getElementById('tab-query');
@@ -445,15 +447,19 @@ async function loadChanges() {
     if (data.error) {
       if (currentTab === 'query') notifyUser('Gerrit 查询失败', data.error, 'error');
       if (!items.length) {
-        if (!rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+        if (renderedGerritQueryScope !== scope || !rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
         return;
       }
     }
     rows.innerHTML = items.map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
+    renderedGerritQueryScope = scope;
   } catch (e) {
     if (!isLatest()) return;
     if (currentTab === 'query') notifyUser('Gerrit 查询失败', e.message, 'error');
-    if (!rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+    if (renderedGerritQueryScope !== scope || !rows.children.length || e.status === 401 || e.status === 403) {
+      rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+      renderedGerritQueryScope = '';
+    }
   } finally {
     if (isLatest()) {
       setActionButtonBusy(button, false);
