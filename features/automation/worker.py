@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
+from foundation.automation_port import AutomationWorkerStatus
 from foundation.config import config_manager
 from foundation.test_execution_options import validate_execution_options
 
@@ -575,7 +576,7 @@ async def stop_automation_worker() -> None:
     logger.info("[AutomationWorker] stopped")
 
 
-def get_worker_status() -> dict[str, Any]:
+def get_worker_status() -> AutomationWorkerStatus:
     cfg = _load_worker_config()
     last_ago = (time.monotonic() - _last_tick_at) if _last_tick_at else None
     return {

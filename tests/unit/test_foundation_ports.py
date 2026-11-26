@@ -146,18 +146,38 @@ class AutomationPortConfigureSemanticsTests(unittest.TestCase):
         with self.assertLogs("foundation.automation_port", level="ERROR"):
             self.assertFalse(automation_port.advancement_paused())
 
+    def test_registered_worker_status_matches_contract(self):
+        from features.automation import register_worker_status_port
+
+        self.addCleanup(
+            automation_port.configure_worker_status_provider,
+            automation_port._worker_status_provider,
+        )
+        register_worker_status_port()
+        status = automation_port.get_worker_status()
+        self.assertEqual(set(status), set(automation_port.AutomationWorkerStatus.__annotations__))
+        self.assertIsInstance(status['enabled'], bool)
+        self.assertIsInstance(status['running'], bool)
+        self.assertIsInstance(status['interval_seconds'], int)
+        self.assertIsInstance(status['advancement_running'], bool)
+
     def test_explicit_none_clears_registration(self):
         self.addCleanup(
             automation_port.configure_worker_status_provider,
             automation_port._worker_status_provider,
         )
 
-        automation_port.configure_worker_status_provider(
-            lambda: {'enabled': False}
-        )
-        self.assertEqual(
-            automation_port.get_worker_status(), {'enabled': False}
-        )
+        status: automation_port.AutomationWorkerStatus = {
+            'enabled': False,
+            'running': False,
+            'interval_seconds': 15,
+            'executor': 'http',
+            'last_tick_result': {},
+            'last_tick_seconds_ago': None,
+            'advancement_running': False,
+        }
+        automation_port.configure_worker_status_provider(lambda: status)
+        self.assertIs(automation_port.get_worker_status(), status)
 
         automation_port.configure_worker_status_provider(None)
 

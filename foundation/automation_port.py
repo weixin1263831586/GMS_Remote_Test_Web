@@ -8,12 +8,24 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict
 
 
 logger = logging.getLogger(__name__)
 
-WorkerStatusProvider = Callable[[], dict[str, Any]]
+class AutomationWorkerStatus(TypedDict):
+    """Scheduler status exposed to health, metrics and automation consumers."""
+
+    running: bool
+    enabled: bool
+    interval_seconds: int
+    executor: str
+    last_tick_result: dict[str, Any]
+    last_tick_seconds_ago: float | None
+    advancement_running: bool
+
+
+WorkerStatusProvider = Callable[[], AutomationWorkerStatus]
 
 _worker_status_provider: WorkerStatusProvider | None = None
 
@@ -26,7 +38,7 @@ def configure_worker_status_provider(
     _worker_status_provider = provider
 
 
-def get_worker_status() -> dict[str, Any]:
+def get_worker_status() -> AutomationWorkerStatus:
     """Return scheduler status, or raise when automation is unavailable."""
     if _worker_status_provider is None:
         raise RuntimeError("automation worker status is not configured")
