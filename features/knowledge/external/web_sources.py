@@ -67,6 +67,13 @@ CREATE TABLE IF NOT EXISTS sync_attempts (
 CREATE TABLE IF NOT EXISTS semantic_sync_attempts (
  source_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS cdd_insights (
+ id INTEGER PRIMARY KEY, token TEXT UNIQUE NOT NULL, source_id TEXT NOT NULL,
+ revision TEXT NOT NULL, model_key TEXT NOT NULL, status TEXT NOT NULL,
+ attempted_at TEXT NOT NULL, facts_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS cdd_insights_source ON cdd_insights(source_id,revision,model_key);
+CREATE VIRTUAL TABLE IF NOT EXISTS cdd_insight_fts USING fts5(search_text, tokenize='unicode61');
 CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
  source_id UNINDEXED, revision UNINDEXED, section, requirement_id, level UNINDEXED,
  condition, original, url UNINDEXED, token UNINDEXED, tokenize='unicode61'
@@ -293,6 +300,9 @@ class WebKnowledgeProvider:
             db.execute("DELETE FROM revisions WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sync_attempts WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM semantic_sync_attempts WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM cdd_insight_fts WHERE rowid IN (SELECT id FROM cdd_insights WHERE source_id=?)",
+                       (source_id,))
+            db.execute("DELETE FROM cdd_insights WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     def sync(self, source_id):
