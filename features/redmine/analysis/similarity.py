@@ -1,4 +1,4 @@
-"""RedmineAgent: nightly Redmine triage and report generation."""
+"""Issue reference retrieval and evidence-based similarity ranking."""
 
 from __future__ import annotations
 
@@ -6,10 +6,15 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from features.redmine.analysis import _truncate
+from features.redmine.analysis.ai import IssueModelAnalysis
 from features.redmine.client import RedmineClient
+
+
+if TYPE_CHECKING:
+    from features.redmine.repository import RedmineAgentDB
 
 
 logger = logging.getLogger(__name__)
@@ -20,8 +25,12 @@ MAX_REFERENCES = 5
 TOP_CANDIDATES_FOR_AI = 8
 
 
-class SimilarityAnalysisMixin:
-    async def _find_similar_references(self, client: RedmineClient, issue_payload: dict[str, Any], failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
+class IssueSimilarity:
+    def __init__(self, db: RedmineAgentDB, model_analysis: IssueModelAnalysis):
+        self.db = db
+        self.model_analysis = model_analysis
+
+    async def find_similar_references(self, client: RedmineClient, issue_payload: dict[str, Any], failures: list[dict[str, Any]]) -> list[dict[str, Any]]:
         terms = self._similar_terms(issue_payload, failures)
         candidates: dict[int, dict[str, Any]] = {}
 
@@ -222,10 +231,10 @@ class SimilarityAnalysisMixin:
 
         Returns {issue_id: score_0_to_1}.
         """
-        config = self._load_ai_config()
-        if self.ai_analyzer_factory is None:
+        config = self.model_analysis.load_config()
+        if self.model_analysis.ai_analyzer_factory is None:
             return {}
-        analyzer = self.ai_analyzer_factory(config)
+        analyzer = self.model_analysis.ai_analyzer_factory(config)
         provider_name = analyzer.get_primary_provider()
         if not provider_name:
             return {}
@@ -265,7 +274,7 @@ class SimilarityAnalysisMixin:
 """
 
         try:
-            resp_text = await asyncio.to_thread(self._call_model_raw, analyzer, provider_name, provider, prompt)
+            resp_text = await asyncio.to_thread(self.model_analysis.call_model_raw, analyzer, provider_name, provider, prompt)
             match = re.search(r'\{.*\}', resp_text, re.S)
             if match:
                 parsed = json.loads(match.group(0))

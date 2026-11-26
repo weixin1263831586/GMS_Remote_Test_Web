@@ -13,10 +13,10 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from features.redmine.analysis import _truncate
-from features.redmine.analysis.ai import AiAnalysisMixin
-from features.redmine.analysis.attachments import AttachmentAnalysisMixin
+from features.redmine.analysis.ai import IssueModelAnalysis
+from features.redmine.analysis.attachments import AttachmentAnalysis
 from features.redmine.analysis.reporting import IssueReporting
-from features.redmine.analysis.similarity import SimilarityAnalysisMixin
+from features.redmine.analysis.similarity import IssueSimilarity
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
 from features.redmine.repository import (
@@ -85,11 +85,7 @@ def _obj_email(value: Any) -> str:
     )
 
 
-class RedmineAgent(
-    AttachmentAnalysisMixin,
-    SimilarityAnalysisMixin,
-    AiAnalysisMixin,
-):
+class RedmineAgent:
     """Batch agent for assigned Redmine issue triage."""
 
     _reporting = IssueReporting()
@@ -107,9 +103,11 @@ class RedmineAgent(
         self.config_manager = redmine_config_manager or config_manager
         self.attachments_dir = attachments_dir or settings.data_root / "redmine/attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
-        self._ai_config_cache: dict[str, Any] | None = None
-        self.report_analyzer_factory = report_analyzer_factory
-        self.ai_analyzer_factory = ai_analyzer_factory
+        self._model_analysis = IssueModelAnalysis(ai_analyzer_factory)
+        self._similarity = IssueSimilarity(self.db, self._model_analysis)
+        self._attachments = AttachmentAnalysis(
+            self.db, self.attachments_dir, report_analyzer_factory,
+        )
 
     def _issue_payload(self, issue: Any, run_id: str, journals: list[dict[str, Any]], attachment_records: list[dict[str, Any]], failures: list[dict[str, Any]]) -> dict[str, Any]:
         fixed_version = _obj_name(getattr(issue, "fixed_version", None))
@@ -460,7 +458,7 @@ class RedmineAgent(
         failures = []
 
         for attachment in attachments:
-            attachment_result = await self._process_attachment(client, issue_id, attachment)
+            attachment_result = await self._attachments.process_attachment(client, issue_id, attachment)
             attachment_records.append(attachment_result)
             analysis = attachment_result.get("analysis_json") or {}
             if analysis.get("failures"):
@@ -473,9 +471,9 @@ class RedmineAgent(
         status_name = _obj_name(getattr(issue, "status", None))
         issue_payload["is_resolved"] = int(status_name in RESOLVED_STATUSES)
 
-        references = await self._find_similar_references(client, issue_payload, failures)
+        references = await self._similarity.find_similar_references(client, issue_payload, failures)
 
-        ai_result = await self._summarize_with_model(issue_payload, failures, references)
+        ai_result = await self._model_analysis.summarize_issue(issue_payload, failures, references)
 
         structured = self._reporting._extract_structured_fields(ai_result, issue_payload, failures, references)
         issue_payload.update(structured)

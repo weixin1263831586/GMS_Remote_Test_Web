@@ -1,4 +1,4 @@
-"""RedmineAgent: nightly Redmine triage and report generation."""
+"""Model-backed issue analysis and shared model execution."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 import requests
@@ -18,9 +19,13 @@ from features.redmine.config import config_manager
 logger = logging.getLogger(__name__)
 
 
-class AiAnalysisMixin:
-    async def _summarize_with_model(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> dict[str, Any]:
-        config = self._load_ai_config()
+class IssueModelAnalysis:
+    def __init__(self, ai_analyzer_factory: Callable[..., Any] | None):
+        self.ai_analyzer_factory = ai_analyzer_factory
+        self._ai_config_cache: dict[str, Any] | None = None
+
+    async def summarize_issue(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> dict[str, Any]:
+        config = self.load_config()
         if self.ai_analyzer_factory is None:
             return {"success": False, "error": "AI model not configured"}
         analyzer = self.ai_analyzer_factory(config)
@@ -34,7 +39,7 @@ class AiAnalysisMixin:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    def _load_ai_config(self) -> dict[str, Any]:
+    def load_config(self) -> dict[str, Any]:
         if self._ai_config_cache is not None:
             return self._ai_config_cache
 
@@ -70,7 +75,7 @@ class AiAnalysisMixin:
 
     def _call_model(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> dict[str, Any]:
         """Call the AI model and parse the structured seven-field JSON response."""
-        raw = self._call_model_raw(analyzer, provider_name, provider, prompt)
+        raw = self.call_model_raw(analyzer, provider_name, provider, prompt)
         try:
             match = re.search(r"\{.*\}", raw, re.S)
             result = json.loads(match.group(0) if match else raw)
@@ -88,7 +93,7 @@ class AiAnalysisMixin:
         except Exception:
             return {"success": False, "provider": provider_name, "summary": raw[:1200], "reply_draft": ""}
 
-    def _call_model_raw(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> str:
+    def call_model_raw(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> str:
         """Call the AI model and return raw text response.
 
         Reuses UniversalAIAnalyzer's HTTP request logic to avoid duplicating

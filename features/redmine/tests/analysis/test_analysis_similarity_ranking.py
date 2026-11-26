@@ -6,12 +6,16 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from features.redmine.analysis.similarity import SimilarityAnalysisMixin
+from features.redmine.analysis.ai import IssueModelAnalysis
+from features.redmine.analysis.similarity import IssueSimilarity
 
 
-class Searcher(SimilarityAnalysisMixin):
+class Searcher(IssueSimilarity):
     def __init__(self):
-        self.db = SimpleNamespace(search_similar=lambda *args, **kwargs: [])
+        super().__init__(
+            SimpleNamespace(search_similar=lambda *args, **kwargs: []),
+            IssueModelAnalysis(None),
+        )
 
     async def _ai_semantic_similarity(self, issue_payload, candidates):
         return {}
@@ -36,7 +40,7 @@ class SimilarityRankingTests(unittest.IsolatedAsyncioTestCase):
              "subject": "CtsSecurityTestCases testFailsAcrossUsers AssertionError",
              "status_name": "Closed"},
         ])
-        refs = await Searcher()._find_similar_references(
+        refs = await Searcher().find_similar_references(
             SimpleNamespace(search_issues_by_subject=remote), issue, failures
         )
         self.assertTrue(refs)

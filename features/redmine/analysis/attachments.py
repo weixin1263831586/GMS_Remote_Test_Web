@@ -1,4 +1,4 @@
-"""RedmineAgent: nightly Redmine triage and report generation."""
+"""Issue attachment summary analysis; full evidence is handled separately."""
 
 from __future__ import annotations
 
@@ -9,12 +9,18 @@ import re
 import shutil
 import tempfile
 import zipfile
-from typing import Any
+from collections.abc import Callable
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from features.redmine.analysis import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
 from features.redmine.client import RedmineAttachment, RedmineClient
 from features.redmine.utils import sanitize_attachment_filename
+
+
+if TYPE_CHECKING:
+    from features.redmine.repository import RedmineAgentDB
 
 
 logger = logging.getLogger(__name__)
@@ -49,8 +55,16 @@ _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 MAX_ERROR_BLOCKS = 5            # max grouped error blocks
 
 
-class AttachmentAnalysisMixin:
-    async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
+class AttachmentAnalysis:
+    def __init__(
+        self, db: RedmineAgentDB, attachments_dir: Path,
+        report_analyzer_factory: Callable[..., Any] | None,
+    ):
+        self.db = db
+        self.attachments_dir = attachments_dir
+        self.report_analyzer_factory = report_analyzer_factory
+
+    async def process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
         issue_dir.mkdir(parents=True, exist_ok=True)
         safe_name = sanitize_attachment_filename(attachment.filename, f"attachment_{attachment.id}")
@@ -129,7 +143,8 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    def _analyze_text_attachment(self, path: str) -> dict[str, Any]:
+    @staticmethod
+    def _analyze_text_attachment(path: str) -> dict[str, Any]:
         """Stream complete logs so late failures survive without loading GBs into RAM."""
         replacement_count = 0
         interesting_count = 0
