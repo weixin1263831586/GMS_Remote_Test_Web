@@ -324,6 +324,8 @@ function openAgentImagePreview(button) {
     status.setAttribute('role', 'status');
     status.textContent = '正在加载图片…';
     image.addEventListener('load', () => {
+        if (!image.naturalWidth || !image.naturalHeight) return;
+        image.style.setProperty('--agent-image-ratio', String(image.naturalWidth / image.naturalHeight));
         image.hidden = false;
         status.hidden = true;
     });

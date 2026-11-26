@@ -151,7 +151,7 @@
 .agent-image-viewer-modal.modal { cursor: zoom-out; }
 .agent-image-viewer-modal > img:not([hidden]) {
     display: block;
-    width: auto;
+    width: min(80vw, calc(80vh * var(--agent-image-ratio, 1)));
     height: auto;
     max-width: 80vw;
     max-height: 80vh;

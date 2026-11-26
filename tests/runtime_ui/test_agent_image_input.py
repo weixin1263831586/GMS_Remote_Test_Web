@@ -82,24 +82,40 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
             expect(dialog.locator("img")).to_have_attribute(
                 "src", "/api/agent/sessions/image-test/images/" + "a" * 32)
             expect(dialog.locator(".modal-content, .modal-header, .tech-frame, button")).to_have_count(0)
-            expect(dialog.locator("img")).to_have_css("width", "8px")
-            expect(dialog.locator("img")).to_have_css("height", "8px")
+            page.wait_for_function("""() => {
+                const image = document.querySelector('.agent-image-viewer-modal > img');
+                if (!image || image.hidden) return false;
+                const size = Math.min(innerWidth, innerHeight) * 0.8;
+                const rect = image.getBoundingClientRect();
+                return Math.abs(rect.width - size) <= 1 && Math.abs(rect.height - size) <= 1;
+            }""")
             dialog.locator("img").click()
             expect(dialog).to_be_visible()
-            for width, height in ((2400, 1600), (1600, 2400)):
+            for width, height in ((2400, 1600), (1600, 2400), (264, 146), (146, 264)):
                 dimensions = dialog.locator("img").evaluate("""async (image, size) => {
                     const canvas = document.createElement('canvas');
                     [canvas.width, canvas.height] = size;
+                    const loaded = new Promise((resolve, reject) => {
+                        image.addEventListener('load', resolve, {once: true});
+                        image.addEventListener('error', reject, {once: true});
+                    });
                     image.src = canvas.toDataURL('image/png');
-                    await image.decode();
+                    await loaded;
                     const rect = image.getBoundingClientRect();
                     return {width: rect.width, height: rect.height,
+                            left: rect.left, top: rect.top,
                             viewportWidth: window.innerWidth, viewportHeight: window.innerHeight};
                 }""", [width, height])
                 self.assertLessEqual(dimensions["width"], dimensions["viewportWidth"] * 0.8 + 1)
                 self.assertLessEqual(dimensions["height"], dimensions["viewportHeight"] * 0.8 + 1)
-                self.assertAlmostEqual(dimensions["width"] / dimensions["height"],
-                                       width / height, delta=0.01)
+                scale = min(dimensions["viewportWidth"] * 0.8 / width,
+                            dimensions["viewportHeight"] * 0.8 / height)
+                self.assertAlmostEqual(dimensions["width"], width * scale, delta=1)
+                self.assertAlmostEqual(dimensions["height"], height * scale, delta=1)
+                self.assertAlmostEqual(dimensions["left"] + dimensions["width"] / 2,
+                                       dimensions["viewportWidth"] / 2, delta=1)
+                self.assertAlmostEqual(dimensions["top"] + dimensions["height"] / 2,
+                                       dimensions["viewportHeight"] / 2, delta=1)
             page.keyboard.press("Escape")
             expect(dialog).to_have_count(0)
             expect(attachment).to_be_visible()
