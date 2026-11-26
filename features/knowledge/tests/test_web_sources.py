@@ -128,3 +128,59 @@ def test_partner_grants_are_owner_bound_and_revocable(tmp_path, monkeypatch):
     monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-a')
     provider.set_partner_grant('owner-a', False)
     assert not provider.has_partner_grant('owner-a')
+
+
+
+def test_nested_requirements_and_table_context():
+    body = cdd(16).replace(
+        b'<li>[C-1-1] MUST support TTS framework APIs.</li>',
+        b'<li>[C-1-1] MUST support TTS framework APIs.<ul>'
+        b'<li>[C-1-9] MUST preserve nested behavior.</li></ul></li>'
+        b'<li>For handheld devices:<ul><li>[C-1-8] MUST support speech.</li></ul></li>',
+    ).replace(
+        b'<h2 id="other">',
+        b'<table><thead><tr><th>Device</th><th>Requirement</th></tr></thead>'
+        b'<tbody><tr><td>Phone</td><td>Must retain audio</td></tr></tbody></table><h2 id="other">',
+    )
+    rows = parse_document(body, 'https://source.android.com/cdd', 'cdd', 16)
+    parent = next(r for r in rows if r[1] == 'C-1-1' and r[0].startswith('3.11'))
+    nested = next(r for r in rows if r[1] == 'C-1-9')
+    assert 'nested behavior' not in parent[4]
+    assert 'MUST support TTS' in nested[3]
+    assert 'For handheld devices' in next(r for r in rows if r[1] == 'C-1-8')[3]
+    table = next(r for r in rows if 'Phone | Must retain audio' in r[4])
+    assert 'Device | Requirement' in table[3]
+
+
+def test_sync_coalesces_and_revision_read(tmp_path, monkeypatch):
+    from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
+
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source16 = configure(provider, 16)
+    source17 = configure(provider, 17)
+    fetch = Mock(return_value=(cdd(16), '', ''))
+    monkeypatch.setattr(web_sources, 'fetch_html', fetch)
+    lock = try_acquire_sync_lock(tmp_path / 'sync-locks' / (source16 + '.lock'))
+    assert lock is not None
+    try:
+        assert provider.sync(source16)['status'] == 'in_progress'
+        fetch.assert_not_called()
+    finally:
+        release_sync_lock(lock)
+    provider.sync(source16)
+    hits = provider.search('TTS', android_api_level=36)
+    token = hits[0].source_path
+    initial = provider.read_requirement(token)
+    assert initial['original'] and initial['revision'] == initial['current_revision']
+    fetch.return_value = (cdd(17), '', '')
+    provider.sync(source17)
+    rows = provider.compare_requirements('3.11. Text-to-Speech', 'C-1-1')
+    assert [r['android_version'] for r in rows] == [16, 17]
+    fetch.return_value = (cdd(16, 'NewSpeech'), '', '')
+    provider.sync(source16)
+    old = provider.read_requirement(token)
+    assert old['revision'] != old['current_revision']
+    assert old['original'] == initial['original']
+    assert provider.sync_due() == []
+    provider.delete(source16)
+    assert provider.read_requirement(token) is None
