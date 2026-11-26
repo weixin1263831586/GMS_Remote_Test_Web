@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import sqlite3
 import uuid
@@ -9,7 +10,7 @@ from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from foundation.config import settings
+from foundation.config import config_manager, settings
 from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 
 from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
@@ -26,8 +27,8 @@ CREATE TABLE IF NOT EXISTS sources (
  generation TEXT NOT NULL, revision TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL DEFAULT '',
  etag TEXT NOT NULL DEFAULT '', modified TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT ''
 );
-CREATE TABLE IF NOT EXISTS partner_grants (
- owner_id TEXT PRIMARY KEY, approved_at TEXT NOT NULL
+CREATE TABLE IF NOT EXISTS partner_model_grants (
+ owner_id TEXT PRIMARY KEY, model_catalog_hash TEXT NOT NULL, approved_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS revisions (
  source_id TEXT NOT NULL, revision TEXT NOT NULL, fetched_at TEXT NOT NULL,
@@ -38,6 +39,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
  condition, original, url UNINDEXED, token UNINDEXED, tokenize='unicode61'
 );
 """
+
+
+def model_catalog_fingerprint():
+    """Bind approval to the enabled model routes without retaining credentials."""
+    config = config_manager.get_ai_config()
+    if not config.get('enabled'):
+        return ''
+    routes = {
+        name: {key: str(provider.get(key) or '') for key in ('model', 'base_url', 'api_format')}
+        for name, provider in (config.get('providers') or {}).items()
+        if isinstance(provider, dict) and provider.get('enabled') and provider.get('model')
+    }
+    if not routes or any(not route['base_url'] for route in routes.values()):
+        return ''
+    return hashlib.sha256(json.dumps(routes, sort_keys=True).encode()).hexdigest()
 
 
 def index_path():
@@ -70,20 +86,27 @@ class WebKnowledgeProvider:
     def set_partner_grant(self, owner_id: str, enabled: bool):
         if not owner_id:
             raise ValueError('Owner identity required')
+        fingerprint = model_catalog_fingerprint() if enabled else ''
+        if enabled and not fingerprint:
+            raise ValueError('No verifiable model catalog')
         with self._db(write=True) as db:
             if enabled:
-                db.execute('INSERT OR REPLACE INTO partner_grants VALUES (?,?)',
-                           (owner_id, datetime.now(timezone.utc).isoformat()))
+                db.execute('INSERT OR REPLACE INTO partner_model_grants VALUES (?,?,?)',
+                           (owner_id, fingerprint, datetime.now(timezone.utc).isoformat()))
             else:
-                db.execute('DELETE FROM partner_grants WHERE owner_id=?', (owner_id,))
+                db.execute('DELETE FROM partner_model_grants WHERE owner_id=?', (owner_id,))
 
     def has_partner_grant(self, owner_id: str):
         if not owner_id or not self._path().is_file():
             return False
         try:
+            fingerprint = model_catalog_fingerprint()
+            if not fingerprint:
+                return False
             with self._db() as db:
-                return db.execute('SELECT 1 FROM partner_grants WHERE owner_id=?', (owner_id,)).fetchone() is not None
-        except sqlite3.Error:
+                return db.execute('SELECT 1 FROM partner_model_grants WHERE owner_id=? AND model_catalog_hash=?',
+                                  (owner_id, fingerprint)).fetchone() is not None
+        except (sqlite3.Error, OSError, ValueError, TypeError):
             return False
 
     def list_sources(self):
