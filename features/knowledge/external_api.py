@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Literal
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -188,13 +187,18 @@ def agent_android_internals_status(request: Request):
 
 
 class WebSourceRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=160)
     url: str = Field(..., min_length=1, max_length=2048)
-    kind: Literal["cdd", "document"] = "document"
-    android_version: int | None = Field(None, ge=1, le=100)
-    license: str = Field(..., min_length=1, max_length=240)
-    enabled: bool = True
+    name: str = Field('', max_length=160)
+    enabled: bool | None = None
+    authorized_for_ai_processing: bool = False
 
+
+def _initial_sync(provider, source_id):
+    try:
+        return provider.sync(source_id)
+    except Exception as exc:
+        logger.warning('Web knowledge initial synchronization failed: %s', type(exc).__name__)
+        return {'source_id': source_id, 'status': 'error'}
 
 @router.get("/web-sources")
 @handle_api_errors
@@ -207,22 +211,27 @@ def list_web_sources(request: Request):
 @handle_api_errors
 def create_web_source(request: Request, payload: WebSourceRequest):
     require_elevated_admin(request)
+    provider = WebKnowledgeProvider()
     try:
-        source_id = WebKnowledgeProvider().save(**payload.model_dump())
+        source_id = provider.save_url(**payload.model_dump())
     except (ValueError, sqlite3.IntegrityError):
-        return error_response("知识源配置无效、重复或访问方式不受支持", 422)
-    return success_response(data={"id": source_id})
+        return error_response('知识源网址无效、重复或未经内容使用授权', 422)
+    sync = _initial_sync(provider, source_id) if payload.enabled is not False else {'status': 'disabled'}
+    return success_response(data={'id': source_id, 'sync': sync})
 
 
 @router.put("/web-sources/{source_id}")
 @handle_api_errors
 def update_web_source(request: Request, source_id: str, payload: WebSourceRequest):
     require_elevated_admin(request)
+    provider = WebKnowledgeProvider()
     try:
-        WebKnowledgeProvider().save(source_id=source_id, **payload.model_dump())
+        provider.save_url(source_id=source_id, **payload.model_dump())
     except (ValueError, sqlite3.IntegrityError):
-        return error_response("知识源配置无效、重复或不存在", 422)
-    return success_response(data={"id": source_id})
+        return error_response('知识源配置无效或不存在；更换网址请添加新知识源', 422)
+    source = next((row for row in provider.list_sources() if row['id'] == source_id), None)
+    sync = _initial_sync(provider, source_id) if source and source['enabled'] and not source['revision'] else None
+    return success_response(data={'id': source_id, 'sync': sync})
 
 
 @router.delete("/web-sources/{source_id}")
