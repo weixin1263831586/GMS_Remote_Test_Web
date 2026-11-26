@@ -20,6 +20,14 @@ MAX_RELATED_CLAUSES = 20
 MAX_RELATED_FRAGMENTS = 5
 MAX_RELATED_TABLE_ROWS = 20
 RAM_TERM = re.compile(r'\bRAM\b|\b(?:advertised|physical|available|system|device|total|usable)\s+memory\b', re.I)
+# Subsystem-local memory is not evidence of installed device RAM capacity.
+_SUBSYSTEM_MEMORY = re.compile(
+    r'\b(?:Android Packet Filtering|APF|Context Hub Runtime Environment|'
+    r'Android Virtualization Framework|IOMMU)\b', re.I
+)
+_GO_DEFINITION = re.compile(
+    r'\b(?:A Go device is|Android Go (?:device|edition)|Go devices? (?:are|must|is))\b', re.I
+)
 CLAUSE_ID = re.compile(r"(?<![A-Za-z0-9])(?:GMS(?:X|-VSR)?|VSR)-[0-9][A-Z0-9_.-]*", re.I)
 
 
@@ -75,6 +83,8 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
     Keep the indexed conditions and nearby text for human review.
     """
     sections = {}
+    excluded_subsystem_sections = 0
+    scanned_sections = 0
     anchors = coverage.get("section_anchors") or {}
     for row in conn.execute(
         "SELECT section_key,path,text_excerpt FROM gms_update_requirement_sections "
@@ -83,18 +93,23 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
         key = row["section_key"]
         if key in excluded_keys:
             continue
+        scanned_sections += 1
+        if _SUBSYSTEM_MEMORY.search(row["path"]):
+            excluded_subsystem_sections += 1
+            continue
         anchor = anchors.get(key)
         sections[key] = {
             "title": row["path"], "section_key": key, "source_revision": revision,
             "source_url": SOURCE_URL + "#" + quote(anchor, safe="-_.:") if anchor else "",
             "clauses": [], "table_rows": [], "fragments": [],
+            "go_definition": bool(_GO_DEFINITION.search(row["text_excerpt"])),
             "clause_matches": 0, "table_row_matches": 0, "fragment_matches": 0,
         }
         text = row["text_excerpt"]
         # Merge nearby matches so a long condition/list is not represented as
         # several near-identical snippets. These are explicitly excerpts.
         ranges = []
-        for match in RAM_TERM.finditer(text):
+        for match in sorted([*RAM_TERM.finditer(text), *_GO_DEFINITION.finditer(text)], key=lambda m: m.start()):
             start, end = max(0, match.start() - 260), min(len(text), match.end() + 360)
             if ranges and start <= ranges[-1][1] and end - ranges[-1][0] <= 1400:
                 ranges[-1] = (ranges[-1][0], end)
@@ -137,13 +152,15 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys):
     matches = [item for item in sections.values()
                if item["clause_matches"] or item["table_row_matches"] or item["fragment_matches"]]
     # Prefer direct clause evidence, but retain section-only notes and tables.
-    matches.sort(key=lambda item: (not item["clause_matches"], not item["table_row_matches"]))
+    matches.sort(key=lambda item: (not item["go_definition"], not item["clause_matches"],
+                                   not item["table_row_matches"], item["section_key"]))
     selected = matches[:MAX_RELATED_SECTIONS]
     return {
         "sections": selected, "section_matches": len(matches),
         "clause_matches": sum(item["clause_matches"] for item in matches),
         "table_row_matches": sum(item["table_row_matches"] for item in matches),
-        "scanned_sections": len(sections),
+        "scanned_sections": scanned_sections,
+        "excluded_subsystem_sections": excluded_subsystem_sections,
         "truncated": len(matches) > len(selected) or any(
             item["clause_matches"] > len(item["clauses"])
             or item["table_row_matches"] > len(item["table_rows"])
@@ -305,6 +322,7 @@ def lookup_requirement_sections(conn, query):
             "requested_android_version": android_version,
             "lookup_scope": "low_ram_declaration" if ram_scope else "section",
             "source_revision": revision, "indexed_at": row["indexed_at"],
+            "revision_text_scope": coverage.get("revision_text_scope", "unknown"),
             "latest_scan_confirmed": bool(latest and latest["run_id"] == row["run_id"]
                                           and latest["state"] == "ready"),
             "truncated": len(sections) > MAX_SECTIONS or any(item["truncated"] for item in result),

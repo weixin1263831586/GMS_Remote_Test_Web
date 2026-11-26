@@ -299,3 +299,45 @@ def test_versioned_ram_lookup_retrieves_other_sections_without_merging_threshold
         assert '4 GB of RAM' in by_anchor['feature']['clauses'][0]['original_text']
         assert by_anchor['notes']['fragments']
         assert lookup_requirement_sections(conn, 'section:GMS-10.0-001')['related_ram'] is None
+
+
+def test_deleted_revision_text_never_enters_active_clause_or_table():
+    doc = fetched("""<article class="devsite-article">
+        <h3 id="example">Example requirements</h3>
+        <p><span>[GMS-1-001] MUST support Android <del>12</del><ins>17</ins>
+        and <span style="text-decoration: line-through">old</span> new mode.</span></p>
+        <table><tr><th>Version</th><th>Limit</th></tr>
+        <tr><td>Android <span><s>12</s>17</span></td><td><del>1</del>2 GB</td></tr></table>
+        <p>Note: Retain this note.</p></article>""")
+    parsed = parse_gms_requirements(doc)
+    clause = parsed.requirement_clauses[0]
+    assert 'Android 17' in clause.original_text
+    assert '12' not in clause.original_text and 'old' not in clause.original_text
+    assert json.loads(parsed.requirement_table_rows[0].values_json) == ['Android 17', '2 GB']
+    assert 'Retain this note' in parsed.requirement_sections[0].text_excerpt
+    assert '12' in html.tostring(doc.doc, encoding='unicode')
+    assert parsed.requirement_coverage['revision_text_scope'] == 'active_markup_only'
+    assert parsed.requirement_coverage['removed_revision_nodes'] == 4
+
+
+def test_device_ram_candidates_prioritize_go_definition_and_exclude_subsystem_memory(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections
+
+    doc = fetched("""<article class="devsite-article">
+        <h3 id="low-ram">Declare Low RAM devices</h3>
+        <p>[GMS-10.0-001] Example declaration.</p>
+        <h3 id="apf">Android Packet Filtering</h3>
+        <p>[GMS-2-001] MUST indicate APF RAM.</p>
+        <h3 id="feature">Feature requirements</h3>
+        <p>[GMS-3-001] Example feature with 8 GB RAM.</p>
+        <h3 id="definitions">Definitions</h3>
+        <p>A Go device is a class of low-memory devices.</p></article>""")
+    with closing(connect(tmp_path / 'scope.sqlite3')) as conn, conn:
+        sync_source(conn, 1, doc, force=True, timestamp='2026-01-01')
+        result = lookup_requirement_sections(conn, 'section:Low RAM;android=16')
+        related = result['related_ram']
+        assert related['excluded_subsystem_sections'] == 1
+        assert related['sections'][0]['source_url'].endswith('#definitions')
+        assert related['sections'][0]['go_definition']
+        assert all(not item['source_url'].endswith('#apf') for item in related['sections'])
+        assert not related['applicability_verified']

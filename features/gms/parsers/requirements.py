@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
+from copy import deepcopy
 from urllib.parse import quote, urljoin, urlsplit
 
 from lxml import html
@@ -84,6 +85,24 @@ def _policy_heading_level(node):
     return 0
 
 
+def _active_policy_article(article):
+    """Remove explicitly deleted text from a copy while preserving surrounding text."""
+    active = deepcopy(article)
+    removed = 0
+    for node in list(active.iterdescendants()):
+        if not isinstance(node.tag, str):
+            continue
+        style = node.get('style', '')
+        if node.tag not in ('del', 's', 'strike') and not re.search(
+            r'(?:^|;)\s*text-decoration(?:-line)?\s*:[^;]*\bline-through\b', style, re.I
+        ):
+            continue
+        if node.getparent() is not None:
+            node.drop_tree()
+            removed += 1
+    return active, removed
+
+
 def _events(node):
     """Walk document order across containers without duplicating nested text."""
     if not isinstance(node.tag, str) or node.tag in _SKIP:
@@ -139,7 +158,9 @@ def section_key_from_heading(heading: html.HtmlElement, path: str) -> tuple[str,
 
 
 def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSource:
-    article = article_node(fetched.doc)
+    raw_article = article_node(fetched.doc)
+    revision = stable_hash(html.tostring(raw_article, encoding='unicode', with_tail=False))
+    article, removed_revision_nodes = _active_policy_article(raw_article)
     source = fetched.source.key
     base = fetched.final_url.split('#', 1)[0]
     anchor_counts = Counter(article.xpath('.//@id') + article.xpath('.//a/@name'))
@@ -162,7 +183,6 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     tables = 0
     current = None
     context = {}
-    revision = stable_hash(html.tostring(article, encoding='unicode', with_tail=False))
 
     def select_section(node, level, title):
         nonlocal current
@@ -301,6 +321,8 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     media_total = len(article.xpath('.//img'))
     coverage = {
         'source_revision': revision,
+        'revision_text_scope': 'active_markup_only',
+        'removed_revision_nodes': removed_revision_nodes,
         'section_anchors': {key: value['anchor'] for key, value in sections.items()
                             if value['anchor'] in anchors},
         'source_scope': 'fetched_html_only',

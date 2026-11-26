@@ -483,6 +483,7 @@ function renderAgentMessages(session) {
                 }
                 if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引，请在 GMS 更新中心核查扫描结果。');
                 if (result.truncated) lines.push('返回范围受限，请缩小章节范围。');
+                if (result.revision_text_scope !== 'active_markup_only') lines.push('当前索引未确认已清除删除线修订文本，请重新同步政策。');
                 const block = document.createElement('div');
                 const addText = (parent, tag, value) => {
                     const node = document.createElement(tag);
@@ -516,7 +517,7 @@ function renderAgentMessages(session) {
                                     if (index >= 0) addText(block, 'p', label + '：' + (row.values[index] || '未列明'));
                                 }
                             }
-                            addText(block, 'strong', 'Go / 非 Go 设备 RAM 要求解读');
+                            addText(block, 'strong', 'Go / 非 Go 设备 RAM 要求解读（证据有限）');
                             addText(block, 'p', 'Low RAM 设备：必须声明或可选声明的容量见上表；Go 产品认证要求不能仅凭此表确认。');
                             const optionalValues = new Set(matchedRows.map(row => {
                                 const index = row.headers.findIndex(value =>
@@ -525,7 +526,7 @@ function renderAgentMessages(session) {
                             }));
                             const optional = optionalValues.size === 1 ? [...optionalValues][0] : '';
                             if (optional && !/^(?:n\s*\/?\s*a|none|not applicable|[-—–]+)$/i.test(optional)) {
-                                addText(block, 'p', '非 Go 设备 RAM（Standard / 非 Low RAM 参考）：' + optional
+                                addText(block, 'p', '非 Low RAM 设备参考容量（非 Go 认证仍需核实）：' + optional
                                     + ' 在表中属于可选声明 Low RAM 的容量，可以选择不声明 Low RAM。');
                                 addText(block, 'p', '这是根据当前版本表格得出的参考结论，不是独立的非 Go 认证最低 RAM 条款；未列出的容量及产品适用条件仍需核验。');
                             } else {
@@ -588,11 +589,23 @@ function renderAgentMessages(session) {
                 }
                 if (result.related_ram) {
                     const related = result.related_ram;
-                    addText(block, 'strong', '其他 RAM 相关政策（功能及适用条件）');
-                    addText(block, 'p', '已检索本地规范其他章节：' + related.scanned_sections + ' 个，命中 '
+                    const relatedDetails = document.createElement('details');
+                    addText(relatedDetails, 'summary', '展开其他 RAM 相关政策（功能及适用条件）');
+                    const definitions = (related.sections || []).filter(section => section.go_definition);
+                    if (definitions.length) {
+                        addText(block, 'p', '已定位可能相关的 Go 产品定义，尚未核验专项认证条件。');
+                        for (const section of definitions) {
+                            addText(block, 'p', '补充证据章节：' + section.title);
+                        }
+                    } else {
+                        addText(block, 'p', '未找到可补足 Go 产品定义的候选章节；仍需读取 Go 专项政策。');
+                    }
+                    block.append(relatedDetails);
+                    addText(relatedDetails, 'p', '已检索本地规范其他章节：' + related.scanned_sections + ' 个，命中 '
                         + related.section_matches + ' 个章节、' + related.clause_matches + ' 个候选条款。');
-                    addText(block, 'p', '以下是跨版本候选原文，需核验目标 Android 版本、首发/升级、设备及芯片条件；不能将功能触发门槛当作统一 GMS 准入门槛。');
-                    if (related.truncated) addText(block, 'p', '返回范围受限：部分候选或上下文未展示，请按章节或条款编号进一步读取。');
+                    addText(relatedDetails, 'p', '以下是跨版本候选原文，需核验目标 Android 版本、首发/升级、设备及芯片条件；不能将功能触发门槛当作统一 GMS 准入门槛。');
+                    if (related.excluded_subsystem_sections) addText(relatedDetails, 'p', '已排除子系统内存相关章节：' + related.excluded_subsystem_sections + ' 个。');
+                    if (related.truncated) addText(relatedDetails, 'p', '返回范围受限：部分候选或上下文未展示，请按章节或条款编号进一步读取。');
                     for (const section of related.sections || []) {
                         const details = document.createElement('details');
                         addText(details, 'summary', section.title + '（' + section.clause_matches + ' 条候选）');
@@ -625,7 +638,7 @@ function renderAgentMessages(session) {
                             } catch (_) { /* Ignore invalid retained URLs. */ }
                         }
                         addText(details, 'p', '文档修订：' + (section.source_revision || '未知'));
-                        block.append(details);
+                        relatedDetails.append(details);
                     }
                 }
                 const meta = addText(block, 'p', lines.join('\n'));
