@@ -22,11 +22,11 @@ from typing import Any
 from foundation.host_metrics import collect_host_metrics
 from foundation.native_tools import resolve_native_tool
 from foundation.security import has_control_chars, quote_device_shell_arg
+from foundation.fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 from foundation.transport_contract import execute_external_transport
 
 from .adb_suppression import adb_daemon_suppressed as _adb_daemon_suppressed
 from .config import WorkerConfig
-from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 
 
 logger = logging.getLogger(__name__)

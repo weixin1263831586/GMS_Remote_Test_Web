@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePath
 
-from foundation import command_result
+from foundation.command_result import CommandResult
 
 
 __all__ = [
@@ -122,11 +122,11 @@ class FastbootPreparationError(RuntimeError):
     pass
 
 
-Runner = Callable[[list[str], int], command_result.CommandResult]
+Runner = Callable[[list[str], int], CommandResult]
 TransportResetCallback = Callable[[str, str], None]
 
 
-def subprocess_runner(argv: list[str], timeout: int) -> command_result.CommandResult:
+def subprocess_runner(argv: list[str], timeout: int) -> CommandResult:
     try:
         completed = subprocess.run(
             argv,
@@ -135,9 +135,9 @@ def subprocess_runner(argv: list[str], timeout: int) -> command_result.CommandRe
             timeout=timeout,
             check=False,
         )
-        return command_result.CommandResult(completed.stdout, completed.stderr, completed.returncode)
+        return CommandResult(completed.stdout, completed.stderr, completed.returncode)
     except (OSError, subprocess.TimeoutExpired) as exc:
-        return command_result.CommandResult(stderr=str(exc), code=-1)
+        return CommandResult(stderr=str(exc), code=-1)
 
 
 class FastbootPreparer:
@@ -177,7 +177,7 @@ class FastbootPreparer:
         *,
         timeout: int = 30,
         required: bool = True,
-    ) -> command_result.CommandResult:
+    ) -> CommandResult:
         result = self.runner(argv, timeout)
         if required and result.code != 0:
             detail = result.output or f"exit code {result.code}"

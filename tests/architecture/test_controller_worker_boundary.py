@@ -54,7 +54,7 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
         "worker.config",
         "worker.suite_actions",
     },
-    # adb proxy + fastboot workflow execution surfaces.
+    # ADB proxy execution surfaces.
     "features/devices/adb/proxy_security.py": {
         "worker.adb_proxy",
     },
@@ -66,13 +66,9 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     },
     "features/devices/bootloader_api.py": {
         "worker.adb_proxy",
-        "worker.fastboot_workflow",
     },
     "features/firmware/api_helpers.py": {
         "worker.adb_proxy",
-    },
-    "features/firmware/gsi_burn.py": {
-        "worker.fastboot_workflow",
     },
 }
 

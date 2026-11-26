@@ -230,6 +230,8 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertIn("foundation/__init__.py", names)
         self.assertIn("foundation/networking.py", names)
         self.assertIn("foundation/transport_contract.py", names)
+        self.assertIn("foundation/fastboot_workflow.py", names)
+        self.assertNotIn("worker/fastboot_workflow.py", names)
 
         installer = (
             project_root / "scripts/deployment/worker/install_cluster_worker.sh"
