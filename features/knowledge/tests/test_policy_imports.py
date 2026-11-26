@@ -47,13 +47,38 @@ def test_general_ask_skips_restricted_imports(tmp_path, monkeypatch):
     store = KnowledgeStore(db_path=tmp_path / 'knowledge.sqlite3', attachment_dir=tmp_path / 'files')
     for title, source in [('Ordinary document', 'manual'), ('Restricted document', 'authorized_policy_import')]:
         store.create_doc('owner-a', space_id='gms', title=title, content_md='Bluetooth', source=source)
-    analyzer = Mock()
-    analyzer.generate.return_value = {'success': True, 'content': 'answer'}
+    import json
+
+    config = {"enabled": True, "primary_provider": "local", "providers": {
+        "local": {"enabled": True, "model": "fixture", "base_url": "http://127.0.0.1:3000"},
+    }}
+    monkeypatch.setattr(web_sources.config_manager, "get_ai_config", lambda: config)
+    analyzer = Mock(config=config)
+    analyzer.rag_local_provider.return_value = "local"
+
+    def infer(prompt, **_kwargs):
+        payload = json.loads(prompt)
+        stage = payload["stage"]
+        assert "Restricted document" not in prompt
+        if stage == "plan":
+            assert any(row["title"] == "Ordinary document" for row in payload["documents"])
+            return {"success": True, "content": '{"searches":[]}'}
+        if stage == "inspect":
+            assert "Ordinary document" in prompt
+            return {"success": True, "content": '{"reads":[]}'}
+        if stage == "draft":
+            return {"success": True, "content": json.dumps({"claims": [
+                {"statement": "Bluetooth", "citations": [{"id": "E1", "quote": "Bluetooth"}]},
+            ]})}
+        return {"success": True, "content": '{"verdicts":[{"id":"C1","supported":true}]}'}
+
+    analyzer.generate_local_rag.side_effect = infer
     monkeypatch.setattr('features.knowledge.service._ask_analyzer_factory', lambda: analyzer)
     result = KnowledgeService(store).ask('owner-a', 'Bluetooth')
     assert result['mode'] == 'ai'
-    assert 'Ordinary document' in analyzer.generate.call_args.args[0]
-    assert 'Restricted document' not in analyzer.generate.call_args.args[0]
+    assert result["rag"]["status"] == "model_reviewed"
+    analyzer.generate.assert_not_called()
+    assert all(row["title"] == "Ordinary document" for row in result["contexts"])
 
 
 def test_partner_grant_requires_upstream_account_verification(monkeypatch):
