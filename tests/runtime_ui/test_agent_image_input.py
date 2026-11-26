@@ -26,15 +26,21 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
                 }))
 
             page.route("**/api/agent/chat", chat)
-            paste = """() => {
+            paste = """async () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = 8;
+                canvas.height = 8;
+                canvas.getContext('2d').fillRect(0, 0, 8, 8);
+                const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
                 const data = new DataTransfer();
-                data.items.add(new File([new Uint8Array([137,80,78,71])], 'clipboard.png', {type:'image/png'}));
+                data.items.add(new File([blob], 'clipboard.png', {type:'image/png'}));
                 document.getElementById('agent-input').dispatchEvent(new ClipboardEvent('paste', {
                     clipboardData: data, bubbles: true, cancelable: true
                 }));
             }"""
             page.evaluate(paste)
             expect(page.locator("#agent-image-previews img")).to_have_count(1)
+            page.wait_for_function("document.querySelector('#agent-image-previews img')?.naturalWidth === 8")
             page.get_by_role("button", name="移除图片 1").click()
             expect(page.locator("#agent-image-previews")).to_be_hidden()
             page.evaluate(paste)

@@ -67,8 +67,8 @@ class UniversalAIAnalyzer:
 
     def get_local_provider(self) -> str | None: return first_local_provider(self.config, _is_local_provider)
 
-    def _post_chat(self, url: str, headers: dict, data: dict, api_format: str):
-        return post_chat(url, headers, data, api_format, timeout=self.timeout)
+    def _post_chat(self, url: str, headers: dict, data: dict, api_format: str, *, allow_redirects: bool = True):
+        return post_chat(url, headers, data, api_format, timeout=self.timeout, allow_redirects=allow_redirects)
 
     def get_provider_statuses(self) -> list[dict]:
         return provider_statuses(self.config)
@@ -146,12 +146,12 @@ class UniversalAIAnalyzer:
                                          {'role': 'user', 'content': content}],
                 max_tokens=min(int(provider.get('max_tokens') or 2000), 4096), system_prompt=system,
             )
-            response = self._post_chat(url, headers, body, fmt)
+            response = self._post_chat(url, headers, body, fmt, allow_redirects=False)
             if response.status_code != 200:
                 return {'success': False, 'error': '视觉模型请求失败'}
             payload = response.json()
             if fmt == API_FORMAT_ANTHROPIC:
-                text = '\\n'.join(part.get('text', '') for part in payload.get('content', [])
+                text = '\n'.join(part.get('text', '') for part in payload.get('content', [])
                                   if isinstance(part, dict) and part.get('type') == 'text')
             else:
                 choices = payload.get('choices') or []

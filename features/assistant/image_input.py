@@ -13,9 +13,9 @@ from PIL import Image, ImageOps
 from features.kkagent import UniversalAIAnalyzer
 from features.users import runtime as users_runtime
 
-from .session_log import _append_message, _append_step, _settle_step
 from foundation.responses import error_response, success_response
-from .session_log import session_payload
+
+from .session_log import _append_message, _append_step, _settle_step, session_payload
 
 
 MAX_IMAGES = 3
@@ -53,12 +53,14 @@ def prepare_images(values: list[str]) -> list[str]:
                     raise ValueError("不支持动态图片")
                 source.load()
                 pixels = ImageOps.exif_transpose(source)
+                # Preserve palette transparency when normalizing screenshots.
+                transparent = "A" in pixels.getbands() or "transparency" in pixels.info
                 if kind == "jpeg":
                     pixels = pixels.convert("RGB")
                     mime = "jpeg"
                     fmt = "JPEG"
                 else:
-                    pixels = pixels.convert("RGBA" if "A" in pixels.getbands() else "RGB")
+                    pixels = pixels.convert("RGBA" if transparent else "RGB")
                     mime = "png"
                     fmt = "PNG"
                 buffer = io.BytesIO()
@@ -82,7 +84,7 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
     prior_status = session.get("status") or "idle"
     session["agent_image_busy"] = True
     session["status"] = "thinking"
-    step = None
+    step_id = None
     try:
         async with _slots:
             try:
@@ -117,6 +119,11 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
             session.pop("agent_image_busy", None)
             return success_response({"session": session_payload(session)}, "Agent updated")
     finally:
+        if step_id:
+            unfinished = next((item for item in session.get("steps", []) if item["id"] == step_id), None)
+            if unfinished and unfinished.get("status") == "running":
+                unfinished.update(status="error", detail="图片分析未完成")
+                _settle_step(unfinished)
         session.pop("agent_image_busy", None)
         if session.get("status") == "thinking":
             session["status"] = prior_status

@@ -146,17 +146,19 @@ def build_chat_request(
     return url, headers, data, api_format
 
 
-def post_chat(url: str, headers: dict, data: dict, api_format: str, timeout: int = 60):
+def post_chat(url: str, headers: dict, data: dict, api_format: str, timeout: int = 60, *,
+              allow_redirects: bool = True):
     """POST 补全请求；常开思考模型拒绝关闭思考时降级 reasoning_effort 重试一次。"""
+    options = {} if allow_redirects else {'allow_redirects': False}
     response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                             json=data, timeout=timeout)
+                             json=data, timeout=timeout, **options)
     if (response.status_code in _THINKING_RETRY_STATUSES
             and rejects_disabling_thinking(_error_message(response))):
         retry_data = {k: v for k, v in data.items() if k not in _THINKING_CONTROL_KEYS}
         if api_format != API_FORMAT_ANTHROPIC:
             retry_data['reasoning_effort'] = 'low'
         response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                                 json=retry_data, timeout=timeout)
+                                 json=retry_data, timeout=timeout, **options)
     return response
 
 

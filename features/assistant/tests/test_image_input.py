@@ -47,9 +47,42 @@ def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt):
     url, _, payload, actual_format = analyzer._post_chat.call_args.args
     assert url.startswith("http://127.0.0.1:8000/")
     assert actual_format == fmt
+    assert analyzer._post_chat.call_args.kwargs == {"allow_redirects": False}
     block = payload["messages"][-1]["content"][1]
     assert block["type"] == ("image" if fmt == "anthropic" else "image_url")
     config["providers"]["local"]["capabilities"] = []
     assert analyzer.image_provider() is None
     assert not analyzer.generate_image_analysis("Analyze", [image_data()])["success"]
     assert analyzer._post_chat.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_image_turn_retains_only_text_and_count(monkeypatch):
+    import json
+
+    from features.assistant import image_input, session_log
+
+    monkeypatch.setattr(session_log, "_persist_transcript", lambda _session: None)
+    monkeypatch.setattr(image_input.users_runtime, "config_manager", Mock())
+    analyzer = Mock()
+    analyzer.image_provider.return_value = "local"
+    analyzer.generate_image_analysis.return_value = {"success": True, "content": "Visible result"}
+    monkeypatch.setattr(image_input, "UniversalAIAnalyzer", lambda _config: analyzer)
+    current = {"session_id": "visual", "status": "idle", "messages": [], "steps": []}
+    raw = image_data()
+    result = await image_input.analyze_image_turn(current, "Analyze", [raw])
+    assert result.status_code == 200
+    assert analyzer.generate_image_analysis.call_count == 1
+    assert current["status"] == "idle"
+    assert current["messages"][0]["data"]["image_count"] == 1
+    assert current["messages"][-1]["content"] == "Visible result"
+    assert current["steps"][-1]["status"] == "done"
+    assert "data:image/" not in json.dumps(current)
+    assert "agent_image_busy" not in current
+
+    analyzer.image_provider.return_value = None
+    result = await image_input.analyze_image_turn(current, "Analyze", [raw])
+    assert result.status_code == 503
+    assert analyzer.generate_image_analysis.call_count == 1
+    assert len(current["messages"]) == 2
+    assert current["status"] == "idle"
