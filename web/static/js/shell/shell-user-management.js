@@ -253,32 +253,32 @@
 
                 return `
                     <tr>
-                        <td title="${escapeHtml(user.client_id || '')}" style="padding: 4px 6px; text-align: center;  ">
+                        <td title="${escapeHtml(user.client_id || '')}" style="text-align: center;  ">
                             ${escapeHtml(user.client_id || '')}
                         </td>
-                        <td title="${escapeHtml(user.ip || '')}" style="padding: 4px 6px; text-align: center;  ">
+                        <td title="${escapeHtml(user.ip || '')}" style="text-align: center;  ">
                             ${escapeHtml(user.ip || '')}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center;  color: ${sourceColor}; ">
+                        <td style="text-align: center;  color: ${sourceColor}; ">
                             ${escapeHtml(sourceLabel)}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center;  ${localDevicesStyle}" ${localDevicesTitle}>
+                        <td style="text-align: center;  ${localDevicesStyle}" ${localDevicesTitle}>
                             ${escapeHtml(localDevices)}
                         </td>
-                        <td title="${escapeHtml(devices)}" style="padding: 4px 6px; text-align: center;  ">
+                        <td title="${escapeHtml(devices)}" style="text-align: center;  ">
                             ${escapeHtml(devices)}
                         </td>
-                        <td title="${escapeHtml(statusText)}" style="padding: 4px 6px; text-align: center;">
+                        <td title="${escapeHtml(statusText)}" style="text-align: center;">
                             <span style="color: ${statusColor};  ">●</span>
                             <span style="margin-left: 6px; ">${escapeHtml(statusText)}</span>
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; ">
+                        <td style="text-align: center; ">
                             ${createdAt}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center; ">
+                        <td style="text-align: center; ">
                             ${lastSeen}
                         </td>
-                        <td style="padding: 4px 6px; text-align: center;">
+                        <td style="text-align: center;">
                             <div class="user-actions-grid">
                                 ${clusterCell}${removeCell}
                             </div>
