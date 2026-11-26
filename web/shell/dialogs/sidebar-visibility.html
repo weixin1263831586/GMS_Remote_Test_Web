@@ -21,19 +21,13 @@
 
                     </section>
                     <section id="sidebar-settings-panel-system" class="sidebar-settings-panel" data-sidebar-settings-panel="system" role="tabpanel" hidden>
-                        <div class="sidebar-settings-tabs" role="group" aria-label="系统配置分类">
-                            <button type="button" class="sidebar-settings-tab active" data-system-settings-tab="runtime" data-click="switchSystemSettingsSection" data-a0="runtime">运行与邮件</button>
-                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="models" data-click="switchSystemSettingsSection" data-a0="models">大模型 / KKAgent</button>
-                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="redmine" data-click="switchSystemSettingsSection" data-a0="redmine">Redmine</button>
-                            <button type="button" class="sidebar-settings-tab" data-system-settings-tab="external" data-click="switchSystemSettingsSection" data-a0="external">外部服务</button>
-                        </div>
-                        <section data-system-settings-panel="runtime">
+                        <section data-system-settings-section="runtime">
                             <div id="system-config-body" aria-live="polite"></div>
                             <div class="modal-buttons" id="system-config-footer" hidden>
                                 <button type="button" class="btn-xxs btn-primary" data-click="saveConfig">保存运行配置</button>
                             </div>
                         </section>
-                        <section data-system-settings-panel="models" hidden>
+                        <section data-system-settings-section="models">
                             <div class="config-section">
                                 <div class="config-section-title">统一模型目录</div>
                                 <p class="modal-info-text">模型由 Controller 的 configs/local/config.json 中 ai_models 统一管理。对话 Agent、报告分析、Redmine 和检索分别使用授权的模型能力及路由，凭据不在页面回显。</p>
@@ -41,10 +35,13 @@
                                 <div id="system-model-catalog" aria-live="polite"></div>
                             </div>
                         </section>
-                        <section data-system-settings-panel="redmine" hidden>
-                            <iframe id="system-redmine-settings-frame" title="Redmine 统计、凭据及每日晨报配置" style="width:100%;height:60vh;border:0;display:block"></iframe>
+                        <section data-system-settings-section="redmine">
+                            <div class="config-section">
+                                <div class="config-section-title">Redmine 统计、凭据及每日晨报配置</div>
+                                <iframe id="system-redmine-settings-frame" title="Redmine 统计、凭据及每日晨报配置"></iframe>
+                            </div>
                         </section>
-                        <section data-system-settings-panel="external" hidden>
+                        <section data-system-settings-section="external">
                             <div class="config-section">
                                 <div class="config-section-title">GMS 助手服务</div>
                                 <div class="modal-form-row"><label for="gms-assistant-url">服务地址:</label><input type="url" id="gms-assistant-url" autocomplete="off" /></div>

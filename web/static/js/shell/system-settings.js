@@ -1,10 +1,12 @@
 // System settings shared by all workspace pages.
-let systemSettingsSection = '';
+let systemSettingsLoad = null;
 let systemConfigGeneration = 0;
 let staticRoutesLoaded = false;
 function resetSystemSettings() {
     systemConfigGeneration++;
-    systemSettingsSection = '';
+    systemSettingsLoad = null;
+    const panel = document.getElementById('sidebar-settings-panel-system');
+    if (panel) panel.scrollTop = 0;
     staticRoutesLoaded = false;
     emailSenderConfigLoaded = false;
     const frame = document.getElementById('system-redmine-settings-frame');
@@ -15,24 +17,26 @@ function resetSystemSettings() {
     const input = document.getElementById('gms-assistant-url');
     if (input) { input.value = ''; delete input.dataset.loaded; }
 }
-function switchSystemSettingsSection(name) {
-    const allowed = ['runtime', 'models', 'redmine', 'external'];
-    const target = allowed.includes(name) ? name : 'runtime';
-    document.querySelectorAll('[data-system-settings-tab]').forEach(button => {
-        button.classList.toggle('active', button.dataset.systemSettingsTab === target);
-    });
-    document.querySelectorAll('[data-system-settings-panel]').forEach(panel => {
-        panel.hidden = panel.dataset.systemSettingsPanel !== target;
-    });
-    if (systemSettingsSection === target) return;
-    systemSettingsSection = target;
-    if (target === 'runtime') void loadSystemRuntimeConfig();
-    if (target === 'models') void loadSystemModelCatalog();
-    if (target === 'external') void loadExternalServiceConfig();
-    if (target === 'redmine') {
+function loadSystemSettings() {
+    if (!systemSettingsLoad) {
         const frame = document.getElementById('system-redmine-settings-frame');
         if (frame && !frame.getAttribute('src')) frame.src = '/redmine-agent?settings=1';
+        systemSettingsLoad = Promise.allSettled([
+            loadSystemRuntimeConfig(), loadSystemModelCatalog(), loadExternalServiceConfig(),
+        ]);
     }
+    return systemSettingsLoad;
+}
+
+async function scrollSystemSettingsTo(sectionName) {
+    if (!['runtime', 'models', 'redmine', 'external'].includes(sectionName)) return;
+    const pending = loadSystemSettings();
+    await pending;
+    if (pending !== systemSettingsLoad) return;
+    const panel = document.getElementById('sidebar-settings-panel-system');
+    const section = panel?.querySelector('[data-system-settings-section="' + sectionName + '"]');
+    if (!section || panel.hidden || !ModalManager.isOpen('sidebar-visibility-modal')) return;
+    panel.scrollTop += section.getBoundingClientRect().top - panel.getBoundingClientRect().top;
 }
 
 async function loadSystemModelCatalog(probeProvider = '') {

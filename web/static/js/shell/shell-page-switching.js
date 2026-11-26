@@ -173,7 +173,7 @@
             // panel, so hide it when the read-only project guide is selected.
             const footer = document.querySelector('#sidebar-visibility-modal .sidebar-settings-footer');
             if (footer) footer.hidden = target !== 'visibility';
-            if (target === 'system') switchSystemSettingsSection(systemSettingsSection || 'runtime');
+            if (target === 'system') void loadSystemSettings();
         }
 
         function setGuideImageZoom(actualSize) {
@@ -243,12 +243,11 @@
                 </label>`;
             }).join('');
 
-            systemSettingsSection = '';
-            if (tabName === 'system' && sectionName) switchSystemSettingsSection(sectionName);
             switchSidebarSettingsTab(tabName);
 
             ModalManager.onClose('sidebar-visibility-modal', resetSystemSettings);
             ModalManager.open('sidebar-visibility-modal');
+            if (tabName === 'system' && sectionName) void scrollSystemSettingsTo(sectionName);
         }
 
         function closeSidebarVisibilityModal() {
