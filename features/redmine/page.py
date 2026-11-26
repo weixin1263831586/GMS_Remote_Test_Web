@@ -16,7 +16,6 @@ PAGE_SCRIPTS = (
     "issues.js",
     "statistics.js",
     "knowledge.js",
-    "daily-brief-diagnosis.js",
     "daily-brief-session.js",
     "daily-brief-timeline.js",
     "analysis-timeline.js",

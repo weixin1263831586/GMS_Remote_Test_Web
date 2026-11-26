@@ -299,9 +299,7 @@ async function lookupSingleIssueHistory(issueId) {
   return false;
 }
 
-// 单号分析与每日晨报行共用的实机取证六态标签 / 证据门禁提示 / 系统权威
-// 元数据 / 证据质量提示已拆至 daily-brief-diagnosis.js（运行时全局
-// 函数，加载顺序与其他辅助模块一致）。
+// 单号分析与每日晨报共用 core.js 中的诊断呈现函数。
 
 function findSingleIssueAnalysis(runId) {
   return singleIssueAnalysisHistory.find(function (item) {

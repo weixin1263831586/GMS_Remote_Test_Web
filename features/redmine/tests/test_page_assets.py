@@ -62,3 +62,15 @@ def test_merged_markdown_table_helper_serves_from_core_js(client):
     core = client.get("/redmine-agent/assets/core.js")
     assert core.status_code == 200
     assert "function _splitMarkdownTableRow" in core.text
+
+
+def test_shared_diagnosis_helpers_serve_from_core_js(client):
+    core = client.get("/redmine-agent/assets/core.js")
+    assert core.status_code == 200
+    assert "function dailyBriefEvidenceTag(" in core.text
+    assert "function dailyBriefEvidenceGateNotice(" in core.text
+    assert "function dailyBriefSystemMetadata(" in core.text
+    assert "function dailyBriefQualityChip(" in core.text
+    assert "function singleIssueAnalysisMeta(" in core.text
+    assert "function dailyBriefPolicyEvidence(" in core.text
+    assert client.get("/redmine-agent/assets/daily-brief-diagnosis.js").status_code == 404
