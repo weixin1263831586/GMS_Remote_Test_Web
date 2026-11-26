@@ -143,6 +143,11 @@ or operational tool execution is allowed. Raw images are validated, stripped
 of metadata and used only for the current analysis; the persisted transcript
 contains the text, image count and resulting answer, not the image bytes.
 Text-only questions continue through the original Agent planning path.
+Image turns with text additionally retrieve bounded public CDD background from
+the local web index. The same revision-bound context policy is used by report
+diagnosis. Image-only turns do not perform OCR-driven retrieval. The transcript
+records candidate references and incomplete coverage, not retrieved text. No
+private knowledge, Partner scan or operational tool is exposed by this path.
 
 ## Shared-layer invariants
 
@@ -162,6 +167,18 @@ The existing external knowledge UI can build multiple bounded semantic batches
 in one confirmed operation. It stops on completion, no progress, busy or error,
 and can resume committed batches later. It is not a persistent background
 scheduler; closing the page stops further client-side requests.
+
+### Automatic public CDD index maintenance
+
+Set `retrieval.auto_index_public_cdd` to the JSON boolean `true` in addition
+to the existing local embedding configuration to enable bounded automatic
+maintenance. The Controller\x27s existing external-knowledge lifecycle tick
+runs at most one public CDD batch (up to 128 vectors) by default. An attempt
+timestamp is persisted before inference, so restarts and failures rotate to
+other sources fairly and resume from committed vectors. Disabled, stale or
+non-CDD sources are not scheduled. Owner-scoped and restricted indexes are
+not automatically scheduled by this option. The derived index still reflects
+only the retained authorized manifest, not upstream coverage.
 
 ## Module boundary
 
