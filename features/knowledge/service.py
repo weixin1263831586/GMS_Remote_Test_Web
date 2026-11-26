@@ -157,15 +157,23 @@ class KnowledgeService:
                 "rag": result}
 
 
-def analyze_public_cdd(question, *, limit=8, android_api_level=None):
+def analyze_public_cdd(question, *, limit=8, android_api_level=None, recall_only=False):
     """Public-only Agent entry. No owner or restricted document content is exposed."""
     result = local_document_rag(question, [web_source(android_api_level=android_api_level, cdd_only=True)],
-                                _ask_analyzer_factory, limit=limit)
-    return {"answer": render_rag_answer(result), "rag": result, "coverage_complete": False,
-            "results": [{"source": item["source"], "source_path": item["reference"],
-                         "source_revision": item["revision"], "snippet": item["text"],
-                         "title": item["metadata"].get("title"), "extra": item["metadata"],
-                         "evidence_level": "background"} for item in result["evidence"]]}
+                                _ask_analyzer_factory, limit=limit, recall_only=recall_only)
+    rows = []
+    for item in result["evidence"]:
+        metadata = item["metadata"]
+        rows.append({"source": item["source"], "source_path": item["reference"],
+                     "source_revision": item["revision"], "snippet": item["text"],
+                     "title": metadata.get("title"), "applicable_versions": str(metadata.get("android_version") or ""),
+                     "source_anchors": [{"url": metadata["source_url"], "revision": item["revision"],
+                                         "evidence_type": "official"}],
+                     "extra": {**metadata, "source_kind": "cdd", "status": "indexed",
+                               "reference": item["reference"], "applicability_context": metadata.get("condition", "")},
+                     "evidence_level": "background"})
+    return {"answer": render_rag_answer(result) if not recall_only else "",
+            "rag": result, "coverage_complete": False, "results": rows}
 
 
 def sync_due_cdd_understanding():
