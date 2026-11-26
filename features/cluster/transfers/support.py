@@ -14,7 +14,7 @@ from features.auth import (
 )
 
 from ..api import _require_agent_scope_when_agent, service
-from ..device_operations.claims import operation_claim_payload
+from ..device_operations.execution import operation_claim_payload
 
 
 def require_export_read(

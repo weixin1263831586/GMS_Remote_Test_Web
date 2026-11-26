@@ -21,9 +21,6 @@ class FirmwareRuntime:
     get_client_id_from_request: RuntimeCallable | None = None
     project_root: Path | None = None
     firmware_transfer_timeout: int = 3600
-    gsi_progress_increment: int = 1
-    gsi_progress_max: int = 95
-    gsi_progress_poll_interval: float = 1
     lock_firmware_devices: RuntimeCallable | None = None
     release_firmware_devices: RuntimeCallable | None = None
     firmware_share_store: object | None = None

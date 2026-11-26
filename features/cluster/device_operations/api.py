@@ -27,8 +27,8 @@ from foundation.error_model import ApiError, record_internal_error
 
 from ..api import _require_cluster_enabled, service
 from ..models import ClusterDeviceAction
-from .claims import device_action_claim_payload
 from .execution import (
+    device_action_claim_payload,
     execute_local_operation,
     fenced_local_payload,
     request_digest,
