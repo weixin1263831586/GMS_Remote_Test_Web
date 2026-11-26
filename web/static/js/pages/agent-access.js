@@ -130,8 +130,7 @@ async function agentAccessReload(button) {
     if (!container || refreshButton?.disabled) return;
     const sequence = ++agentAccessLoadSequence;
     if (refreshButton) {
-        refreshButton.disabled = true;
-        refreshButton.textContent = '刷新中…';
+        setActionButtonBusy(refreshButton, true, '刷新中');
     }
     if (!agentAccessLoaded) {
         container.innerHTML = '<tr><td colspan="11" class="agent-access-empty">正在加载接入凭据…</td></tr>';
@@ -159,8 +158,7 @@ async function agentAccessReload(button) {
         }
     } finally {
         if (sequence === agentAccessLoadSequence && refreshButton) {
-            refreshButton.disabled = false;
-            refreshButton.textContent = '↻ 刷新';
+            setActionButtonBusy(refreshButton, false);
         }
     }
 }
