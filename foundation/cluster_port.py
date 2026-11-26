@@ -10,12 +10,79 @@ single-host behavior.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 from starlette.requests import Request
 
+from foundation.device_claims import DeviceClaimRegistry
 
-ClusterServiceProvider = Callable[[], Any]
+
+class ClusterConfigContract(Protocol):
+    @property
+    def local_worker_id(self) -> str: ...
+
+    @property
+    def remote_dispatch_enabled(self) -> bool: ...
+
+
+class ClusterRepositoryContract(Protocol):
+    """Storage capabilities consumed through the cluster port."""
+
+    @property
+    def db_path(self) -> Path: ...
+
+    @property
+    def claims(self) -> DeviceClaimRegistry: ...
+
+    def get_worker(self, worker_id: str) -> dict[str, Any] | None: ...
+    def list_devices(self, worker_id: str = '') -> list[dict[str, Any]]: ...
+    def refresh_worker_devices(self, worker_id: str, devices: list[dict[str, Any]]) -> None: ...
+    def upsert_seen_device(self, worker_id: str, serial: str) -> None: ...
+    def resolve_worker_device(self, worker_id: str, value: str) -> dict[str, Any] | None: ...
+    def get_job(self, job_id: str) -> dict[str, Any] | None: ...
+    def list_jobs(
+        self, limit: int = 100, owner_id: str = '', include_active: bool = False,
+    ) -> list[dict[str, Any]]: ...
+    def list_events(self, job_id: str, after: int = -1, limit: int = 500) -> list[dict[str, Any]]: ...
+    def get_reservation_by_source(self, source_id: str) -> dict[str, Any] | None: ...
+    def acquire_device_operation_claim(
+        self, worker_id: str, devices: list[str], *, owner_id: str,
+        source_type: str, source_id: str, ttl_seconds: int = 3600, username: str = '',
+    ) -> list[dict[str, Any]]: ...
+    def claim_fencing_tokens(
+        self, records: list[dict[str, Any]], attempt_id: str, *,
+        device_ids: set[str] | None = None,
+    ) -> list[dict[str, Any]]: ...
+    def force_release_local_aoa_operation(self, device_key: str, local_worker_id: str) -> tuple[bool, str]: ...
+    def create_command(self, data: dict[str, Any], *, attach_to_job: bool = False) -> dict[str, Any]: ...
+    def get_command(self, command_id: str) -> dict[str, Any] | None: ...
+    def find_correlated_command(
+        self, worker_id: str, command_type: str, key: str, value: str,
+    ) -> dict[str, Any] | None: ...
+    def create_transfer(
+        self, worker_id: str, transfer_type: str = 'suite_export', owner_id: str = '',
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+    def get_transfer(self, transfer_id: str) -> dict[str, Any] | None: ...
+    def update_transfer(self, transfer_id: str, **values: Any) -> dict[str, Any] | None: ...
+
+
+class ClusterServiceContract(Protocol):
+    @property
+    def config(self) -> ClusterConfigContract: ...
+
+    @property
+    def repository(self) -> ClusterRepositoryContract: ...
+
+    @property
+    def effective_enabled(self) -> bool: ...
+
+    def list_workers(self) -> list[dict[str, Any]]: ...
+    def has_command_agent(self, worker_id: str) -> bool: ...
+
+
+ClusterServiceProvider = Callable[[], ClusterServiceContract]
 WorkerTokens = Callable[[], dict[str, str]]
 CancelJob = Callable[[str, Request], dict[str, Any]]
 AuthenticateWorker = Callable[[str, str | None], None]
@@ -145,7 +212,7 @@ def submit_device_action(request: Request, payload: dict[str, Any]) -> Awaitable
     return _device_action_request(request, payload)
 
 
-def get_cluster_service() -> Any:
+def get_cluster_service() -> ClusterServiceContract:
     """Return the cluster service, or raise when unavailable."""
     if _cluster_service_provider is None:
         raise RuntimeError("cluster service is not configured")

@@ -7,12 +7,10 @@ None-on-unavailable semantics for single-host fallback.
 
 from __future__ import annotations
 
-from typing import Any
-
 from foundation import cluster_port
 
 
-def get_cluster_service() -> Any:
+def get_cluster_service() -> cluster_port.ClusterServiceContract | None:
     """Return the cluster service, or ``None`` when unavailable."""
     try:
         return cluster_port.get_cluster_service()

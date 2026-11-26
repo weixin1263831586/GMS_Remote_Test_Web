@@ -8,6 +8,7 @@ behavior. Port registration must come from the composition root
 importing a feature package.
 """
 
+import inspect
 import unittest
 from unittest.mock import MagicMock
 
@@ -173,6 +174,27 @@ class RedmineAgentFactoryConfigureSemanticsTests(unittest.TestCase):
         redmine_api.configure_agent_factories(report_analyzer_factory=None)
 
         self.assertIsNone(redmine_api._REPORT_ANALYZER_FACTORY)
+
+
+class ClusterContractTests(unittest.TestCase):
+    def test_repository_contract_members_exist(self):
+        from features.cluster import ClusterRepository
+
+        contract = cluster_port.ClusterRepositoryContract
+        methods = {
+            name for name, value in vars(contract).items()
+            if not name.startswith('_') and inspect.isfunction(value)
+        }
+        for name in methods:
+            with self.subTest(name=name):
+                self.assertTrue(callable(getattr(ClusterRepository, name, None)))
+
+    def test_service_contract_members_exist(self):
+        from features.cluster import ClusterService
+
+        self.assertTrue(callable(ClusterService.list_workers))
+        self.assertTrue(callable(ClusterService.has_command_agent))
+        self.assertIsInstance(ClusterService.effective_enabled, property)
 
 
 class CrossFeatureWiringTests(unittest.TestCase):
