@@ -131,7 +131,7 @@ class KnowledgeService:
         return self.store.get_doc(user_id, doc["doc_id"]) or doc
 
     def ask(self, user_id: str, question: str, *, space_id: str = "", limit: int = 8,
-            include_external: bool = False) -> dict[str, Any]:
+            include_external: bool = False, include_authorized_imports: bool = False) -> dict[str, Any]:
         question = (question or "").strip()
         if not question:
             return {"answer": "请输入问题。", "contexts": []}
@@ -139,7 +139,7 @@ class KnowledgeService:
         # approved imports with the current model catalog may join ordinary documents.
         catalog = model_catalog_fingerprint()
         sources = [personal_source(self.store, user_id, space_id=space_id)]
-        if catalog:
+        if include_authorized_imports and catalog:
             sources.append(personal_source(self.store, user_id, space_id=space_id,
                                            approved_only=True, catalog_hash=catalog))
         if include_external:
