@@ -16,13 +16,13 @@ import sqlite3
 import threading
 import uuid
 from contextlib import closing
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from foundation.config_paths import sanitize_owner_id
 
 from ..users import _now, owner_redmine_root
-from .jobs import DailyBriefJobStore
 from .models import (
     DailyBriefIssue,
     DailyBriefRun,
@@ -44,6 +44,7 @@ ISSUE_COLUMNS = (
     "result",
 )
 TERMINAL_RUN_STATUSES = frozenset({"completed", "partial", "failed", "cancelled"})
+JOB_KINDS = frozenset({"run", "issue"})
 
 
 def canonical_owner_id(owner_id: str) -> str:
@@ -55,6 +56,10 @@ def canonical_owner_id(owner_id: str) -> str:
     晨报（UI 显示「暂无每日晨报」）。所有读写一律先经此函数规范化。
     """
     return sanitize_owner_id(owner_id)
+
+
+def _new_job_id() -> str:
+    return "dbj_" + uuid.uuid4().hex
 
 
 def new_run_id() -> str:
@@ -78,7 +83,6 @@ class DailyBriefRepository:
         self._lock = threading.RLock()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
-        self.jobs = DailyBriefJobStore(self)
 
     # ------------------------------------------------------------------ schema
 
@@ -761,37 +765,290 @@ class DailyBriefRepository:
 
     # ------------------------------------------------------------------ jobs
 
-    # durable job 队列已拆分至 daily_brief_jobs.DailyBriefJobStore；这里保留
-    # 薄委托，既有调用方无需改动。原子化入口见 create_run_and_enqueue_job。
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    @classmethod
+    def _lease_expiry(cls, seconds: int) -> str:
+        return (
+            datetime.now(timezone.utc) + timedelta(seconds=max(10, int(seconds)))
+        ).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        with closing(self._connect()) as conn, conn:
+            row = conn.execute(
+                "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (job_id,)
+            ).fetchone()
+            return dict(row) if row is not None else None
+
+    def has_active_job(self, run_id: str, kind: str | None = None) -> bool:
+        """run 是否仍有 queued/running 的 job（already_running 兜底校验）。"""
+        sql = (
+            "SELECT 1 FROM redmine_daily_brief_jobs WHERE run_id=? "
+            "AND status IN ('queued','running')"
+        )
+        params: list[Any] = [run_id]
+        if kind is not None:
+            sql += " AND kind=?"
+            params.append(kind)
+        with closing(self._connect()) as conn, conn:
+            return conn.execute(sql + " LIMIT 1", params).fetchone() is not None
+
+    def cancel_queued_issue_jobs(self, run_id: str) -> int:
+        """作废 run 的全部排队 issue-job（force 重跑前调用）。
+
+        force 重跑会删除 issue 行（refreeze），排队的
+        issue-job 若不清除，会在 run-job 之后被领取并因 issue 行不存在
+        而失败。claim 门控是兜底，这里在重置时源头清除。
+        """
+        with self._lock, closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                "worker_id='',lease_token='',lease_expires_at='',"
+                "finished_at=?,error='superseded by full run rerun' "
+                "WHERE run_id=? AND kind='issue' AND status='queued'",
+                (self._utc_now(), run_id),
+            )
+            return cursor.rowcount
+
+    def _active_job(
+        self, conn: sqlite3.Connection, run_id: str, kind: str, issue_id: int
+    ) -> sqlite3.Row | None:
+        return conn.execute(
+            "SELECT * FROM redmine_daily_brief_jobs WHERE run_id=? AND kind=? "
+            "AND issue_id=? AND status IN ('queued','running') "
+            "ORDER BY requested_at LIMIT 1",
+            (run_id, kind, issue_id),
+        ).fetchone()
+
+    def _reset_run_for_enqueue(self, conn: sqlite3.Connection, run_id: str) -> None:
+        # 重排队时刷新 started_at：否则历史 completed run 的旧时间戳会让
+        # reset_stale_running() 把刚排队的任务当成超时僵尸标成 failed。
+        conn.execute(
+            "UPDATE redmine_daily_brief_runs SET status='pending', started_at=?, "
+            "finished_at='', error='', cancel_requested=0, updated_at=? WHERE run_id=?",
+            (_now(), _now(), run_id),
+        )
+
+    def _insert_job(
+        self, conn: sqlite3.Connection, run_id: str, *, kind: str, issue_id: int
+    ) -> tuple[dict[str, Any], bool]:
+        """在既有事务/连接里插入 job；(run_id, kind, issue_id) 幂等合流。
+
+        合流键与部分唯一索引 idx_brief_jobs_active 一致：不同 issue 的
+        reanalyze 绝不能被同 run job 静默吞掉。
+        """
+        existing = self._active_job(conn, run_id, kind, issue_id)
+        if existing is not None:
+            return dict(existing), False
+        try:
+            job_id = _new_job_id()
+            conn.execute(
+                "INSERT INTO redmine_daily_brief_jobs "
+                "(job_id,run_id,kind,issue_id,status,requested_at) "
+                "VALUES (?,?,?,?, 'queued', ?)",
+                (job_id, run_id, kind, issue_id, self._utc_now()),
+            )
+        except sqlite3.IntegrityError:
+            # 跨进程并发：另一进程刚为同一 (run,kind,issue) 插入。
+            existing = self._active_job(conn, run_id, kind, issue_id)
+            if existing is None:
+                raise
+            return dict(existing), False
+        row = conn.execute(
+            "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (job_id,)
+        ).fetchone()
+        return dict(row), True
 
     def enqueue_job(
         self, run_id: str, *, kind: str = "run", issue_id: int = 0
     ) -> tuple[dict[str, Any], bool]:
-        return self.jobs.enqueue_job(run_id, kind=kind, issue_id=issue_id)
+        """持久化一个 Web/CLI 请求；同一目标已有活动 job 时幂等复用。"""
+        if kind not in JOB_KINDS:
+            raise ValueError(f"unsupported daily brief job kind: {kind}")
+        target_issue = int(issue_id or 0)
+        if kind == "run":
+            target_issue = 0
+        with self._lock, closing(self._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            run = conn.execute(
+                "SELECT run_id, status FROM redmine_daily_brief_runs WHERE run_id=?",
+                (run_id,),
+            ).fetchone()
+            if run is None:
+                raise ValueError(f"daily brief run not found: {run_id}")
+            if kind == "issue":
+                issue = conn.execute(
+                    "SELECT issue_id FROM redmine_daily_brief_issues "
+                    "WHERE run_id=? AND issue_id=?",
+                    (run_id, target_issue),
+                ).fetchone()
+                if issue is None:
+                    raise ValueError(f"issue {target_issue} not found in run {run_id}")
+            job, created = self._insert_job(conn, run_id, kind=kind, issue_id=target_issue)
+            if created:
+                self._reset_run_for_enqueue(conn, run_id)
+                if kind == "issue":
+                    conn.execute(
+                        "UPDATE redmine_daily_brief_issues SET status='pending', "
+                        "started_at='', finished_at='', error='', error_type='' "
+                        "WHERE run_id=? AND issue_id=?",
+                        (run_id, target_issue),
+                    )
+            return job, created
 
-    def get_job(self, job_id: str) -> dict[str, Any] | None:
-        return self.jobs.get_job(job_id)
-
-    def has_active_job(self, run_id: str, kind: str | None = None) -> bool:
-        return self.jobs.has_active_job(run_id, kind)
-
-    def claim_next_job(self, worker_id: str, lease_seconds: int = 90):
-        return self.jobs.claim_next_job(worker_id, lease_seconds)
+    def claim_next_job(
+        self, worker_id: str, lease_seconds: int = 90
+    ) -> dict[str, Any] | None:
+        """领取最早 job，并把租约过期的未完成任务安全放回队列。"""
+        now = self._utc_now()
+        with self._lock, closing(self._connect()) as conn, conn:
+            conn.execute("BEGIN IMMEDIATE")
+            expired = conn.execute(
+                "SELECT j.job_id,j.run_id,j.kind,j.issue_id,r.status AS run_status "
+                "FROM redmine_daily_brief_jobs j JOIN redmine_daily_brief_runs r "
+                "ON r.run_id=j.run_id WHERE j.status='running' "
+                "AND j.lease_expires_at<>'' AND j.lease_expires_at<?",
+                (now,),
+            ).fetchall()
+            for item in expired:
+                if item["run_status"] in TERMINAL_RUN_STATUSES:
+                    conn.execute(
+                        "UPDATE redmine_daily_brief_jobs SET status='completed',worker_id='',"
+                        "lease_token='',lease_expires_at='',finished_at=? WHERE job_id=?",
+                        (now, item["job_id"]),
+                    )
+                    continue
+                conn.execute(
+                    "UPDATE redmine_daily_brief_jobs SET status='queued',worker_id='',"
+                    "lease_token='',lease_expires_at='',"
+                    "error='worker lease expired; queued for retry' WHERE job_id=?",
+                    (item["job_id"],),
+                )
+                conn.execute(
+                    "UPDATE redmine_daily_brief_runs SET status='pending',"
+                    "error='worker interrupted; queued for retry',updated_at=? WHERE run_id=?",
+                    (_now(), item["run_id"]),
+                )
+                if item["kind"] == "issue":
+                    conn.execute(
+                        "UPDATE redmine_daily_brief_issues SET status='pending' "
+                        "WHERE run_id=? AND issue_id=?",
+                        (item["run_id"], item["issue_id"]),
+                    )
+            # 先清理所有已被 full-run 覆盖的 issue-job，再从全局队列选取。
+            # 不能只在当前候选恰好是 issue-job 时清理：requested_at 相同
+            # 时 job_id 可能让 run-job 先被领取，遗留的 issue-job 会在
+            # full-run 完成后错误执行。
+            conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                "worker_id='',lease_token='',lease_expires_at='',"
+                "finished_at=?,error='superseded by full run job' "
+                "WHERE kind='issue' AND status='queued' AND EXISTS ("
+                "SELECT 1 FROM redmine_daily_brief_jobs AS run_job "
+                "WHERE run_job.run_id=redmine_daily_brief_jobs.run_id "
+                "AND run_job.kind='run' "
+                "AND run_job.status IN ('queued','running')"
+                ")",
+                (now,),
+            )
+            while True:
+                row = conn.execute(
+                    "SELECT queued.* FROM redmine_daily_brief_jobs AS queued "
+                    "WHERE queued.status='queued' AND NOT EXISTS ("
+                    "SELECT 1 FROM redmine_daily_brief_jobs AS active "
+                    "WHERE active.run_id=queued.run_id AND active.status='running'"
+                    ") ORDER BY queued.requested_at,queued.job_id LIMIT 1"
+                ).fetchone()
+                if row is None:
+                    return None
+                # 跨 kind 互斥：同一 run 的活跃 run-job 是
+                # 全量执行域（force 重跑会删掉 issue 行），排队的
+                # issue-job 此时不允许被领取——否则 reanalyze_issue 读到
+                # 被删除的 issue 行 → RuntimeError → 失败收敛把刚重置的
+                # run 打成 failed。作废（cancelled）而不是等待：run-job
+                # 完成后用户可重新发起单项分析。
+                if row["kind"] == "issue":
+                    active_run_job = conn.execute(
+                        "SELECT 1 FROM redmine_daily_brief_jobs "
+                        "WHERE run_id=? AND kind='run' "
+                        "AND status IN ('queued','running') LIMIT 1",
+                        (row["run_id"],),
+                    ).fetchone()
+                    if active_run_job is not None:
+                        conn.execute(
+                            "UPDATE redmine_daily_brief_jobs SET status='cancelled',"
+                            "worker_id='',lease_token='',lease_expires_at='',"
+                            "finished_at=?,error='superseded by full run job' "
+                            "WHERE job_id=?",
+                            (now, row["job_id"]),
+                        )
+                        continue
+                lease_token = uuid.uuid4().hex
+                cursor = conn.execute(
+                    "UPDATE redmine_daily_brief_jobs SET status='running',worker_id=?,"
+                    "lease_token=?,lease_expires_at=?,started_at=?,attempt_count=attempt_count+1,"
+                    "error='' WHERE job_id=? AND status='queued'",
+                    (worker_id, lease_token, self._lease_expiry(lease_seconds), now, row["job_id"]),
+                )
+                if cursor.rowcount != 1:
+                    return None
+                return dict(conn.execute(
+                    "SELECT * FROM redmine_daily_brief_jobs WHERE job_id=?", (row["job_id"],)
+                ).fetchone())
 
     def renew_job(
         self, job_id: str, worker_id: str, lease_token: str, lease_seconds: int = 90
     ) -> bool:
-        return self.jobs.renew_job(job_id, worker_id, lease_token, lease_seconds)
+        with self._lock, closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET lease_expires_at=? "
+                "WHERE job_id=? AND worker_id=? AND lease_token=? AND status='running'",
+                (self._lease_expiry(lease_seconds), job_id, worker_id, lease_token),
+            )
+            return cursor.rowcount == 1
 
     def finish_job(
         self, job_id: str, worker_id: str, lease_token: str, *, error: str = ""
     ) -> bool:
-        return self.jobs.finish_job(job_id, worker_id, lease_token, error=error)
+        with self._lock, closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status=?,worker_id='',"
+                "lease_token='',lease_expires_at='',finished_at=?,error=? "
+                "WHERE job_id=? AND worker_id=? AND lease_token=? AND status='running'",
+                ("failed" if error else "completed", self._utc_now(), error[:1000],
+                 job_id, worker_id, lease_token),
+            )
+            return cursor.rowcount == 1
 
     def requeue_job(
         self, job_id: str, worker_id: str, lease_token: str, *, reason: str
     ) -> bool:
-        return self.jobs.requeue_job(job_id, worker_id, lease_token, reason=reason)
+        with self._lock, closing(self._connect()) as conn, conn:
+            cursor = conn.execute(
+                "UPDATE redmine_daily_brief_jobs SET status='queued',worker_id='',"
+                "lease_token='',lease_expires_at='',error=? WHERE job_id=? AND worker_id=? "
+                "AND lease_token=? AND status='running'",
+                (reason[:1000], job_id, worker_id, lease_token),
+            )
+            if cursor.rowcount:
+                row = conn.execute(
+                    "SELECT run_id,kind,issue_id FROM redmine_daily_brief_jobs WHERE job_id=?",
+                    (job_id,),
+                ).fetchone()
+                conn.execute(
+                    "UPDATE redmine_daily_brief_runs SET status='pending',error=?,updated_at=? "
+                    "WHERE run_id=?",
+                    (reason[:1000], _now(), row["run_id"]),
+                )
+                if row["kind"] == "issue":
+                    conn.execute(
+                        "UPDATE redmine_daily_brief_issues SET status='pending' "
+                        "WHERE run_id=? AND issue_id=?",
+                        (row["run_id"], row["issue_id"]),
+                    )
+            return cursor.rowcount == 1
 
     def create_run_and_enqueue_job(self, run: DailyBriefRun, *, issue: DailyBriefIssue | None = None) -> tuple[bool, dict[str, Any], bool]:
         """Create/reuse a run, optional single issue and job in one write transaction."""
@@ -817,7 +1074,7 @@ class DailyBriefRepository:
                 run_id = str(row["run_id"])
             else:
                 run_id = run.run_id
-            job, job_created = self.jobs.insert_job(conn, run_id, kind="issue" if issue else "run", issue_id=issue.issue_id if issue else 0)
+            job, job_created = self._insert_job(conn, run_id, kind="issue" if issue else "run", issue_id=issue.issue_id if issue else 0)
             if job_created:
                 if issue:
                     issue.run_id = run_id
@@ -826,7 +1083,7 @@ class DailyBriefRepository:
                         self._issue_params(issue),
                     )
                 if not run_created:
-                    self.jobs._reset_run_for_enqueue(conn, run_id)
+                    self._reset_run_for_enqueue(conn, run_id)
                 else:
                     conn.execute(
                         "UPDATE redmine_daily_brief_runs SET started_at=? WHERE run_id=?",

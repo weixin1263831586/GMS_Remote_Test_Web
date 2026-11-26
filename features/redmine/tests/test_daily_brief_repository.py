@@ -387,7 +387,7 @@ class DailyBriefRepositoryTests(unittest.TestCase):
         self.repo.create_run(run)
         self.repo.upsert_issue(DailyBriefIssue(run_id=run.run_id, issue_id=100, buckets=[], status="completed"))
         self.repo.enqueue_job(run.run_id, kind="issue", issue_id=100)
-        cancelled = self.repo.jobs.cancel_queued_issue_jobs(run.run_id)
+        cancelled = self.repo.cancel_queued_issue_jobs(run.run_id)
         self.assertEqual(cancelled, 1)
         # 无活跃 job 阻塞 run-job 入队。
         _run_job, created = self.repo.enqueue_job(run.run_id, kind="run")

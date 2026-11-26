@@ -547,7 +547,7 @@ class DailyBriefService:
             self.repository.delete_issues(run.run_id)
             # 重冻结会删掉全部 issue 行；仍在排队的 issue-job 必须一并
             # 作废，否则它们随后被领取时读不到 issue 行。
-            self.repository.jobs.cancel_queued_issue_jobs(run.run_id)
+            self.repository.cancel_queued_issue_jobs(run.run_id)
         # 复用 run 重新执行前清除上一轮的取消标志。
         self.repository.clear_cancel(run.run_id)
         self.repository.update_run(run)
