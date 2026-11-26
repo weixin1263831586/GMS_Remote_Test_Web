@@ -169,3 +169,19 @@ async def test_download_stream_exceeds_former_256_mib_limit_without_losing_tail(
     with source.open("rb") as handle:
         handle.seek(-len(tail), 2)
         assert handle.read() == tail
+
+
+def test_snapshot_search_cites_revision_and_separates_scan_from_source_coverage(tmp_path):
+    store = EvidenceStore(tmp_path)
+    snapshot = store.create_snapshot(issue_id=42, download_policy="none")
+    store.update_snapshot(snapshot["snapshot_id"], status="ready", content_sha256="snapshot-hash",
+                          manifest_json={"description": "failure",
+                                         "journals": [{"id": 7, "notes": "failure"}]})
+    snapshot = store.get_snapshot(snapshot["snapshot_id"])
+    data = _search_all_evidence(store, snapshot, ["failure"], 10, 0)
+    hits = data["queries"][0]["matches"]
+    assert data["coverage_complete"] and not data["source_coverage_complete"]
+    assert [hit["kind"] for hit in hits] == ["description", "journal"]
+    assert all(hit["source_revision"] == "snapshot-hash" for hit in hits)
+    assert len({hit["reference"] for hit in hits}) == 2
+    assert hits[1]["journal_id"] == 7

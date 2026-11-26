@@ -1,4 +1,5 @@
 from features.retrieval import evidence_plan_context, summarize_evidence
+from features.retrieval.evidence import evidence_followup_required
 
 
 def test_evidence_plan_distinguishes_missing_and_partial_sources():
@@ -25,3 +26,20 @@ def test_context_is_bounded_and_has_omissions():
     context = evidence_plan_context([{"evidence": evidence}] * 12)
     assert len(context["retrievals"]) == 8
     assert context["omitted_retrievals"] == 4
+
+
+def test_batch_evidence_references_and_scope_gaps():
+    evidence = summarize_evidence("redmine_evidence_search", {"data": {
+        "coverage_complete": True, "index_complete": False, "source_coverage_complete": False,
+        "queries": [{"total": 3, "next_offset": 1, "matches": [
+            {"reference": "snapshot/artifact/1", "source_revision": "sha", "source": "redmine_evidence"}]},
+            {"total": 0, "matches": []}]}})
+    assert evidence["returned"] == 1
+    assert not evidence["coverage_complete"]
+    assert evidence["references"][0]["revision"] == "sha"
+    assert {"incomplete_source_scope", "incomplete_evidence_index", "more_result_pages",
+            "batch_query_without_match"} <= set(evidence["gaps"])
+    observations = [{"evidence": evidence}]
+    assert evidence_followup_required(observations)
+    assert not evidence_followup_required(observations + [{"evidence_followup": True}])
+    assert not evidence_followup_required([{"evidence": {"gaps": []}}])

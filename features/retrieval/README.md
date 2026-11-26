@@ -91,3 +91,16 @@ note (offset_basis=redacted_note). Redaction precedes chunking. Changed or remov
 and archive reset clears the derived namespace. The index covers only the
 bounded local archive, not current remote access or complete Redmine history.
 No new model-provider or Agent/MCP exposure is enabled by these endpoints.
+
+
+### Existing diagnosis paths
+
+The existing Redmine history search merges opt-in archived journal candidates
+with lexical issue results through RRF, retaining only journal citation
+coordinates (not reply text). The snapshot search retains its streaming
+artifact/ZIP/description/journal search and reports scan coverage separately
+from whole-snapshot source coverage. Its revision-bound candidates include
+the snapshot, artifact or journal coordinate. Project Agent recognizes
+batch-result pagination, missing sources and incomplete evidence and permits
+one extra planning round within the existing tool budget. This is not proof
+of a verified root cause or a guarantee that a missing source can be reached.

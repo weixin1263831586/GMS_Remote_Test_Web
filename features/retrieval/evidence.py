@@ -19,6 +19,11 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         return None
     source_status = data.get("sources_status")
     records = next((data[key] for key in _RESULT_KEYS if isinstance(data.get(key), list)), None)
+    batches = data.get("queries")
+    batch_rows = [row for row in batches[:16] if isinstance(row, dict)] if isinstance(batches, list) else []
+    if records is None and batch_rows:
+        records = [item for row in batch_rows for item in (row.get("matches") or [])[:30]
+                   if isinstance(item, dict)]
     is_retrieval = (isinstance(source_status, list) or "coverage_complete" in data
                     or "retrieval" in data or (records is not None
                         and any(part in tool for part in ("search", "recall", "knowledge", "evidence"))))
@@ -29,6 +34,18 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     references = []
     if data.get("coverage_complete") is False:
         gaps.append("incomplete_coverage")
+    if data.get("source_coverage_complete") is False:
+        gaps.append("incomplete_source_scope")
+    if data.get("index_complete") is False or data.get("index_warnings"):
+        gaps.append("incomplete_evidence_index")
+    if data.get("remote_search_error"):
+        gaps.append("remote_search_failed")
+    if data.get("limited") is True or data.get("next_offset") is not None or any(
+        row.get("truncated") or row.get("next_offset") is not None for row in batch_rows
+    ):
+        gaps.append("more_result_pages")
+    if any(row.get("total") == 0 for row in batch_rows):
+        gaps.append("batch_query_without_match")
     if data.get("possibly_truncated") is True or data.get("latest_confirmed") is False:
         gaps.append("bounded_or_unconfirmed")
     if payload.get("success") is False:
@@ -68,7 +85,9 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         if extra.get("status") == "stale":
             gaps.append("stale_candidate")
     return {"tool": tool, "returned": len(records) if records is not None else None,
-            "coverage_complete": data.get("coverage_complete") is True,
+            "coverage_complete": (data.get("coverage_complete") is True
+                                  and data.get("source_coverage_complete") is not False
+                                  and data.get("index_complete") is not False),
             "sources": sources, "references": references[:16],
             "gaps": list(dict.fromkeys(gaps))[:24]}
 
@@ -81,3 +100,18 @@ def evidence_plan_context(observations: list, *, limit=8) -> dict:
     return {"retrievals": selected, "omitted_retrievals": max(0, len(evidence) - len(selected)),
             "has_unresolved_scope": any(not item.get("coverage_complete") or item.get("gaps")
                                         for item in selected)}
+
+
+def evidence_followup_required(observations: list) -> bool:
+    """Request at most one extra planning round for an explicit unresolved retrieval gap."""
+    if any(isinstance(item, dict) and item.get("evidence_followup") for item in observations):
+        return False
+    evidence = next((item["evidence"] for item in reversed(observations)
+                     if isinstance(item, dict) and isinstance(item.get("evidence"), dict)), None)
+    if not evidence:
+        return False
+    actionable = {"incomplete_coverage", "incomplete_source_scope", "incomplete_evidence_index",
+                  "remote_search_failed", "more_result_pages", "batch_query_without_match",
+                  "no_match_in_returned_scope", "bounded_or_unconfirmed"}
+    return any(gap in actionable or gap.startswith(("source:", "semantic:", "source_revision_not_current:"))
+               for gap in evidence.get("gaps", []) if isinstance(gap, str))

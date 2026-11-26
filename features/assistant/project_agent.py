@@ -26,6 +26,7 @@ from features.assistant.workflow_execution import (
 )
 from features.assistant.workspace import _apply_workspace_tool_params, _missing_required_params
 from features.retrieval import compact_observation, evidence_plan_context, summarize_evidence
+from features.retrieval.evidence import evidence_followup_required
 from foundation.redaction import redact_sensitive_data
 
 
@@ -409,6 +410,12 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                         continue
                     return True
                 if kind == "answer":
+                    if state.rounds < MAX_ROUNDS and evidence_followup_required(observations):
+                        observations.append({"evidence_followup": True,
+                                             "instruction": "复核当前证据缺口；若影响结论，使用已有只读工具补证，"
+                                                            "缩小查询范围、读取原文或翻页。若无可用工具，明确不确定性。"
+                                                            "不要重复相同查询，不要执行写操作。"})
+                        continue
                     _append_message(session, "assistant", str(decision.get("text") or "请补充你的目标"),
                                     data={"quick_actions": state.report_actions} if state.report_actions else None)
                     return True
