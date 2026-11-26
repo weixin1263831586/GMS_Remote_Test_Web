@@ -131,6 +131,21 @@ class OpsPortContractTests(unittest.TestCase):
 
 
 class AutomationPortConfigureSemanticsTests(unittest.TestCase):
+    def test_advancement_gate_preserves_fail_open_contract(self):
+        self.addCleanup(
+            automation_port.configure_advancement_gate,
+            automation_port._advancement_gate,
+        )
+        automation_port.configure_advancement_gate(None)
+        self.assertFalse(automation_port.advancement_paused())
+
+        automation_port.configure_advancement_gate(lambda: True)
+        self.assertTrue(automation_port.advancement_paused())
+
+        automation_port.configure_advancement_gate(MagicMock(side_effect=RuntimeError("unavailable")))
+        with self.assertLogs("foundation.automation_port", level="ERROR"):
+            self.assertFalse(automation_port.advancement_paused())
+
     def test_explicit_none_clears_registration(self):
         self.addCleanup(
             automation_port.configure_worker_status_provider,
