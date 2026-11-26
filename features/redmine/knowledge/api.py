@@ -1,8 +1,7 @@
 """HTTP endpoints for the Redmine knowledge base.
 
 All routes are per-user (resolved through ``get_redmine_service_for_request``).
-Mounted under the existing ``/api/redmine-agent`` prefix via
-``router.include_router`` (see ``api.py``).
+Mounted by the application router composition.
 """
 
 from __future__ import annotations
@@ -23,7 +22,7 @@ from ..daily_brief.repository import canonical_owner_id, owner_daily_brief_repos
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/redmine-agent")
 
 
 def _knowledge(request: Request):

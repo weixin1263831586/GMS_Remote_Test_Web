@@ -52,6 +52,7 @@ from features.ops import api as ops
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
+from features.redmine import statistics_api as redmine_statistics
 from features.redmine import users_api as redmine_users_api
 from features.redmine.api import configure_redmine_service
 from features.redmine.daily_brief import api as redmine_daily_brief
@@ -62,6 +63,7 @@ from features.redmine.dashboard import (
 )
 from features.redmine.evidence import api as redmine_evidence
 from features.redmine.evidence import search_api as redmine_evidence_search
+from features.redmine.knowledge import api as redmine_knowledge
 from features.redmine.reply import api as redmine_reply
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
@@ -148,6 +150,8 @@ ALL_ROUTERS = [
     knowledge.router,
     knowledge.page_router,
     redmine.router,
+    redmine_statistics.router,
+    redmine_knowledge.router,
     redmine.page_router,
     redmine_users_api.router,
     redmine_evidence.router,

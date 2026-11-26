@@ -507,7 +507,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_personal_workload_refresh_updates_existing_local_snapshot(self):
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
 
         class Client:
@@ -544,7 +544,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
                 cookies={},
             )
-            stats_api = redmine_router._statistics_api
+
             with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
                 stats_api, "_service_for_request", return_value=service
             ), patch.object(
@@ -575,7 +575,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_personal_workload_refresh_excludes_reassigned_pending_issue(self):
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
 
         class Client:
@@ -619,7 +619,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
                 cookies={},
             )
-            stats_api = redmine_router._statistics_api
+
             with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
                 stats_api, "_service_for_request", return_value=service
             ), patch.object(
@@ -658,7 +658,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         like 黄超群 sees the same full history Gerrit shows."""
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
 
         live_trends = {
@@ -692,7 +692,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
                 cookies={},
             )
-            stats_api = redmine_router._statistics_api
+
             with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
                 stats_api, "_service_for_request", return_value=service
             ), patch.object(
@@ -725,7 +725,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         showing the local-DB trends instead of going blank."""
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
 
         class Client:
@@ -749,7 +749,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
                 cookies={},
             )
-            stats_api = redmine_router._statistics_api
+
             with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
                 stats_api, "_service_for_request", return_value=service
             ), patch.object(
@@ -780,7 +780,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         """
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
 
         class CurrentRedmineUser:
@@ -844,7 +844,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
                 state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
                 cookies={},
             )
-            stats_api = redmine_router._statistics_api
+
             with patch.object(stats_api, "_has_redmine_credentials", return_value=True), patch.object(
                 stats_api, "_service_for_request", return_value=service
             ), patch.object(
@@ -870,7 +870,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_department_resolved_detail_uses_profile_members(self):
         import asyncio
 
-        import features.redmine.api as redmine_router
+        from features.redmine import statistics_api as stats_api
 
         class ResolvedIssuesClient:
             def __init__(self):
@@ -896,7 +896,7 @@ class RedmineDashboardStatsTests(unittest.TestCase):
             state=SimpleNamespace(current_user=CurrentUser("alice", "alice", "user")),
             cookies={},
         )
-        stats_api = redmine_router._statistics_api
+
         department_users = [
             {"id": 1, "name": "韩金锋", "department_id": "system-2", "department": "系统二部"},
             {"id": 2, "name": "黄超群", "department_id": "system-2", "department": "系统二部"},

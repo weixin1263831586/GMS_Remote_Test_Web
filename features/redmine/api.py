@@ -960,18 +960,6 @@ async def update_email_config(request: Request):
     return {"success": True, "data": {"email": public_email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
 
 
-from . import statistics_api as _statistics_api  # noqa: E402
-
-
-router.include_router(_statistics_api.router)
-
-from .knowledge import api as _knowledge_api  # noqa: E402
-
-
-router.include_router(_knowledge_api.router)
-get_department_overdue_statistics = _statistics_api.get_department_overdue_statistics
-
-
 def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:
     """发送部门提醒邮件。
 
