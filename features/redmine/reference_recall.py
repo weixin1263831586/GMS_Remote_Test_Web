@@ -10,7 +10,7 @@ import sqlite3
 from contextlib import closing
 
 from features.gms import extract_reference_identifiers, recall_gms_requirements, recall_mainline_references
-from features.knowledge import partner_policy_allowed, policy_search_terms, recall_web_references
+from features.knowledge import partner_policy_allowed, policy_search_terms, recall_owner_policy_imports, recall_web_references
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root
@@ -120,6 +120,10 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
         policy["target_android_version"] = version
         policy["version_resolution"] = "matched" if version is not None else "conflicting" if versions else "unknown"
         result.setdefault("sources", {})["web_documents"] = policy
+    if allow_partner:
+        imported = recall_owner_policy_imports(str(owner_id), policy_query)
+        if imported is not None:
+            result.setdefault('sources', {})['owner_policy_imports'] = imported
     if allow_partner and partner_policy_allowed(str(owner_id)):
         result.setdefault('sources', {})['gms_requirements'] = recall_gms_requirements(
             policy_search_terms(policy_query), data_root=data_root
