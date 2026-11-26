@@ -78,6 +78,10 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                     header: head.rows[0].getBoundingClientRect().height,
                                     row: row.getBoundingClientRect().height,
                                     middle: [...row.cells].every(cell => getComputedStyle(cell).verticalAlign === 'middle'),
+                                    padding: [...head.rows[0].cells, ...row.cells].every(cell => {
+                                        const style = getComputedStyle(cell);
+                                        return style.paddingTop === '2px' && style.paddingBottom === '2px';
+                                    }),
                                 });
                             } finally {
                                 test.remove();
@@ -99,6 +103,10 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                 header: host.firstElementChild.getBoundingClientRect().height,
                                 row: host.lastElementChild.getBoundingClientRect().height,
                                 middle: getComputedStyle(host.lastElementChild).alignItems === 'center',
+                                padding: [...host.children].every(cell => {
+                                    const style = getComputedStyle(cell);
+                                    return style.paddingTop === '2px' && style.paddingBottom === '2px';
+                                }),
                             });
                         } finally { host.remove(); }
                     } finally {
@@ -110,8 +118,9 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 for item in samples:
                     with self.subTest(width=width, table=item['name']):
                         self.assertAlmostEqual(item['header'], 42, delta=1, msg=str(item))
-                        self.assertAlmostEqual(item['row'], 44, delta=1, msg=str(item))
+                        self.assertAlmostEqual(item['row'], 36, delta=1, msg=str(item))
                         self.assertTrue(item['middle'], item)
+                        self.assertTrue(item['padding'], item)
         finally:
             page.close()
 
@@ -138,7 +147,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                         } finally { table.remove(); }
                     }""")
                     self.assertAlmostEqual(result['header'], 42, delta=1, msg=str(result))
-                    self.assertAlmostEqual(result['row'], 44, delta=1, msg=str(result))
+                    self.assertAlmostEqual(result['row'], 36, delta=1, msg=str(result))
                     self.assertEqual(result['align'], 'middle')
         finally:
             page.close()

@@ -27,9 +27,9 @@
     --ui-modal-header-height-roomy: 56px;
     --ui-modal-close-size: 30px;
     --ui-table-header-height: 42px;
-    --ui-table-row-height: 44px;
+    --ui-table-row-height: 36px;
     --ui-table-cell-padding-inline: 10px;
-    --ui-table-cell-padding-block: 4px;
+    --ui-table-cell-padding-block: 2px;
     --ui-stat-height: 95px;
     --ui-stat-height-compact: 70px;
     --ui-card-heading-height: 42px;
