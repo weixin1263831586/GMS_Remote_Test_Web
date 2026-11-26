@@ -70,6 +70,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     gaps = []
     sources = []
     references = []
+    revisions = []
     if data.get("coverage_complete") is False:
         gaps.append("incomplete_coverage")
     if group_limited:
@@ -174,8 +175,23 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
                 repo = str(item.get("repo") or data.get("repo_scope") or "")
                 reference = f"{repo + '/' if repo else ''}{path}:{item.get('line') or ''}"
                 revision, origin = commit, data["source_id"]
+                if repo and data.get("reproducible") is True:
+                    revisions.append({"kind": "sdk", "project": repo, "revision": commit.lower(),
+                                      "reference": reference, "source": str(origin)[:80]})
             else:
                 gaps.append("sdk_revision_unpinned")
+        if gerrit and not data.get("error") and data.get("configured") is not False:
+            patch = item.get("currentPatchSet") or item.get("current_patch_set") or {}
+            patch_revision = patch.get("revision") if isinstance(patch, dict) else None
+            rest_revision = item.get("current_revision")
+            sha = str(patch_revision or rest_revision or "").lower()
+            project = str(item.get("project") or "")
+            change = str(item.get("number") or item.get("_number") or "")
+            if (project and change.isdigit() and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha)
+                    and (not patch_revision or not rest_revision or str(patch_revision).lower() == str(rest_revision).lower())):
+                reference, revision, origin = f"gerrit:{project}:{change}", sha, "gerrit"
+                revisions.append({"kind": "gerrit", "project": project, "revision": sha,
+                                  "reference": reference, "source": "gerrit"})
         if reference and revision:
             ref = {"reference": str(reference)[:300], "revision": str(revision)[:128],
                    "source": str(origin)[:80]}
@@ -191,6 +207,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
                                   and data.get("index_complete") is not False
                                   and not gaps),
             "sources": sources, "references": references[:16],
+            **({"revision_candidates": revisions[:16]} if revisions else {}),
             "gaps": list(dict.fromkeys(gaps))[:24]}
 
 
@@ -199,7 +216,22 @@ def evidence_plan_context(observations: list, *, limit=8) -> dict:
     evidence = [item["evidence"] for item in observations if isinstance(item, dict)
                 and isinstance(item.get("evidence"), dict)]
     selected = evidence[-max(1, min(limit, 8)):]
+    revision_rows = [row for item in selected for row in item.get("revision_candidates", [])
+                     if isinstance(row, dict)]
+    links = []
+    for sdk in revision_rows:
+        if sdk.get("kind") != "sdk":
+            continue
+        for change in revision_rows:
+            if (change.get("kind") == "gerrit" and sdk.get("project") == change.get("project")
+                    and sdk.get("revision") == change.get("revision")):
+                link = {"project": sdk["project"], "revision": sdk["revision"],
+                        "sdk_reference": sdk["reference"], "gerrit_reference": change["reference"],
+                        "relation": "same_project_and_commit", "applicability_verified": False}
+                if link not in links and len(links) < 16:
+                    links.append(link)
     return {"retrievals": selected, "omitted_retrievals": max(0, len(evidence) - len(selected)),
+            "sdk_gerrit_links": links,
             "has_unresolved_scope": any(not item.get("coverage_complete") or item.get("gaps")
                                         for item in evidence)}
 
