@@ -32,7 +32,7 @@ from .clients import (
     hide_sensitive_info,
     owner_id_from_request,
 )
-from .storage_paths import owner_storage_key
+from .storage_paths import owner_preferences_dir
 
 
 config_manager = runtime.config_manager
@@ -627,9 +627,7 @@ _storage_lock = threading.RLock()
 
 
 def _preferences_path(owner_id: str) -> Path:
-    directory = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / "navigation.json"
+    return owner_preferences_dir(runtime.data_root, owner_id) / 'navigation.json'
 
 
 def load_navigation_preferences(owner_id: str) -> dict[str, list[str]]:

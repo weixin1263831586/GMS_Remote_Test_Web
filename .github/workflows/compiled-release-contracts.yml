@@ -6,6 +6,7 @@ on:
       - 'ui/**'
       - 'audit/main-ci-fix-*'
       - 'audit/mainline-gerrit-match-*'
+      - 'audit/main-full-review-*'
     paths:
       - 'scripts/release/**'
       - 'scripts/backup/gms_backup.py'

@@ -2,7 +2,6 @@
 // ==================== 常用网址管理（支持分类）====================
 let categorizedTools = {};
 let currentCategory = 'all';
-const TOOLS_STORAGE_KEY = 'gms_tools_list';
 const CATEGORIES_STORAGE_KEY = 'gms_tools_categories';
 
 // 默认分类
@@ -42,41 +41,11 @@ function continueLoadingLocalData() {
     const categorizedStored = localStorage.getItem(CATEGORIES_STORAGE_KEY);
     if (categorizedStored) {
         try {
-            const localTools = JSON.parse(categorizedStored);
-
-            // 清理"其他"分类
-            if (localTools['其他']) {
-                // 将旧的"其他"分类归入当前公司分类。
-                if (localTools[COMPANY_CATEGORY]) {
-                    localTools[COMPANY_CATEGORY] = localTools[COMPANY_CATEGORY].concat(localTools['其他']);
-                } else {
-                    localTools[COMPANY_CATEGORY] = localTools['其他'];
-                }
-                delete localTools['其他'];
-                // 页面初始化期间的迁移只落本地：module load ≠ user mutation，
-                // 不得对服务器发起写请求（否则刷新即触发 Failed to fetch）。
-                saveCategories({ sync: false });
-            }
-
-            categorizedTools = localTools;
+            categorizedTools = JSON.parse(categorizedStored);
             renderToolsGrid();
             return;
         } catch (e) {
             console.error('加载分类数据失败:', e);
-        }
-    }
-
-    // 将未分类存储转换为分类结构。
-    const stored = localStorage.getItem(TOOLS_STORAGE_KEY);
-    if (stored) {
-        try {
-            const oldTools = JSON.parse(stored);
-            categorizedTools = migrateToCategories(oldTools);
-            saveCategories({ sync: false });
-            renderToolsGrid();
-            return;
-        } catch (e) {
-            console.error('加载工具列表失败:', e);
         }
     }
 
@@ -101,55 +70,8 @@ function continueLoadingLocalData() {
     renderToolsGrid();
 }
 
-function migrateToCategories(oldTools) {
-    const categorized = {};
-    const defaultCategories = Object.keys(DEFAULT_CATEGORIES);
-
-    // 初始化分类
-    defaultCategories.forEach(cat => {
-        categorized[cat] = [];
-    });
-
-    // 智能分类
-    oldTools.forEach(tool => {
-        const category = guessCategory(tool);
-        if (!categorized[category]) {
-            categorized[category] = [];
-        }
-        categorized[category].push(tool);
-    });
-
-    return categorized;
-}
-
-function guessCategory(tool) {
-    const url = tool.url.toLowerCase();
-    const title = tool.title.toLowerCase();
-
-    // 归类到配置的公司分类。
-    if (COMPANY_KEYWORDS.some(keyword => url.includes(keyword) || title.includes(keyword))) {
-        return COMPANY_CATEGORY;
-    }
-
-    // Google 相关
-    if (url.includes('google') || url.includes('gmail') || url.includes('youtube')) {
-        return 'Google';
-    }
-
-    // 开发工具
-    if (url.includes('github') || url.includes('gitlab') || url.includes('stackoverflow')) {
-        return '开发工具';
-    }
-
-
-    // 默认归到当前公司分类。
-    return COMPANY_CATEGORY;
-}
-
 function saveCategories({ sync = true } = {}) {
-    // 四阶段：Persist local 总是执行；Sync server 只在真正的用户变更
-    // （编辑/拖拽/删除）时触发。初始化、迁移、默认值路径必须传
-    // { sync: false } —— 页面加载绝不产生服务器写请求。
+    // Persist locally; synchronize only explicit user changes.
     localStorage.setItem(CATEGORIES_STORAGE_KEY, JSON.stringify(categorizedTools));
 
     if (sync) {

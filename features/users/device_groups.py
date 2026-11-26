@@ -19,7 +19,7 @@ from foundation.responses import error_response, success_response
 
 from . import runtime
 from .clients import get_client_id_from_request
-from .storage_paths import owner_storage_key
+from .storage_paths import owner_preferences_dir
 
 
 router = APIRouter()
@@ -214,10 +214,7 @@ def current_username_for_request(request: Request) -> str:
 
 
 def _device_groups_path(username: str) -> Path:
-    data_root = Path(runtime.data_root)
-    directory = data_root / 'user_prefs' / owner_storage_key(username)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / 'device_groups.json'
+    return owner_preferences_dir(runtime.data_root, username) / 'device_groups.json'
 
 
 def load_device_groups(username: str | None) -> list[dict[str, Any]]:

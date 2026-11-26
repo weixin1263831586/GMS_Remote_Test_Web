@@ -441,7 +441,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_websites_init_and_migration_never_post_to_server(self):
+    def test_websites_init_never_posts_to_server(self):
         """Initialization and defaults are local; only user mutations may sync."""
         page = self.new_page()
         save_requests = []
@@ -452,13 +452,11 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             else None,
         )
         try:
-            # Seed the legacy flat storage so the init path exercises the
-            # migrateToCategories + saveCategories branch, then load the
-            # shell with an empty categorized store.
+            # Seed current categorized storage.
             page.add_init_script(
                 """
                 localStorage.setItem('gms_tools_categories', JSON.stringify({
-                    '其他': [{ icon: '🧪', title: 'Legacy Tool', url: 'https://legacy.example' }]
+                    '其他': [{ icon: '🧪', title: 'My Tool', url: 'https://example.test' }]
                 }));
                 """
             )

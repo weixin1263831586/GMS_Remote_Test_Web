@@ -1,18 +1,22 @@
-# Agent package verification and release entry points.
-# Source and generated tests deliberately use separate pytest processes.
-# Standalone package suites must not load Controller-level conftest fixtures.
+# Repository verification and package release entry points.
 PY ?= python3
 export V
+PYTEST_ARGS ?=
 
-.PHONY: help agent-test agent-check agent-release agent-sync-check codesearch-check
+.PHONY: help repository-test agent-test agent-check agent-release agent-sync-check codesearch-check
 
 help:
+	@echo "repository-test    All default test roots excluding browser and device soak suites"
 	@echo "agent-test         Agent source + generated tests + version contract"
 	@echo "agent-check        agent-test + tracked-file secret scan"
 	@echo "agent-release V=X.Y.Z  version bump, sync and full self-check"
 	@echo "agent-sync-check   sync and reject generated worktree drift"
 	@echo "codesearch-check   standalone CodeSearch plugin tests"
 
+repository-test:
+	$(PY) -m pytest --ignore=tests/e2e --ignore=tests/runtime_ui --ignore=tests/soak -q $(PYTEST_ARGS)
+
+# Standalone suites use separate processes and fixtures.
 agent-test:
 	$(PY) -m pytest --confcutdir=agent/gms-remote-test agent/gms-remote-test/tests -q
 	$(PY) -m pytest --confcutdir=plugins/gms-remote-test plugins/gms-remote-test/tests -q
