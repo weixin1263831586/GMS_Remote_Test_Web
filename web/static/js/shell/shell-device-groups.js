@@ -166,7 +166,7 @@
                     <button class="btn-xxs" data-mgmt-del="${group.id}" style="padding:2px 6px;">🗑️ 删除</button>
                 </span>`;
             return `<tr class="device-group-row" style="background: var(--lighter-bg);">
-                <td colspan="12" style="padding:6px 8px;">
+                <td colspan="12">
                     <div class="device-group-header" style="background:transparent;border:none;">${toggle}${color}${name}${cnt}${ops}</div>
                 </td>
             </tr>`;
