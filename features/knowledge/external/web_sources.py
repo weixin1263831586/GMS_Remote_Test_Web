@@ -9,12 +9,13 @@ import uuid
 from contextlib import closing, contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from foundation.config import config_manager, settings
 from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 
 from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
-from .document_index import document_revision, parse_document
+from .document_index import document_revision, document_title, parse_document
 from .web_fetch import fetch_html, validate_url
 
 
@@ -137,19 +138,52 @@ class WebKnowledgeProvider:
         except (sqlite3.Error, OSError, ValueError, TypeError):
             return {}
 
+    def save_url(self, *, url, name='', enabled=None, source_id=None, authorized_for_ai_processing=False):
+        """Infer public document metadata; unknown sources require explicit content-use approval."""
+        url, name = url.strip(), name.strip()
+        host = validate_url(url)
+        path = urlsplit(url).path
+        match = re.fullmatch(r'/docs/compatibility/(\d+)/android-\1-cdd', path) if host == 'source.android.com' else None
+        version = int(match.group(1)) if match else None
+        kind = 'cdd' if version else 'document'
+        old = None
+        if source_id:
+            old = next((row for row in self.list_sources() if row['id'] == source_id), None)
+            if old is None:
+                raise ValueError('Source not found')
+            if old['url'] != url:
+                raise ValueError('Add a new source when changing the URL')
+        if old:
+            # Preserve the recorded license and source classification on a rename or toggle.
+            license = old['license']
+            kind, version = old['kind'], old['android_version']
+            if enabled is None:
+                enabled = bool(old['enabled'])
+            if not name:
+                name = old['name']
+        elif host == 'source.android.com' and path.startswith('/docs/'):
+            license = 'CC-BY-4.0 (AOSP documentation, unless otherwise noted)'
+        elif authorized_for_ai_processing:
+            license = 'Administrator-approved content use; license not independently verified'
+        else:
+            raise ValueError('Unknown source requires content-use approval')
+        return self.save(name=name, url=url, kind=kind, android_version=version,
+                         license=license, enabled=True if enabled is None else enabled, source_id=source_id)
+
     def list_sources(self):
         if not self._path().is_file():
             return []
         with self._db() as db:
             return [dict(r) for r in db.execute(
-                "SELECT id,name,url,kind,android_version,license,enabled,revision,synced_at,error "
-                "FROM sources ORDER BY name,id")]
+                "SELECT s.id,s.name,s.url,s.kind,s.android_version,s.license,s.enabled,s.revision,s.synced_at,s.error, "
+                "(SELECT count(*) FROM clauses c WHERE c.source_id=s.id AND c.revision=s.revision) AS indexed_count "
+                "FROM sources s ORDER BY s.name,s.id")]
 
     def save(self, *, name, url, kind, android_version, license, enabled=True, source_id=None):
         name, license = name.strip(), license.strip()
         host = validate_url(url)
-        if not name or len(name) > 160 or not license or len(license) > 240:
-            raise ValueError("Name and content-use license are required")
+        if len(name) > 160 or not license or len(license) > 240:
+            raise ValueError("Invalid name or content-use license")
         if kind not in {"cdd", "document"}:
             raise ValueError("Unsupported source type")
         if kind == "cdd" and (host != "source.android.com" or not android_version or
@@ -207,6 +241,7 @@ class WebKnowledgeProvider:
             if not revision:
                 raise ValueError("No usable revision")
             clauses = parse_document(body, row["url"], row["kind"], row["android_version"]) if body is not None else []
+            title = (document_title(body) or urlsplit(row['url']).hostname or row['url'])[:160] if body is not None and not row['name'] else ''
             stamp = datetime.now(timezone.utc).isoformat()
             with self._db(write=True) as db:
                 db.execute("BEGIN IMMEDIATE")
@@ -224,8 +259,9 @@ class WebKnowledgeProvider:
                             "\0".join((source_id, revision, section, req, original)).encode()).hexdigest()[:24]
                         db.execute("INSERT INTO clauses VALUES (?,?,?,?,?,?,?,?,?)",
                                    (source_id, revision, section, req, level, condition, original, url, token))
-                db.execute("UPDATE sources SET revision=?,synced_at=?,etag=?,modified=?,error='' WHERE id=?",
-                           (revision, stamp, etag, modified, source_id))
+                db.execute("UPDATE sources SET name=CASE WHEN name='' AND ?<>'' THEN ? ELSE name END, "
+                           "revision=?,synced_at=?,etag=?,modified=?,error='' WHERE id=?",
+                           (title, title, revision, stamp, etag, modified, source_id))
             return {"source_id": source_id, "revision": revision, "status": "ready", "unchanged": body is None}
         except Exception as exc:
             with self._db(write=True) as db:
