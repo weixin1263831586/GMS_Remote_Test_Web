@@ -5,11 +5,12 @@ import re
 from urllib.parse import urlsplit
 
 from features.retrieval import IntelligentRAG, IntelligentSource, RetrievalHit, RetrievalResult
+from foundation.config import config_manager
 from foundation.redaction import redact_sensitive_text
 
 from .external.web_sources import WebKnowledgeProvider, model_catalog_fingerprint
 from .personal_semantic import _redacted_body, _revision, retrieve_personal_contexts
-from .policy_imports import _approved_content, is_policy_import, policy_import_filter
+from .policy_imports import IMPORT_TAG, _approved_content, content_hash, is_policy_import, policy_import_filter
 
 PAGE_SIZE = 2800
 
@@ -44,9 +45,10 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
         rev = revision(doc)
         if not rev:
             return None
+        title = doc["title"] if not approved_only or content_hash(doc) == rev else body.splitlines()[0]
         return RetrievalHit(
             source_id, f'{doc["doc_id"]}:{start}', rev, body[start:start + PAGE_SIZE],
-            "candidate", {"doc_id": doc["doc_id"], "title": redact_sensitive_text(doc["title"])[:200],
+            "candidate", {"doc_id": doc["doc_id"], "title": redact_sensitive_text(title)[:200],
                           "start": start, "total_chars": len(body), "offset_basis": "redacted_document",
                           "scope": "owner_approved_import" if approved_only else "owner_document"},
         )
@@ -61,7 +63,7 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
         rows = []
         if approved_only:
             # Search owner-approved documents only; do not send unapproved candidates to the model.
-            docs = store.search(owner, query, space_id=space_id, limit=50)
+            docs = store.search(owner, query, space_id=space_id, tag=IMPORT_TAG, limit=50)
             terms = [word.casefold() for word in re.findall(r"[\w.-]{2,}", query)[:24]]
             for candidate in docs:
                 doc = get(candidate["doc_id"])
@@ -99,7 +101,7 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
         if not doc or revision(doc) != hit.revision:
             return RetrievalResult([], "stale")
         # Page zero is the beginning; later pages continue from the original hit.
-        start = 0 if page == 0 else hit.metadata["start"] + page * PAGE_SIZE
+        start = 0 if page == 0 else max(0, hit.metadata["start"] + page * PAGE_SIZE)
         result = passage(doc, start)
         return RetrievalResult([result] if result else [], "matched" if result else "no_match")
 
@@ -152,6 +154,8 @@ def web_source(*, android_api_level=None, cdd_only=False):
         return RetrievalResult(rows, "matched" if rows else "no_match")
 
     def read(hit, page):
+        if page < 0:
+            return RetrievalResult([], "unavailable")
         if not current(hit):
             return RetrievalResult([], "stale")
         data = provider.read_cdd_scope(hit.reference, mode="section", offset=page * 3, limit=3,
@@ -170,6 +174,11 @@ def web_source(*, android_api_level=None, cdd_only=False):
 def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferred=None, catalog_hash=""):
     """Select the local route once and reject mid-run catalog changes."""
     try:
+        config = (config_manager.load_config() or {}).get("retrieval") or {}
+        if preferred is None and isinstance(config, dict):
+            preferred = config.get("llm_provider")
+            if preferred is not None and (not isinstance(preferred, str) or not preferred.strip()):
+                raise ValueError("Invalid local LLM provider")
         analyzer = analyzer_factory()
         name = analyzer.rag_local_provider(preferred)
         fingerprint = model_catalog_fingerprint(analyzer.config)
