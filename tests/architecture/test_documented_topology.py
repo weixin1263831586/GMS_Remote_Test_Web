@@ -364,3 +364,16 @@ def test_report_receives_centered_direct_arrow_from_worker_results():
     assert "['logs','Worker 原生结果','results / logs','chart','channel',839,340,237,165" in data
     assert "['report','报告浏览 / 登记','按需汇总与分析','book','control',839,564,237,104" in data
     assert "['M958 505 V564','report','结果索引'" in data
+
+
+def test_diagnostic_topology_preserves_knowledge_and_execution_boundaries():
+    source = (ROOT / 'docs/architecture/agent-analysis-topology.mmd').read_text(encoding='utf-8')
+    nodes, edges = parse_topology(source)
+    assert '背景知识' in nodes['Knowledge']
+    assert ('Knowledge', 'Review', '背景知识', '-->') in edges
+    assert '证据门禁' in nodes['Review'] and '结论复核' in nodes['Review']
+    data = (ROOT / 'web/static/js/pages/architecture-scene-data.js').read_text(encoding='utf-8')
+    for term in ('Evidence Gate', 'Claim Review', 'background', 'Android Internals Wiki',
+                 'Android CDD / Web', 'owner 授权 PDF / HTML', '不进入公共索引',
+                 '结论与建议（非执行）', '设备操作须另行授权', '诊断结果消费'):
+        assert term in data, term
