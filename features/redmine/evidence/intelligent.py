@@ -6,6 +6,7 @@ import json
 import re
 import sqlite3
 from contextlib import closing
+from pathlib import Path
 
 from features.retrieval import IntelligentSource, RetrievalHit, RetrievalResult
 from foundation.redaction import redact_sensitive_text
@@ -21,14 +22,22 @@ MAX_BYTES = 8 * 1024 * 1024
 class SnapshotCorpus:
     """Pin a retained snapshot. No network fetch, repair, or evidence DB writes."""
 
-    def __init__(self, owner_id, snapshot_id, *, include_journals=True):
+    def __init__(self, owner_id, snapshot_id, *, include_journals=True, data_root=None):
         if not owner_id or not snapshot_id:
             raise ValueError("Owner and snapshot required")
-        self.root = owner_redmine_root(owner_id)
+        if data_root is None:
+            self.root = owner_redmine_root(owner_id)
+        else:
+            from foundation.config_paths import sanitize_owner_id
+
+            if sanitize_owner_id(owner_id) != owner_id:
+                raise ValueError('Invalid evaluation owner identity')
+            self.root = Path(data_root) / 'redmine' / 'by_user' / owner_id
         self.snapshot_id = snapshot_id
         self.include_journals = include_journals
         self.documents = {}
         self.bounded = False
+        self.remaining_chars = MAX_BYTES
         self.revision, manifest, artifacts = self._load()
         self._add("issue", "工单标题及描述", str(manifest.get("subject") or "") + "\n"
                   + str(manifest.get("description") or ""))
@@ -51,12 +60,16 @@ class SnapshotCorpus:
                 self.bounded = True
                 continue
             budget = min(remaining, MAX_FILE_BYTES)
+            stamp = self._stamp(file)
             with file.open("rb") as handle:
                 raw = handle.read(budget + 1)
+            if self._stamp(file) != stamp:
+                self.bounded = True
+                continue
             self.bounded |= len(raw) > budget or row["derived_status"] in {"partial", "missing"}
             remaining -= min(len(raw), budget)
             self._add("artifact:" + row["artifact_id"], row["filename"], raw[:budget].decode("utf-8", "replace"),
-                      file=file, stamp=self._stamp(file), budget=budget)
+                      file=file, stamp=stamp)
 
     @staticmethod
     def _stamp(file):
@@ -85,8 +98,10 @@ class SnapshotCorpus:
     def _add(self, key, title, body, **extra):
         # Redact whole bounded text before slicing to avoid splitting secrets.
         body = redact_sensitive_text(body)
-        self.bounded |= len(body) > MAX_FILE_BYTES
-        body = body[:MAX_FILE_BYTES]
+        cap = min(MAX_FILE_BYTES, self.remaining_chars)
+        self.bounded |= len(body) > cap
+        body = body[:cap]
+        self.remaining_chars -= len(body)
         if body.strip():
             self.documents[key] = {"title": redact_sensitive_text(str(title))[:200], "body": body, **extra}
 
