@@ -35,7 +35,9 @@ def policy_lookup_target(message: str) -> str:
     if re.search(r"(?<![A-Za-z0-9])GMS(?![A-Za-z0-9])", message, re.I) and re.search(
         r"(?<![A-Za-z0-9])RAM(?![A-Za-z0-9])|Low\s*RAM|内存|运存|isLowRamDevice", message, re.I
     ):
-        # Query the policy topic, not a hardcoded answer or a CDD substitute.
+        # A qualified subtopic must not be rewritten to the declaration rule.
+        if re.search(r"preload|预装|模块|module|APEX", message, re.I):
+            return "section:Module preload requirements for low RAM devices"
         return "section:Low RAM"
     return ""
 
@@ -93,6 +95,24 @@ def lookup_requirement_sections(conn, query):
             return {"status": "anchor_not_indexed", "sections": [], "coverage_complete": False}
         predicate = "section_key IN (" + ",".join("?" for _ in keys) + ")"
         params.extend(keys)
+    elif query.strip().casefold() == "section:low ram":
+        # The certification memory intent refers to the declaration rule, not
+        # every section that mentions low RAM (preload, performance, etc.).
+        # Match the indexed clause or its actual section anchor; never invent text.
+        keys = [key for key, anchor in (coverage.get("section_anchors") or {}).items()
+                if anchor == "low-ram"]
+        for hit in conn.execute(
+            "SELECT DISTINCT section_key FROM gms_update_requirement_clauses "
+            "WHERE source_key=? AND source_revision=? AND requirement_id=?",
+            (SOURCE, revision, "GMS-10.0-001"),
+        ):
+            if hit[0] not in keys:
+                keys.append(hit[0])
+        if not keys:
+            return {"status": "no_match", "sections": [], "coverage_complete": False,
+                    "lookup_scope": "low_ram_declaration"}
+        predicate = "section_key IN (" + ",".join("?" for _ in keys) + ")"
+        params.extend(keys)
     elif CLAUSE_ID.fullmatch(query.removeprefix("section:")):
         predicate = ("section_key IN (SELECT section_key FROM gms_update_requirement_clauses "
                      "WHERE source_key=? AND source_revision=? AND requirement_id=? COLLATE NOCASE)")
@@ -132,7 +152,8 @@ def lookup_requirement_sections(conn, query):
             "section_key": key, "title": section["path"], "source_url": url,
             "source_revision": revision, "text": text[:MAX_TEXT],
             "clauses": [{k: item[k] for k in ("requirement_id", "change_version", "change_kind",
-                         "source_url", "content_hash")} for item in clauses[:MAX_ROWS]],
+                         "source_url", "content_hash", "original_text", "context_text")}
+                        for item in clauses[:MAX_ROWS]],
             "table_rows": [{"headers": json.loads(item["headers_json"]),
                             "values": json.loads(item["values_json"]),
                             "table_index": item["table_index"], "row_index": item["row_index"],

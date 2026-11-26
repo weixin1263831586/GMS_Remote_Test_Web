@@ -262,9 +262,8 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
         if target:
             _append_message(
                 session, "assistant",
-                "已定位 GMS Requirements 检索目标。请查看授权原文、表格及版本条件；"
-                "此结果不进入模型上下文。若索引缺失或过期，需要重新同步授权来源。"
-                "Low RAM 声明不等同于 Android Go 产品认证。",
+                "正在读取 GMS Requirements 对应政策章节。以下按条款和表格展示授权索引，"
+                "此结果不进入模型上下文。Low RAM 声明不等同于 Android Go 产品认证。",
                 data={"gms_policy_lookup": target},
             )
             _append_step(session, "GMS 政策来源定位", "done", "已选择授权原文查询入口，尚未读取内容")

@@ -187,3 +187,37 @@ def test_case_distinct_table_rows_and_tab_ids_publish_without_key_collisions(tmp
         sync_source(conn, 1, doc, force=True, timestamp='2026-01-01')
         assert conn.execute('SELECT count(*) FROM gms_update_requirement_table_rows').fetchone()[0] == 2
         assert conn.execute('SELECT count(*) FROM gms_update_requirement_clauses').fetchone()[0] == 2
+
+
+def test_low_ram_declaration_excludes_preload_and_other_memory_sections(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections, policy_lookup_target
+
+    body = """<article class="devsite-article">
+    <h2>4. Preload</h2><h3 id="module-preload-requirements-for-low-ram-devices">
+    Module preload requirements for low RAM devices</h3>
+    <p>[GMS-4.2.2-001] Example preload rule.</p>
+    <table><tr><th>Module</th></tr><tr><td>Example module</td></tr></table>
+    <h2>10. Performance</h2><h3 id="low-ram">Declare Low RAM devices</h3>
+    <p>[GMS-10.0-001] Example declaration rule.</p>
+    <table><tr><th>OS Version</th><th>Must be Low RAM</th><th>Optionally Low RAM</th>
+    <th>Not qualified for GMS</th></tr><tr><td>Android 16 or higher</td>
+    <td>3 GB</td><td>4 GB</td><td>Less than 3 GB</td></tr></table>
+    <h3>RAM usage</h3><p>Other Low RAM guidance.</p></article>"""
+    with closing(connect(tmp_path / 'precise.sqlite3')) as conn, conn:
+        sync_source(conn, 1, fetched(body), force=True, timestamp='2026-01-01')
+        result = lookup_requirement_sections(conn, 'section:Low RAM')
+        assert len(result['sections']) == 1
+        section = result['sections'][0]
+        assert section['source_url'].endswith('#low-ram')
+        assert section['clauses'][0]['requirement_id'] == 'GMS-10.0-001'
+        assert section['table_rows'][0]['values'] == ['Android 16 or higher', '3 GB', '4 GB', 'Less than 3 GB']
+        assert 'Example preload rule' not in section['text']
+        query = policy_lookup_target('GMS Low RAM 模块预装要求')
+        assert query == 'section:Module preload requirements for low RAM devices'
+        preload = lookup_requirement_sections(conn, query)
+        assert preload['sections'][0]['source_url'].endswith('#module-preload-requirements-for-low-ram-devices')
+        conn.execute("DELETE FROM gms_update_requirement_clauses WHERE requirement_id='GMS-10.0-001'")
+        coverage = json.loads(conn.execute('SELECT coverage_json FROM gms_update_requirement_coverage').fetchone()[0])
+        coverage['section_anchors'] = {k: v for k, v in coverage['section_anchors'].items() if v != 'low-ram'}
+        conn.execute('UPDATE gms_update_requirement_coverage SET coverage_json=?', (json.dumps(coverage),))
+        assert lookup_requirement_sections(conn, 'section:Low RAM')['status'] == 'no_match'

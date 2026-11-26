@@ -126,3 +126,9 @@ Only the lookup query is persisted; the browser reads and displays the
 protected result after authorization. No Partner grant or model route is
 enabled, and no upstream URL is fetched by this lookup. Re-synchronize the
 authorized scan to populate the section-anchor inventory for older indexes.
+
+The Low RAM certification intent resolves the declaration section by its retained
+anchor or GMS-10.0-001 clause, not broad title matches. Explicit preload questions
+remain separate. The browser presents clause text and structured tables first;
+section context and revision details are expandable. This is a human-readable
+lookup, not an authorized model analysis of shared Partner content.

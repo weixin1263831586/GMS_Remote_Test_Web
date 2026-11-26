@@ -396,19 +396,63 @@ function renderAgentMessages(session) {
                 }
                 if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引，请在 GMS 更新中心核查扫描结果。');
                 if (result.truncated) lines.push('返回范围受限，请缩小章节范围。');
-                for (const section of result.sections || []) {
-                    lines.push('', section.title, section.source_url || '未确认章节锚点',
-                        '文档修订：' + section.source_revision, section.text);
-                    for (const row of section.table_rows || []) {
-                        lines.push(row.headers.map((header, i) => header + '：' + (row.values[i] || '')).join(' | '));
-                    }
-                    if (section.media?.length) lines.push('包含图片引用，图片内容尚未核验。');
-                }
+                const block = document.createElement('div');
+                const addText = (parent, tag, value) => {
+                    const node = document.createElement(tag);
+                    node.textContent = String(value ?? '');
+                    parent.append(node);
+                    return node;
+                };
                 if (!result.sections?.length) lines.push('没有可返回章节，请核查采集和索引状态。');
-                const block = document.createElement('pre');
-                block.className = 'agent-message-body';
-                block.style.whiteSpace = 'pre-wrap';
-                block.textContent = lines.join('\n');
+                for (const section of result.sections || []) {
+                    addText(block, 'strong', section.title || '政策章节');
+                    for (const clause of section.clauses || []) {
+                        addText(block, 'p', [clause.requirement_id, clause.change_version,
+                            clause.change_kind].filter(Boolean).join(' · '));
+                        if (clause.original_text) addText(block, 'p', clause.original_text);
+                    }
+                    const grouped = new Map();
+                    for (const row of section.table_rows || []) {
+                        const key = row.table_index;
+                        if (!grouped.has(key)) grouped.set(key, []);
+                        grouped.get(key).push(row);
+                    }
+                    for (const rows of grouped.values()) {
+                        const table = document.createElement('table');
+                        table.className = 'list-table';
+                        const header = table.createTHead().insertRow();
+                        for (const title of rows[0].headers || []) {
+                            const th = addText(header, 'th', title);
+                            th.scope = 'col';
+                        }
+                        const body = table.createTBody();
+                        for (const row of rows) {
+                            const tr = body.insertRow();
+                            for (const value of row.values || []) tr.insertCell().textContent = value;
+                        }
+                        block.append(table);
+                    }
+                    if (section.source_url) {
+                        try {
+                            const url = new URL(section.source_url);
+                            if (url.origin === 'https://docs.partner.android.com'
+                                && url.pathname === '/gms/policies/domains/reqs') {
+                                const link = addText(block, 'a', '查看政策原文');
+                                link.href = url.href;
+                                link.target = '_blank';
+                                link.rel = 'noopener noreferrer';
+                            }
+                        } catch (_) { /* Ignore invalid retained URLs. */ }
+                    }
+                    const details = document.createElement('details');
+                    addText(details, 'summary', '展开章节原文、Note、脚注及版本信息');
+                    addText(details, 'p', '文档修订：' + (section.source_revision || '未知'));
+                    addText(details, 'p', section.text || '');
+                    if (section.media?.length) addText(details, 'p', '包含图片引用，图片内容尚未核验。');
+                    block.append(details);
+                }
+                const meta = addText(block, 'p', lines.join('\n'));
+                meta.className = 'agent-message-body';
                 output.replaceChildren(block);
                 if (output.isConnected) container.scrollTop = container.scrollHeight;
             } catch (_) {
