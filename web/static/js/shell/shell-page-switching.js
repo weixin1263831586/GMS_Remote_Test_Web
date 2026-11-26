@@ -160,7 +160,7 @@
         }
 
         function switchSidebarSettingsTab(tabName) {
-            const target = tabName === 'guide' ? 'guide' : 'visibility';
+            const target = ['guide', 'system'].includes(tabName) ? tabName : 'visibility';
             document.querySelectorAll('[data-sidebar-settings-tab]').forEach(button => {
                 const active = button.dataset.sidebarSettingsTab === target;
                 button.classList.toggle('active', active);
@@ -173,6 +173,7 @@
             // panel, so hide it when the read-only project guide is selected.
             const footer = document.querySelector('#sidebar-visibility-modal .sidebar-settings-footer');
             if (footer) footer.hidden = target !== 'visibility';
+            if (target === 'system') switchSystemSettingsSection(systemSettingsSection || 'runtime');
         }
 
         function setGuideImageZoom(actualSize) {
@@ -216,7 +217,7 @@
             if (event.target?.id === 'guide-image-modal') closeGuideImageLightbox();
         }
 
-        function openSidebarVisibilityModal() {
+        function openSidebarVisibilityModal(tabName = 'visibility', sectionName = '') {
             const modal = document.getElementById('sidebar-visibility-modal');
             const list = document.getElementById('sidebar-visibility-list');
             if (!modal || !list) return;
@@ -242,13 +243,18 @@
                 </label>`;
             }).join('');
 
-            switchSidebarSettingsTab('visibility');
+            systemSettingsSection = '';
+            if (tabName === 'system' && sectionName) switchSystemSettingsSection(sectionName);
+            switchSidebarSettingsTab(tabName);
 
             ModalManager.open('sidebar-visibility-modal');
         }
 
         function closeSidebarVisibilityModal() {
             ModalManager.close('sidebar-visibility-modal');
+            const frame = document.getElementById('system-redmine-settings-frame');
+            if (frame) frame.removeAttribute('src');
+            systemSettingsSection = '';
         }
 
         function selectAllSidebarVisibility() {

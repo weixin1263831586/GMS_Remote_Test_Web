@@ -21,13 +21,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from features.kkagent import child_env as _engine_child_env
-from features.kkagent import run_headless_turn
+from features.kkagent import KKAGENT_BINARY, TURN_TIMEOUT_SECONDS, run_headless_turn
 
 
 logger = logging.getLogger(__name__)
 
-KKAGENT_BINARY = "kkagent"
-TURN_TIMEOUT_SECONDS = 120
 _BRIDGE_PROMPT_PREFIX = (
     "你是 GMS 远程测试平台的规划助手。只做意图澄清、规划建议与只读诊断，"
     "不得直接执行烧写、AOA 或测试启动；实际执行由平台状态机完成。"

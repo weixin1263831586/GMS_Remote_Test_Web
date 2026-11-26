@@ -104,9 +104,87 @@ async function submitAddProject() {
   } catch (e) { notifyUser('添加项目失败', e.message, 'error'); }
 }
 
-// ---- Settings Modal ----
+// ---- Central settings ----
+var dailyBriefConfigCache = null;
+function dailyBriefSetting(name) {
+  return document.querySelector('[data-daily-brief-setting="' + name + '"]');
+}
+
+function appendDailyBriefModelOption(select, value, label) {
+  var option = document.createElement('option');
+  option.value = String(value || '');
+  option.textContent = String(label || value || '');
+  select.appendChild(option);
+}
+
+async function loadDailyBriefAgentProfiles(selectedProfile) {
+  var select = dailyBriefSetting('agent_profile');
+  if (!select) return;
+  var selected = String(selectedProfile || '').trim();
+  select.replaceChildren();
+  try {
+    var payload = await api('/api/redmine-agent/daily-brief/agent-profiles') || {};
+    var profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
+    var known = {};
+    if (profiles.length > 1 && !selected) {
+      appendDailyBriefModelOption(select, '', '请选择 kkagent Profile');
+    }
+    profiles.forEach(function(item) {
+      var profile = String(item || '').trim();
+      if (!profile || known[profile]) return;
+      known[profile] = true;
+      appendDailyBriefModelOption(select, profile, profile);
+    });
+    if (!profiles.length) {
+      appendDailyBriefModelOption(select, '', '未发现本机 kkagent Profile');
+    } else if (selected && !known[selected]) {
+      appendDailyBriefModelOption(select, selected, '当前保存的 Profile：' + selected);
+    }
+    select.value = selected || String(payload.default_profile || '').trim();
+  } catch (_) {
+    appendDailyBriefModelOption(select, selected, selected || 'Profile 列表读取失败');
+    select.value = selected;
+  }
+}
+
+async function loadDailyBriefModelOptions(selectedModel) {
+  var select = dailyBriefSetting('model');
+  if (!select) return;
+  var selected = String(selectedModel || '').trim();
+  select.replaceChildren();
+  try {
+    var payload = await api('/api/redmine-agent/daily-brief/model-options') || {};
+    var models = Array.isArray(payload.models) ? payload.models : [];
+    var known = {};
+    models.forEach(function(item) {
+      var model = String((item || {}).model || '').trim();
+      if (!model || known[model]) return;
+      known[model] = true;
+      var display = String((item || {}).display_name || model).trim() || model;
+      var provider = String((item || {}).provider || '').trim();
+      appendDailyBriefModelOption(select, model, provider ? display + '（' + provider + '）' : display);
+    });
+    if (!models.length) {
+      appendDailyBriefModelOption(select, '', '未发现已启用的系统模型（使用 kkagent 默认模型）');
+    } else if (selected && !known[selected]) {
+      appendDailyBriefModelOption(select, selected, '当前保存的模型：' + selected);
+    }
+    select.value = selected || String(payload.default_model || '').trim();
+    if (!select.value && select.options.length) select.selectedIndex = 0;
+  } catch (_) {
+    appendDailyBriefModelOption(select, selected, selected || '模型列表读取失败（使用 kkagent 默认模型）');
+    select.value = selected;
+  }
+}
+
 function showSettingsModal() {
-  showModal('settingsModal');
+  if (window.parent !== window && typeof window.parent.openSidebarVisibilityModal === 'function') {
+    window.parent.openSidebarVisibilityModal('system', 'redmine');
+  } else {
+    window.location.assign('/redmine-agent?settings=1');
+  }
+}
+function loadRedmineSettings() {
   // 每次打开都独立刷新晨报模型；统计/凭据设置失败不能让旧下拉选项残留。
   void refreshDailyBriefSettings();
   void initSelfBindingSelect();
@@ -115,7 +193,7 @@ function showSettingsModal() {
       await loadStatsConfig();
       document.getElementById('settingStaleDays').value = statsConfig.stale_days || 20;
       document.getElementById('settingWindowDays').value = statsConfig.window_days || 0;
-      document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl || 600;
+      document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl ?? 600;
       document.getElementById('settingFreshnessDays').value = statsConfig.freshness_days || 180;
       document.getElementById('settingRedmineBaseUrl').value = redmineBaseUrl();
       // 邮件通知：只读展示生效的发送方（系统级），本弹框不再编辑 SMTP。
@@ -126,7 +204,7 @@ function showSettingsModal() {
           summary.textContent = sender.smtp_host
             ? '发送方：' + sender.smtp_host + ':' + (sender.smtp_port || 465)
               + '（' + (sender.from_addr || sender.username || '-') + '）'
-            : '发送方尚未配置，请联系管理员在「系统配置」弹框填写。';
+            : '发送方尚未配置，请联系管理员在「导航设置与使用帮助 → 系统配置」填写。';
         }
       } catch (_) {
         var summary = document.getElementById('emailSenderSummary');
@@ -143,7 +221,6 @@ function showSettingsModal() {
     } catch (_) {}
   })();
 }
-function hideSettingsModal() { hideModal('settingsModal'); }
 
 // ---- 个人身份绑定（方案 2：全局组织架构共享，个人绑定/别名 per-owner）----
 async function initSelfBindingSelect() {
@@ -222,8 +299,8 @@ function renderRedmineCredentialStatus(status) {
 
 async function saveSettings() {
   var stale = parseInt(document.getElementById('settingStaleDays').value) || 20;
-  var window_ = parseInt(document.getElementById('settingWindowDays').value) || 60;
-  var cacheTtl = parseInt(document.getElementById('settingCacheTtl').value) || 600;
+  var window_ = Number(document.getElementById('settingWindowDays').value || 0);
+  var cacheTtl = Number(document.getElementById('settingCacheTtl').value || 0);
   var freshnessDays = parseInt(document.getElementById('settingFreshnessDays').value) || 180;
   var redmineBase = document.getElementById('settingRedmineBaseUrl').value.trim();
   try {
@@ -268,7 +345,11 @@ async function saveSettings() {
       body: JSON.stringify(briefConfig)
     });
     _statsConfigCacheTs = 0; // force reload
-    hideSettingsModal();
-    refreshCurrentTab();
+    document.getElementById('settingRedminePass').value = '';
+    document.getElementById('settingRedmineApiKey').value = '';
+    notifyUser('Redmine 配置已保存', '再次进入业务页面时读取最新配置', 'success');
+    if (window.parent !== window) {
+      window.parent.postMessage({type: 'redmine-settings-saved'}, window.location.origin);
+    }
   } catch (e) { notifyUser('保存设置失败', e.message, 'error'); }
 }

@@ -27,7 +27,6 @@
     header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
     header .filter-bar select { width:86px; min-width:86px; }
     header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
-    header .btn-group > .settings-btn { width:72px; min-width:72px; }
 
     @media (max-width:1199px) {
 
@@ -64,13 +63,13 @@
     /* 统计设置弹框：标题字号与其他页面统一 */
 
     /* Long modal forms scroll; do not shrink field cards into overlap. */
-    #settingsModal .tech-dialog--redmine-settings > .modal-body {
+    #redmine-system-settings {
         overflow-y:auto;
         overflow-x:hidden;
         align-items:stretch;
         min-height:0;
     }
-    #settingsModal .tech-dialog--redmine-settings > .modal-body > * {
+    #redmine-system-settings > * {
         flex:0 0 auto;
     }
 
