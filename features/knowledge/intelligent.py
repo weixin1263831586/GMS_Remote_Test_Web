@@ -349,7 +349,10 @@ def local_document_model(analyzer_factory, *, preferred=None, catalog_hash=""):
         if not name or not fingerprint:
             return {"success": False}
         fresh = analyzer_factory()
+        current_config = (config_manager.load_config() or {}).get("retrieval") or {}
+        current_preferred = current_config.get("llm_provider") if isinstance(current_config, dict) else None
         if (model_catalog_fingerprint(fresh.config) != fingerprint
+                or fresh.rag_local_provider(current_preferred) != name
                 or fresh.rag_local_provider(name) != name):
             raise PermissionError("Model route changed")
         return fresh.generate_local_rag(prompt, provider_name=name, **kwargs)
