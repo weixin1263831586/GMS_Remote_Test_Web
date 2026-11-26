@@ -247,14 +247,13 @@
             if (tabName === 'system' && sectionName) switchSystemSettingsSection(sectionName);
             switchSidebarSettingsTab(tabName);
 
+            ModalManager.onClose('sidebar-visibility-modal', resetSystemSettings);
             ModalManager.open('sidebar-visibility-modal');
         }
 
         function closeSidebarVisibilityModal() {
             ModalManager.close('sidebar-visibility-modal');
-            const frame = document.getElementById('system-redmine-settings-frame');
-            if (frame) frame.removeAttribute('src');
-            systemSettingsSection = '';
+
         }
 
         function selectAllSidebarVisibility() {

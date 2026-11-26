@@ -44,6 +44,7 @@ ALLOWED_DYNAMIC_TARGET_FEATURES = frozenset(
         "firmware",
         "gerrit",
         "knowledge",
+        "kkagent",
         "redmine",
         "reports",
         "sdk",

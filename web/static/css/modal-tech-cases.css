@@ -11,7 +11,6 @@
 .tech-dialog--elevate #elevate-action-label { border-color: #997148; background: #2a2226; }
 .tech-dialog--vpn-credential .tech-field-card { min-height: 60px; }
 .tech-dialog--wifi .tech-form-section { display: grid; gap: 4px; }
-.tech-dialog--gms-assistant-config .tech-field-card > label { min-width: 100px; }
 /* Creation forms: paired metadata in tool editors; simple categories stay stacked. */
 .tech-dialog--category .tech-field-card,
 .tech-dialog--ut-category .tech-field-card { min-height: 54px; }
@@ -231,7 +230,6 @@
 .tech-dialog--sdk-source .agent-access-form-grid { margin: 0; }
 .tech-dialog--sdk-source .agent-sdk-path-list { background: var(--tech-input); border-color: var(--tech-edge-soft); }
 .tech-dialog--agent-scopes .modal-body { display: grid; gap: 10px; }
-.tech-dialog--config #config-modal-body :is(fieldset,.config-section) { border-color: var(--tech-edge-soft); background: var(--tech-panel); }
 .tech-dialog--update-radar-settings .radar-task-fieldset { background: var(--tech-panel); border-color: var(--tech-edge-soft); border-radius: 9px; }
 /* Embedded workspaces: metadata cards, connection form, date-range pair, detail table. */
 .tech-dialog:is([class*='tech-dialog--redmine-'],[class*='tech-dialog--gerrit-']) .form-grid { gap: 14px; }
@@ -239,7 +237,6 @@
 .tech-dialog--redmine-project .modal-body { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; align-content: start; }
 .tech-dialog--redmine-department .tech-field-card { margin-bottom: 12px; }
 .tech-dialog--redmine-reset .modal-info-text { border-left-color: #ed8799; background: #32232b; }
-.tech-dialog--redmine-settings .tech-field-card,
 .tech-dialog--gerrit-settings .tech-field-card { margin-bottom: 12px; }
 .tech-dialog--redmine-trend-range .modal-body,
 .tech-dialog--gerrit-trend-range .form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 16px; }

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from . import config_api
 from .analyzer import (
     UniversalAIAnalyzer,
     call_provider_chain,
@@ -120,6 +121,7 @@ __all__ = [
     "consume_line",
     "context_length_limit",
     "context_limited_config",
+    "config_api",
     "default_model_alias",
     "endpoint_url",
     "extract_turn_events",

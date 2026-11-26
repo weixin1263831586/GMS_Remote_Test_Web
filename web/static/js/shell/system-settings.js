@@ -1,5 +1,20 @@
 // System settings shared by all workspace pages.
 let systemSettingsSection = '';
+let systemConfigGeneration = 0;
+let staticRoutesLoaded = false;
+function resetSystemSettings() {
+    systemConfigGeneration++;
+    systemSettingsSection = '';
+    staticRoutesLoaded = false;
+    emailSenderConfigLoaded = false;
+    const frame = document.getElementById('system-redmine-settings-frame');
+    if (frame) frame.removeAttribute('src');
+    document.getElementById('system-config-body')?.replaceChildren();
+    const footer = document.getElementById('system-config-footer');
+    if (footer) footer.hidden = true;
+    const input = document.getElementById('gms-assistant-url');
+    if (input) { input.value = ''; delete input.dataset.loaded; }
+}
 function switchSystemSettingsSection(name) {
     const allowed = ['runtime', 'models', 'redmine', 'external'];
     const target = allowed.includes(name) ? name : 'runtime';
@@ -49,6 +64,9 @@ async function loadSystemRuntimeConfig() {
     const modalBody = document.getElementById('system-config-body');
     const footer = document.getElementById('system-config-footer');
     if (!modalBody || !footer) return;
+    const generation = ++systemConfigGeneration;
+    staticRoutesLoaded = false;
+    emailSenderConfigLoaded = false;
     footer.hidden = true;
     modalBody.textContent = '正在读取运行配置…';
 
@@ -59,6 +77,7 @@ async function loadSystemRuntimeConfig() {
         modalBody.textContent = '获取配置失败: ' + error.message;
         return;
     }
+    if (generation !== systemConfigGeneration) return;
     const usbipVidPids = Array.isArray(config.usbip_vid_pids)
         ? config.usbip_vid_pids.join(', ')
         : String(config.usbip_vid_pid || '');
@@ -555,6 +574,8 @@ async function loadStaticRoutes() {
         renderStaticRoutesMessage(`加载失败: ${error.message}`, 'var(--error-color)');
         return;
     }
+    if (!tbody.isConnected || tbody !== document.getElementById('static-routes-table-body')) return;
+    staticRoutesLoaded = true;
     if (enabledCheckbox) enabledCheckbox.checked = !!data.enabled;
     renderStaticRoutesTable(Array.isArray(data.routes) ? data.routes : []);
 }
@@ -618,6 +639,10 @@ function deleteStaticRouteRow(button) {
 }
 
 async function saveStaticRoutes() {
+    if (!staticRoutesLoaded) {
+        showToast('静态路由尚未读取成功，本次未修改路由配置', 'warning');
+        return;
+    }
     const enabledCheckbox = document.getElementById('config-static-routes-enabled');
     const payload = {
         enabled: !!(enabledCheckbox && enabledCheckbox.checked),
@@ -649,14 +674,15 @@ async function saveConfig() {
     // Save UI log settings to localStorage (frontend-only)
     const historyLimit = parseInt(document.getElementById('config-log-history-limit')?.value) || 100;
     const maxEntries = parseInt(document.getElementById('config-log-max-entries')?.value) || 1000;
-    localStorage.setItem('gms-log-history-limit', String(historyLimit));
-    localStorage.setItem('gms-log-max-entries', String(maxEntries));
+
 
     try {
         addLogEntry('正在保存配置...', 'info');
         showToast('正在保存配置...', 'info');
 
         await apiCall('/api/config/update', 'POST', config);
+        localStorage.setItem('gms-log-history-limit', String(historyLimit));
+        localStorage.setItem('gms-log-max-entries', String(maxEntries));
         addLogEntry('配置已保存', 'success');
         showToast('配置保存成功', 'success');
 

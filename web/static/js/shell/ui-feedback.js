@@ -147,7 +147,7 @@ window.showSnackbar = function showSnackbar(title, message, level = 'info', dura
 // 各 close* 函数定义在 pages/*.js（本模块之后加载），必须惰性包装；
 // 加载期直接传函数引用会在脚本求值时抛 ReferenceError。
 const _modalCloseHandlers = {
-    'config-modal': () => closeModal(),
+    'sidebar-visibility-modal': () => closeSidebarVisibilityModal(),
     'firmware-modal': () => closeFirmwareModal(),
     'firmware-share-modal': () => closeFirmwareShareModal(),
     'firmware-share-password-modal': () => closeFirmwareSharePasswordModal(),

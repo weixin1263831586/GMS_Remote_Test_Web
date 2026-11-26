@@ -184,13 +184,14 @@ function showSettingsModal() {
     window.location.assign('/redmine-agent?settings=1');
   }
 }
-function loadRedmineSettings() {
-  // 每次打开都独立刷新晨报模型；统计/凭据设置失败不能让旧下拉选项残留。
-  void refreshDailyBriefSettings();
-  void initSelfBindingSelect();
-  (async function() {
-    try {
-      await loadStatsConfig();
+let redmineSettingsLoaded = false;
+async function loadRedmineSettings() {
+  const saveButton = document.getElementById('save-redmine-settings');
+  if (saveButton) saveButton.disabled = true;
+  redmineSettingsLoaded = false;
+  try {
+      const [config] = await Promise.all([api('/api/redmine-agent/config/stats'), refreshDailyBriefSettings(), initSelfBindingSelect()]);
+      statsConfig = config;
       document.getElementById('settingStaleDays').value = statsConfig.stale_days || 20;
       document.getElementById('settingWindowDays').value = statsConfig.window_days || 0;
       document.getElementById('settingCacheTtl').value = statsConfig.cache_ttl ?? 600;
@@ -218,8 +219,9 @@ function loadRedmineSettings() {
       } catch (_) { renderRedmineCredentialStatus(null); }
       document.getElementById('settingRedminePass').value = '';
       document.getElementById('settingRedmineApiKey').value = '';
-    } catch (_) {}
-  })();
+      redmineSettingsLoaded = true;
+      if (saveButton) saveButton.disabled = false;
+  } catch (error) { notifyUser('读取设置失败', error.message, 'error'); }
 }
 
 // ---- 个人身份绑定（方案 2：全局组织架构共享，个人绑定/别名 per-owner）----
@@ -269,8 +271,8 @@ async function refreshDailyBriefSettings() {
       loadDailyBriefModelOptions(dailyBriefConfigCache.model || ''),
     ]);
     dailyBriefSetting('max_parallel_issues').value = dailyBriefConfigCache.max_parallel_issues || 1;
-  } catch (_) {
-    // The individual selectors render a visible fallback option on failure.
+  } catch (error) {
+    throw new Error('每日晨报配置读取失败：' + error.message);
   }
 }
 
@@ -298,6 +300,7 @@ function renderRedmineCredentialStatus(status) {
 }
 
 async function saveSettings() {
+  if (!redmineSettingsLoaded) return;
   var stale = parseInt(document.getElementById('settingStaleDays').value) || 20;
   var window_ = Number(document.getElementById('settingWindowDays').value || 0);
   var cacheTtl = Number(document.getElementById('settingCacheTtl').value || 0);
