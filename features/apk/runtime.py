@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
+from foundation.config import ConfigManager
 from foundation.runtime_contracts import ClientIdResolver
+
+
+if TYPE_CHECKING:
+    from .store import ApkTaskStore
 
 
 @dataclass
 class ApkRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     global_state: object | None = None
     get_client_id_from_request: ClientIdResolver | None = None
     project_root: Path | None = None
@@ -20,7 +26,7 @@ class ApkRuntime:
     apk_max_source_file_size: int = 0
     jadx_path: str = "jadx"
     jadx_timeout: int = 300
-    apk_task_store: object | None = None
+    apk_task_store: ApkTaskStore | None = None
 
 
 _runtime = ApkRuntime()
