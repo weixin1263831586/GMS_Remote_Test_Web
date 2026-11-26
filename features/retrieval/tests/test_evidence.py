@@ -137,3 +137,31 @@ def test_summary_limits_cannot_claim_complete_coverage():
     assert len(evidence["references"]) == 16
     assert not evidence["coverage_complete"]
     assert "bounded_or_unconfirmed" in evidence["gaps"]
+
+
+def test_nested_mcp_reference_groups_keep_source_coverage_and_citations():
+    payload = {"success": True, "data": {"success": True, "data": {
+        "coverage_complete": True,
+        "sources": {
+            "security_patches": {"status": "matched", "items": [
+                {"reference": "ref:patch", "source_revision": "digest", "description": "private text"}
+            ]},
+            "critical_patches": {"status": "unavailable", "items": []},
+            "exemptions": {"status": "not_applicable", "items": []},
+        },
+    }}}
+    evidence = summarize_evidence("gms_rt_redmine_references", payload)
+    assert evidence["references"] == [{"source": "security_patches", "reference": "ref:patch",
+                                      "revision": "digest"}]
+    assert not evidence["coverage_complete"]
+    assert "source:critical_patches:unavailable" in evidence["gaps"]
+    assert "source_coverage:exemptions" not in evidence["gaps"]
+    assert "private text" not in str(evidence)
+
+
+def test_nested_failure_is_not_hidden_by_outer_success():
+    result = summarize_evidence("knowledge_search", {"success": True, "data": {
+        "success": False, "data": {"results": [], "coverage_complete": True},
+    }})
+    assert "tool_failed" in result["gaps"]
+    assert not result["coverage_complete"]
