@@ -87,3 +87,27 @@ def test_public_scheduler_resumes_batches_and_rotates_after_failure(tmp_path, mo
     assert restarted.sync_due_semantic() == []
     config["retrieval"]["auto_index_public_cdd"] = "true"
     assert restarted.sync_due_semantic() == []
+
+
+def test_dense_recall_rejects_manifest_change_during_query(tmp_path):
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    url = "https://source.android.com/docs/compatibility/16/android-16-cdd"
+    source = provider.save(name="CDD 16", url=url, kind="cdd",
+                           android_version=16, license="CC-BY-4.0")
+    with provider._db(write=True) as db:
+        db.execute("UPDATE sources SET revision='r1' WHERE id=?", (source,))
+        db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r1", "2026-01-01"))
+        db.execute("INSERT INTO clauses VALUES(?,?,?,?,?,?,?,?,?)",
+                   (source, "r1", "Memory", "", "MUST", "", "memory", url, "old-token"))
+    assert cdd_semantic.CddSemantic(provider, embedder=Encoder()).sync(source)["coverage_complete"]
+
+    class ChangingEncoder(Encoder):
+        def encode(self, texts):
+            with provider._db(write=True) as db:
+                db.execute("UPDATE sources SET revision='r2' WHERE id=?", (source,))
+                db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r2", "2026-01-02"))
+            return super().encode(texts)
+
+    hits, status = cdd_semantic.CddSemantic(provider, embedder=ChangingEncoder()).search("memory")
+    assert hits == []
+    assert status["status"] == "stale" and not status["coverage_complete"]
