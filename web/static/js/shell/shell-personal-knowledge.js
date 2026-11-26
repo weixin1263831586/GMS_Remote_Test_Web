@@ -1,6 +1,7 @@
         // ==================== 个人知识库 ====================
         const kbState = {
             initialized: false,
+            policyImport: false,
             spaces: [],
             nodes: [],
             currentSpace: 'gms',
@@ -21,7 +22,7 @@
         async function kbFetch(url, options, retried = false) {
             const response = await fetch(url, {credentials: 'same-origin', ...(options || {})});
             const result = await response.json().catch(() => ({}));
-            if (!retried && url.startsWith('/api/knowledge/external/') && response.status === 403 && result.detail?.elevation_required && typeof window.requestElevatedAccess === 'function') {
+            if (!retried && (url.startsWith('/api/knowledge/external/') || (url === '/api/knowledge/upload' && kbState.policyImport)) && response.status === 403 && result.detail?.elevation_required && typeof window.requestElevatedAccess === 'function') {
                 if (await window.requestElevatedAccess('管理外部知识源')) return kbFetch(url, options, true);
             }
             if (!response.ok || result.success === false) throw new Error(result.error || result.message || result.detail?.message || `HTTP ${response.status}`);
@@ -77,6 +78,9 @@
                         body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
                     await loadGrant();
                 } catch (error) { status.textContent = error.message; }
+            });
+            panel.querySelector('[data-kb-import]').addEventListener('click', async () => {
+                if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
             });
             const controls = form.elements;
             function reset() {
@@ -440,8 +444,12 @@
 
         function kbSearch() { kbLoadDocs(); }
 
-        function kbOpenUpload() {
-            document.getElementById('kb-upload-input').value = '';
+        function kbOpenUpload(policy = false) {
+            kbState.policyImport = policy === true;
+            const input = document.getElementById('kb-upload-input');
+            if (!input.dataset.defaultAccept) input.dataset.defaultAccept = input.accept || '*/*';
+            input.accept = kbState.policyImport ? '.pdf,.html,.htm' : input.dataset.defaultAccept;
+            input.value = '';
             document.getElementById('kb-upload-status').textContent = '';
             ModalManager.open('kb-upload-modal');
         }
@@ -458,6 +466,7 @@
                     form.append('file', files[i]);
                     form.append('space_id', kbState.currentSpace);
                     form.append('parent_id', kbState.currentParent);
+                    if (kbState.policyImport) form.append('tags', 'external-policy-ai-approved');
                     const doc = await kbFetch('/api/knowledge/upload', {method:'POST', body:form});
                     kbState.currentDocId = doc.doc_id;
                 }
