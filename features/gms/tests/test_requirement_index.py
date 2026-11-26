@@ -150,3 +150,21 @@ def test_protected_section_lookup_requires_human_and_elevated_session(monkeypatc
         queries.list_gms_requirement_clauses(None, q='section:Low RAM')
     assert exc.value.status_code == 403
     connect_db.assert_not_called()
+
+
+def test_empty_policy_index_distinguishes_failed_scan(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections
+
+    with closing(connect(tmp_path / 'empty.sqlite3')) as conn, conn:
+        assert lookup_requirement_sections(conn, 'section:Low RAM')['status'] == 'not_indexed'
+        conn.execute(
+            """INSERT INTO gms_update_source_results
+            (run_id,source_key,state,discovered,fetched,parsed,error)
+            VALUES (2,'gms_requirements','failed',1,1,0,'internal failure detail')"""
+        )
+        result = lookup_requirement_sections(conn, 'section:Low RAM')
+        assert result['status'] == 'scan_failed'
+        assert result['latest_scan']['fetched'] == 1
+        assert result['latest_scan']['parsed'] == 0
+        assert 'error' not in result['latest_scan']
+        assert not result['latest_scan_confirmed']

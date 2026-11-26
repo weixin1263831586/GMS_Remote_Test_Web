@@ -99,6 +99,28 @@ jobs:
                       for item in scan.get('sources', []):
                           if item.get('source_key') != 'gms_requirements':
                               continue
+                          error = str(item.get('error') or '').lower()
+                          categories = (
+                              ('source document redirected or missing article', 'unexpected_document'),
+                              ('no records parsed', 'empty_parse'),
+                              ('conflicting duplicate record key', 'duplicate_record_key'),
+                              ('unique constraint failed', 'unique_constraint'),
+                              ('not null constraint failed', 'not_null_constraint'),
+                              ('no such table', 'missing_table'),
+                              ('no such column', 'missing_column'),
+                              ('database is locked', 'database_locked'),
+                              ('has no attribute', 'attribute_error'),
+                              ('unexpected keyword argument', 'signature_error'),
+                              ('not enough values to unpack', 'unpack_error'),
+                              ('too many values to unpack', 'unpack_error'),
+                              ('list index out of range', 'index_error'),
+                              ('invalid ipv6 url', 'invalid_link'),
+                              ('maximum recursion depth', 'recursion_error'),
+                              ('访问失败', 'authorization_or_http_error'),
+                          )
+                          category = next((label for marker, label in categories if marker in error),
+                                          'other' if error else 'none')
+                          report('requirements_failure_category', category)
                           for field in ('discovered', 'fetched', 'parsed'):
                               number = item.get(field)
                               report('requirements_scan_' + field, number if isinstance(number, int) else 'unknown')

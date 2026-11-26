@@ -50,7 +50,14 @@ def lookup_requirement_sections(conn, query):
         "SELECT * FROM gms_update_requirement_coverage WHERE source_key=?", (SOURCE,)
     ).fetchone()
     if row is None:
-        return {"status": "not_indexed", "sections": [], "coverage_complete": False}
+        latest = conn.execute(
+            "SELECT run_id,state,discovered,fetched,parsed FROM gms_update_source_results "
+            "WHERE source_key=? ORDER BY run_id DESC LIMIT 1", (SOURCE,),
+        ).fetchone()
+        return {"status": "scan_failed" if latest and latest["state"] == "failed" else "not_indexed",
+                "sections": [], "coverage_complete": False,
+                "latest_scan": dict(latest) if latest else None,
+                "latest_scan_confirmed": False}
     coverage = json.loads(row["coverage_json"])
     revision = coverage.get("source_revision") or ""
     if not revision:

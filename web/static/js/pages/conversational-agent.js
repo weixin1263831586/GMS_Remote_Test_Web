@@ -385,12 +385,16 @@ function renderAgentMessages(session) {
                 const result = payload.data || {};
                 const lines = ['来源：GMS Requirements（本地授权扫描）',
                     '索引时间：' + (result.indexed_at || '未知'),
-                    '状态：' + ({matched: '已找到章节', not_indexed: '尚未建立条款索引',
+                    '状态：' + ({matched: '已找到章节', not_indexed: '尚未建立条款索引', scan_failed: '最近一次规范扫描失败',
                         anchor_not_indexed: '未索引指定锚点', anchor_required: '需要指定章节锚点',
                         no_match: '未找到匹配章节', revision_missing: '索引缺少修订信息'}
                         [result.status] || result.status || '未知'),
                     '未核验上游完整性、实时版本及产品适用性。'];
-                if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引。');
+                if (result.latest_scan) {
+                    const scan = result.latest_scan;
+                    lines.push('扫描批次：' + scan.run_id + ' · 获取文档：' + scan.fetched + ' · 解析记录：' + scan.parsed);
+                }
+                if (result.latest_scan_confirmed === false) lines.push('最近扫描未确认当前索引，请在 GMS 更新中心核查扫描结果。');
                 if (result.truncated) lines.push('返回范围受限，请缩小章节范围。');
                 for (const section of result.sections || []) {
                     lines.push('', section.title, section.source_url || '未确认章节锚点',
