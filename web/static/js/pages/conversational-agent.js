@@ -52,6 +52,7 @@ let agentHistoryIndex = -1;  // -1 = not browsing history
 let agentModelStatusLoaded = false;
 let agentModelStatusFlight = null;
 let agentElevationFlight = null;
+let agentPolicyReadFlight = null;
 let agentRetryId = '';
 let agentCurrentSession = null;
 let agentSessionDirectory = [];
@@ -313,8 +314,7 @@ function renderAgentMessages(session) {
             const query = encodeURIComponent(data.gms_policy_lookup);
             actions += `<div class="agent-actions"><button type="button" class="btn-xs"
                 data-gms-policy-query="${escapeHtml(query)}">读取 GMS 政策原文</button>
-                <a href="/api/gms-update-center/requirements/clauses?q=${escapeHtml(query)}"
-                   target="_blank" rel="noopener noreferrer">查看原始检索结果</a></div>
+                </div>
                 <div class="agent-policy-evidence" aria-live="polite"></div>`;
         }
 
@@ -340,18 +340,49 @@ function renderAgentMessages(session) {
     container.querySelectorAll('[data-gms-policy-query]').forEach(button => {
         button.addEventListener('click', async () => {
             const output = button.parentElement.nextElementSibling;
-            if (!output) return;
+            if (!output || agentPolicyReadFlight) return;
+            const sessionId = agentSessionId;
+            const stillCurrent = () => output.isConnected && agentSessionId === sessionId;
+            const flight = {};
+            agentPolicyReadFlight = flight;
             button.disabled = true;
-            output.textContent = '正在读取授权索引…';
+            output.textContent = '正在确认管理员授权…';
             try {
-                const response = await fetch('/api/gms-update-center/requirements/clauses?q='
-                    + button.dataset.gmsPolicyQuery, {cache: 'no-store'});
-                if (!response.ok) {
-                    output.textContent = response.status === 403
-                        ? '需要管理员提权后重新读取。' : 'GMS 政策检索暂不可用。';
+                const granted = await requestElevatedAccess('读取 GMS 政策原文');
+                if (!stillCurrent()) return;
+                if (!granted) {
+                    output.textContent = '未完成管理员验证，未读取政策内容。可点击重新读取。';
                     return;
                 }
-                const result = (await response.json()).data || {};
+                output.textContent = '正在读取授权索引…';
+                const url = '/api/gms-update-center/requirements/clauses?q=' + button.dataset.gmsPolicyQuery;
+                const read = () => fetch(url, {cache: 'no-store', credentials: 'same-origin'});
+                let response = await read();
+                let payload = await response.json().catch(() => ({}));
+                if (!stillCurrent()) return;
+                if (response.status === 403 && payload.detail?.elevation_required === true) {
+                    // The grant may have expired between validation and the protected read.
+                    state.elevated = false;
+                    state.elevatedUntil = null;
+                    const renewed = await requestElevatedAccess('继续读取 GMS 政策原文');
+                    if (!stillCurrent()) return;
+                    if (!renewed) {
+                        output.textContent = '管理员授权未续期，未读取政策内容。';
+                        return;
+                    }
+                    response = await read();
+                    payload = await response.json().catch(() => ({}));
+                    if (!stillCurrent()) return;
+                }
+                if (!response.ok || payload.success === false) {
+                    output.textContent = response.status === 401 ? '登录已失效，请重新登录。'
+                        : response.status === 403 ? (payload.detail?.elevation_required
+                            ? '管理员授权仍未生效，请检查当前登录会话。'
+                            : '当前身份无权读取 GMS 政策。')
+                        : 'GMS 政策检索暂不可用。';
+                    return;
+                }
+                const result = payload.data || {};
                 const lines = ['来源：GMS Requirements（本地授权扫描）',
                     '索引时间：' + (result.indexed_at || '未知'),
                     '状态：' + ({matched: '已找到章节', not_indexed: '尚未建立条款索引',
@@ -379,6 +410,7 @@ function renderAgentMessages(session) {
             } catch (_) {
                 output.textContent = 'GMS 政策检索失败，请重新读取。';
             } finally {
+                if (agentPolicyReadFlight === flight) agentPolicyReadFlight = null;
                 button.disabled = false;
             }
         });

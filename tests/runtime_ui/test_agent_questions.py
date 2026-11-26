@@ -260,3 +260,74 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
                     assert submissions == []
         finally:
             page.close()
+
+
+    def test_gms_policy_read_requires_elevation_and_retries_only_expired_grant(self):
+        page = self.new_page()
+        requests = []
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.policyAuthCalls = 0;
+                window.policyAuthGranted = false;
+                window.requestElevatedAccess = async () => {
+                    window.policyAuthCalls++;
+                    return window.policyAuthGranted;
+                };
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+
+            def reply(route):
+                requests.append(route.request.url)
+                if len(requests) == 1:
+                    route.fulfill(status=403, content_type='application/json',
+                                  body=json.dumps({'detail': {'elevation_required': True}}))
+                else:
+                    route.fulfill(status=200, content_type='application/json',
+                                  body=json.dumps({'success': True, 'data': {
+                                      'status': 'matched', 'sections': [{'title': 'Fixture Low RAM',
+                                          'text': 'Example policy', 'table_rows': []}]
+                                  }}))
+
+            page.route('**/api/gms-update-center/requirements/clauses?*', reply)
+            button = page.get_by_role('button', name='读取 GMS 政策原文', exact=True)
+            button.click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('未完成管理员验证')
+            self.assertEqual(requests, [])
+            page.evaluate('window.policyAuthGranted = true')
+            button.click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('Example policy')
+            self.assertEqual(len(requests), 2)
+            self.assertEqual(page.evaluate('window.policyAuthCalls'), 3)
+        finally:
+            page.close()
+
+    def test_gms_policy_non_elevation_forbidden_is_not_retried(self):
+        page = self.new_page()
+        requests = []
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+
+            def forbidden(route):
+                requests.append(route.request.url)
+                route.fulfill(status=403, content_type='application/json',
+                              body=json.dumps({'detail': {'agent_forbidden': True}}))
+
+            page.route('**/api/gms-update-center/requirements/clauses?*', forbidden)
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('当前身份无权读取')
+            self.assertEqual(len(requests), 1)
+        finally:
+            page.close()
