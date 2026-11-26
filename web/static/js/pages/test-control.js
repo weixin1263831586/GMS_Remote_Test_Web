@@ -736,7 +736,6 @@ function renderClientCredentialsMessage(tbody, message, color) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 4;
-    cell.style.padding = '20px';
     cell.style.textAlign = 'center';
     if (color) cell.style.color = color;
     cell.textContent = message;
@@ -746,7 +745,6 @@ function renderClientCredentialsMessage(tbody, message, color) {
 
 function appendClientCredentialCell(row, text, color) {
     const cell = document.createElement('td');
-    cell.style.padding = '4px 6px';
     if (color) cell.style.color = color;
     cell.textContent = text;
     row.appendChild(cell);
