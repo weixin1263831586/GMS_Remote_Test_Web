@@ -687,26 +687,51 @@
         }
 
         async function kbAsk() {
-            const result = await GmsDialogs.form('全库提问', [{name: 'value', label: '全库提问', required: true, multiline: true}]);
+            const result = await GmsDialogs.form('智能知识问答', [
+                {name: 'value', label: '问题', required: true, multiline: true}
+            ], {message: '本地 LLM 将主动检索、阅读原文及复核结论。'});
             const question = result?.value;
             if (!question || !question.trim()) return;
-            const data = await kbFetch('/api/knowledge/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:question.trim(), space_id:kbState.currentSpace})});
+            const includeImports = await window.showConfirmDialog('授权知识源',
+                '是否同时检索本人已授权导入的规范及公开网页？取消则仅检索当前个人知识空间。');
             const info = document.getElementById('kb-side-info');
+            if (info) info.textContent = '本地 RAG 正在规划、检索和复核，请以实际完成结果为准。';
+            const data = await kbFetch('/api/knowledge/ask', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question: question.trim(), space_id: includeImports ? '' : kbState.currentSpace,
+                    include_external: !!includeImports, include_authorized_imports: !!includeImports})
+            });
             if (info) {
                 const contexts = Array.isArray(data.contexts) ? data.contexts : [];
+                const steps = Array.isArray(data.rag?.steps) ? data.rag.steps : [];
+                const labels = {plan: '问题规划', search: '检索', read: '原文阅读', inspect: '证据检查',
+                    draft: '综合分析', review: '结论复核', model: '模型调用'};
+                const trace = steps.length ? `
+                    <details><summary>执行记录（${steps.length}）</summary>
+                    ${steps.map(step => `<div>${kbEsc(labels[step.stage] || step.stage)}：
+                        ${kbEsc(step.source || '')} ${kbEsc(step.status || '')}
+                        ${Number.isInteger(step.new_evidence) ? ' · 新证据 ' + step.new_evidence : ''}</div>`).join('')}
+                    </details>` : '';
                 const sources = contexts.length ? `
                     <div style="font-weight:var(--ui-type-weight-semibold);margin-top:10px;margin-bottom:6px;">来源</div>
-                    ${contexts.map((ctx, i) => `
-                        <div style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
-                            <button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}" style="margin-bottom:4px;">[${i + 1}] ${kbEsc(ctx.title || '无标题')}</button>
-                            <div style="color:var(--text-secondary);line-height:1.5;">${kbEsc(kbSnippet(ctx.snippet || ctx.summary || '', 180))}</div>
-                        </div>
-                    `).join('')}
+                    ${contexts.map((ctx, i) => {
+                        const title = '[' + (ctx.evidence_id || i + 1) + '] ' + (ctx.title || '无标题');
+                        const heading = ctx.doc_id
+                            ? `<button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}">${kbEsc(title)}</button>`
+                            : `<strong>${kbEsc(title)}</strong>`;
+                        return `<details style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
+                            <summary>${heading}</summary>
+                            <div style="color:var(--text-secondary);white-space:pre-wrap;overflow-wrap:anywhere;">${kbEsc(ctx.snippet || '')}</div>
+                            <div style="color:var(--text-secondary);overflow-wrap:anywhere;">${kbEsc(ctx.reference || '')} · ${kbEsc(ctx.source_revision || '')}</div>
+                            <div style="color:var(--text-secondary);overflow-wrap:anywhere;">${kbEsc(ctx.source_url || '')}</div>
+                        </details>`;
+                    }).join('')}
                 ` : '';
                 info.innerHTML = `
-                    <div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:6px;">问答结果 ${data.mode === 'ai' && data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
+                    <div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:6px;">智能问答
+                    ${data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
                     <div style="white-space:pre-wrap;color:var(--text-color);line-height:1.6;">${kbEsc(data.answer || '')}</div>
-                    ${sources}
+                    ${trace}${sources}
                 `;
             }
         }
