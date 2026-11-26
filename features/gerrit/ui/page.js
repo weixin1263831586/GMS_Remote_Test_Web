@@ -18,7 +18,7 @@ let pendingDepartmentTargetSelect = 'departmentProfile';
 let pendingTrendChartKey = '';
 let gerritWorkspaceContext = {};
 let pendingWorkspaceChangeId = '';
-const gerritDashboardRequestGeneration = {personal: 0, department: 0};
+const gerritDashboardRequestGeneration = {personal: 0, department: 0, query: 0};
 const esc = window.escapeHtml;
 async function api(url, options) {
   const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
@@ -59,7 +59,10 @@ async function init() {
   if (ownerInput) ownerInput.value = person.owner || config.default_owner || '';
   if (currentTab === 'personal') await loadPersonal(false);
   else if (currentTab === 'department') await loadDepartment(false);
-  else await loadChanges();
+  else {
+    renderHeaderTabControls();
+    await loadChanges();
+  }
 }
 function showSettings() {
   document.getElementById('settingBaseUrl').value = config.base_url || '';
@@ -321,10 +324,10 @@ async function withRefreshButtonBusy(task) {
 }
 
 async function refreshCurrentTab() {
+  if (currentTab === 'query') return loadChanges();
   await withRefreshButtonBusy(async function() {
     if (currentTab === 'personal') await loadPersonal(true);
     else if (currentTab === 'department') await loadDepartment(true);
-    else await loadChanges();
   });
 }
 function findPersonalProfile(id) {
@@ -440,16 +443,41 @@ async function loadDepartment(refresh) {
 }
 async function loadChanges() {
   if (currentTab !== 'query') return;
+  const requestGeneration = ++gerritDashboardRequestGeneration.query;
   const profileId = document.getElementById('profile').value || '';
   const query = document.getElementById('query').value || '';
+  const button = document.getElementById('queryBtn');
+  const rows = document.getElementById('rows');
+  const panel = document.getElementById('tab-query');
+  const isLatest = () => requestGeneration === gerritDashboardRequestGeneration.query;
   saveGerritProfileState();
-  document.getElementById('status').textContent = '查询中...';
+  button.disabled = true;
+  button.textContent = '查询中';
+  button.setAttribute('aria-busy', 'true');
+  panel.setAttribute('aria-busy', 'true');
   try {
     const data = await api('/api/gerrit-dashboard/changes?profile_id=' + encodeURIComponent(profileId) + '&query=' + encodeURIComponent(query));
-    document.getElementById('status').innerHTML = data.error ? '<span class="error">' + esc(data.error) + '</span>' : '';
-    document.getElementById('rows').innerHTML = (data.items || []).map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
+    if (!isLatest()) return;
+    const items = data.items || [];
+    if (data.error) {
+      if (currentTab === 'query') notifyUser('Gerrit 查询失败', data.error, 'error');
+      if (!items.length) {
+        if (!rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+        return;
+      }
+    }
+    rows.innerHTML = items.map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
   } catch (e) {
-    document.getElementById('status').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+    if (!isLatest()) return;
+    if (currentTab === 'query') notifyUser('Gerrit 查询失败', e.message, 'error');
+    if (!rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+  } finally {
+    if (isLatest()) {
+      button.disabled = false;
+      button.textContent = '查询';
+      button.setAttribute('aria-busy', 'false');
+      panel.setAttribute('aria-busy', 'false');
+    }
   }
 }
 function placeholderHtml(innerHtml) {
