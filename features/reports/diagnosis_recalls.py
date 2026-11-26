@@ -216,7 +216,7 @@ async def search_system_background(
         data = await asyncio.to_thread(
             federated_search,
             query,
-            sources=[BACKGROUND_SOURCE],
+            sources=[BACKGROUND_SOURCE, "web_documents"],
             limit=BACKGROUND_LIMIT,
             android_api_level=android_api_level,
         )
