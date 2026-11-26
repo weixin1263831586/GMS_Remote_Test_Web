@@ -1,4 +1,4 @@
-name: GMS requirements local index audit
+name: GMS requirements targeted scan validation
 on:
   push:
     branches: ['audit/main-full-review-18fe70e-20261126']
@@ -9,7 +9,7 @@ permissions:
 jobs:
   policy-index-audit:
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 5
+    timeout-minutes: 6
     steps:
       - name: Confirm Controller host
         run: |
@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
         with:
           persist-credentials: false
-      - name: Read existing Controller index metadata
+      - name: Run scoped Requirements scan and verify index metadata
         shell: bash
         env:
           GMS_SOAK_BASE_URL: ${{ vars.GMS_SOAK_BASE_URL || secrets.GMS_SOAK_BASE_URL }}
@@ -30,6 +30,7 @@ jobs:
           python3 - <<'PY'
           import os
           import sys
+          import time
           from pathlib import Path
           from urllib.parse import urlsplit
           import requests
@@ -60,6 +61,10 @@ jobs:
                       if response.status_code != 200:
                           report('controller_login_http', response.status_code)
                           return 1
+                      response = session.post(base + '/api/auth/elevate', json={'username': cfg['GMS_SOAK_USERNAME'], 'password': cfg['GMS_SOAK_PASSWORD']}, allow_redirects=False, timeout=15)
+                      if response.status_code != 200:
+                          report('controller_elevation_http', response.status_code)
+                          return 1
                   else:
                       report('controller_auth', 'not_configured')
                       return 1
@@ -73,6 +78,43 @@ jobs:
                           raise ValueError('API unsuccessful')
                       return payload
                   prefix = '/api/gms-update-center'
+                  status = get(prefix + '/scan/status')['data']['status']
+                  if status.get('running'):
+                      report('requirements_scan_start', 'busy')
+                      return 1
+                  previous = status.get('run_id') or 0
+                  # Explicit source only; never trigger the full GMS or radar scan.
+                  response = session.post(base + prefix + '/scan',
+                                          params={'mode': 'full', 'source': 'gms_requirements'},
+                                          allow_redirects=False, timeout=15)
+                  report('requirements_scan_start_http', response.status_code)
+                  if response.status_code != 200 or response.json().get('success') is not True:
+                      return 1
+                  scan = {}
+                  for _ in range(36):
+                      time.sleep(3)
+                      status = get(prefix + '/scan/status')['data']['status']
+                      run_id = status.get('run_id')
+                      if (isinstance(run_id, int) and run_id > previous
+                              and not status.get('running')
+                              and status.get('source') == ['gms_requirements']):
+                          scan = status
+                          break
+                  state = scan.get('state')
+                  report('requirements_scan_state', state if state in ('completed', 'failed', 'partial', 'interrupted') else 'pending')
+                  if scan:
+                      report('requirements_scan_run_id', scan['run_id'])
+                      for item in scan.get('sources', []):
+                          if item.get('source_key') != 'gms_requirements':
+                              continue
+                          for field in ('discovered', 'fetched', 'parsed'):
+                              number = item.get(field)
+                              report('requirements_scan_' + field, number if isinstance(number, int) else 'unknown')
+                      evidence = get(prefix + '/scan/runs/' + str(scan['run_id']), {'limit': 50})['data']
+                      for item in evidence.get('documents', []):
+                          if item.get('source_key') == 'gms_requirements':
+                              code = item.get('status_code')
+                              report('requirements_document_http', code if isinstance(code, int) else 'unknown')
                   sources = get(prefix + '/sources')['data']
                   matches = [item for item in sources.get('scanned', []) if item.get('source_key') == 'gms_requirements']
                   report('requirements_source_configured', any(item.get('source_key') == 'gms_requirements' for item in sources.get('configured', [])))
@@ -91,7 +133,7 @@ jobs:
                       payload = get(prefix + route, {**params, 'limit': 1})
                       total = payload.get('meta', {}).get('total')
                       report(label, total if isinstance(total, int) else 'unknown')
-              return 0
+              return 0 if state == 'completed' else 1
           try:
               sys.exit(main())
           except Exception as exc:
