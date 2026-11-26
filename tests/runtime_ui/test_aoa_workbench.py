@@ -66,7 +66,7 @@ class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
                             commandWidth: rows.every(row => {
                                 const command = row.querySelector('code').getBoundingClientRect();
                                 const comment = row.querySelector('.aoa-command-comment').getBoundingClientRect();
-                                return command.width >= comment.width * 1.9;
+                                return Math.abs(command.width - comment.width * 1.5) <= 2;
                             }),
                             comments: rows.every(row => {
                                 const comment = row.querySelector('.aoa-command-comment');
