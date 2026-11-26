@@ -17,6 +17,7 @@ from typing import Any, Protocol, TypedDict
 DEFAULT_STAGE_MAX_AGE_DAYS = 7
 DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS = 7
 
+
 class OpsEvent(TypedDict):
     id: str
     created_at: str
@@ -89,6 +90,74 @@ class DiskCleanupResult(_DiskCleanupCounts, total=False):
     largest_dirs: list[DirectorySize]
 
 
+class ArtifactCounters(TypedDict):
+    bytes: int
+    files: int
+    directories: int
+    aged_bytes: int
+    aged_files: int
+    older_7d_bytes: int
+    older_30d_bytes: int
+    older_90d_bytes: int
+    newest: float | None
+    present: bool
+    complete: bool
+    note: str
+
+
+class ArtifactBreakdown(TypedDict):
+    type: str
+    bytes: int
+    files: int
+
+
+class _ArtifactItemFields(ArtifactCounters):
+    id: str
+    name: str
+    group: str
+    scope: str
+    location: str
+    cleanup: str
+    priority: str
+    age_days: int
+    description: str
+    status: str
+
+
+class ArtifactItem(_ArtifactItemFields, total=False):
+    breakdown: list[ArtifactBreakdown]
+
+
+class FilesystemUsage(TypedDict):
+    total_bytes: int | None
+    free_bytes: int | None
+    used_bytes: int | None
+
+
+class DiskInventorySummary(TypedDict):
+    measured_bytes: int
+    controller_data_bytes: int
+    local_worker_bytes: int
+    aged_bytes: int
+    scanned_categories: int
+    incomplete_categories: int
+    attention_categories: int
+    visited_entries: int
+    scan_seconds: float
+    controller_scan_complete: bool
+    disk: FilesystemUsage
+
+
+class DiskInventoryResult(TypedDict):
+    generated_at: str
+    scope: str
+    readonly: bool
+    cache_hit: bool
+    summary: DiskInventorySummary
+    items: list[ArtifactItem]
+    coverage: list[str]
+
+
 AlertSweep = Callable[[], AlertSweepResult]
 
 
@@ -118,7 +187,7 @@ class DiskHygiene(Protocol):
 
 
 class DiskInventory(Protocol):
-    def __call__(self, *, refresh: bool = False) -> dict[str, Any]: ...
+    def __call__(self, *, refresh: bool = False) -> DiskInventoryResult: ...
 
 _incident_recorder: IncidentRecorder | None = None
 _alert_sweep: AlertSweep | None = None
@@ -186,7 +255,7 @@ def configure_disk_inventory(inventory: DiskInventory | None) -> None:
     _disk_inventory = inventory
 
 
-def read_disk_inventory(*, refresh: bool = False) -> dict[str, Any]:
+def read_disk_inventory(*, refresh: bool = False) -> DiskInventoryResult:
     """Read runtime inventory without exposing cleanup operations."""
     if _disk_inventory is None:
         raise RuntimeError("Runtime disk inventory is not configured")

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from foundation.config import PROJECT_ROOT, settings
+from foundation.ops_port import ArtifactBreakdown, ArtifactCounters, ArtifactItem, DiskInventoryResult, FilesystemUsage
 from foundation.uploads import upload_temp_root
 
 
@@ -32,7 +33,7 @@ MAX_TEMP_DISCOVERY_ENTRIES = 20000
 MAX_TREE_DEPTH = 96
 CACHE_SECONDS = 60.0
 _CACHE_LOCK = threading.Lock()
-_CACHE: tuple[float, str, dict[str, Any]] | None = None
+_CACHE: tuple[float, str, DiskInventoryResult] | None = None
 
 # Stable category IDs are also used by UI filters and regression tests.
 # id, label, group, cleanup policy, attention, reference mtime age, explanation
@@ -167,7 +168,7 @@ def _kind(path: tuple[str, ...]) -> str | None:
     return "runtime_other"
 
 
-def _new_row() -> dict[str, Any]:
+def _new_row() -> ArtifactCounters:
     return {
         "bytes": 0, "files": 0, "directories": 0, "aged_bytes": 0,
         "aged_files": 0, "older_7d_bytes": 0, "older_30d_bytes": 0,
@@ -189,7 +190,7 @@ def _unsafe_path_component(path: Path) -> str:
     return ""
 
 
-def _record_error(row: dict[str, Any], detail: str) -> None:
+def _record_error(row: ArtifactCounters, detail: str) -> None:
     row["complete"] = False
     if detail not in row["note"].split("；"):
         row["note"] = "；".join(filter(None, (row["note"], detail)))
@@ -197,8 +198,8 @@ def _record_error(row: dict[str, Any], detail: str) -> None:
 
 def _scan_tree(
     root: Path, classifier: Callable[[tuple[str, ...]], str | None],
-    rows: dict[str, dict[str, Any]], *,
-    now: float, deadline: float, limit: int, apk_types: dict,
+    rows: dict[str, ArtifactCounters], *,
+    now: float, deadline: float, limit: int, apk_types: dict[str, dict[str, int]],
     owner_limit: int = MAX_OWNER_ENTRIES,
     excluded_roots: frozenset[str] = frozenset(),
 ) -> tuple[int, bool]:
@@ -406,7 +407,7 @@ def collect_disk_artifacts(
     data_root: Path | None = None, *,
     test_log_root: Path | None = None,
     worker_root: Path | None = None,
-) -> dict[str, Any]:
+) -> DiskInventoryResult:
     """Read known host-local paths once; never contact or alter remote hosts."""
     start = time.monotonic()
     now = time.time()
@@ -472,29 +473,34 @@ def collect_disk_artifacts(
         total_visits += count
     measured = sum(row["bytes"] for row in rows.values())
     incomplete = sum(not row["complete"] for row in rows.values())
+    filesystem: FilesystemUsage
     try:
         disk = shutil.disk_usage(data)
         filesystem = {"total_bytes": disk.total, "free_bytes": disk.free, "used_bytes": disk.used}
     except OSError:
         filesystem = {"total_bytes": None, "free_bytes": None, "used_bytes": None}
-    items = []
+    items: list[ArtifactItem] = []
     for key, label, group, cleanup, priority, days, explanation in ARTIFACT_KINDS:
-        item = rows[key]
-        item.update({
+        row = rows[key]
+        item: ArtifactItem = {
+            **row,
             "id": key, "name": label, "group": group,
             "scope": "本机 Worker" if key == "local_worker_jobs" else "Controller",
             "location": DISPLAY_PATHS[key], "cleanup": cleanup,
             "priority": priority, "age_days": days, "description": explanation,
-        })
-        item["status"] = (
-            "partial" if not item["complete"] else
-            "unavailable" if key == "local_worker_jobs" and not local_worker_scanned else
-            "scanned" if item["present"] else "absent"
-        )
+            "status": (
+                "partial" if not row["complete"] else
+                "unavailable" if key == "local_worker_jobs" and not local_worker_scanned else
+                "scanned" if row["present"] else "absent"
+            ),
+        }
         if key == "apk":
+            breakdown: list[ArtifactBreakdown] = [
+                {"type": ext, "bytes": value["bytes"], "files": value["files"]}
+                for ext, value in apk_types.items()
+            ]
             item["breakdown"] = sorted(
-                ({"type": ext, **value} for ext, value in apk_types.items()),
-                key=lambda value: value["bytes"], reverse=True,
+                breakdown, key=lambda value: value["bytes"], reverse=True,
             )[:15]
         items.append(item)
     return {
@@ -528,7 +534,7 @@ def collect_disk_artifacts(
     }
 
 
-def cached_disk_artifacts(refresh: bool = False) -> dict[str, Any]:
+def cached_disk_artifacts(refresh: bool = False) -> DiskInventoryResult:
     """A manual refresh always resamples the disk, even inside the cache TTL."""
     global _CACHE
     key = str(Path(settings.data_root).absolute())

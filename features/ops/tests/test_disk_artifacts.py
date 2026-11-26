@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 
 from features.ops import disk_artifacts
+from foundation.ops_port import ArtifactBreakdown, ArtifactItem, DiskInventoryResult, DiskInventorySummary, FilesystemUsage
 
 
 def _inventory(tmp_path: Path, monkeypatch, **extra):
@@ -22,6 +23,19 @@ def _inventory(tmp_path: Path, monkeypatch, **extra):
 
 def _rows(result):
     return {item["id"]: item for item in result["items"]}
+
+
+def test_inventory_result_matches_shared_contract(tmp_path, monkeypatch):
+    result = _inventory(tmp_path, monkeypatch)
+    assert set(result) == DiskInventoryResult.__required_keys__
+    assert set(result["summary"]) == DiskInventorySummary.__required_keys__
+    assert set(result["summary"]["disk"]) == FilesystemUsage.__required_keys__
+    assert result["items"]
+    for item in result["items"]:
+        assert ArtifactItem.__required_keys__ <= set(item)
+        assert set(item) <= ArtifactItem.__required_keys__ | ArtifactItem.__optional_keys__
+        for entry in item.get("breakdown", []):
+            assert set(entry) == ArtifactBreakdown.__required_keys__
 
 
 def test_one_pass_counts_apk_and_redmine_without_double_count(tmp_path: Path, monkeypatch):

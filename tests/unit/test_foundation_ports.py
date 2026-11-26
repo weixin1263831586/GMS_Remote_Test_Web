@@ -108,7 +108,6 @@ class OpsPortContractTests(unittest.TestCase):
         self.assertEqual(set(sweep), ops_port.AlertSweepResult.__required_keys__)
         self.assertEqual(sweep, {'evaluated': 0, 'recorded': 0, 'notified': 0})
 
-
     def test_unregistered_cleanup_preserves_requested_mode(self):
         self.addCleanup(ops_port.configure_disk_hygiene, ops_port._disk_hygiene)
         ops_port.configure_disk_hygiene(None)
