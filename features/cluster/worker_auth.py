@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import HTTPException
 
 from foundation.config_paths import worker_tokens_path
+from foundation.private_config import write_atomic_text
 from foundation.security import bearer_token
 
 
@@ -77,24 +78,9 @@ def _token_map(raw: dict) -> dict[str, str]:
 
 def _write_private_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(
-        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    write_atomic_text(
+        path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
     )
-    try:
-        descriptor = os.open(
-            temporary,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, ensure_ascii=False)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        path.chmod(0o600)
-    finally:
-        temporary.unlink(missing_ok=True)
 
 
 def worker_tokens() -> dict[str, str]:

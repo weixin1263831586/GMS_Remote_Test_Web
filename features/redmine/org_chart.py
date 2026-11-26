@@ -18,12 +18,12 @@ daily-brief 等消费方拿到的仍是扁平成员列表（含 overlay 别名�
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from typing import Any
 
 from foundation.config import settings
 from foundation.config_paths import config_root
+from foundation.private_config import atomic_write_json
 
 from .users import owner_user_map_path
 
@@ -107,10 +107,7 @@ def save_org_payload(payload: dict[str, Any], project_root: Path | str | None = 
             f"拒绝用空 departments 覆写现有非空组织花名册: {path}"
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = path.with_name(path.name + ".tmp")
-    tmp_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp_path, path)
+    atomic_write_json(path, payload)
 
 
 def load_user_overlay(owner_id: str) -> dict[str, Any]:
@@ -132,8 +129,7 @@ def save_user_overlay(owner_id: str, overlay: dict[str, Any]) -> None:
     overlay.pop("departments", None)
     path = owner_user_map_path(owner_id)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(overlay, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, overlay)
 
 
 def _flatten_departments(payload: Any) -> list[dict[str, Any]]:
