@@ -5,6 +5,8 @@ on:
     paths:
       - 'features/knowledge/external/**'
       - 'features/knowledge/tests/test_web_sources*.py'
+      - 'tools/scripts/testing/audit_external_policy_live.py'
+      - 'features/redmine/reference_recall.py'
       - '.github/workflows/audit-external-policy-live.yml'
   workflow_dispatch:
 
@@ -36,3 +38,20 @@ jobs:
           trap 'rm -rf -- "$scratch"' EXIT
           export GMS_DATA_ROOT="$scratch/data"
           python3 -m pytest -q -s features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py --basetemp="$scratch/pytest"
+
+      - name: Replay existing Redmine snapshots without changing production data
+        shell: bash
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          umask 077
+          scratch=$(mktemp -d "$RUNNER_TEMP/external-replay.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          export GMS_DATA_ROOT="$scratch/data"
+          python3 -m tools.scripts.testing.audit_external_policy_live \
+            --data-root "$HOME/GMS_Remote_Test_Web/data" --scratch "$scratch" \
+            2>"$scratch/errors" | grep --line-buffered '^EXTERNAL_POLICY_REPLAY='
