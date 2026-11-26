@@ -284,6 +284,9 @@ def semantic_index_status(request: Request, source_id: str):
     require_elevated_admin(request)
     provider = WebKnowledgeProvider()
     result = {**provider.semantic_status(source_id), **provider.semantic_schedule_status(source_id)}
+    from .external import cdd_intelligence
+
+    result["document_understanding"] = cdd_intelligence.status(provider, source_id)
     issue = embedding_configuration_issue("cdd")
     if issue:
         result = {**result, "configuration_issue": issue}
