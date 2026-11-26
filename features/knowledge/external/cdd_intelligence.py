@@ -77,7 +77,7 @@ def sync_batch(provider, model, key, *, batch_size=4):
                 if not current:
                     continue
                 insight = derived.get(row["token"])
-                state = "error" if failed else "ready" if insight else "no_supported_fact"
+                state = "error" if failed or insight is None else "ready" if insight["facts"] else "no_supported_fact"
                 db.execute("""INSERT INTO cdd_insights(token,source_id,revision,model_key,status,attempted_at,facts_json)
                     VALUES(?,?,?,?,?,?,?) ON CONFLICT(token) DO UPDATE SET
                     source_id=excluded.source_id,revision=excluded.revision,model_key=excluded.model_key,
@@ -86,7 +86,7 @@ def sync_batch(provider, model, key, *, batch_size=4):
                      json.dumps(insight or {}, ensure_ascii=False)))
                 identity = db.execute("SELECT id FROM cdd_insights WHERE token=?", (row["token"],)).fetchone()[0]
                 db.execute("DELETE FROM cdd_insight_fts WHERE rowid=?", (identity,))
-                if insight:
+                if insight and insight["facts"]:
                     db.execute("INSERT INTO cdd_insight_fts(rowid,search_text) VALUES(?,?)",
                                (identity, insight["search_text"]))
                 written += 1
@@ -106,7 +106,8 @@ def status(provider, source_id=None):
             row = db.execute("""SELECT count(*) AS total,
                 count(CASE WHEN i.status IN ('ready','no_supported_fact') THEN 1 END) AS processed,
                 count(CASE WHEN i.status='ready' THEN 1 END) AS enriched,
-                count(CASE WHEN i.status='error' THEN 1 END) AS errors
+                count(CASE WHEN i.status='error' THEN 1 END) AS errors,
+                count(CASE WHEN length(c.original)>2400 OR length(c.section)+length(c.condition)+1>800 THEN 1 END) AS bounded
                 FROM clauses c JOIN sources s ON s.id=c.source_id AND s.revision=c.revision
                 LEFT JOIN cdd_insights i ON i.token=c.token AND i.model_key=?
                 WHERE s.enabled=1 AND s.kind='cdd' AND s.error=''
@@ -114,8 +115,9 @@ def status(provider, source_id=None):
         result = dict(row)
     except (sqlite3.Error, OSError):
         return {"status": "unavailable", "processed": 0, "total": 0, "coverage_complete": False}
-    complete = bool(result["total"] and result["processed"] == result["total"])
-    return {**result, "status": "ready" if complete else "partial" if result["processed"] else "empty",
+    processed_all = bool(result["total"] and result["processed"] == result["total"])
+    complete = processed_all and result["bounded"] == 0
+    return {**result, "status": "ready" if complete else "bounded" if processed_all else "partial" if result["processed"] else "empty",
             "coverage_complete": complete, "scope": "current_retained_public_cdd_processing"}
 
 
