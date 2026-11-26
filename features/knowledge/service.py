@@ -7,7 +7,7 @@ from typing import Any
 from .parsers import parse_file
 from .external.web_sources import model_catalog_fingerprint
 from .intelligent import (local_document_model, local_document_rag, personal_insight_index,
-                          personal_source, render_rag_answer, web_source, wiki_source)
+                          personal_source, render_rag_answer, web_source, wiki_insight_index, wiki_source)
 from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
@@ -233,3 +233,24 @@ def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=
 def run_authorized_rag(question, sources, *, limit=8, recall_only=False):
     """Use the injected model gateway with domain-owned, request-authorized adapters."""
     return local_document_rag(question, sources, _ask_analyzer_factory, limit=limit, recall_only=recall_only)
+
+
+def wiki_document_understanding(*, sync=False, batch_size=4):
+    """Only process explicitly approved current Wiki content and local model route."""
+    index = wiki_insight_index()
+    if not index.model_key:
+        return {"status": "disabled", "processed": 0, "total": 0, "coverage_complete": False}
+    source = wiki_source()
+    manifest, complete = source.manifest()
+    if not sync:
+        return index.status(manifest, complete=complete)
+    if not manifest:
+        return {"status": "unavailable", "processed": 0, "total": 0, "coverage_complete": False}
+    model, name, fingerprint = local_document_model(_ask_analyzer_factory)
+    if not name or fingerprint != model_catalog_fingerprint():
+        return {"status": "model_unavailable", "coverage_complete": False}
+
+    def current(hit):
+        return wiki_insight_index().model_key == index.model_key and source.current(hit)
+
+    return index.sync(manifest, current, model, complete=complete, batch_size=batch_size)
