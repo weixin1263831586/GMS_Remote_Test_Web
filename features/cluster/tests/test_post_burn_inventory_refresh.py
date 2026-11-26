@@ -3,7 +3,7 @@
 刷新职责位于 features/cluster/firmware_recovery.refresh_post_burn_inventory：
 run_local_firmware_recovery 的两个返回路径（完成/派发失败）都会触发。
 本文件锁定两条契约：
-- 恢复结束后库存被立即写入（probe → refresh_devices）；
+- 恢复结束后库存被立即写入（probe → refresh_worker_devices）；
 - probe/写库失败只告警，绝不影响恢复结果。
 """
 
@@ -27,7 +27,7 @@ class PostBurnInventoryRefreshTests(unittest.TestCase):
         devices = [{"serial": "D1", "state": "available", "transport": "local_usb"}]
         refreshed = []
         repository = SimpleNamespace(
-            refresh_devices=lambda wid, devs: refreshed.append((wid, devs)))
+            refresh_worker_devices=lambda wid, devs: refreshed.append((wid, devs)))
 
         with patch(
             "features.cluster.local_bridge._probe_devices", return_value=devices
@@ -37,7 +37,7 @@ class PostBurnInventoryRefreshTests(unittest.TestCase):
         assert refreshed == [("local-worker", devices)]
 
     def test_refresh_failure_never_raises(self):
-        repository = SimpleNamespace(refresh_devices=lambda wid, devs: None)
+        repository = SimpleNamespace(refresh_worker_devices=lambda wid, devs: None)
 
         with patch(
             "features.cluster.local_bridge._probe_devices",

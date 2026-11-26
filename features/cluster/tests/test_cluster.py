@@ -90,13 +90,13 @@ class ClusterRepositoryTests(unittest.TestCase):
         """本地烧写完成的库存刷新：只写设备表，不碰会话/状态/心跳时间。"""
         self.register()
         before = self.repo.get_worker("worker-246")
-        self.repo.refresh_devices("worker-246", [
+        self.repo.refresh_worker_devices("worker-246", [
             {"serial": "ABC", "transport": "local_usb", "state": "usb_only",
              "properties": {"usb": "1-13"}},
         ])
         stale = self.repo.list_devices("worker-246")[0]
         self.assertEqual(stale["state"], "usb_only")
-        self.repo.refresh_devices("worker-246", [
+        self.repo.refresh_worker_devices("worker-246", [
             {"serial": "ABC", "transport": "local_usb", "state": "available",
              "properties": {"usb": "1-13", "android_version": "17"}},
         ])

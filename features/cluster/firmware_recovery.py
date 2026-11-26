@@ -215,7 +215,7 @@ def refresh_post_burn_inventory(repository, worker_id: str) -> None:
 
     try:
         devices = local_bridge._probe_devices()
-        repository.refresh_devices(worker_id, devices)
+        repository.refresh_worker_devices(worker_id, devices)
     except Exception:
         logger.warning("post-burn inventory refresh failed", exc_info=True)
 
