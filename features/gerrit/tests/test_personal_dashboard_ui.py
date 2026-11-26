@@ -233,3 +233,65 @@ def test_resolved_owner_matches_controls_reviews_and_manual_query(dashboard, def
     assert query["owner"] == ["custom@example.com"]
     assert "profile_id" not in query
     playwright_api.expect(page.locator("#owner")).to_have_value("custom@example.com")
+
+
+
+def test_query_loading_reuses_button_without_layout_shift(dashboard):
+    page, _ = dashboard
+    open_dashboard(page)
+    page.evaluate("""() => {
+        const originalApi = api;
+        window.pendingQueries = [];
+        api = (url, options) => url.includes('/changes?')
+            ? new Promise((resolve, reject) => pendingQueries.push({resolve, reject}))
+            : originalApi(url, options);
+    }""")
+    button = page.locator('#queryBtn')
+    table = page.locator('#tab-query .wrap')
+    panel = page.locator('#tab-query')
+    page.locator('[data-tab="query"]').click()
+    playwright_api.expect(button).to_have_text('查询中')
+    playwright_api.expect(button).to_be_disabled()
+    playwright_api.expect(panel).to_have_attribute('aria-busy', 'true')
+    playwright_api.expect(panel.locator('.status-line')).to_have_count(0)
+    busy_button = button.bounding_box()
+    busy_table = table.bounding_box()
+    page.evaluate("pendingQueries[0].resolve({items: []})")
+    playwright_api.expect(button).to_have_text('查询')
+    playwright_api.expect(button).to_be_enabled()
+    playwright_api.expect(panel).to_have_attribute('aria-busy', 'false')
+    playwright_api.expect(page.locator('#rows')).to_contain_text('无记录')
+    assert button.bounding_box() == busy_button
+    assert table.bounding_box()['y'] == busy_table['y']
+
+    page.locator('#refreshBtn').click()
+    playwright_api.expect(button).to_have_text('查询中')
+    playwright_api.expect(page.locator('#rows')).to_contain_text('无记录')
+    assert table.bounding_box()['y'] == busy_table['y']
+    page.evaluate("pendingQueries[1].reject(new Error('Temporary query failure'))")
+    playwright_api.expect(button).to_be_enabled()
+    playwright_api.expect(button).to_have_text('查询')
+    playwright_api.expect(page.locator('#gerrit-local-toast')).to_contain_text('Temporary query failure')
+    playwright_api.expect(page.locator('#rows')).to_contain_text('无记录')
+    assert table.bounding_box()['y'] == busy_table['y']
+
+
+def test_query_latest_response_owns_busy_state(dashboard):
+    page, _ = dashboard
+    open_dashboard(page)
+    page.evaluate("""() => {
+        window.pendingQueries = [];
+        api = () => new Promise(resolve => pendingQueries.push(resolve));
+        switchTab('query');
+        loadChanges();
+    }""")
+    button = page.locator('#queryBtn')
+    playwright_api.expect(button).to_be_disabled()
+    page.evaluate("pendingQueries[0]({items: [], error: 'obsolete result'})")
+    playwright_api.expect(button).to_have_text('查询中')
+    playwright_api.expect(button).to_be_disabled()
+    playwright_api.expect(page.locator('#gerrit-local-toast')).to_have_count(0)
+    page.evaluate("pendingQueries[1]({items: []})")
+    playwright_api.expect(button).to_have_text('查询')
+    playwright_api.expect(button).to_be_enabled()
+    playwright_api.expect(page.locator('#rows')).to_contain_text('无记录')
