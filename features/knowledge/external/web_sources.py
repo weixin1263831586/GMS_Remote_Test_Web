@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import sqlite3
 import uuid
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from foundation.config import settings
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 
 from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
 from .document_index import document_revision, parse_document
@@ -132,6 +134,18 @@ class WebKnowledgeProvider:
             db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     def sync(self, source_id):
+        if not re.fullmatch(r'[0-9a-f]{32}', source_id):
+            raise ValueError('Invalid source identity')
+        lock_path = self._path().parent / 'sync-locks' / (source_id + '.lock')
+        descriptor = try_acquire_sync_lock(lock_path)
+        if descriptor is None:
+            return {'source_id': source_id, 'status': 'in_progress', 'coalesced': True}
+        try:
+            return self._sync(source_id)
+        finally:
+            release_sync_lock(descriptor)
+
+    def _sync(self, source_id):
         with self._db() as db:
             row = db.execute("SELECT * FROM sources WHERE id=? AND enabled=1", (source_id,)).fetchone()
         if row is None:
@@ -167,6 +181,56 @@ class WebKnowledgeProvider:
                 db.execute("UPDATE sources SET error=? WHERE id=? AND generation=? AND revision=?",
                            (type(exc).__name__, source_id, row["generation"], row["revision"]))
             raise
+
+    def sync_due(self, *, now=None, max_sources=4):
+        """Refresh enabled public sources at most daily; failures retry on the next tick."""
+        now = now or datetime.now(timezone.utc)
+        outcomes = []
+        for source in self.list_sources():
+            if not source['enabled']:
+                continue
+            stamp = source['synced_at']
+            if stamp and not source['error']:
+                try:
+                    if now - datetime.fromisoformat(stamp) < timedelta(hours=24):
+                        continue
+                except ValueError:
+                    pass
+            try:
+                outcomes.append(self.sync(source['id']))
+            except (OSError, ValueError, sqlite3.Error):
+                outcomes.append({'source_id': source['id'], 'status': 'error'})
+            if len(outcomes) >= max_sources:
+                break
+        return outcomes
+
+    def read_requirement(self, token):
+        """Read the full retained clause and its original revision, never a new revision."""
+        if not re.fullmatch(r'POL-[0-9a-f]{24}', token) or not self._path().is_file():
+            return None
+        with self._db() as db:
+            row = db.execute(
+                """SELECT c.*,s.name,s.android_version,s.kind,s.license,
+                          s.revision AS current_revision,r.fetched_at
+                   FROM clauses c JOIN sources s ON c.source_id=s.id
+                   JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
+                   WHERE c.token=? AND s.enabled=1 LIMIT 1""", (token,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def compare_requirements(self, section, requirement_id):
+        """Compare current CDD revisions by exact section and clause, never bare ID."""
+        if not self._path().is_file():
+            return []
+        with self._db() as db:
+            rows = db.execute(
+                """SELECT c.*,s.name,s.android_version,r.fetched_at
+                   FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                   JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
+                   WHERE s.enabled=1 AND s.kind='cdd' AND c.section=? AND c.requirement_id=?
+                   ORDER BY s.android_version,c.token LIMIT 100""", (section, requirement_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def status(self):
         enabled = [r for r in self.list_sources() if r["enabled"]]
