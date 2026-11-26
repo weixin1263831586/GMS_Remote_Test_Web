@@ -7,7 +7,13 @@ import time
 from pathlib import Path
 
 from features.ops import disk_artifacts
-from foundation.ops_port import ArtifactBreakdown, ArtifactItem, DiskInventoryResult, DiskInventorySummary, FilesystemUsage
+from foundation.ops_port import (
+    ArtifactBreakdown,
+    ArtifactItem,
+    DiskInventoryResult,
+    DiskInventorySummary,
+    FilesystemUsage,
+)
 
 
 def _inventory(tmp_path: Path, monkeypatch, **extra):
