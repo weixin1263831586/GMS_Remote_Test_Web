@@ -1911,6 +1911,18 @@
     "methods": [
       "GET"
     ],
+    "path": "/api/gms-update-center/requirements/clauses"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/gms-update-center/requirements/coverage"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
     "path": "/api/gms-update-center/requirements/sections"
   },
   {
@@ -2143,9 +2155,33 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/external/web-sources/{source_id}/semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/web-sources/{source_id}/semantic-index"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/knowledge/external/web-sources/{source_id}/sync"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/external/wiki-semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/wiki-semantic-index"
   },
   {
     "methods": [
@@ -2170,6 +2206,18 @@
       "GET"
     ],
     "path": "/api/knowledge/search"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/semantic-index"
   },
   {
     "methods": [
@@ -2799,6 +2847,36 @@
       "GET"
     ],
     "path": "/api/redmine-agent/runs/{run_id}"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/search/journal-semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/search/journal-semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/search/journals"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/redmine-agent/search/semantic-index"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/redmine-agent/search/semantic-index"
   },
   {
     "methods": [
