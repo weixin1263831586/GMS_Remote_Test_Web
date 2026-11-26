@@ -30,7 +30,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
                     route.fulfill(json={'success': True, 'data': {'sources': [{
                         'id': 'cdd16', 'name': 'Android 16 CDD',
                         'url': 'https://source.android.com/docs/compatibility/16/android-16-cdd',
-                        'android_version': 16, 'enabled': True,
+                        'android_version': 16, 'indexed_count': 4441, 'enabled': True,
                         'revision': 'revision16', 'synced_at': '', 'error': '',
                     }]}})
 
@@ -59,6 +59,31 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(panel.locator('form [name="kind"], form [name="license"], form [name="android_version"]')).to_have_count(0)
             expect(panel.locator('[data-kb-reset]')).to_be_hidden()
             expect(panel.locator('[data-kb-sources]')).to_contain_text('GMS Certification Requirements')
+            table = panel.locator('.kb-source-table')
+            expect(table.locator('colgroup col')).to_have_count(6)
+            expect(table.locator('tbody tr').first.locator('td').nth(3)).to_have_text('4441')
+            geometry = table.evaluate("""table => {
+                const headers = [...table.tHead.rows[0].cells];
+                return [...table.tBodies[0].rows].flatMap(row => [...row.cells].map((cell, index) => {
+                    const head = headers[index];
+                    const a = head.getBoundingClientRect();
+                    const b = cell.getBoundingClientRect();
+                    const style = getComputedStyle(cell);
+                    return {
+                        aligned: Math.abs(a.x - b.x) < 1 && Math.abs(a.width - b.width) < 1,
+                        textAligned: getComputedStyle(head).textAlign === style.textAlign,
+                        expectedAlignment: style.textAlign === (index < 2 ? 'left' : 'center'),
+                        noWrap: style.whiteSpace === 'nowrap',
+                        clipped: style.overflowX === 'hidden' && style.textOverflow === 'ellipsis',
+                        compact: index !== 2 || b.width <= 80,
+                        actionsFit: index !== 5 || cell.firstElementChild.scrollWidth <= cell.firstElementChild.clientWidth + 1,
+                    };
+                }));
+            }""")
+            for cell in geometry:
+                self.assertTrue(all(cell.values()), cell)
+            url_cell = table.locator('tbody tr').first.locator('td').nth(1)
+            expect(url_cell).to_have_attribute('title', 'https://source.android.com/docs/compatibility/16/android-16-cdd')
             form = panel.locator('form')
             url = 'https://source.android.com/docs/compatibility/17/android-17-cdd'
             form.locator('[name="url"]').fill(url)
