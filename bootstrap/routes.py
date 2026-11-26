@@ -259,7 +259,6 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             cleanup_files=cleanup_files,
         )
         configure_report_dependencies(
-            ssh_manager=ssh_manager,
             file_utils=FileUtils,
             universal_analyzer_factory=_report_failure_analyzer_factory,
             resolve_suite_target=resolve_suite_diagnosis_target,
