@@ -65,4 +65,7 @@ def sync_due_web_sources():
     provider = WebKnowledgeProvider()
     outcomes = provider.sync_due()
     outcomes.extend(provider.sync_due_semantic())
+    from .service import sync_due_cdd_understanding
+
+    outcomes.extend(sync_due_cdd_understanding())
     return outcomes
