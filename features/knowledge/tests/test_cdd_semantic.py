@@ -146,3 +146,41 @@ def test_model_context_only_recalls_fresh_public_cdd(tmp_path, monkeypatch):
     context = retrieve_public_cdd_context("memory")
     assert [item["reference"] for item in context] == ["POL-" + "0" * 24]
     assert not context[0]["applicability_verified"]
+
+
+def test_wiki_scheduler_shares_budget_and_requires_current_approval(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    import features.retrieval as retrieval
+    from features.knowledge.external import federation, web_sources
+
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    config = {"retrieval": {"auto_index_public_cdd": True, "auto_index_approved_wiki": True}}
+    monkeypatch.setattr(web_sources.config_manager, "load_config", lambda: config)
+    monkeypatch.setattr(retrieval, "embedding_configuration_issue", lambda *args: None)
+    source_id = provider.save(name="CDD", url="https://source.android.com/docs/compatibility/16/android-16-cdd",
+                              kind="cdd", android_version=16, license="CC-BY-4.0")
+    with provider._db(write=True) as db:
+        db.execute("UPDATE sources SET revision='r1' WHERE id=?", (source_id,))
+    monkeypatch.setattr(provider, "semantic_status", lambda _id: {"status": "partial", "coverage_complete": False})
+    cdd_sync = Mock(return_value={"status": "partial", "coverage_complete": False})
+    monkeypatch.setattr(provider, "sync_semantic", cdd_sync)
+    wiki = Mock()
+    wiki.status.return_value = SimpleNamespace(status="ready", source_revision="w1",
+                                               approved_revision="w1", available_revision="w2")
+    wiki.semantic_status.return_value = {"status": "partial", "coverage_complete": False}
+    wiki.sync_semantic.return_value = {"status": "ready", "coverage_complete": True}
+    monkeypatch.setattr(federation, "federated_service", lambda: SimpleNamespace(provider=lambda _id: wiki))
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    assert provider.sync_due_semantic(now=now)[0]["source_id"] == source_id
+    assert provider.sync_due_semantic(now=now + timedelta(minutes=1))[0]["status"] == "stale"
+    wiki.sync_semantic.assert_not_called()
+    assert provider.semantic_schedule_status("android_internals", wiki=True)["last_auto_index_attempt"]
+    wiki.status.return_value.available_revision = "w1"
+    assert provider.sync_due_semantic(now=now + timedelta(minutes=2))[0]["source_id"] == source_id
+    assert provider.sync_due_semantic(now=now + timedelta(minutes=3))[0]["source_id"] == "android_internals"
+    wiki.sync_semantic.assert_called_once_with(batch_size=128)
+    config["retrieval"]["auto_index_approved_wiki"] = False
+    assert not provider.semantic_schedule_status("android_internals", wiki=True)["auto_index_enabled"]
