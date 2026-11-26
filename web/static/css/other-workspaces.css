@@ -89,7 +89,6 @@
     background: var(--card-bg); border: 1px solid var(--border-color);
     border-radius: 8px; box-shadow: none; backdrop-filter: none;
 }
-#page-test.page-ui-rework .input-container { padding: 12px; margin-bottom: 10px; }
 #page-test.page-ui-rework .input-table td { padding-right: 10px; }
 #page-test.page-ui-rework .input-table td:last-child { padding-right: 0; }
 #page-test.page-ui-rework .middle-row {

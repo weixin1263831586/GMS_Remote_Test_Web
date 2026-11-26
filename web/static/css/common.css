@@ -1260,7 +1260,7 @@ td.table-placeholder {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    padding: 6px;
+    padding: 6px 10px;
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(10px);
     flex-shrink: 0;
@@ -1297,7 +1297,7 @@ td.table-placeholder {
 .right-frame {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
 
 /* ADB 设备与操作控制区。 */
