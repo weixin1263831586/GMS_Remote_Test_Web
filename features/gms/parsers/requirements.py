@@ -6,7 +6,7 @@ import json
 import re
 from collections import Counter
 from copy import deepcopy
-from urllib.parse import quote, urljoin, urlsplit
+from urllib.parse import quote, unquote, urljoin, urlsplit
 
 from lxml import html
 
@@ -103,6 +103,22 @@ def _active_policy_article(article):
     return active, removed
 
 
+def _local_links(node):
+    return list(dict.fromkeys(unquote(href[1:]) for href in node.xpath('.//a/@href')
+                              if href.startswith('#') and len(href) > 1))
+
+
+def _note_kind(node, value):
+    identity = node.get('id', '')
+    if (node.get('role') == 'doc-footnote'
+            or re.match(r'^(?:fn|footnote)[-_]?\\d', identity, re.I)
+            or re.match(r'^Footnotes?\\s*[:.]', value, re.I)):
+        return 'footnote'
+    if re.match(r'^Notes?\\s*:', value, re.I):
+        return 'note'
+    return ''
+
+
 def _events(node):
     """Walk document order across containers without duplicating nested text."""
     if not isinstance(node.tag, str) or node.tag in _SKIP:
@@ -183,6 +199,9 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     tables = 0
     current = None
     context = {}
+    clause_owner = {}
+    table_owner = {}
+    evidence_links = {}
 
     def select_section(node, level, title):
         nonlocal current
@@ -200,6 +219,8 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
         sections[key] = {'level': level, 'number': number, 'title': clean, 'path': path,
                          'anchor': node.get('id', ''), 'parts': [title], 'tables': 0, 'links': []}
         context.clear()
+        clause_owner.clear()
+        table_owner.clear()
 
     def add_tag(version, kind, ids, value, path, section_key):
         ids_text = ', '.join(ids)
@@ -225,6 +246,7 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                                  'path': 'Document front matter', 'anchor': '',
                                  'parts': [], 'tables': 0, 'links': []}
         section = sections[current]
+        links = evidence_links.setdefault(current, {'tables': [], 'notes': []})
         path = section['path']
         scope = _scope(node)
         scope_key = tuple(scope)
@@ -243,6 +265,10 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                     table_definition_candidates.add(definition.group(1))
             media.extend({**item, 'section_key': current} for item in _media(node, base))
             headers, parsed_rows = table_rows(node, base, complete_headers=True)
+            links['tables'].append({'table_index': tables, 'clause_key': clause_owner.get(scope_key, ''),
+                                    'scope': scope, 'local_links': _local_links(node),
+                                    'association': 'adjacent_candidate'})
+            table_owner[scope_key] = tables
             for row in parsed_rows:
                 values = row['values']
                 headers_json, values_json = _json(headers), _json(values)
@@ -257,7 +283,17 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                     stable_hash([headers, values]),
                 ))
             continue
+        offset = section.get('text_length', len(' '.join(section['parts']))) + bool(section['parts'])
         section['parts'].append(value)
+        section['text_length'] = offset + len(value)
+        note_kind = _note_kind(node, value)
+        if note_kind:
+            anchor = node.get('id', '')
+            links['notes'].append({'kind': note_kind, 'start': offset, 'end': offset + len(value),
+                                   'anchor': anchor if anchor in anchors else '', 'scope': scope,
+                                   'clause_key': clause_owner.get(scope_key, ''),
+                                   'table_index': table_owner.get(scope_key),
+                                   'association': 'adjacent_candidate'})
         section['links'].extend(filter(None, (_safe_url(base, href) for href in node.xpath('.//a/@href'))))
         ids = requirement_ids(value)
         references.update(ids)
@@ -266,10 +302,14 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
             kind = (start.group(1) or 'added').lower()
             version = 'Android ' + ' '.join((start.group(2) or start.group(3)).upper().split())
             markers.append((version, kind, scope_key))
+            clause_owner.pop(scope_key, None)
+            table_owner.pop(scope_key, None)
             marker_counts[(version, kind)] += 1
             add_tag(version, kind, ids, value, path, current)
             continue
         if _END.match(value):
+            clause_owner.pop(scope_key, None)
+            table_owner.pop(scope_key, None)
             if markers and markers[-1][2] == scope_key:
                 markers.pop()
             else:
@@ -301,10 +341,14 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                 value, condition, active[0], active[1], _json(mentions), _json(scope), url, anchor_kind,
                 revision, _json(payload['references']), _json(payload['media']), stable_hash(payload),
             ))
+            clause_owner[scope_key] = clauses[-1].clause_key
+            table_owner.pop(scope_key, None)
             if active[0]:
                 add_tag(active[0], active[1], [requirement_id], value, path, current)
-        elif not ids and node.tag in ('p', 'li', 'td', 'th', 'div', 'dt', 'dd'):
+        elif not ids and not note_kind and node.tag in ('p', 'li', 'td', 'th', 'div', 'dt', 'dd'):
             context[scope_key] = value
+            clause_owner.pop(scope_key, None)
+            table_owner.pop(scope_key, None)
         for version in mentions:
             if version != active[0]:
                 add_tag(version, 'specific', ids, value, path, current)
@@ -323,6 +367,8 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
         'source_revision': revision,
         'revision_text_scope': 'active_markup_only',
         'historical_applicability_verified': False,
+        'section_evidence_links': {key: value for key, value in evidence_links.items()
+                                   if value['tables'] or value['notes']},
         'removed_revision_nodes': removed_revision_nodes,
         'section_anchors': {key: value['anchor'] for key, value in sections.items()
                             if value['anchor'] in anchors},

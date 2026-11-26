@@ -585,6 +585,14 @@ function renderAgentMessages(session) {
                                 header + '：' + (row.values[i] || '')).join(' | '));
                         }
                     }
+                    const structured = section.structured_evidence;
+                    if (structured?.notes?.length) {
+                        addText(details, 'strong', '关联附注与脚注（待核验适用性）');
+                        for (const note of structured.notes) {
+                            const association = note.association === 'explicit_anchor' ? '明确锚点关联' : '相邻候选';
+                            addText(details, 'p', association + '：' + note.text);
+                        }
+                    }
                     if (section.text) addText(details, 'p', section.text);
                     else if (section.context_limited) addText(details, 'p', '原始上下文边界不明确，请查看官方章节。');
                     if (section.media?.length) addText(details, 'p', '包含图片引用，图片内容尚未核验。');

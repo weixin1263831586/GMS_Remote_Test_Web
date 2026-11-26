@@ -224,6 +224,39 @@ def _related_ram_evidence(conn, revision, coverage, excluded_keys, android_versi
     }
 
 
+def _section_evidence(coverage, key, original, clauses, rows, context_limited):
+    """Resolve only retained offsets and selected table/clause identities."""
+    links = (coverage.get("section_evidence_links") or {}).get(key, {})
+    clause_keys = {item["clause_key"] for item in clauses}
+    table_indexes = {item["table_index"] for item in rows}
+    tables = [dict(item) for item in links.get("tables", [])
+              if item["table_index"] in table_indexes]
+    notes = []
+    for item in links.get("notes", []):
+        start, end = item["start"], item["end"]
+        if not 0 <= start < end <= len(original):
+            continue
+        explicit = [table["table_index"] for table in tables
+                    if item.get("anchor") and item["anchor"] in table.get("local_links", [])
+                    and item.get("scope") == table.get("scope")]
+        if context_limited and not explicit:
+            continue
+        note = {**item, "text": original[start:end], "linked_tables": explicit,
+                "association": "explicit_anchor" if explicit else "adjacent_candidate"}
+        if note.get("clause_key") not in clause_keys:
+            note["clause_key"] = ""
+        if note.get("table_index") not in table_indexes:
+            note["table_index"] = None
+        notes.append(note)
+    for table in tables:
+        if table.get("clause_key") not in clause_keys:
+            table["clause_key"] = ""
+    return {"tables": tables[:MAX_ROWS], "notes": notes[:MAX_ROWS],
+            "available": key in (coverage.get("section_evidence_links") or {}),
+            "truncated": len(tables) > MAX_ROWS or len(notes) > MAX_ROWS,
+            "applicability_verified": False}
+
+
 def requirement_index_consistent(conn, coverage):
     """Check the retained revision against all indexed record families."""
     if not coverage or not coverage.get("source_revision"):
@@ -387,6 +420,8 @@ def lookup_requirement_sections(conn, query):
                          "scope_json", "version_mentions_json", "clause_key")}
                         for item in clauses[:MAX_ROWS]],
             "table_rows": table_rows,
+            "structured_evidence": _section_evidence(coverage, key, section["text_excerpt"],
+                                                     clauses[:MAX_ROWS], rows[:MAX_ROWS], context_limited),
             "media": [] if context_limited else [item for item in coverage.get("media", [])
                                                  if item.get("section_key") == key][:MAX_ROWS],
             "truncated": (len(text) > MAX_TEXT or bounded),

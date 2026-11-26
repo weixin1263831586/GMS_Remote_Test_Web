@@ -379,3 +379,29 @@ def test_policy_index_integrity_checks_all_record_families(tmp_path):
         result = lookup_requirement_sections(conn, 'section:GMS-1.1-001')
         assert not result['index_consistent']
         assert not result['latest_scan_confirmed']
+
+
+def test_policy_table_notes_and_explicit_footnotes_are_revision_bound(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections
+
+    doc = fetched("""<article class="devsite-article">
+      <h3 id="rules">Example rules</h3>
+      <p>[GMS-1-001] MUST satisfy the example.</p>
+      <table><tr><th>Limit</th></tr><tr><td>Example <a href="#fn1">1</a></td></tr></table>
+      <p id="fn1">Footnote: Only for example devices.</p>
+      <p>Note: Additional example.</p>
+      <p>[GMS-1-002] MUST satisfy another example.</p>
+      <h3 id="other">Other section</h3><p>Note: Unrelated note.</p>
+      </article>""")
+    with closing(connect(tmp_path / 'structured.sqlite3')) as conn, conn:
+        sync_source(conn, 1, doc, force=True, timestamp='2026-01-01')
+        section = lookup_requirement_sections(conn, 'section:GMS-1-001')['sections'][0]
+        evidence = section['structured_evidence']
+        first = next(c for c in section['clauses'] if c['requirement_id'] == 'GMS-1-001')
+        assert evidence['tables'][0]['clause_key'] == first['clause_key']
+        assert evidence['notes'][0]['association'] == 'explicit_anchor'
+        assert evidence['notes'][0]['linked_tables'] == [evidence['tables'][0]['table_index']]
+        assert evidence['notes'][0]['text'] == 'Footnote: Only for example devices.'
+        assert evidence['notes'][1]['association'] == 'adjacent_candidate'
+        assert all('Unrelated' not in n['text'] for n in evidence['notes'])
+        assert not evidence['applicability_verified']
