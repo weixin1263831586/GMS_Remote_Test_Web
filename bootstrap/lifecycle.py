@@ -240,7 +240,7 @@ def create_lifespan(services: AppServices):
             # downloading 快照推进到 interrupted 终态，避免 wait_for_snapshot
             # 与状态轮询永久等待；失败绝不阻断启动。
             try:
-                from features.redmine.evidence.service import reconcile_interrupted_fetches
+                from features.redmine.evidence.fetch import reconcile_interrupted_fetches
 
                 reconciled = reconcile_interrupted_fetches()
                 if reconciled:

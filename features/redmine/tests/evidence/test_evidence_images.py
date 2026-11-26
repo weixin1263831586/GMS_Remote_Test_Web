@@ -43,7 +43,7 @@ def _tiny_png_bytes() -> bytes:
 
 class ImageDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
     def _fetch_with_png(self, owner_id: str = "owner-a", png: bytes | None = None):
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
         from features.redmine.evidence.store import owner_evidence_store
 
         if png is None:

@@ -2,9 +2,11 @@
 
 from pathlib import Path
 
-from features.redmine.evidence.service import (
+from features.redmine.evidence.fetch import (
     _ACTIVE_FETCH_SNAPSHOTS,
     reconcile_interrupted_fetches,
+)
+from features.redmine.evidence.service import (
     wait_for_snapshot,
 )
 from features.redmine.evidence.store import EvidenceStore

@@ -258,7 +258,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_long_journal_preserved_byte_for_byte(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -279,7 +279,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         import asyncio
         import hashlib
 
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
         from features.redmine.evidence.store import owner_evidence_store
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
@@ -300,7 +300,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_refresh_creates_new_snapshot_and_old_remains(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -316,7 +316,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_partial_when_attachment_fails(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceFetcher, snapshot_completeness
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import snapshot_completeness
 
         with FakeRedmineServer() as fake:
             fake.fail_attachment = "776656"
@@ -334,7 +335,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_redirect_to_other_host_rejected(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
 
         with FakeRedmineServer() as fake:
             fake.redirect_attachment = "776655"
@@ -353,7 +354,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_issue_not_found_marks_failed(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError
 
         with FakeRedmineServer() as fake:
             fake.issue_not_found = True
@@ -365,7 +367,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_owner_isolation(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
         from features.redmine.evidence.store import owner_evidence_store
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
@@ -378,7 +380,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
     def test_login_html_rejected(self):
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceAuthError, EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceAuthError
 
         with FakeRedmineServer() as fake:
             document = fake.issue_document
@@ -403,7 +406,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
 
         import aiohttp
 
-        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -427,7 +431,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         import asyncio
 
         import features.redmine.evidence.service as evidence
-        from features.redmine.evidence.service import EvidenceAuthError, EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceAuthError
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -448,7 +453,8 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         """base_url 缺失的报错必须指向 Web UI 设置页。"""
         import asyncio
 
-        from features.redmine.evidence.service import EvidenceError, EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.service import EvidenceError
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
@@ -465,7 +471,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
         """P1 回归：run() 未预期异常时 _runner 兜底必须把快照推进 failed。"""
         import asyncio
 
-        import features.redmine.evidence.service as evidence
+        import features.redmine.evidence.fetch as evidence
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = evidence.EvidenceFetcher("owner-a")
@@ -499,7 +505,7 @@ class EvidencePipelineTests(EvidencePipelineFixture, unittest.TestCase):
             EVIDENCE_CACHE_TTL_SECONDS,
             _snapshot_fresh,
         )
-        from features.redmine.evidence.service import EvidenceFetcher
+        from features.redmine.evidence.fetch import EvidenceFetcher
 
         with FakeRedmineServer() as fake, self._patched_config(fake.base_url):
             fetcher = EvidenceFetcher("owner-a")
