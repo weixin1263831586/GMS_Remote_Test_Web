@@ -14,6 +14,7 @@ from features.assistant import kkagent_bridge
 from features.assistant import planning_recovery as recovery
 from features.assistant.executor import executor
 from features.assistant.report_query import apply_report_goal_params
+from features.assistant.response import external_knowledge_warnings
 from features.assistant.route_invocation import _UNSUPPORTED_DIRECT_TOOLS
 from features.assistant.session_log import _append_message, _append_step, _format_params
 from features.assistant.tools import registry
@@ -371,8 +372,11 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     if tool.name == "redmine_issue_analyze" and outcome.success:
                         # The durable analysis now owns progress; the planning turn must not wait or redispatch.
                         return True
-                    _append_step(session, tool.display_name, "done" if outcome.success else "warning",
-                                     (outcome.formatted_text or outcome.error or "操作完成")[:1000])
+                    source_warnings = (external_knowledge_warnings(outcome.data)
+                                       if tool.name == "android_internals_search" else [])
+                    step_status = "done" if outcome.success and not source_warnings else "warning"
+                    _append_step(session, tool.display_name, step_status,
+                                 (outcome.formatted_text or outcome.error or "操作完成")[:1000])
                     if (not outcome.success and isinstance(outcome.data, dict)
                             and outcome.data.get("status_code") == 403 and outcome.data.get("elevation_required") is True):
                         state.completed.pop(key, None)  # Guard refused before execution.
