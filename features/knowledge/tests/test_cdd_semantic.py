@@ -111,3 +111,38 @@ def test_dense_recall_rejects_manifest_change_during_query(tmp_path):
     hits, status = cdd_semantic.CddSemantic(provider, embedder=ChangingEncoder()).search("memory")
     assert hits == []
     assert status["status"] == "stale" and not status["coverage_complete"]
+
+
+def test_model_context_only_recalls_fresh_public_cdd(tmp_path, monkeypatch):
+    from features.knowledge import retrieve_public_cdd_context
+    from features.knowledge.external import web_sources
+
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    monkeypatch.setattr(web_sources, "index_path", lambda: provider._path())
+    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: Encoder())
+    urls = (
+        ("https://source.android.com/docs/compatibility/16/android-16-cdd", "cdd", 16),
+        ("https://source.android.com/docs/compatibility/17/android-17-cdd", "cdd", 17),
+        ("https://example.com/document", "document", None),
+    )
+    ids = []
+    for i, (url, kind, version) in enumerate(urls):
+        source = provider.save(name=f"Source {i}", url=url, kind=kind,
+                               android_version=version, license="approved")
+        ids.append(source)
+        with provider._db(write=True) as db:
+            db.execute("UPDATE sources SET revision='r1' WHERE id=?", (source,))
+            db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r1", "2026-01-01"))
+            db.execute("INSERT INTO clauses VALUES(?,?,?,?,?,?,?,?,?)",
+                       (source, "r1", "Memory", "", "MUST", "", "memory", url,
+                        "POL-" + str(i) * 24))
+    for source in ids[:2]:
+        assert provider.sync_semantic(source)["coverage_complete"]
+    with provider._db(write=True) as db:
+        db.execute("UPDATE sources SET error='OSError' WHERE id=?", (ids[1],))
+    hits, status = provider.search_with_status("memory", public_cdd_only=True)
+    assert [hit.source_path for hit in hits] == ["POL-" + "0" * 24]
+    assert status["total"] == status["indexed"] == 1
+    context = retrieve_public_cdd_context("memory")
+    assert [item["reference"] for item in context] == ["POL-" + "0" * 24]
+    assert not context[0]["applicability_verified"]
