@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from cryptography.fernet import Fernet
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -15,6 +17,7 @@ from fastapi.testclient import TestClient
 from features.auth import CurrentUser
 from features.redmine.evidence import api as evidence_api
 from features.redmine.evidence import search_api as evidence_search_api
+from features.redmine.evidence.api import _snapshot_fresh
 
 
 def _make_config_manager(base_url: str):
@@ -673,6 +676,21 @@ class EvidenceApiTests(unittest.TestCase):
                 preflight_owner_fetch("owner-a"), "http://redmine.example/"
             )
 
+
+@pytest.mark.parametrize("tz", [None, timezone.utc])
+def test_recent_snapshots_are_fresh(tz):
+    stamp = (datetime.now(tz) - timedelta(seconds=10)).isoformat()
+    assert _snapshot_fresh({"fetched_at": stamp}, 300)
+
+
+@pytest.mark.parametrize(("tz", "minutes"), [(None, -15), (timezone.utc, -15), (timezone.utc, 15)])
+def test_old_future_snapshots_are_not_fresh(tz, minutes):
+    stamp = (datetime.now(tz) + timedelta(minutes=minutes)).isoformat()
+    assert not _snapshot_fresh({"fetched_at": stamp}, 300)
+
+
+def test_invalid_snapshot_is_not_fresh():
+    assert not _snapshot_fresh({"fetched_at": "invalid"}, 300)
 
 if __name__ == "__main__":
     unittest.main()

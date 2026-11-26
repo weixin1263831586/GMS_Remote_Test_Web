@@ -1,12 +1,4 @@
-"""Evidence 快照保留策略（磁盘回收）回归。
-
-证据快照附件原样落盘，实测单工单可达 GB 级且历史上无任何清理，是
-data/ 下最大的持续磁盘开销。本文件锁定三条契约：
-- 终态快照按年龄（GMS_EVIDENCE_RETENTION_DAYS）与每工单数量
-  （GMS_EVIDENCE_MAX_SNAPSHOTS_PER_ISSUE）回收，进行中状态永不回收；
-- 文件先删、DB 行后删，DB 行只随文件一起消失（不产生悬挂引用）；
-- 无 DB 引用的孤儿目录（先删后崩的残留）由清扫兜底回收。
-"""
+"""Evidence store retention, attachment lookup and snapshot-state contracts."""
 
 from __future__ import annotations
 
@@ -18,7 +10,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from features.redmine.evidence import store as evidence_store
+from features.redmine.evidence.service import snapshot_completeness
 from features.redmine.evidence.store import EvidenceStore
 
 
@@ -146,6 +141,126 @@ class EvidenceRetentionTests(unittest.TestCase):
             self.assertIsNone(skipped)
             self.assertIsNotNone(self.store.get_snapshot(again["snapshot_id"]))
 
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(evidence_store, "_now", lambda: "2026-10-27T10:00:00")
+    return evidence_store.EvidenceStore(tmp_path)
+
+
+def _artifact(store, snapshot, monkeypatch, artifact_id):
+    monkeypatch.setattr(evidence_store, "new_artifact_id", lambda: artifact_id)
+    return store.create_artifact(
+        snapshot_id=snapshot["snapshot_id"], attachment_id="123",
+        filename="log.txt", original_filename="log.txt",
+        content_type="text/plain", kind="text",
+    )
+
+
+def test_default_lookup_uses_newest_snapshot_when_older_download_finishes_late(store, monkeypatch):
+    old = store.create_snapshot(issue_id=1)
+    new = store.create_snapshot(issue_id=1)
+    newest = _artifact(store, new, monkeypatch, "art_a")
+    older = _artifact(store, old, monkeypatch, "art_z")
+
+    assert store.latest_snapshot_for_issue(1)["snapshot_id"] == new["snapshot_id"]
+    assert store.get_artifact_by_attachment_id("123") == newest
+    assert store.get_artifact_by_attachment_id("123", snapshot_id=old["snapshot_id"]) == older
+
+
+def test_scoped_lookup_uses_insertion_order_for_same_second_rows(store, monkeypatch):
+    snapshot = store.create_snapshot(issue_id=1)
+    _artifact(store, snapshot, monkeypatch, "art_z")
+    newest = _artifact(store, snapshot, monkeypatch, "art_a")
+
+    assert store.get_artifact_by_attachment_id("123", snapshot_id=snapshot["snapshot_id"]) == newest
+    assert store.get_artifact_by_attachment_id("123") == newest
+
+
+def test_lookup_does_not_cross_attachment_or_snapshot_scope(store, monkeypatch):
+    snapshot = store.create_snapshot(issue_id=1)
+    _artifact(store, snapshot, monkeypatch, "art_a")
+
+    assert store.get_artifact_by_attachment_id("456") is None
+    assert store.get_artifact_by_attachment_id("123", snapshot_id="ev_missing") is None
+
+
+def _ready_snapshot(store: EvidenceStore, **fields):
+    snapshot = store.create_snapshot(issue_id=648526, download_policy="all")
+    store.update_snapshot(
+        snapshot["snapshot_id"],
+        status="ready",
+        content_sha256="a" * 64,
+        **fields,
+    )
+    return store.get_snapshot(snapshot["snapshot_id"])
+
+
+def test_derivation_gap_keeps_original_ready_and_flags_derived_dimension(tmp_path):
+    store = EvidenceStore(tmp_path / "owner")
+    snapshot = _ready_snapshot(store, error_json=[{"stage": "derive", "message": "OCR 失败"}])
+    created = store.create_artifact(
+        snapshot_id=snapshot["snapshot_id"], attachment_id="776657",
+        filename="shot.png", original_filename="shot.png",
+        content_type="image/png", kind="image",
+    )
+    store.update_artifact(
+        created["artifact_id"],
+        status="ready", derived_status="missing", derived_text_path="",
+    )
+
+    flags = snapshot_completeness(snapshot, store.list_artifacts(snapshot["snapshot_id"]))
+    # 原件维度全绿；只有派生维度如实为缺口。
+    assert flags["issue"] and flags["journals"] and flags["requested_downloads"]
+    assert flags["derived_text"] is False
+    artifact = store.get_artifact(created["artifact_id"])
+    assert artifact["status"] == "ready"
+    assert artifact["derived_status"] == "missing"
+    assert artifact["text_available"] is False
+
+
+def test_download_gap_pulls_snapshot_partial_and_requested_downloads_false(tmp_path):
+    store = EvidenceStore(tmp_path / "owner")
+    snapshot = store.create_snapshot(issue_id=648526, download_policy="all")
+    store.update_snapshot(
+        snapshot["snapshot_id"],
+        status="partial",
+        content_sha256="b" * 64,
+        error_json=[{"stage": "download", "message": "附件 HTTP 500"}],
+    )
+    snapshot = store.get_snapshot(snapshot["snapshot_id"])
+
+    flags = snapshot_completeness(snapshot, [])
+    assert flags["issue"] and flags["journals"]
+    assert flags["requested_downloads"] is False
+
+
+def test_failed_snapshot_is_never_fully_complete(tmp_path):
+    store = EvidenceStore(tmp_path / "owner")
+    snapshot = store.create_snapshot(issue_id=648526, download_policy="none")
+    store.update_snapshot(
+        snapshot["snapshot_id"],
+        status="failed",
+        error_json=[{"stage": "issue", "message": "Redmine 不可达"}],
+    )
+    snapshot = store.get_snapshot(snapshot["snapshot_id"])
+
+    flags = snapshot_completeness(snapshot, [])
+    assert flags["issue"] is False and flags["journals"] is False
+    assert not all(flags.values())
+
+
+def test_derived_warning_only_lives_in_derived_dimension(tmp_path):
+    """derived_status=partial（索引不完整）不改变原件与下载维度。"""
+    store = EvidenceStore(tmp_path / "owner")
+    snapshot = _ready_snapshot(store, error_json=[{"stage": "derive", "message": "成员超限"}])
+    flags = snapshot_completeness(snapshot, [])
+
+    assert flags["issue"] and flags["requested_downloads"]
+    assert flags["derived_text"] is False
+    # 对照：快照没有 derive 阶段错误时派生维度为 True。
+    clean = _ready_snapshot(store)
+    assert snapshot_completeness(clean, [])["derived_text"] is True
 
 if __name__ == "__main__":
     unittest.main()
