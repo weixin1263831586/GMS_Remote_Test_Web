@@ -10,14 +10,12 @@ import time
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
 
 from features.auth import require_elevated_admin_when_auth_required
+from foundation.command_result import CommandResult
 from foundation.config_paths import default_suites_path
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response, success_response
 from foundation.security import sanitize_device_ids
-from worker.fastboot_workflow import (
-    CommandResult,
-    FastbootPreparer,
-)
+from worker.fastboot_workflow import FastbootPreparer
 
 from . import runtime
 from .models import DeviceActionRequest, DeviceLockRequest, VerifiedBootState
