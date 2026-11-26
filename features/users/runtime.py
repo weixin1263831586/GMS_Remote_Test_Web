@@ -4,13 +4,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from foundation.runtime_contracts import UserStateProvider
 
 
+if TYPE_CHECKING:
+    from foundation.config import ConfigManager
+
+
 @dataclass
 class UserRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     data_root: Path | None = None
     global_state: object | None = None
     ssh_async_manager: object | None = None
@@ -43,11 +48,24 @@ def configure_runtime(**values: object) -> None:
         setattr(_runtime, name, value)
 
 
-def configure_user_dependencies(**values: object) -> None:
-    """Bootstrap 装配入口:运行时绑定之外,同步注入 config/sessions 的配置管理器。"""
+def configure_user_dependencies(
+    *,
+    config_manager: ConfigManager,
+    data_root: Path,
+    global_state: object,
+    ssh_async_manager: object,
+    get_or_create_user_state: UserStateProvider,
+) -> None:
+    """Wire user runtime and configuration consumers."""
     from . import config_api
     from .sessions import client_manager
 
-    configure_runtime(**values)
-    client_manager.config_manager = values["config_manager"]
-    config_api.config_manager = values["config_manager"]
+    configure_runtime(
+        config_manager=config_manager,
+        data_root=data_root,
+        global_state=global_state,
+        ssh_async_manager=ssh_async_manager,
+        get_or_create_user_state=get_or_create_user_state,
+    )
+    client_manager.config_manager = config_manager
+    config_api.config_manager = config_manager
