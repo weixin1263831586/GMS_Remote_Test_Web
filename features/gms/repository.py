@@ -10,7 +10,7 @@ from .update_records import init_db as init_updates
 
 
 DB_PATH = settings.data_root / 'gms_update.sqlite3'
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def init_db(conn):

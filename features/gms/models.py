@@ -145,6 +145,27 @@ class RequirementVersionTagRecord:
     content_hash: str
 
 
+@dataclass(frozen=True)
+class RequirementClauseRecord:
+    source_key: str
+    clause_key: str
+    requirement_id: str
+    section_key: str
+    section_title: str
+    original_text: str
+    context_text: str
+    change_version: str
+    change_kind: str
+    version_mentions_json: str
+    scope_json: str
+    source_url: str
+    anchor_kind: str
+    source_revision: str
+    references_json: str
+    media_json: str
+    content_hash: str
+
+
 @dataclass
 class ParsedSource:
     artifacts: list[ArtifactRecord] = None  # type: ignore[assignment]
@@ -154,6 +175,8 @@ class ParsedSource:
     requirement_sections: list[RequirementSectionRecord] = None  # type: ignore[assignment]
     requirement_table_rows: list[RequirementTableRowRecord] = None  # type: ignore[assignment]
     requirement_version_tags: list[RequirementVersionTagRecord] = None  # type: ignore[assignment]
+    requirement_clauses: list[RequirementClauseRecord] = field(default_factory=list)
+    requirement_coverage: dict[str, object] = field(default_factory=dict)
     bulletin_month_status: dict[str, str] = field(default_factory=dict)
     bulletin_month_diagnostics: dict[str, str] = field(default_factory=dict)
 

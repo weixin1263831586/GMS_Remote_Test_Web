@@ -7,7 +7,9 @@ import re
 import sqlite3
 from contextlib import closing
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+
+from features.auth import require_elevated_admin
 
 from .mainline_records import escape_like
 from .repository import DB_PATH, connect
@@ -478,7 +480,7 @@ async def list_gms_update_mainline(
 
 @router.get('/requirements/sections')
 async def list_gms_update_requirement_sections(
-    level: int | None = Query(None, ge=2, le=3),
+    level: int | None = Query(None, ge=1, le=6),
     top_only: bool = Query(False, description='Only return top-level numbered chapters such as 1, 2, 3'),
     q: str = Query(''),
     limit: int = Query(100, ge=1, le=500),
@@ -609,3 +611,52 @@ async def list_gms_update_requirement_table_rows(
         item['values'] = json.loads(item.pop('values_json') or '[]')
         items.append(item)
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
+
+
+@router.get('/requirements/coverage')
+def gms_requirement_coverage(request: Request):
+    require_elevated_admin(request)
+    with closing(_get_db()) as conn:
+        row = conn.execute('SELECT * FROM gms_update_requirement_coverage WHERE source_key=?',
+                           ('gms_requirements',)).fetchone()
+        latest = conn.execute("""SELECT run_id,state,discovered,fetched,parsed
+            FROM gms_update_source_results WHERE source_key=? ORDER BY run_id DESC LIMIT 1""",
+            ('gms_requirements',)).fetchone()
+    return {'success': True, 'data': {
+        'coverage': json.loads(row['coverage_json']) if row else None,
+        'indexed_run_id': row['run_id'] if row else None,
+        'indexed_at': row['indexed_at'] if row else None,
+        'latest_scan': dict(latest) if latest else None,
+    }}
+
+
+@router.get('/requirements/clauses')
+def list_gms_requirement_clauses(request: Request, q: str = Query('', max_length=256),
+                                 requirement_id: str = Query('', max_length=128),
+                                 section_key: str = Query('', max_length=128),
+                                 change_version: str = Query('', max_length=40),
+                                 limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    require_elevated_admin(request)
+    where = ['source_key=?']
+    params: list[str | int] = ['gms_requirements']
+    if requirement_id:
+        where.append('requirement_id=? COLLATE NOCASE')
+        params.append(requirement_id)
+    if section_key:
+        where.append('section_key=?')
+        params.append(section_key)
+    if change_version:
+        where.append('change_version=? COLLATE NOCASE')
+        params.append(change_version)
+    if q:
+        like = _like_param(q)
+        where.append('(original_text LIKE ? ESCAPE "\\" OR context_text LIKE ? ESCAPE "\\" OR section_title LIKE ? ESCAPE "\\")')
+        params.extend([like, like, like])
+    predicate = ' AND '.join(where)
+    with closing(_get_db()) as conn:
+        total = conn.execute(f'SELECT count(*) FROM gms_update_requirement_clauses WHERE {predicate}', params).fetchone()[0]
+        rows = conn.execute(f"""SELECT * FROM gms_update_requirement_clauses WHERE {predicate}
+            ORDER BY section_title,requirement_id,clause_key LIMIT ? OFFSET ?""",
+            [*params, limit, offset]).fetchall()
+    return {'success': True, 'data': {'items': _rows_to_dicts(rows)},
+            'meta': {'total': total, 'limit': limit, 'offset': offset}}
