@@ -564,11 +564,12 @@ class WebKnowledgeProvider:
         hits, _ = self.search_with_status(query, limit=limit, android_api_level=android_api_level)
         return hits
 
-    def search_with_status(self, query, *, limit=5, android_api_level=None):
+    def search_with_status(self, query, *, limit=5, android_api_level=None, public_cdd_only=False):
         from .cdd_semantic import CddSemantic
 
         limit = min(max(limit, 1), 20)
-        lexical = self._lexical_search(query, limit=limit, android_api_level=android_api_level)
+        lexical = self._lexical_search(query, limit=limit, android_api_level=android_api_level,
+                                       public_cdd_only=public_cdd_only)
         version = API_TO_ANDROID.get(android_api_level)
         if android_api_level is not None and version is None:
             version = -1
@@ -590,7 +591,7 @@ class WebKnowledgeProvider:
             pool[key].score = -float(rank)
         return [pool[key] for key in keys], status
 
-    def _lexical_search(self, query, *, limit=5, android_api_level=None):
+    def _lexical_search(self, query, *, limit=5, android_api_level=None, public_cdd_only=False):
         if not self._path().is_file():
             return []
         terms = _match_terms(search_terms(query))
@@ -608,8 +609,9 @@ class WebKnowledgeProvider:
                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
                    WHERE clauses MATCH ? AND s.enabled=1 AND
                      (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
+                     AND (?=0 OR (s.kind='cdd' AND s.error=''))
                    ORDER BY rank,c.token LIMIT ?""",
-                (match, version, version, max(limit * 20, 60))).fetchall()
+                (match, version, version, int(public_cdd_only), max(limit * 20, 60))).fetchall()
             # 命中按章节成组：表格/列表往往只有条件行或说明行命中，单独返回
             # 它们回答不了问题（问内存门槛却只拿到"声明 ram.low"这类标志位）。
             # 章节优先序沿用 bm25 的最佳名次，章内再按「MUST/SHOULD 强度 →
