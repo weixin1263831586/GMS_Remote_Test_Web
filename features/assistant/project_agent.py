@@ -365,6 +365,11 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                                             + _format_params(params) + "\n请确认执行。", kind="plan", data={"plan": plan}, private_params=params)
                         return True
                     key = recovery.operation_key(tool.name, params)
+                    if (tool.is_readonly and key in state.successful_retrievals
+                            and any(item.get("evidence_followup") for item in observations)):
+                        observations.append({"tool": tool.name,
+                                             "error": "相同检索已执行，请缩小范围、翻页或核验原文。"})
+                        continue
                     if not tool.is_readonly and key in state.completed:
                         observations.append(state.completed[key])
                         continue
@@ -380,6 +385,8 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     evidence = summarize_evidence(tool.name, safe_payload) if tool.is_readonly else None
                     if evidence is not None:
                         observation["evidence"] = evidence
+                        if outcome.success:
+                            state.successful_retrievals.add(key)
                     observations.append(observation)
                     if not tool.is_readonly:
                         state.completed[key] = observation
@@ -422,8 +429,12 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                                                             "缩小查询范围、读取原文或翻页。若无可用工具，明确不确定性。"
                                                             "不要重复相同查询，不要执行写操作。"})
                         continue
+                    response_data = {"quick_actions": state.report_actions} if state.report_actions else {}
+                    evidence_context = evidence_plan_context(observations)
+                    if evidence_context["retrievals"]:
+                        response_data["evidence_plan"] = evidence_context
                     _append_message(session, "assistant", str(decision.get("text") or "请补充你的目标"),
-                                    data={"quick_actions": state.report_actions} if state.report_actions else None)
+                                    data=response_data or None)
                     return True
                 if kind == "navigate":
                     from features.assistant.response import WEBAPP_PAGES
