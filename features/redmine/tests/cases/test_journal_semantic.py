@@ -49,3 +49,16 @@ def test_chunk_bounds_and_source_anchors(monkeypatch):
     assert not complete
     assert [(chunk.start, chunk.end) for chunk in chunks.values()] == [(0, 1600), (1400, 2000)]
     assert all(chunk.journal_id == "7" for chunk in chunks.values())
+
+
+def test_credentials_are_redacted_before_chunking(tmp_path):
+    repo = _repo(tmp_path, "owner")
+    secret = "SENSITIVE-EXAMPLE-" + "x" * 350
+    note = "a " * 790 + "password=" + secret + "\n" + "memory " * 250
+    _issue(repo, [{"id": 1, "notes": note}])
+    index = journal_semantic.JournalSemantic(repo, embedder=Encoder())
+    manifest, _ = index._manifest()
+    cache = {}
+    texts = [index._resolve(chunk, cache) for chunk in manifest.values()]
+    assert all(text is not None and secret not in text for text in texts)
+    assert all("SENSITIVE-EXAMPLE-" not in text and "x" * 50 not in text for text in texts)

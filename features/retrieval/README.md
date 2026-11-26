@@ -86,8 +86,8 @@ embedding of archived reply notes. Explicitly private notes are excluded.
 Authenticated human owners can inspect/build bounded batches with GET/POST
 `/api/redmine-agent/search/journal-semantic-index` and search with POST
 `/api/redmine-agent/search/journals` (JSON: query, limit).
-Results cite issue, journal, revision and character offsets; returned snippets
-are redacted. Changed or removed replies cannot resolve from stale vectors,
+Results cite issue, journal, revision and character offsets in the redacted
+note (offset_basis=redacted_note). Redaction precedes chunking. Changed or removed replies cannot resolve from stale vectors,
 and archive reset clears the derived namespace. The index covers only the
 bounded local archive, not current remote access or complete Redmine history.
 No new model-provider or Agent/MCP exposure is enabled by these endpoints.

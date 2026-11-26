@@ -40,6 +40,11 @@ class JournalChunk:
         return f"{self.issue_id}:{self.journal_id}:{self.revision}:{self.start}"
 
 
+def _revision(journal_id, created_on, note):
+    return hashlib.sha256(json.dumps(["redacted-v1", journal_id, created_on, note],
+                                     ensure_ascii=False).encode()).hexdigest()
+
+
 def _chunks(issue_id, journals):
     complete = True
     chunks = {}
@@ -59,8 +64,11 @@ def _chunks(issue_id, journals):
             complete = False
             continue
         created_on = str(journal.get("created_on") or "")
-        revision = hashlib.sha256(json.dumps([journal_id, created_on, note],
-                                              ensure_ascii=False).encode()).hexdigest()
+        revision = _revision(journal_id, created_on, note)
+        if len(note) > MAX_NOTE:
+            complete = False
+        # Redact the entire note before splitting; a credential can span a chunk boundary.
+        note = redact_sensitive_text(note)
         if len(note) > MAX_NOTE:
             complete = False
         for start in range(0, min(len(note), MAX_NOTE), CHUNK_STEP):
@@ -135,11 +143,9 @@ class JournalSemantic:
             return None
         note = notes.get(chunk.journal_id, "")
         # Duplicate journal IDs in a damaged archive must not resolve to another reply.
-        revision = hashlib.sha256(json.dumps([chunk.journal_id, chunk.created_on, note],
-                                              ensure_ascii=False).encode()).hexdigest()
-        if revision != chunk.revision:
+        if _revision(chunk.journal_id, chunk.created_on, note) != chunk.revision:
             return None
-        return redact_sensitive_text(note[chunk.start:chunk.end])
+        return redact_sensitive_text(note)[chunk.start:chunk.end]
 
     def sync(self, *, batch_size=128):
         if self.embedder is None:
@@ -195,6 +201,7 @@ class JournalSemantic:
                             "source_revision": chunk.revision, "issue_id": chunk.issue_id,
                             "journal_id": chunk.journal_id, "created_on": chunk.created_on,
                             "start_char": chunk.start, "end_char": chunk.end,
+                            "offset_basis": "redacted_note",
                             "snippet": text, "evidence_level": "candidate",
                             "retrieval_channels": ["semantic"]})
             if len(results) >= limit:
