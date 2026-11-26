@@ -371,16 +371,16 @@ function displayTestReports(reports) {
         tr.dataset.reportName = report.report_name || '';
 
         tr.innerHTML = `
-            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(displayClient)}</td>
-            <td class="reports-type-cell" data-type="${suiteTypeColorKey(testType)}" style="padding: 4px 6px; text-align: center;">${escapeHtml(testType)}</td>
-            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
-            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(workerId)}</td>
-            <td class="reports-mono-cell" style="padding: 4px 6px; text-align: center;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
-            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; color: var(--success-color);">${escapeHtml(passCount)}</td>
-            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; color: var(--danger-color);">${escapeHtml(failCount)}</td>
-            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center;">${escapeHtml(totalCount)}</td>
-            <td class="reports-metric-cell" style="padding: 4px 6px; text-align: center; ${passRateStyle}">${escapeHtml(passRate)}</td>
-            <td style="padding: 4px 6px; text-align: center;">
+            <td class="reports-mono-cell" style="text-align: center;">${escapeHtml(displayClient)}</td>
+            <td class="reports-type-cell" data-type="${suiteTypeColorKey(testType)}" style="text-align: center;">${escapeHtml(testType)}</td>
+            <td class="reports-mono-cell" style="text-align: center; color: var(--text-primary);">${escapeHtml(suiteName)}</td>
+            <td class="reports-mono-cell" style="text-align: center;">${escapeHtml(workerId)}</td>
+            <td class="reports-mono-cell" style="text-align: center;" title="${escapeIconAttr(report.timestamp || '')}">${escapeHtml(report.report_name || report.timestamp || '-')}</td>
+            <td class="reports-metric-cell" style="text-align: center; color: var(--success-color);">${escapeHtml(passCount)}</td>
+            <td class="reports-metric-cell" style="text-align: center; color: var(--danger-color);">${escapeHtml(failCount)}</td>
+            <td class="reports-metric-cell" style="text-align: center;">${escapeHtml(totalCount)}</td>
+            <td class="reports-metric-cell" style="text-align: center; ${passRateStyle}">${escapeHtml(passRate)}</td>
+            <td style="text-align: center;">
                 <button class="btn-xxs" data-action="analyze" style="margin: 2px; ">📈 分析</button>
                 <button class="btn-xxs" data-action="retry" style="background: var(--primary-gradient); margin: 2px; ">🔄 retry</button>
                 <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; ">results</button>
