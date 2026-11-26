@@ -144,7 +144,7 @@ def web_source(*, android_api_level=None, cdd_only=False):
                             {"title": redact_sensitive_text(row["name"])[:160],
                              "section": redact_sensitive_text(row["section"])[:300],
                              "source_url": row["url"], "android_version": row["android_version"],
-                             "requirement_id": row["requirement_id"],
+                             "requirement_id": row["requirement_id"], "requirement_level": row["level"],
                              "condition": redact_sensitive_text(row["condition"])[:1500],
                              "applicability_verified": False})
 
@@ -211,9 +211,9 @@ def local_document_model(analyzer_factory, *, preferred=None, catalog_hash=""):
     return invoke, name, fingerprint
 
 
-def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferred=None, catalog_hash=""):
+def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferred=None, catalog_hash="", recall_only=False):
     invoke, name, _ = local_document_model(analyzer_factory, preferred=preferred, catalog_hash=catalog_hash)
-    result = IntelligentRAG(sources, invoke, limit=limit).run(redact_sensitive_text(question))
+    result = IntelligentRAG(sources, invoke, limit=limit).run(redact_sensitive_text(question), recall_only=recall_only)
     result["provider"] = name or ""
     return result
 
