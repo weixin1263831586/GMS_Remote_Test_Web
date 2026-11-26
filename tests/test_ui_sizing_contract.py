@@ -390,7 +390,7 @@ class UiSizingContractTests(unittest.TestCase):
 
     def test_aoa_command_grid_has_one_layout_owner(self):
         source = (CSS / "aoa-workbench.css").read_text(encoding="utf-8")
-        self.assertRegex(source, r"grid-template-columns:\s*3ch minmax\(0, 1fr\) minmax\(0, 1\.5fr\) 60\.5px 156px;")
+        self.assertRegex(source, r"grid-template-columns:\s*3ch minmax\(0, 2fr\) minmax\(0, 1fr\) 60\.5px 156px;")
         self.assertIn("grid-column: 5; grid-row: 1;", source)
         self.assertIn("grid-column: 4 / 6;", source)
         for path in CSS.rglob("*.css"):
