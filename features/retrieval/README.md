@@ -110,8 +110,13 @@ The evidence planner also preserves fixed SDK commit/file/line citations,
 selected-repository limits, dynamic OpenGrok uncertainty and Gerrit pagination.
 Daily Brief prompts distinguish completed text scans from complete source
 coverage and require independent verification of historical candidates and
-patch applicability. These are shared evidence rules, not a cross-source
-search service or unrestricted access to protected documents.
+patch applicability. Native Redmine MCP traces and controller reference preflight
+use the shared evidence summarizer, including nested envelopes and grouped source
+coverage. Official patch citations identify retained record revisions, not an
+upstream Git commit. The Project Agent rejects repeated successful queries during
+its bounded follow-up and retains unresolved evidence scope in answer metadata.
+These are shared evidence rules, not a cross-source search service or unrestricted
+access to protected documents.
 
 
 ### Restricted GMS policy lookup
@@ -133,15 +138,21 @@ remain separate. The browser presents clause text and structured tables first;
 section context and revision details are expandable. This is a human-readable
 lookup, not an authorized model analysis of shared Partner content.
 
+Owner-approved imported policy documents are bound to their content digest and
+the ordered enabled model catalog, including the effective primary and fallback
+routes, endpoint, model and protocol. The version-2 fingerprint invalidates
+previous approvals; owners must explicitly authorize again. Credentials are not
+included in the fingerprint. This does not establish upstream Partner entitlement.
+
 ### Clipboard images in Conversation Agent
 
 Paste PNG, JPEG or WebP into the composer (at most three images, 4 MiB total).
 The user can remove previews before sending; image-only messages are valid.
 Image turns use the existing local model gateway with a configured, enabled
-provider declaring `capabilities: ["vision"]`. No external provider fallback
-or operational tool execution is allowed. Raw images are validated, stripped
-of metadata and used only for the current analysis; the persisted transcript
-contains the text, image count and resulting answer, not the image bytes.
+provider declaring `image_in` or `vision` in its capabilities. No external
+provider fallback or operational tool execution is allowed. Images are validated,
+stripped of metadata and retained as private session attachments for history
+preview; the transcript contains attachment descriptors, not inline image bytes.
 Text-only questions continue through the original Agent planning path.
 Image turns with text additionally retrieve bounded public CDD background from
 the local web index. The same revision-bound context policy is used by report
@@ -172,7 +183,7 @@ scheduler; closing the page stops further client-side requests.
 
 Set `retrieval.auto_index_public_cdd` to the JSON boolean `true` in addition
 to the existing local embedding configuration to enable bounded automatic
-maintenance. The Controller\x27s existing external-knowledge lifecycle tick
+maintenance. The Controller's existing external-knowledge lifecycle tick
 runs at most one public CDD batch (up to 128 vectors) by default. An attempt
 timestamp is persisted before inference, so restarts and failures rotate to
 other sources fairly and resume from committed vectors. Disabled, stale or
