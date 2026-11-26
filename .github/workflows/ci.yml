@@ -294,7 +294,7 @@ jobs:
         run: |
           mkdir -p artifacts
           pytest features/assistant features/reports features/redmine features/kkagent \
-                 features/gerrit features/knowledge features/email \
+                 features/gerrit features/knowledge features/email features/retrieval \
             -q --junitxml=artifacts/unit-assistant-reports.xml --durations=30
       - name: Upload JUnit report
         if: always()

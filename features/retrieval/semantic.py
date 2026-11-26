@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import sqlite3
 import struct
 import threading
@@ -54,12 +55,66 @@ def _model(path, revision):
     return LocalEmbedding(Path(path), revision)
 
 
-def local_embedding():
-    """Return None unless the local configuration explicitly enables semantic retrieval."""
+def _source_config(source):
     config = (config_manager.load_config() or {}).get("retrieval") or {}
     if not config.get("enabled"):
+        return {}
+    allowed = config.get("enabled_sources", ["cdd"])
+    if not isinstance(allowed, list) or source not in allowed:
+        return {}
+    return config
+
+
+def local_embedding(source="cdd"):
+    """Opt in to each corpus; private data is never enabled by the public CDD setting."""
+    config = _source_config(source)
+    if not config:
         return None
     return _model(str(config["model_path"]), str(config["model_revision"]))
+
+
+class LocalReranker:
+    """Optional local cross encoder for a small already-authorized candidate pool."""
+
+    def __init__(self, path, revision):
+        self.path = Path(path).expanduser().resolve(strict=True)
+        if not self.path.is_dir() or not revision.strip():
+            raise ValueError("Local reranker directory and revision are required")
+        self._model = None
+        self._lock = threading.Lock()
+
+    def rank(self, query, documents, *, limit=30):
+        keys = list(documents)[:max(1, min(limit, 50))]
+        if not keys:
+            return []
+        if not self._lock.acquire(timeout=5):
+            raise TimeoutError("Local reranker busy")
+        try:
+            if self._model is None:
+                from sentence_transformers import CrossEncoder
+
+                self._model = CrossEncoder(str(self.path), device="cpu", local_files_only=True,
+                                           trust_remote_code=False)
+            scores = self._model.predict([(query[:MAX_TEXT], documents[key][:MAX_TEXT]) for key in keys],
+                                         batch_size=8, show_progress_bar=False)
+            if len(scores) != len(keys) or any(not math.isfinite(float(score)) for score in scores):
+                raise ValueError("Invalid reranker output")
+            return [key for key, _ in sorted(zip(keys, scores, strict=True),
+                                             key=lambda item: -float(item[1]))]
+        finally:
+            self._lock.release()
+
+
+@lru_cache(maxsize=1)
+def _reranker(path, revision):
+    return LocalReranker(path, revision)
+
+
+def local_reranker(source="cdd"):
+    config = _source_config(source)
+    if not config.get("reranker_path"):
+        return None
+    return _reranker(str(config["reranker_path"]), str(config["reranker_revision"]))
 
 
 def _unit(vector):
@@ -80,6 +135,9 @@ class VectorIndex:
 
     def _connect(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Restrict newly created derived databases, including owner-scoped vectors.
+        fd = os.open(self.path, os.O_CREAT | os.O_WRONLY, 0o600)
+        os.close(fd)
         conn = sqlite3.connect(self.path, timeout=5)
         conn.execute("""CREATE TABLE IF NOT EXISTS vectors (
             namespace TEXT NOT NULL, model TEXT NOT NULL, token TEXT NOT NULL,
@@ -138,6 +196,12 @@ class VectorIndex:
                 if math.isfinite(score):
                     ranked.append((token, score))
         return sorted(ranked, key=lambda item: (-item[1], item[0]))[:max(1, min(limit, 100))]
+
+    def clear(self, namespace):
+        if not self.path.is_file():
+            return
+        with closing(self._connect()) as db, db:
+            db.execute("DELETE FROM vectors WHERE namespace=?", (namespace,))
 
     def prune(self, namespace, model, tokens):
         """Discard derived data outside the caller's current corpus and model."""

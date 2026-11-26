@@ -51,7 +51,7 @@ class RetrievalSource(Protocol):
     def search(self, query: RetrievalQuery) -> RetrievalResult: ...
 
 
-def fuse_rankings(rankings, *, limit, exact_keys=(), k=60):
+def fuse_rankings(rankings, *, limit, exact_keys=(), k=60, tie_key=None):
     """RRF over ordered identity lists; never compare raw provider scores."""
     if k < 1 or limit < 1:
         raise ValueError("Invalid ranking budget")
@@ -62,7 +62,8 @@ def fuse_rankings(rankings, *, limit, exact_keys=(), k=60):
             first.setdefault(key, len(first))
             scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
     exact = set(exact_keys)
-    return sorted(scores, key=lambda key: (key not in exact, -scores[key], first[key]))[:limit]
+    return sorted(scores, key=lambda key: (key not in exact, -scores[key],
+                                          tie_key(key) if tie_key else first[key]))[:limit]
 
 
 class RetrievalService:

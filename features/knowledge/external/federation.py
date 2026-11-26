@@ -11,6 +11,8 @@ import logging
 import threading
 from typing import Any
 
+from features.retrieval import fuse_rankings
+
 from .base import (
     KNOWN_SOURCES,
     ExternalKnowledgeError,
@@ -168,54 +170,28 @@ class FederatedKnowledgeService:
                 if hit.evidence_level != "background":
                     hit.evidence_level = "background"
                 results.append(hit)
-        # RRF（Reciprocal Rank Fusion）合并（round-robin 公平但不做
-        # relevance calibration；ADR 0014 联邦排序收口）。score = Σ 1/(k + rank_i)：在多个
-        # source 都命中的条目获得叠加加分，单命中的条目按各 source 内部
-        # 排序保持相对次序（单 source 时退化为该 source 的原始排序，
-        # 与旧 round-robin 行为一致）。k=60 是文献标准值，抑制单一
-        # source 高 rank 的支配效应；同分按 (source, source_path) 稳定
-        # 排序，保证跨调用结果可复现。
         by_source: dict[str, list[KnowledgeHit]] = {}
         for hit in results:
             by_source.setdefault(hit.source, []).append(hit)
-        ranked_per_source = [
-            by_source[source] for source in sorted(by_source)
-        ]
-        rrf_scores: dict[tuple[str, str, str], float] = {}
+        rankings = []
         representatives: dict[tuple[str, str, str], KnowledgeHit] = {}
-        for hits in ranked_per_source:
-            seen_in_source: set[tuple[str, str, str]] = set()
-            unique_rank = 0
-            for hit in sorted(hits, key=lambda h: h.score, reverse=True):
+        for source in sorted(by_source):
+            ranking = []
+            for hit in sorted(by_source[source], key=lambda item: item.score, reverse=True):
                 key = _rrf_document_key(hit)
-                if key in seen_in_source:
-                    continue
-                seen_in_source.add(key)
-                unique_rank += 1
-                rrf_scores[key] = rrf_scores.get(key, 0.0) + 1.0 / (
-                    RRF_K + unique_rank
-                )
+                ranking.append(key)
                 current = representatives.get(key)
-                if current is None or (
-                    hit.score,
-                    hit.source,
-                    hit.source_path,
-                ) > (
-                    current.score,
-                    current.source,
-                    current.source_path,
+                if current is None or (hit.score, hit.source, hit.source_path) > (
+                    current.score, current.source, current.source_path
                 ):
                     representatives[key] = hit
-        merged_keys = sorted(
-            representatives,
-            key=lambda key: (
-                -rrf_scores[key],
-                representatives[key].source,
-                representatives[key].source_path,
-                representatives[key].title,
-            )
+            rankings.append(ranking)
+        merged_keys = fuse_rankings(
+            rankings, limit=max(1, limit), k=RRF_K,
+            tie_key=lambda key: (representatives[key].source, representatives[key].source_path,
+                                 representatives[key].title),
         )
-        merged = [representatives[key] for key in merged_keys[: max(1, limit)]]
+        merged = [representatives[key] for key in merged_keys]
         return {
             "results": [hit.to_dict() for hit in merged],
             "sources_status": status_rows,

@@ -37,3 +37,19 @@ This does not establish completeness of the upstream document.
 
 Tests use deterministic synthetic encoders; real model quality and deployment
 performance must be evaluated on the Controller.
+
+## Owner-scoped Redmine case retrieval
+
+Set `retrieval.enabled_sources` to `["cdd", "redmine_cases"]` to allow local
+processing of historical case facts. The default remains public CDD only.
+An authenticated human may use GET/POST
+`/api/redmine-agent/search/semantic-index` to inspect or build a batch for
+their own case repository. Existing similar-case search merges lexical,
+semantic and business-feature rankings when vectors exist. Reset clears
+derived vectors along with owner case data. Results are candidates, not
+verified root causes.
+
+An optional local cross encoder is configured with `reranker_path` and
+`reranker_revision` in the same section; it ranks bounded case candidates
+without network access. No GMS Partner documents, raw attachments or
+live device data are included in these indexes.

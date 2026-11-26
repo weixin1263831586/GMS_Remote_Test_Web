@@ -2,6 +2,7 @@
 
 Domain providers own access checks, source revisions and document content.
 """
+from .semantic import LocalEmbedding, VectorIndex, local_embedding, local_reranker
 from .service import (
     RetrievalHit,
     RetrievalQuery,
@@ -12,7 +13,7 @@ from .service import (
     evaluate_ranking,
     fuse_rankings,
 )
-from .semantic import LocalEmbedding, VectorIndex, local_embedding
+
 
 __all__ = [
     "LocalEmbedding",
@@ -26,4 +27,5 @@ __all__ = [
     "evaluate_ranking",
     "fuse_rankings",
     "local_embedding",
+    "local_reranker",
 ]

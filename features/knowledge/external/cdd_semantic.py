@@ -25,13 +25,17 @@ class CddSemantic:
                 and (source_id is None or row["id"] == source_id)
                 and (version is None or row["android_version"] == version)]
 
-    def _rows(self, source):
+    def _rows(self, source, tokens):
+        if not tokens:
+            return []
+        placeholders = ",".join("?" for _ in tokens)
         with self.provider._db() as db:
             return [dict(row) for row in db.execute(
                 """SELECT c.token,c.section,c.requirement_id,c.condition,c.original
                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
                    WHERE s.id=? AND s.enabled=1 AND s.kind='cdd' AND s.revision=?
-                   ORDER BY c.token LIMIT ?""", (source["id"], source["revision"], MAX_CORPUS + 1)
+                   AND c.token IN (""" + placeholders + ") ORDER BY c.token",
+                (source["id"], source["revision"], *tokens)
             )]
 
     def _scope(self, source):
@@ -69,15 +73,11 @@ class CddSemantic:
         tokens = self._manifest(source)
         scope, model = self._scope(source), self.embedder.identity
         indexed = self.index.indexed(scope, model, tokens)
-        missing = set(token for token in tokens if token not in indexed)
+        missing = [token for token in tokens if token not in indexed][:max(1, min(batch_size, MAX_BATCH))]
         batch = {}
-        for row in self._rows(source):
-            if row["token"] not in missing:
-                continue
+        for row in self._rows(source, missing):
             batch[row["token"]] = "\n".join(row[key] for key in
                                           ("section", "requirement_id", "condition", "original"))
-            if len(batch) >= max(1, min(batch_size, MAX_BATCH)):
-                break
         self.index.upsert(scope, model, batch, self.embedder)
         # Never purge a newer revision's derived data after a concurrent source update.
         current = self._sources(source_id)

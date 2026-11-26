@@ -17,6 +17,7 @@ from features.users import owner_id_from_request
 from foundation.error_model import ApiError, record_internal_error
 
 from ..api import get_redmine_service_for_request
+from ..cases.semantic import CaseSemantic
 from ..daily_brief.repository import canonical_owner_id, owner_daily_brief_repository
 
 
@@ -92,6 +93,26 @@ async def get_case_fact(issue_id: int, request: Request):
 
 
 # Similarity search
+
+@router.get("/search/semantic-index")
+def case_semantic_status(request: Request):
+    require_human_principal_when_auth_required(request)
+    try:
+        return {"success": True, "data": CaseSemantic(_knowledge(request).knowledge_db).status()}
+    except Exception as exc:
+        logger.warning("Case index status unavailable: %s", type(exc).__name__)
+        return {"success": True, "data": {"status": "error", "coverage_complete": False}}
+
+
+@router.post("/search/semantic-index")
+def sync_case_semantic_index(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    require_human_principal_when_auth_required(request)
+    try:
+        return {"success": True, "data": CaseSemantic(_knowledge(request).knowledge_db).sync(batch_size=batch_size)}
+    except Exception as exc:
+        logger.warning("Case semantic synchronization failed: %s", type(exc).__name__)
+        return ApiError.conflict("本地案例语义索引未完成，请检查配置").to_response()
+
 
 @router.post("/search/similar")
 async def search_similar(request: Request, limit: int = Query(10, ge=1, le=50)):

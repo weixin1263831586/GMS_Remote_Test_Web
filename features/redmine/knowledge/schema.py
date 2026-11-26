@@ -10,12 +10,16 @@ join against the scan store.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
 import threading
 from pathlib import Path
 from typing import Any
+
+from features.retrieval import VectorIndex
+from foundation.process_sync import hold_sync_lock
 
 
 logger = logging.getLogger(__name__)
@@ -222,7 +226,14 @@ class KnowledgeSchemaMixin:
         )
 
     def reset(self) -> None:
-        """Delete all knowledge base data but keep the empty database shell."""
+        """Delete owner data and its derived case vectors under the indexing lock."""
+        path = self.db_path.with_name(self.db_path.stem + ".case-vectors.sqlite3")
+        namespace = hashlib.sha256(str(self.db_path.resolve()).encode()).hexdigest()
+        with hold_sync_lock(path.with_suffix(".lock")):
+            self._reset_records()
+            VectorIndex(path).clear(namespace)
+
+    def _reset_records(self):
         with self.connect() as conn:
             conn.executescript(
                 """
