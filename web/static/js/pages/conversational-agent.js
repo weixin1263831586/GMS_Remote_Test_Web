@@ -443,8 +443,15 @@ function renderAgentSteps(session) {
     if (!stepsEl) return;
 
     const steps = session?.steps || [];
+    const sessionKey = String(session?.session_id || '');
+    const previousTop = stepsEl.scrollTop;
+    // Follow the tail unless the user is reading earlier steps.
+    const followLatest = stepsEl.dataset.renderedSession !== sessionKey
+        || stepsEl.scrollHeight - stepsEl.clientHeight - previousTop <= 24;
+    stepsEl.dataset.renderedSession = sessionKey;
     if (!steps.length) {
         stepsEl.innerHTML = '<div class="suite-empty">等待任务</div>';
+        stepsEl.scrollTop = 0;
         return;
     }
 
@@ -500,6 +507,7 @@ function renderAgentSteps(session) {
             </article>
         `;
     }).join('');
+    stepsEl.scrollTop = followLatest ? stepsEl.scrollHeight : previousTop;
 }
 
 function openAgentRunInAts(runId) {
@@ -932,6 +940,8 @@ function openAgentApkAnalysis(taskId) {
 }
 
 function initAgentPage() {
+    const stepsEl = $('agent-steps');
+    if (stepsEl) delete stepsEl.dataset.renderedSession;
     if (!agentInitialized) {
         agentInitialized = true;
         const input = $('agent-input');

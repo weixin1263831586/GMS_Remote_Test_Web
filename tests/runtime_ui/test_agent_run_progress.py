@@ -4,6 +4,50 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class RuntimeAgentRunProgressTests(RuntimeUiHarness):
+    def test_steps_follow_latest_without_interrupting_history_review(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.locator("#agent-steps").wait_for(state="visible")
+            result = page.evaluate("""() => {
+                const panel = document.getElementById('agent-steps');
+                const steps = Array.from({length: 30}, (_, i) => ({
+                    title: 'Step ' + i, status: 'done',
+                    detail: 'Execution detail '.repeat(8),
+                }));
+                const render = (sessionId = 'follow-test') => renderAgentSteps({
+                    session_id: sessionId, status: 'running', steps,
+                });
+                const atBottom = () => panel.scrollHeight - panel.clientHeight - panel.scrollTop <= 2;
+                render();
+                const overflow = panel.scrollHeight > panel.clientHeight;
+                const initial = atBottom();
+                steps.push({title: 'Latest', status: 'running', detail: 'New detail '.repeat(8)});
+                render();
+                const appended = atBottom();
+                steps[steps.length - 1].detail = 'Updated detail '.repeat(80);
+                render();
+                const updated = atBottom();
+                panel.scrollTop = 0;
+                steps.push({title: 'Another step', status: 'done'});
+                render();
+                const historyPreserved = panel.scrollTop === 0 && !atBottom();
+                panel.scrollTop = panel.scrollHeight;
+                steps.push({title: 'Resumed following', status: 'running'});
+                render();
+                const resumed = atBottom();
+                panel.scrollTop = 0;
+                render('different-session');
+                const switched = atBottom();
+                renderAgentSteps({session_id: 'different-session', status: 'idle', steps: []});
+                return {overflow, initial, appended, updated, historyPreserved, resumed, switched,
+                        cleared: panel.scrollTop === 0};
+            }""")
+            assert all(result.values()), result
+        finally:
+            page.close()
+
     def test_agent_times_use_beijing_time_in_any_browser_timezone(self):
         page = self.new_page()
         try:
