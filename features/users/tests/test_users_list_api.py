@@ -149,7 +149,7 @@ class UsersListApiTests(unittest.TestCase):
         )
         try:
             with patch(
-                "features.users.cluster_access.get_cluster_service",
+                "foundation.cluster_port.get_cluster_service",
                 side_effect=RuntimeError("cluster not configured in unit test"),
             ), patch.object(
                 users_api,
@@ -241,7 +241,7 @@ class UsersListApiTests(unittest.TestCase):
         try:
             with (
                 patch(
-                    "features.users.cluster_access.get_cluster_service",
+                    "foundation.cluster_port.get_cluster_service",
                     return_value=cluster,
                 ),
                 patch.object(
@@ -288,7 +288,7 @@ class UsersListApiTests(unittest.TestCase):
         }
         try:
             with patch(
-                "features.users.cluster_access.get_cluster_service",
+                "foundation.cluster_port.get_cluster_service",
                 side_effect=RuntimeError("cluster not configured in unit test"),
             ), patch.object(
                 users_api,
@@ -334,7 +334,7 @@ class UsersListApiTests(unittest.TestCase):
         )
         try:
             with patch(
-                "features.users.cluster_access.get_cluster_service",
+                "foundation.cluster_port.get_cluster_service",
                 side_effect=RuntimeError("cluster not configured in unit test"),
             ), patch(
                 "features.users.users_api.resolve_client_display_id",
@@ -403,7 +403,7 @@ class UsersListLockSafetyTests(unittest.TestCase):
 
         try:
             with patch(
-                "features.users.cluster_access.get_cluster_service",
+                "foundation.cluster_port.get_cluster_service",
                 side_effect=RuntimeError("cluster not configured in unit test"),
             ), patch.object(
                 users_api,

@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Request
 
 from features.auth import get_authenticated_user
+from foundation.cluster_port import ClusterServiceContract
 from foundation.private_config import atomic_write_json
 from foundation.responses import error_response, success_response
 
@@ -159,11 +160,11 @@ def auto_assign_new_devices(
         return groups
 
 
-def cluster_device_properties(service: Any = None) -> dict[str, dict[str, str]]:
+def cluster_device_properties(service: ClusterServiceContract | None = None) -> dict[str, dict[str, str]]:
     """Return online remote Worker devices in the management/grouping shape."""
     try:
         if service is None:
-            from features.users.cluster_access import get_cluster_service
+            from foundation.cluster_port import get_cluster_service
 
             service = get_cluster_service()
         if service is None or not service.effective_enabled:
@@ -212,96 +213,11 @@ def current_username_for_request(request: Request) -> str:
     return user.resource_owner_id if user else get_client_id_from_request(request)
 
 
-def _legacy_owner_storage_key(username: str) -> str:
-    raw = str(username or '').strip()
-    key = ''.join(
-        character if character.isalnum() or character in {'-', '_'} else '_'
-        for character in raw
-    )
-    if not key:
-        return 'anonymous'
-    if key != raw:
-        digest = hashlib.sha256(raw.encode('utf-8')).hexdigest()[:12]
-        return f'{key}_{digest}'
-    return key
-
-
 def _device_groups_path(username: str) -> Path:
     data_root = Path(runtime.data_root)
     directory = data_root / 'user_prefs' / owner_storage_key(username)
     directory.mkdir(parents=True, exist_ok=True)
     return directory / 'device_groups.json'
-
-
-def _agent_token_ids_for_owner(owner: str) -> list[str]:
-    """Token ids enrolled by this account (cross-feature public surface)."""
-    try:
-        from features.auth import auth_service
-
-        records = auth_service.list_agent_tokens()
-    except Exception:  # 注册表不可用时按无历史数据处理（迁移是尽力而为）
-        return []
-    return [
-        str(record.get('id') or '')
-        for record in records
-        if str(record.get('owner_user_id') or '') == str(owner)
-    ]
-
-
-def _migrate_legacy_owner_groups(username: str, target: Path) -> None:
-    """Lazily migrate legacy owner and Agent actor storage directories.
-
-    Device groups previously used a different filename sanitizer and, before
-    ADR 0010, an Agent token's synthetic actor id. Copy the newest valid legacy
-    file only when the canonical owner target does not exist.
-    """
-    if target.is_file():
-        return
-    data_root = Path(runtime.data_root) / 'user_prefs'
-    candidates = [
-        data_root / _legacy_owner_storage_key(username) / 'device_groups.json'
-    ]
-    for token_id in _agent_token_ids_for_owner(username):
-        if not token_id:
-            continue
-        candidates.append(
-            data_root
-            / _legacy_owner_storage_key(f'agent:{token_id}')
-            / 'device_groups.json'
-        )
-    candidates = [candidate for candidate in candidates if candidate != target]
-    existing = []
-    for legacy in candidates:
-        try:
-            if legacy.is_file():
-                existing.append(legacy)
-        except OSError:
-            continue
-    candidates = existing
-    if not candidates:
-        return
-    legacy_path = max(candidates, key=lambda candidate: candidate.stat().st_mtime)
-    try:
-        data = json.loads(legacy_path.read_text(encoding='utf-8'))
-        groups = normalize_device_groups(
-            data.get('groups', []) if isinstance(data, dict) else data
-        )
-    except (OSError, json.JSONDecodeError, HTTPException):
-        return
-    if not groups:
-        return
-    try:
-        temporary = target.with_suffix(f'{target.suffix}.tmp')
-        temporary.write_text(
-            json.dumps({'groups': groups}, ensure_ascii=False, indent=2),
-            encoding='utf-8',
-        )
-        temporary.replace(target)
-    except OSError:
-        try:
-            temporary.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def load_device_groups(username: str | None) -> list[dict[str, Any]]:
@@ -311,7 +227,6 @@ def load_device_groups(username: str | None) -> list[dict[str, Any]]:
 
     path = _device_groups_path(username)
     with _storage_lock:
-        _migrate_legacy_owner_groups(username, path)
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
             return normalize_device_groups(

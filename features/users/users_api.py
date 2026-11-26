@@ -323,7 +323,7 @@ async def list_users(
 
     # 合并持久化 Worker 任务的所有者和设备租约。
     try:
-        from features.users.cluster_access import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         cluster_service = get_cluster_service()
         jobs = (
