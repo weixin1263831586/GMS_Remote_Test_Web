@@ -48,6 +48,7 @@ from .diagnosis_recalls import (
     search_system_background,
 )
 from .display import report_display_name
+from .rag_context import public_cdd_context
 from .repository import test_report_db
 from .service import test_report_manager
 
@@ -472,9 +473,10 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
                     match_notes=[f"Resolution failed: {redact_sensitive_text(target_error)}"],
                 )
 
-        async def _run_ai_analysis():
+        async def _run_ai_analysis(retrieval_context):
             try:
-                return await asyncio.to_thread(analyze_with_ai, request.test_name, request.error_message or "", request.stack_trace or "", request.module or "", class_names)
+                options = {"retrieval_context": retrieval_context} if retrieval_context else {}
+                return await asyncio.to_thread(analyze_with_ai, request.test_name, request.error_message or "", request.stack_trace or "", request.module or "", class_names, **options)
             except Exception as exc:
                 return {
                     "root_cause": "AI analysis unavailable",
@@ -490,12 +492,9 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         background_query = " ".join(keywords[:6]) or request.test_name or (request.error_message or "")[:120]
         background_api_level = android_api_level_from_request(request)
 
-        # 召回通道编排：suite target / AI / 内部案例 KB / Mainline 豁免 /
-        # Mainline 安全补丁 / 系统机制背景六路并行；KB 与 Mainline 的
-        # 失败降级实现在 diagnosis_recalls.py（各自独立降级，互不影响）。
-        suite_target, ai_result, kb_results, mainline_exemptions, mainline_patches, system_background_results = await asyncio.gather(
+        # Retrieve first; only authorized public CDD candidates enter the model context.
+        suite_target, kb_results, mainline_exemptions, mainline_patches, system_background_results = await asyncio.gather(
             _resolve_suite_target(),
-            _run_ai_analysis(),
             search_knowledge_base(http_request, request, keywords),
             search_mainline_exemptions(request),
             search_mainline_security_patches(request),
@@ -504,6 +503,8 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             ),
         )
 
+        retrieval_context = public_cdd_context(system_background_results)
+        ai_result = await _run_ai_analysis(retrieval_context)
         source_search_results = []
         search_terms = list(class_names[:3])
         if failure_location and failure_location.get("file_name"):
@@ -546,6 +547,9 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
             # knowledge_base_results —— 这里是「Android 为什么这样工作」，
             # 不是「我们以前遇到过什么」，且永远是 background，不参与根因判定。
             "system_background_results": system_background_results[:6],
+            "retrieval_context": {"scope": "public_cdd_only", "candidate_count": len(retrieval_context),
+                                  "coverage_complete": False,
+                                  "references": [item["reference"] for item in retrieval_context]},
             "suite_target": suite_target,
             "mainline_exemptions": mainline_exemptions,
             "mainline_exempt": bool(mainline_exemptions),

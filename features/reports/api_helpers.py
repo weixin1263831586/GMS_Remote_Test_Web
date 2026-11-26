@@ -422,7 +422,7 @@ def _rule_based_analysis(test_name, error_message, stack_trace, module):
     }
 
 
-def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_names=None):
+def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_names=None, *, retrieval_context=None):
     """调用已配置模型分析测试失败并补充源码信息。"""
     return analyze_failure_with_ai(
         test_name, error_message, stack_trace, module, class_names,
@@ -432,6 +432,7 @@ def analyze_with_ai(test_name, error_message, stack_trace='', module='', class_n
         config_manager=config_manager,
         stack_trace_utils=StackTraceUtils,
         logger=logger,
+        retrieval_context=retrieval_context,
     )
 
 

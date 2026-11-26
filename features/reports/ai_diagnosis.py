@@ -107,6 +107,7 @@ def analyze_failure_with_ai(
     config_manager: Any,
     stack_trace_utils: Any,
     logger: Any,
+    retrieval_context=None,
 ) -> dict[str, Any]:
     class_names = class_names or []
     failure_location = stack_trace_utils.extract_failure_location(stack_trace)
@@ -127,6 +128,7 @@ def analyze_failure_with_ai(
         analyzer = analyzer_factory()
         preferred_provider = analyzer.get_local_provider() or ''
         failure_info = parse_failure_info(test_name, error_message)
+        options = {"retrieval_context": retrieval_context} if retrieval_context else {}
         result = analyzer.analyze_test_failure(
             class_name=failure_info.get('class_name', ''),
             method_name=failure_info.get('method_name'),
@@ -134,6 +136,7 @@ def analyze_failure_with_ai(
             stack_trace=stack_trace,
             auto_fetch_source=True,
             preferred_provider=preferred_provider or None,
+            **options,
         )
         attempted_providers = result.get('attempted_providers') or []
         if result['success']:

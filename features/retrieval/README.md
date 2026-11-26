@@ -69,3 +69,12 @@ change, are excluded before indexing and again before recall. Long documents
 and total corpus size are bounded, and the returned coverage flag reflects
 these bounds. Deleted or modified documents are not returned by stale vectors;
 index synchronization removes obsolete derived rows.
+
+### Diagnostic context
+
+The project Agent includes bounded evidence provenance and source/coverage gaps
+in its existing tool loop. Report diagnosis retrieves background candidates
+before model inference and includes only current public CDD citations with
+matching source anchors. Private historical cases, Wiki, SDK and Partner
+material are not newly sent to model providers by this path. No candidate
+establishes device applicability or a verified root cause.
