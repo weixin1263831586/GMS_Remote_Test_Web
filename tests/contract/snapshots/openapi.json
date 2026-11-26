@@ -5580,7 +5580,7 @@
     },
     "/api/auth/elevate": {
       "post": {
-        "description": "Re-authenticate as admin to unlock sensitive operations.\n\nVerifies the supplied credentials belong to an admin, then stamps an\nelevation onto the caller's current session that lasts for the rest of\nthat session. In anonymous development mode this is also the point where\nan admin session is created; ordinary page loading remains anonymous while\nsensitive actions still require credentials.",
+        "description": "Grant ordinary human sessions temporary administrator authority.",
         "requestBody": {
           "content": {
             "application/json": {
@@ -5618,7 +5618,7 @@
     },
     "/api/auth/elevation/reset": {
       "post": {
-        "description": "Explicitly drop admin verification without logging out the session.",
+        "description": "Clear a temporary grant; an admin's role authority is unchanged.",
         "responses": {
           "200": {
             "content": {

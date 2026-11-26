@@ -2,7 +2,7 @@
 
 Domain providers own access checks, source revisions and document content.
 """
-from .evidence import evidence_plan_context, summarize_evidence
+from .evidence import evidence_followup_required, evidence_plan_context, summarize_evidence
 from .semantic import LocalEmbedding, VectorIndex, local_embedding, local_reranker
 from .service import (
     RetrievalHit,
@@ -26,6 +26,7 @@ __all__ = [
     "VectorIndex",
     "compact_observation",
     "evaluate_ranking",
+    "evidence_followup_required",
     "evidence_plan_context",
     "fuse_rankings",
     "local_embedding",

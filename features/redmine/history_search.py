@@ -6,8 +6,7 @@ import asyncio
 import logging
 from typing import Any
 
-from features.retrieval import fuse_rankings
-from features.retrieval.semantic import local_embedding
+from features.retrieval import fuse_rankings, local_embedding
 
 from .knowledge.journal_semantic import JournalSemantic
 from .users import RESOLVED_STATUS_NAMES

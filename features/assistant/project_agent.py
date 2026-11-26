@@ -25,8 +25,12 @@ from features.assistant.workflow_execution import (
     workflow_plan_busy_hint,
 )
 from features.assistant.workspace import _apply_workspace_tool_params, _missing_required_params
-from features.retrieval import compact_observation, evidence_plan_context, summarize_evidence
-from features.retrieval.evidence import evidence_followup_required
+from features.retrieval import (
+    compact_observation,
+    evidence_followup_required,
+    evidence_plan_context,
+    summarize_evidence,
+)
 from foundation.redaction import redact_sensitive_data
 
 
