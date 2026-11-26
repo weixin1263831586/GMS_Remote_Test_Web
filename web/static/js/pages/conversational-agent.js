@@ -508,6 +508,21 @@ function renderAgentMessages(session) {
                                     if (index >= 0) addText(block, 'p', label + '：' + (row.values[index] || '未列明'));
                                 }
                             }
+                            addText(block, 'strong', 'Go / 非 Go 设备 RAM 要求解读');
+                            addText(block, 'p', 'Go 设备：必须声明 Low RAM 的容量以及可选声明的容量见上表；是否符合 Go 产品认证还需核验独立适用条件。');
+                            const optionalValues = new Set(matchedRows.map(row => {
+                                const index = row.headers.findIndex(value =>
+                                    String(value).trim().toLowerCase().replace(/\s+/g, ' ') === 'optionally low ram');
+                                return String(index >= 0 ? (row.values[index] ?? '') : '').trim();
+                            }));
+                            const optional = optionalValues.size === 1 ? [...optionalValues][0] : '';
+                            if (optional && !/^(?:n\s*\/?\s*a|none|not applicable|[-—–]+)$/i.test(optional)) {
+                                addText(block, 'p', '非 Go 设备 RAM（Standard / 非 Low RAM 参考）：' + optional
+                                    + ' 在表中属于可选声明 Low RAM 的容量，可以选择不声明 Low RAM。');
+                                addText(block, 'p', '这是根据当前版本表格得出的参考结论，不是独立的非 Go 认证最低 RAM 条款；未列出的容量及产品适用条件仍需核验。');
+                            } else {
+                                addText(block, 'p', '非 Go 设备 RAM：表格未提供唯一明确的可选 Low RAM 容量，不能据此推断 Standard 设备最低 RAM。');
+                            }
                             addText(block, 'p', 'Low RAM 声明不等同于 Android Go 产品认证；仍需核验产品适用条件。');
                         }
                     }

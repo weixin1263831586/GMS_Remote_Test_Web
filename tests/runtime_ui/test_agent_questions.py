@@ -395,6 +395,9 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(evidence).to_contain_text('Android 17：政策表格对应要求')
             expect(evidence).to_contain_text('必须声明 Low RAM：Example A')
             expect(evidence).to_contain_text('不符合 GMS 资格：Example C')
+            expect(evidence).to_contain_text('Go / 非 Go 设备 RAM 要求解读')
+            expect(evidence).to_contain_text('非 Go 设备 RAM（Standard / 非 Low RAM 参考）：Example B')
+            expect(evidence).to_contain_text('不是独立的非 Go 认证最低 RAM 条款')
             expect(evidence.locator('table tbody tr')).to_have_count(1)
             expect(evidence.locator('table')).not_to_contain_text('Historical A')
             alignment = evidence.locator('table').evaluate("""table => {
@@ -414,5 +417,36 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             expect(evidence.locator('details')).not_to_have_attribute('open', '')
             evidence.locator('summary').click()
             expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
+        finally:
+            page.close()
+
+
+    def test_gms_policy_non_go_summary_does_not_invent_unlisted_capacity(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            row = {
+                'headers': ['OS Version', 'Must be Low RAM', 'Optionally Low RAM', 'Not qualified for GMS'],
+                'values': ['Android 12', 'Example required', 'N/A', 'Example excluded'],
+                'table_index': 1, 'row_index': 1,
+            }
+            data = {'status': 'matched', 'requested_android_version': 12,
+                    'lookup_scope': 'low_ram_declaration',
+                    'sections': [{'title': 'Fixture', 'table_rows': [row], 'version_rows': [row]}]}
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': data})))
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM;android=12'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            evidence = page.locator('.agent-policy-evidence')
+            expect(evidence).to_contain_text('不能据此推断 Standard 设备最低 RAM')
+            expect(evidence).not_to_contain_text('可以选择不声明 Low RAM')
         finally:
             page.close()
