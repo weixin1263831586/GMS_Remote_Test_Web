@@ -1,0 +1,128 @@
+name: One-time Firefox desktop connectivity probe
+on:
+  push:
+    branches: ['audit/main-full-review-18fe70e-20261126']
+    paths: ['.github/workflows/probe-firefox-partner-desktop.yml']
+permissions:
+  contents: read
+jobs:
+  desktop-probe:
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 3
+    steps:
+      - name: Read-only connectivity and target document keyword check
+        shell: bash
+        run: |
+          set -eu
+          test "$RUNNER_NAME" = ats-041055-64g
+          test "$(id -un)" = hcq
+          timeout 40s /usr/bin/python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+          import subprocess
+          from urllib.parse import urlsplit
+          def report(key, value):
+              print(key + "=" + str(value).lower(), flush=True)
+          # Only desktop connection coordinates from the same user's Firefox.
+          allowed = {b"DISPLAY", b"XAUTHORITY", b"WAYLAND_DISPLAY", b"XDG_RUNTIME_DIR", b"DBUS_SESSION_BUS_ADDRESS"}
+          found = False
+          for p in pathlib.Path("/proc").iterdir():
+              if not p.name.isdigit():
+                  continue
+              try:
+                  if p.stat().st_uid != os.getuid() or (p / "comm").read_text().strip() not in ("firefox", "firefox-bin"):
+                      continue
+                  found = True
+                  for entry in (p / "environ").read_bytes().split(b"\0"):
+                      key, sep, val = entry.partition(b"=")
+                      if sep and key in allowed and val:
+                          os.environ[os.fsdecode(key)] = os.fsdecode(val)
+                  if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+                      break
+              except OSError:
+                  continue
+          report("firefox_process", found)
+          if not found:
+              raise SystemExit(0)
+          report("x11_display_set", bool(os.environ.get("DISPLAY")))
+          report("wayland_display_set", bool(os.environ.get("WAYLAND_DISPLAY")))
+          def xprop(*args):
+              try:
+                  result = subprocess.run(["xprop", *args], capture_output=True, text=True, timeout=3)
+                  return result.stdout if result.returncode == 0 else ""
+              except (OSError, subprocess.TimeoutExpired):
+                  return ""
+          clients = xprop("-root", "_NET_CLIENT_LIST")
+          report("x11_window_query", bool(clients))
+          firefox_window = False
+          partner_title = False
+          for window in re.findall(r"0x[0-9a-fA-F]+", clients)[:100]:
+              if "firefox" not in xprop("-id", window, "WM_CLASS").lower():
+                  continue
+              firefox_window = True
+              title = xprop("-id", window, "_NET_WM_NAME")
+              partner_title |= bool(re.search(r"GMS Requirements|Google Partner|Android Partner|GMS.*Policies", title, re.I))
+          report("firefox_window", firefox_window)
+          report("partner_title_hint", partner_title)
+          # Accessibility is optional and read-only. Do not enable it, switch tabs,
+          # capture screenshots, extract cookies, or output any document text.
+          try:
+              import gi
+              gi.require_version("Atspi", "2.0")
+              from gi.repository import Atspi
+              Atspi.init()
+              desktop = Atspi.get_desktop(0)
+              def walk(root, maximum):
+                  pending = [root]
+                  for _ in range(maximum):
+                      if not pending:
+                          return
+                      node = pending.pop()
+                      if node is None:
+                          continue
+                      yield node
+                      try:
+                          for i in range(min(node.get_child_count(), 500) - 1, -1, -1):
+                              pending.append(node.get_child_at_index(i))
+                      except Exception:
+                          pass
+              target = None
+              for i in range(desktop.get_child_count()):
+                  app = desktop.get_child_at_index(i)
+                  if app is None or "firefox" not in app.get_name().lower():
+                      continue
+                  for node in walk(app, 2000):
+                      try:
+                          if node.get_role() not in (Atspi.Role.DOCUMENT_WEB, Atspi.Role.DOCUMENT_FRAME):
+                              continue
+                          doc = node.get_document_iface()
+                          if doc is None:
+                              continue
+                          url = doc.get_document_attribute_value("DocURL") or ""
+                          parsed = urlsplit(url)
+                          if parsed.scheme == "https" and parsed.hostname == "docs.partner.android.com" and parsed.path.rstrip("/") == "/gms/policies/domains/reqs":
+                              target = node
+                              break
+                      except Exception:
+                          continue
+                  if target is not None:
+                      break
+              report("target_document_accessible", target is not None)
+              if target is not None:
+                  memory = False
+                  android16 = False
+                  for node in walk(target, 3000):
+                      try:
+                          value = node.get_name() or ""
+                          memory |= bool(re.search(r"\b(?:RAM|memory)\b", value, re.I))
+                          android16 |= bool(re.search(r"\bAndroid\s*16\b", value, re.I))
+                          if memory and android16:
+                              break
+                      except Exception:
+                          continue
+                  report("memory_keyword_visible", memory)
+                  report("android16_keyword_visible", android16)
+          except Exception:
+              report("accessibility_probe_available", False)
+          PY
