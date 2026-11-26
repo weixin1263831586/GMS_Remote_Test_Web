@@ -86,6 +86,20 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
             expect(dialog.locator("img")).to_have_css("height", "8px")
             dialog.locator("img").click()
             expect(dialog).to_be_visible()
+            for width, height in ((2400, 1600), (1600, 2400)):
+                dimensions = dialog.locator("img").evaluate("""async (image, size) => {
+                    const canvas = document.createElement('canvas');
+                    [canvas.width, canvas.height] = size;
+                    image.src = canvas.toDataURL('image/png');
+                    await image.decode();
+                    const rect = image.getBoundingClientRect();
+                    return {width: rect.width, height: rect.height,
+                            viewportWidth: window.innerWidth, viewportHeight: window.innerHeight};
+                }""", [width, height])
+                self.assertLessEqual(dimensions["width"], dimensions["viewportWidth"] * 0.8 + 1)
+                self.assertLessEqual(dimensions["height"], dimensions["viewportHeight"] * 0.8 + 1)
+                self.assertAlmostEqual(dimensions["width"] / dimensions["height"],
+                                       width / height, delta=0.01)
             page.keyboard.press("Escape")
             expect(dialog).to_have_count(0)
             expect(attachment).to_be_visible()
