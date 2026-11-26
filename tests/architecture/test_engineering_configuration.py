@@ -36,7 +36,6 @@ def test_tracked_test_modules_have_a_collection_root(pytestconfig):
     assert not uncovered, f'Test modules without a collection root: {uncovered}'
 
 
-
 def test_feature_unit_ci_jobs_cover_each_feature_test_root_once():
     workflow = yaml.safe_load((ROOT / '.github/workflows/ci.yml').read_text(encoding='utf-8'))
     expected = {f'features/{path.parts[1]}' for path in tracked_test_paths()
@@ -48,9 +47,9 @@ def test_feature_unit_ci_jobs_cover_each_feature_test_root_once():
         for step in job.get('steps', []):
             run = step.get('run', '').replace('\\\n', ' ')
             for line in run.splitlines():
-                words = shlex.split(line, comments=True)
-                if not words or words[0] != 'pytest':
+                if not line.lstrip().startswith('pytest '):
                     continue
+                words = shlex.split(line, comments=True)
                 counts.update(word for word in words[1:]
                               if word.startswith('features/') and word.count('/') == 1)
     missing = sorted(expected - counts.keys())

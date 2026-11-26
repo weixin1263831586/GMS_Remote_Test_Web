@@ -17,6 +17,7 @@ __all__ = [
     "PreparedFastbootDevice",
     "Runner",
     "resolve_bootloader_oem_profile",
+    "subprocess_runner",
     "vendor_partition",
 ]
 
