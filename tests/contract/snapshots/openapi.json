@@ -3024,7 +3024,7 @@
           },
           "issue_id": {
             "exclusiveMinimum": 0,
-            "maximum": 9223372036854775808,
+            "maximum": 9223372036854776000,
             "title": "Issue Id",
             "type": "integer"
           }
@@ -4718,6 +4718,52 @@
           }
         },
         "summary": "Cancel Agent Session"
+      }
+    },
+    "/api/agent/sessions/{session_id}/images/{image_id}": {
+      "get": {
+        "description": "Serve a private image for its original session owner.",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "image_id",
+            "required": true,
+            "schema": {
+              "title": "Image Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Agent Image"
       }
     },
     "/api/apk/analyze/{task_id}": {
