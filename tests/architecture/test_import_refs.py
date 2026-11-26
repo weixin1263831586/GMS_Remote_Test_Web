@@ -31,3 +31,20 @@ def test_import_scanner_resolves_feature_package_imports():
     assert module_names(tree, "features.example") == {
         "features", "features.devices", "features.reports", "features.users",
     }
+
+
+def test_import_scanner_resolves_worker_aliases_and_builtin_imports():
+    tree = ast.parse(
+        'from worker import adb_proxy as proxy\n'
+        'import builtins as loaders\n'
+        'from builtins import __import__ as load\n'
+        'load("features.reports.api")\n'
+        'loaders.__import__(name="worker.suite_actions")\n'
+    )
+    assert module_names(tree, "features.example") == {
+        "worker", "worker.adb_proxy", "builtins",
+        "features.reports.api", "worker.suite_actions",
+    }
+    assert module_names(tree, "features.example", include_dynamic=False) == {
+        "worker", "worker.adb_proxy", "builtins",
+    }
