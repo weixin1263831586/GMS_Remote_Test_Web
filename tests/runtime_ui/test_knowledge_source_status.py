@@ -124,3 +124,44 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
             self.assertEqual(table.get_by_role("button", name="打开网址", exact=True).count(), 2)
         finally:
             page.close()
+
+
+    def test_semantic_index_builds_remaining_batches_and_stops_without_progress(self):
+        page = self.new_page()
+        calls = []
+        state = {"status": "empty", "indexed": 0, "total": 260, "coverage_complete": False}
+
+        def reply(route, data):
+            route.fulfill(status=200, content_type="application/json",
+                          body=json.dumps({"success": True, "data": data}))
+
+        def sync(route):
+            calls.append(route.request.method)
+            if len(calls) <= 3:
+                state["indexed"] = min(260, state["indexed"] + 128)
+                state["coverage_complete"] = state["indexed"] == 260
+                state["status"] = "ready" if state["coverage_complete"] else "partial"
+            reply(route, state)
+
+        try:
+            page.route("**/api/knowledge/external/web-sources", lambda route: reply(route, {"sources": []}))
+            page.route("**/api/gms-update-center/requirements/coverage", lambda route: reply(route, {}))
+            page.route("**/api/gms-update-center/scan/status", lambda route: reply(route, {}))
+            page.route("**/api/knowledge/external/wiki-semantic-index", lambda route: reply(route, state))
+            page.route("**/api/knowledge/external/wiki-semantic-index?batch_size=128", sync)
+            self.goto_shell(page)
+            page.evaluate("switchPage('notes', null)")
+            page.locator('#page-notes [data-kb-view="external"]').click()
+            page.evaluate("window.showConfirmDialog = async () => true")
+            row = page.locator(".kb-source-table tr").filter(has_text="Android Internals Wiki")
+            button = row.get_by_role("button", name="语义索引", exact=True)
+            button.click()
+            expect(button).to_be_enabled(timeout=10000)
+            self.assertEqual(calls, ["POST", "POST", "POST"])
+            self.assertTrue(state["coverage_complete"])
+            state.update(status="partial", indexed=128, coverage_complete=False)
+            button.click()
+            expect(button).to_be_enabled(timeout=10000)
+            self.assertEqual(len(calls), 4)
+        finally:
+            page.close()

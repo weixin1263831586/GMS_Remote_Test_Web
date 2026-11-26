@@ -148,10 +148,33 @@
                     showToast('语义索引已完整：' + counts(status), 'success');
                     return;
                 }
-                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '。构建下一批（最多128条）？')) return;
+                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '。连续构建剩余批次？')) return;
                 run(async () => {
-                    const result = await kbFetch(endpoint + '?batch_size=128', {method: 'POST'});
-                    showToast('语义索引覆盖：' + counts(result), result.coverage_complete ? 'success' : 'info');
+                    let current = status;
+                    // Keep each server request bounded; committed batches can be resumed.
+                    for (let batch = 0; batch < 256; batch++) {
+                        if (!trigger.isConnected || panel.hidden) break;
+                        const result = await kbFetch(endpoint + '?batch_size=128', {method: 'POST'});
+                        trigger.title = '语义索引覆盖：' + counts(result);
+                        if (result.coverage_complete) {
+                            showToast('语义索引覆盖：' + counts(result), 'success');
+                            return;
+                        }
+                        if (result.status === 'busy') {
+                            showToast('已有索引任务运行，请完成后继续。', 'info');
+                            return;
+                        }
+                        if (!['empty', 'partial', 'ready'].includes(result.status)) {
+                            showToast('语义索引未完成：' + counts(result) + '，请检查来源和模型配置。', 'warning');
+                            return;
+                        }
+                        if (!Number.isInteger(result.indexed) || result.indexed <= (current.indexed ?? 0)) {
+                            showToast('语义索引无新增进度：' + counts(result) + '，请检查语料范围或模型状态。', 'warning');
+                            return;
+                        }
+                        current = result;
+                    }
+                    showToast('本轮索引结束：' + counts(current) + '，可继续构建剩余批次。', 'info');
                 }, trigger, '索引中');
             }
             async function load() {

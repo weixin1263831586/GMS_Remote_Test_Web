@@ -157,3 +157,8 @@ locks retain their existing reset coordination. Personal semantic chunks redact
 the entire document before slicing, with offsets relative to redacted text.
 The token revision changes so old vectors are not recalled after this change;
 rebuild the personal semantic index through its existing sync endpoint.
+
+The existing external knowledge UI can build multiple bounded semantic batches
+in one confirmed operation. It stops on completion, no progress, busy or error,
+and can resume committed batches later. It is not a persistent background
+scheduler; closing the page stops further client-side requests.
