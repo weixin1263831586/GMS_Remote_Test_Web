@@ -28,14 +28,11 @@ function diskAuditStatusText(item) {
 
 function setDiskAuditRefreshState(loading, message) {
     const button = document.getElementById('audit-disk-refresh-btn');
-    const label = document.getElementById('audit-disk-refresh-label');
     const text = document.getElementById('audit-disk-scanned-at');
     if (button) {
-        button.disabled = loading;
-        button.setAttribute('aria-busy', String(loading));
+        setActionButtonBusy(button, loading, '扫描中');
         button.classList.toggle('audit-disk-refreshing', loading);
     }
-    if (label) label.textContent = loading ? '扫描中…' : '刷新';
     if (text && message) text.textContent = message;
 }
 
@@ -231,9 +228,9 @@ async function loadDiskArtifactAudit(force = false) {
     const alreadyLoaded = diskArtifactAuditState.loaded;
     diskArtifactAuditState.loading = true;
     tbody.setAttribute('aria-busy', 'true');
-    setDiskAuditRefreshState(true, '正在读取磁盘目录，请勿重复点击…');
+    setDiskAuditRefreshState(true);
     if (!alreadyLoaded) {
-        tbody.innerHTML = '<tr><td colspan="6" class="table-placeholder">正在只读扫描本机 Controller 与 Worker 产物...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" class="table-placeholder">正在扫描运行产物…</td></tr>';
     }
     try {
         // refresh=true bypasses the server-side 60-second snapshot cache.
