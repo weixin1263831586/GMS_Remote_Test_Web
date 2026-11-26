@@ -144,7 +144,7 @@ jobs:
           GMS_MODAL_MATRIX_OUT: ${{ runner.temp }}/gms-modal-inventory/cases
         run: |
           python -m pytest tests/runtime_ui/test_modal_inventory_runner.py -q \
-            --junitxml="${{ runner.temp }}/gms-modal-inventory/cases.xml"
+            --junitxml="$RUNNER_TEMP/gms-modal-inventory/cases.xml"
       - name: Build complete modal-by-modal evidence ledger
         if: always()
         env:

@@ -2,19 +2,25 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict
+
+from typing_extensions import Unpack
+
+from foundation.config import ConfigManager
+from foundation.runtime_contracts import ClientIdResolver, ControllerStateContract
 
 
-RuntimeCallable = Callable[..., object]
+if TYPE_CHECKING:
+    from .store import ApkTaskStore
 
 
 @dataclass
 class ApkRuntime:
-    config_manager: object | None = None
-    global_state: object | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
+    config_manager: ConfigManager | None = None
+    global_state: ControllerStateContract | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
     project_root: Path | None = None
     apk_upload_dir: Path | None = None
     apk_max_tasks: int = 20
@@ -22,7 +28,21 @@ class ApkRuntime:
     apk_max_source_file_size: int = 0
     jadx_path: str = "jadx"
     jadx_timeout: int = 300
-    apk_task_store: object | None = None
+    apk_task_store: ApkTaskStore | None = None
+
+
+class ApkRuntimeBindings(TypedDict, total=False):
+    config_manager: ConfigManager | None
+    global_state: ControllerStateContract | None
+    get_client_id_from_request: ClientIdResolver | None
+    project_root: str | Path | None
+    apk_upload_dir: str | Path | None
+    apk_max_tasks: int
+    apk_max_file_size: int
+    apk_max_source_file_size: int
+    jadx_path: str
+    jadx_timeout: int
+    apk_task_store: ApkTaskStore | None
 
 
 _runtime = ApkRuntime()
@@ -39,7 +59,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
-def configure_runtime(**values: object) -> None:
+def configure_runtime(**values: Unpack[ApkRuntimeBindings]) -> None:
     invalid = set(values) - _RUNTIME_FIELDS
     if invalid:
         raise TypeError(f"unknown APK runtime bindings: {sorted(invalid)}")

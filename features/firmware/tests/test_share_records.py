@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import pytest
 from cryptography.fernet import Fernet
 
 from features.firmware import shares_api
@@ -76,3 +77,22 @@ def test_share_list_requires_elevated_admin_when_auth_required(
     )
     response = client.get("/api/firmware-shares")
     assert response.status_code == 200
+
+
+def test_share_records_use_private_atomic_storage(tmp_path, monkeypatch):
+    store = tmp_path / "shares.json"
+    monkeypatch.setattr(shares_api, "_store_path", lambda: store)
+    original = [{"id": "first", "path": "/home/test/update.img"}]
+    shares_api._save_records(original)
+    assert shares_api._load_records() == original
+    assert store.stat().st_mode & 0o777 == 0o600
+
+    def fail_replace(*_args):
+        raise OSError("publication failed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("foundation.private_config.os.replace", fail_replace)
+        with pytest.raises(OSError, match="publication failed"):
+            shares_api._save_records([{"id": "second"}])
+    assert shares_api._load_records() == original
+    assert list(tmp_path.iterdir()) == [store]

@@ -26,12 +26,6 @@ from .store import EvidenceStore
 logger = logging.getLogger(__name__)
 
 
-def ocr_image_text(image, pytesseract) -> str:
-    """Return OCR text with an explicit warning when tile coverage is partial."""
-    text, note = _ocr_image_text(image, pytesseract)
-    return f"{text}\n[{note}]" if note else text
-
-
 def _ocr_image_text(image, pytesseract) -> tuple[str, str]:
     """Cover large images with overlapping tiles instead of rejecting them.
 
@@ -94,6 +88,19 @@ def _load_ocr_dependencies() -> tuple[Any, Any]:
     return pytesseract, Image
 
 
+def read_image_ocr(image_path: str | Path, pytesseract: Any, image_module: Any) -> tuple[str, str]:
+    """Recognize an image with the shared engine and bounded tile coverage."""
+    from ..tesseract_finder import configure_usable_tesseract
+
+    cmd = configure_usable_tesseract()
+    if cmd:
+        import pytesseract.pytesseract as _pt
+
+        _pt.tesseract_cmd = cmd
+    with image_module.open(image_path) as image:
+        return _ocr_image_text(image, pytesseract)
+
+
 def extract_image_ocr_text(
     store: EvidenceStore,
     atomic_write: Callable[[Path, bytes], None],
@@ -123,19 +130,7 @@ def extract_image_ocr_text(
     except Exception as exc:
         return "", f"OCR 依赖缺失: {type(exc).__name__}"
     try:
-        # 与 analysis/attachments.py 共用可运行 OCR 引擎选择策略；捆绑版本
-        # 不兼容时回退系统 Tesseract，并重新配置动态库和语言数据路径。
-        from ..tesseract_finder import (
-            configure_usable_tesseract,
-        )
-
-        cmd = configure_usable_tesseract()
-        if cmd:
-            import pytesseract.pytesseract as _pt
-
-            _pt.tesseract_cmd = cmd
-        with Image.open(image_path) as image:
-            text, note = _ocr_image_text(image, pytesseract)
+        text, note = read_image_ocr(image_path, pytesseract, Image)
     except Exception as exc:
         logger.debug("OCR failed for %s: %s", image_path, exc)
         detail = str(exc).strip().splitlines()

@@ -25,30 +25,32 @@ async function smartSearch() {
 
 async function fetchIssueFromRedmine(issueId) {
   var btn = document.getElementById('scanBtn');
-  var origText = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ 拉取 #' + issueId + '...';
+  if (btn.disabled) return;
+  setActionButtonBusy(btn, true, '拉取中');
   try {
     var result = await api('/api/redmine-agent/issues/' + issueId + '/fetch', {method: 'POST'});
     if (result.action === 'exists') {
       document.getElementById('searchInput').value = '';
       return loadIssues();
     }
-    btn.textContent = '⏳ 分析 #' + issueId + '...';
+    setActionButtonBusy(btn, true, '分析中');
     await waitForRun(result.run_id, '拉取');
     document.getElementById('searchInput').value = '';
     return loadIssues();
   } catch (e) {
     notifyUser('拉取工单失败', e.message, 'error');
   } finally {
-    btn.disabled = false;
-    btn.textContent = origText;
+    setActionButtonBusy(btn, false);
+    updateRedmineToolbar();
   }
 }
 
 // ---- Issues list ----
+let issuesRequestGeneration = 0;
+let renderedIssuesScope = '';
 async function loadIssues(page) {
   if (page) currentPage = page;
+  const generation = ++issuesRequestGeneration;
   const search = document.getElementById('searchInput').value.trim();
   const status = document.getElementById('statusFilter').value;
   const priority = document.getElementById('priorityFilter').value;
@@ -57,12 +59,25 @@ async function loadIssues(page) {
   if (search) url += `&search=${encodeURIComponent(search)}`;
   if (status) url += `&status=${encodeURIComponent(status)}`;
   if (priority) url += `&priority=${encodeURIComponent(priority)}`;
+  const box = document.getElementById('issuesList');
+  box.setAttribute('aria-busy', 'true');
   try {
     const data = await api(url);
+    if (generation !== issuesRequestGeneration) return;
     renderIssuesList(data.items || []);
+    renderedIssuesScope = url;
     renderPagination(data.total || 0, data.limit, data.offset);
   } catch (e) {
-    document.getElementById('issuesList').innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+    if (generation !== issuesRequestGeneration) return;
+    if (renderedIssuesScope === url && e.status !== 401 && e.status !== 403) {
+      notifyUser('工单刷新失败', e.message, 'error');
+    } else {
+      renderedIssuesScope = '';
+      box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+      document.getElementById('issuesPagination')?.replaceChildren();
+    }
+  } finally {
+    if (generation === issuesRequestGeneration) box.setAttribute('aria-busy', 'false');
   }
 }
 
@@ -155,7 +170,7 @@ function renderIssueCard(item) {
     </h3>
 
     <div class="field-label">📋 基本信息</div>
-    <table class="info-table">
+    <table class="info-table ui-detail-table">
       <tr>
         <th>SoC</th><td><strong>${esc(item.soc_platform || '-')}</strong></td>
         <th>Android</th><td><strong>${esc(item.android_version || '-')}</strong></td>

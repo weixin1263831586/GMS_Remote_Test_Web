@@ -423,7 +423,8 @@ rather than adding operators.
 ANDROID BACKGROUND KNOWLEDGE (optional, ADR 0014): gms_rt_knowledge_search
 (CLI: gms-rt-knowledge-search "keywords" --json --non-interactive) returns
 background-only Android system-mechanism knowledge from the external
-android-internals wiki (LMKD, Binder, Choreographer, ANR internals, ...). Use
+android-internals wiki and public CDD / external policy documents. For policy hits, cite exact POL- tokens,
+verify target version and applicability; normative expectations alone do not prove a defect. Use
 it to explain mechanisms or to plan verification steps. Every hit carries
 evidence_level="background": never cite a hit as verified root cause, never
 count it as evidence-gate material, and it cannot replace gms_rt_sdk_* /

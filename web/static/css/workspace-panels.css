@@ -78,15 +78,6 @@
 #aoa-panel .aoa-config-column > .aoa-column-heading > div { width: 100%; justify-content: space-between; }
 #aoa-panel .aoa-screen-stage { background: var(--darker-bg); border-color: var(--border-color); }
 #aoa-panel .aoa-calibration-status { border-radius: 6px; background: var(--light-bg); border: 1px solid var(--border-color); }
-#aoa-panel .aoa-command-table th { height: 32px; color: var(--text-secondary);  }
-#aoa-panel .aoa-command-table td { padding-top: 6px; padding-bottom: 6px; }
-#aoa-panel .aoa-command-list-header,
-#aoa-panel .aoa-command-row { grid-template-columns: 3ch minmax(0, 1.5fr) minmax(70px, 1fr); row-gap: 6px; }
-#aoa-panel .aoa-actions-label { grid-column: 1 / -1; }
-#aoa-panel .aoa-command-row > .aoa-command-state { grid-column: 1 / 3; grid-row: 2; justify-self: start; text-align: left; }
-#aoa-panel .aoa-command-row > .aoa-command-actions { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
-#aoa-panel .aoa-command-list li { padding-top: 6px; padding-bottom: 6px; }
-#aoa-panel .aoa-command-list code { white-space: normal; overflow-wrap: anywhere; }
 .aoa-operation-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
 .aoa-operation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .aoa-operation-block > .aoa-muted { margin-top: 7px; }

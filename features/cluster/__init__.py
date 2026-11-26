@@ -1,7 +1,10 @@
 """Multi-host test cluster controller."""
 
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from pydantic import ValidationError
+from starlette.requests import Request
 
 from foundation import cluster_port
 from foundation.error_model import ApiError, format_validation_errors
@@ -26,60 +29,63 @@ from .models import ClusterDeviceAction
 from .report_index import index_cluster_report
 from .repository import ClusterRepository
 from .service import ClusterService
-from .state_machine import ACTIVE_CLUSTER_JOB_STATUSES
 from .worker_auth import authenticate_worker, worker_tokens
 
 
-def run_artifact_retention():
+def run_artifact_retention() -> None:
     from .artifact_retention import run_enabled_retention
 
     return run_enabled_retention(get_cluster_service().repository)
 
 
-async def run_worker_command(*args, **kwargs):
+async def run_worker_command(
+    worker_id: str, command_type: str, payload: dict[str, Any], timeout: float = 10,
+) -> dict[str, Any]:
     """Execute through the configured Cluster command boundary."""
     from .api import _run_worker_command
 
-    return await _run_worker_command(*args, **kwargs)
+    return await _run_worker_command(worker_id, command_type, payload, timeout=timeout)
 
 
-def require_cluster_enabled(*args, **kwargs):
+def require_cluster_enabled(remote: bool = False) -> None:
     """Apply the Controller's runtime cluster-mode gate."""
     from .api import _require_cluster_enabled
 
-    return _require_cluster_enabled(*args, **kwargs)
+    _require_cluster_enabled(remote)
 
 
-def require_worker_session(*args, **kwargs):
+def require_worker_session(worker_id: str, session_id: str = '', generation: int = 0) -> None:
     """Validate a Worker session through the command API boundary."""
     from .commands_api import _require_worker_session
 
-    return _require_worker_session(*args, **kwargs)
+    _require_worker_session(worker_id, session_id, generation)
 
 
-def _port_aoa_playback_control(*args, **kwargs):
-    return control_aoa_playback(*args, **kwargs)
+def _port_aoa_playback_control(
+    control_id: str, worker_id: str, owner_id: str, action: str,
+) -> Awaitable[dict[str, Any]]:
+    return control_aoa_playback(control_id, worker_id, owner_id, action)
 
 
-def _port_cluster_service():
+def _port_cluster_service() -> ClusterService:
     return get_cluster_service()
 
 
-def _port_cancel_job(*args, **kwargs):
-    return cancel_job(*args, **kwargs)
+def _port_cancel_job(job_id: str, request: Request) -> dict[str, Any]:
+    return cancel_job(job_id, request)
 
 
-def _port_worker_tokens():
+def _port_worker_tokens() -> dict[str, str]:
     # Resolve the package-level name so tests patching
     # features.cluster.worker_tokens are honored.
     return worker_tokens()
 
 
-def _port_authenticate_worker(*args, **kwargs):
-    return authenticate_worker(*args, **kwargs)
+def _port_authenticate_worker(worker_id: str, authorization: str | None) -> None:
+    authenticate_worker(worker_id, authorization)
 
 
-async def _port_device_action_request(request, payload):
+async def _port_device_action_request(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
     try:
         body = ClusterDeviceAction(**payload)
     except ValidationError as exc:
@@ -87,20 +93,24 @@ async def _port_device_action_request(request, payload):
     return await device_action(body, request)
 
 
-def _port_prepare_local_firmware_recovery(*args, **kwargs):
-    return prepare_local_firmware_recovery(*args, **kwargs)
+def _port_prepare_local_firmware_recovery(
+    request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int | str = 60,
+) -> cluster_port.PreparedFirmwareRecovery | None:
+    return prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds=boot_wait_seconds)
 
 
-def _port_run_local_firmware_recovery(*args, **kwargs):
-    return run_local_firmware_recovery(*args, **kwargs)
+def _port_run_local_firmware_recovery(
+    prepared: cluster_port.PreparedFirmwareRecovery, on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> Awaitable[cluster_port.FirmwareRecoveryResult]:
+    return run_local_firmware_recovery(prepared, on_event=on_event)
 
 
-def _port_validate_local_firmware_recovery(*args, **kwargs):
-    return validate_local_firmware_recovery(*args, **kwargs)
+def _port_validate_local_firmware_recovery(prepared: cluster_port.PreparedFirmwareRecovery | None) -> None:
+    validate_local_firmware_recovery(prepared)
 
 
-def _port_release_local_firmware_recovery(*args, **kwargs):
-    return release_local_firmware_recovery(*args, **kwargs)
+def _port_release_local_firmware_recovery(prepared: cluster_port.PreparedFirmwareRecovery | None) -> None:
+    release_local_firmware_recovery(prepared)
 
 
 # Register this feature with the foundation access port so consumers that
@@ -132,7 +142,6 @@ def register_cluster_port() -> None:
 
 
 __all__ = [
-    "ACTIVE_CLUSTER_JOB_STATUSES",
     "ClusterConfig",
     "ClusterDeviceAction",
     "ClusterRepository",

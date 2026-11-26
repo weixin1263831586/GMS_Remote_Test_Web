@@ -48,17 +48,8 @@ def normalize_usbip_vid_pids(value: str | Iterable[str] | None) -> tuple[str, ..
 
 
 def configured_usbip_vid_pids(config: dict[str, Any]) -> tuple[str, ...]:
-    """Resolve the plural config while retaining legacy single-value support.
-
-    ``usbip_vid_pids`` is authoritative when present. Deployments that still
-    have only ``usbip_vid_pid`` inherit the built-in Android mode defaults and
-    keep their optional custom value, so an upgrade does not lose Fastboot.
-    """
-    if 'usbip_vid_pids' in config:
-        configured = normalize_usbip_vid_pids(config.get('usbip_vid_pids'))
-        return configured or DEFAULT_ANDROID_USBIP_VID_PIDS
-    legacy = normalize_usbip_vid_pids(config.get('usbip_vid_pid'))
-    return tuple(dict.fromkeys((*DEFAULT_ANDROID_USBIP_VID_PIDS, *legacy)))
+    """Resolve the configured Android USB modes or use the built-in defaults."""
+    return normalize_usbip_vid_pids(config.get('usbip_vid_pids')) or DEFAULT_ANDROID_USBIP_VID_PIDS
 
 
 def _strip_ansi(text: str) -> str:

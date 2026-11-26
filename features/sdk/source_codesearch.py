@@ -4,10 +4,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
+import re
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import suppress
+from pathlib import Path
 from typing import Any
+
+from foundation.config import ConfigManager
 
 from .source_provider_contract import (
     CODESEARCH_MAX_HITS_PER_FILE,
@@ -24,6 +31,230 @@ from .source_provider_contract import (
     _strip_opengrok_path,
     decode_signed_id,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def codesearch_script_location() -> tuple[str, str]:
+    """定位 codesearch 脚本与其工作目录（search 子命令的 cwd）。"""
+    web_app_dir = Path(__file__).resolve().parents[2]
+    codesearch_dir = web_app_dir / 'plugins' / 'codesearch'
+    return str(codesearch_dir / 'scripts' / 'codesearch.py'), str(codesearch_dir)
+
+
+def run_codesearch_process(
+    cmd: list[str], cwd: str, *, timeout: float = 30.0,
+) -> subprocess.CompletedProcess | None:
+    """Run a bounded CodeSearch subprocess without a shell."""
+    try:
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=max(0.1, timeout), cwd=cwd,
+        )
+        return result if result.returncode == 0 else None
+    except subprocess.TimeoutExpired:
+        logger.warning("代码搜索超时（%.1f秒预算）", timeout)
+        return None
+    except Exception as e:
+        logger.error(f"代码搜索异常: {e}")
+        return None
+
+
+def get_opengrok_project_for_android_version(android_version: str, opengrok_config: dict) -> str:
+    if not android_version or not opengrok_config:
+        return (opengrok_config or {}).get('default_project', 'Android16')
+    match = re.match(r'(\d+)', android_version)
+    if match and match.group(1) in opengrok_config.get('project_mapping', {}):
+        return opengrok_config['project_mapping'][match.group(1)]
+    return opengrok_config.get('default_project', 'Android16')
+
+
+def search_indexed_paths(
+    path: str, *, android_version: str = "", timeout: float = 30.0,
+) -> tuple[str, list[str] | None]:
+    """Return the selected project and indexed paths; None means unavailable."""
+    script, cwd = codesearch_script_location()
+    config: dict[str, Any] = {}
+    with suppress(Exception):
+        config = ConfigManager().load_config().get("opengrok", {}) or {}
+    project = get_opengrok_project_for_android_version(android_version, config)
+    project_args = ["--project", project] if project else []
+    result = run_codesearch_process(
+        ["python3", script, "search", "--keywords", path,
+         "--search-field", "path", "--limit", "10", *project_args],
+        cwd, timeout=timeout,
+    )
+    if result is None:
+        return project, None
+    paths = []
+    for line in result.stdout.splitlines():
+        match = re.match(r"^\[[^\]]+\]\s+(.+)$", line.strip())
+        if match and match.group(1).strip():
+            paths.append(match.group(1).strip())
+    return project, paths
+
+
+def _attach_opengrok_url(item: dict[str, Any], base_url: str, project: str) -> None:
+    """Build and attach an OpenGrok xref URL to a search result item, then clean temp keys."""
+    path = item.get("path", "")
+    line = item.get("line")
+    if line:
+        item["url"] = f"{base_url}/xref/{project}/{path}#{line}"
+    else:
+        item["url"] = f"{base_url}/xref/{project}/{path}"
+    item.pop("_opengrok_base_url", None)
+    item.pop("_opengrok_project", None)
+
+
+def search_indexed_source(
+    class_name: str,
+    failure_location: dict | None = None,
+    max_results: int = 5,
+    android_version: str = '',
+) -> list[dict[str, str]]:
+    """
+    Args:
+        class_name: 类名 (如 com.android.cts.permission.PermissionTest)
+        failure_location: 从堆栈提取的失败位置 {file_name, file_type, line_number}
+        max_results: 最大返回结果数
+        android_version: 报告的 Android 版本（如 "15"），用于按版本映射选择 OpenGrok 项目
+
+    Returns:
+        List[Dict]: 搜索结果列表，每个包含 {project, path, line, type, file_type}
+    """
+    codesearch_script, codesearch_dir = codesearch_script_location()
+
+    # 按 Android 版本选择索引项目。
+    opengrok_config = {}
+    with suppress(Exception):
+        opengrok_config = ConfigManager().load_config().get('opengrok', {})
+    base_url = opengrok_config.get('base_url', '')
+    version_project = get_opengrok_project_for_android_version(
+        android_version,
+        opengrok_config,
+    )
+    project_args = ['--project', version_project] if version_project else []
+
+    try:
+        # 如果有精确失败位置，优先使用
+        if failure_location:
+            file_name = failure_location.get('file_name', '')
+            file_type = failure_location.get('file_type', '')
+            line_number = failure_location.get('line_number', '')
+
+            simple_name = file_name.split('$')[0]
+
+            result = run_codesearch_process(
+                ['python3', codesearch_script, 'search', '--keywords', simple_name, '--search-field', 'path', '--limit', '10', *project_args],
+                str(codesearch_dir),
+            )
+            if result:
+                lines = result.stdout.strip().split('\n')
+                target_file = f"{simple_name}.{file_type}"
+
+                for i, line_text in enumerate(lines):
+                    line_text = line_text.strip()
+                    if not line_text:
+                        continue
+                    if target_file in line_text or (simple_name in line_text and f".{file_type}" in line_text):
+                        project = ''
+                        for j in range(i + 1, min(len(lines), i + 3)):
+                            if lines[j].strip().startswith('project:'):
+                                project = lines[j].strip().split(':', 1)[1].strip()
+                                break
+                        item = {
+                            'type': 'definition',
+                            'path': line_text.replace('[definition] ', '').strip() if line_text.startswith('[definition]') else line_text,
+                            'line': line_number,
+                            'file_type': file_type,
+                            'project': project,
+                            'is_exact_location': True,
+                        }
+                        # 链接项目优先取报告版本对应项目，避免搜索默认项目覆盖版本语义
+                        selected_project = version_project or project
+                        if base_url and selected_project:
+                            _attach_opengrok_url(item, base_url, selected_project)
+                        return [item][:max_results]
+                # Fall through to class name search
+
+        # 没有失败位置时，使用类名搜索定义
+        simple_class_name = class_name.split('.')[-1]
+
+        result = run_codesearch_process(
+            ['python3', codesearch_script, 'search', '--keywords', simple_class_name, '--search-field', 'def', '--limit', str(max_results), *project_args],
+            str(codesearch_dir),
+        )
+        if not result:
+            return []
+
+        selected_project = version_project
+
+        search_results = []
+        lines = result.stdout.strip().split('\n')
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+            if not line or not (line.startswith('[') and ']' in line):
+                i += 1
+                continue
+
+            bracket_end = line.index(']')
+            bracket_content = line[1:bracket_end]
+            rest_of_line = line[bracket_end + 1:].strip()
+
+            result_item = {
+                'type': bracket_content,
+                'path': rest_of_line,
+                'file_type': 'kt' if rest_of_line.endswith('.kt') else 'java',
+            }
+
+            if base_url and selected_project:
+                result_item['_opengrok_base_url'] = base_url
+                result_item['_opengrok_project'] = selected_project
+
+            for j in range(i + 1, min(len(lines), i + 3)):
+                next_line = lines[j].strip()
+                if next_line.startswith('project:'):
+                    result_item['project'] = next_line.split(':', 1)[1].strip()
+                    break
+                elif next_line.startswith('['):
+                    break
+
+            for j in range(i + 1, min(len(lines), i + 4)):
+                next_line = lines[j].strip()
+                if (
+                    next_line
+                    and not next_line.startswith('project:')
+                    and not next_line.startswith('[')
+                    and ':' in next_line
+                ):
+                    line_num_part = next_line.split(':')[0].strip()
+                    if line_num_part.isdigit():
+                        result_item['line'] = line_num_part
+                        break
+
+            if '_opengrok_base_url' in result_item:
+                _attach_opengrok_url(result_item, base_url, selected_project)
+
+            search_results.append(result_item)
+            i += 1
+
+        seen_paths = set()
+        unique_results = []
+        for item in search_results:
+            if item['path'] not in seen_paths:
+                seen_paths.add(item['path'])
+                unique_results.append(item)
+
+        return unique_results[:max_results]
+
+    except subprocess.TimeoutExpired:
+        logger.warning("代码搜索超时")
+        return []
+    except Exception as e:
+        logger.error(f"代码搜索异常：{e}")
+        return []
 
 
 class CodesearchProvider:

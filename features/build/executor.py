@@ -5,12 +5,12 @@ import os
 import posixpath
 import re
 import shlex
-import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
+from foundation.processes import run_local_shell_command
 from foundation.ssh_security import configure_strict_host_keys
 
 
@@ -398,15 +398,13 @@ class SshTmuxBuildBackend:
 
 class LocalBuildBackend(SshTmuxBuildBackend):
     def _run(self, server: dict[str, Any], command: str, timeout: int = 30) -> tuple[int, str, str]:
-        # Build templates are operator-controlled shell programs; request
-        # parameters are schema-validated before rendering.
-        try:
-            proc = subprocess.run(command, shell=True, text=True, capture_output=True, timeout=timeout)  # nosec B602
-        except subprocess.TimeoutExpired:
+        # Operator-controlled templates require shell semantics; parameters are validated.
+        result = run_local_shell_command(command, timeout=timeout)
+        if result.timed_out:
             raise BuildExecutionError("本地构建命令执行超时") from TimeoutError(
                 "local build command timed out"
             )
-        return proc.returncode, proc.stdout, proc.stderr
+        return result.code, result.stdout, result.stderr
 
     @contextmanager
     def open_artifact(self, *, server: dict[str, Any], path: str):

@@ -1,4 +1,4 @@
-"""Sweep glue tests (phase 2): snapshot -> incidents -> dedup -> notify."""
+"""Incident evaluation and notification delivery tests."""
 
 import unittest
 from pathlib import Path
@@ -6,10 +6,20 @@ from tempfile import TemporaryDirectory
 from unittest import mock
 
 from features.ops.store import OpsStore
-from features.ops.sweep import run_ops_sweep
+from features.ops.sweep import build_snapshot, run_ops_sweep
 
 
 class SweepTests(unittest.TestCase):
+    def test_snapshot_uses_registered_cluster_port(self):
+        service = mock.Mock()
+        service.list_workers.return_value = [{'id': 'w1'}]
+        with mock.patch('features.ops.sweep.get_cluster_service', return_value=service):
+            self.assertEqual(build_snapshot()['workers'], [{'id': 'w1'}])
+
+    def test_snapshot_tolerates_unavailable_cluster_port(self):
+        with mock.patch('features.ops.sweep.get_cluster_service', side_effect=RuntimeError):
+            self.assertNotIn('workers', build_snapshot())
+
     def test_failed_old_event_is_attempted_only_once_per_sweep(self):
         with TemporaryDirectory() as tmp:
             store = OpsStore(Path(tmp) / "ops.sqlite3")
@@ -47,7 +57,7 @@ class SweepTests(unittest.TestCase):
                 "features.ops.service.get_ops_store", return_value=store
             ), mock.patch(
                 "features.ops.sweep.notify_incident",
-                return_value={"sent": [{"transport": "webhook", "sent": True}]},
+                return_value={"ok": True, "sent": [{"transport": "webhook", "sent": True}]},
             ) as notify:
                 first = run_ops_sweep(cfg)
                 second = run_ops_sweep(cfg)
@@ -56,7 +66,8 @@ class SweepTests(unittest.TestCase):
             self.assertEqual(second["notified"], 0)  # dedup suppresses notify
             notify.assert_called_once()
 
-    def test_failed_delivery_is_retried_with_backoff_and_closed_loop(self):
+    @mock.patch('features.ops.sweep.build_snapshot', return_value={'disk_free_gb': 1})
+    def test_failed_delivery_is_retried_with_backoff_and_closed_loop(self, _snapshot):
         # 发送失败的事件必须进 pending/failed 状态并在后续
         # sweep 重试；成功后写 notified_at 形成闭环。
         with TemporaryDirectory() as tmp:

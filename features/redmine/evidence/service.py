@@ -1,7 +1,7 @@
 """Redmine 证据快照抓取服务（只读 evidence pipeline）。
 
 本模块与看板摘要
-通道（analysis/issue.py 的 2,000 字符截断）完全分离：
+通道（工单摘要的 2,000 字符截断）完全分离：
 
 - 直接请求 Redmine REST ``/issues/{id}.json?include=...``，原样保存返回的
   UTF-8 JSON 字节并计算 SHA-256；
@@ -16,7 +16,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import base64
 import logging
 import os
@@ -28,7 +27,6 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..config import config_manager as redmine_config_manager
-from ..users import sanitize_owner_id
 from .store import owner_evidence_store
 
 
@@ -300,116 +298,6 @@ def _now_iso() -> str:
 
 
 # --------------------------------------------------------------- entrypoints
-
-# ``EvidenceFetcher`` lives in ``fetch.py`` (split to keep both
-# modules reviewable); it is re-exported here so the historical import paths
-# ``features.redmine.evidence.service.EvidenceFetcher`` keep working.
-from .fetch import EvidenceFetcher  # noqa: E402
-
-
-_BACKGROUND_TASKS: set[asyncio.Task] = set()
-
-# 进程内活跃抓取（sanitize(owner_id), snapshot_id）：重启对账据此区分
-# "仍在执行"与"无执行者的遗留中间态"。
-_ACTIVE_FETCH_SNAPSHOTS: set[tuple[str, str]] = set()
-
-# 抓取过程的中间态：进程意外退出后，处于这些状态的快照不会再有执行者。
-# queued 也纳入对账：快照创建与后台任务启动之间存在窗口，进程在该窗口
-# 退出会留下永远无人认领的 queued 记录。
-INTERMEDIATE_FETCH_STATUSES = ("queued", "fetching", "downloading")
-
-
-def reconcile_interrupted_fetches(root: Path | None = None) -> list[dict[str, str]]:
-    """启动对账：把无活跃执行者的中间态快照推进到 ``interrupted`` 终态。
-
-    Controller 重启后 asyncio 后台抓取任务不复存在，数据库里残留的
-    queued/fetching/downloading 快照会让 wait_for_snapshot 与状态轮询
-    永久等待。中断标记保留已下载的附件、issue.json 与派生结果（不删除
-    任何证据），重试时重新发起抓取即可；活跃执行者存在的快照不做改动。
-    """
-    if root is None:
-        from foundation.config import settings
-
-        root = settings.data_root / "redmine" / "by_user"
-    reconciled: list[dict[str, str]] = []
-    root = Path(root)
-    if not root.is_dir():
-        return reconciled
-    from .store import EvidenceStore
-
-    for owner_dir in sorted(root.iterdir()):
-        # 只认已存在的 evidence 存储，绝不因对账创建新库。
-        if not (owner_dir / "evidence.sqlite3").is_file():
-            continue
-        store = EvidenceStore(owner_dir)
-        orphans = store.list_snapshots_by_status(set(INTERMEDIATE_FETCH_STATUSES))
-        for snapshot in orphans:
-            snapshot_id = str(snapshot.get("snapshot_id") or "")
-            if (str(owner_dir.name), snapshot_id) in _ACTIVE_FETCH_SNAPSHOTS:
-                continue
-            store.update_snapshot(
-                snapshot_id,
-                status="interrupted",
-                error_json=[
-                    *(snapshot.get("errors") or []),
-                    {
-                        "stage": "fetch",
-                        "message": (
-                            "Controller 重启导致抓取中断；已下载附件与派生结果"
-                            "已保留，可重新发起抓取"
-                        ),
-                    },
-                ],
-            )
-            reconciled.append({"owner": str(owner_dir.name), "snapshot_id": snapshot_id})
-    return reconciled
-
-
-def start_evidence_fetch(owner_id: str, snapshot: dict[str, Any]) -> asyncio.Task:
-    """启动受控后台抓取任务（Controller 生命周期内跟踪）。"""
-    fetcher = EvidenceFetcher(owner_id)
-    # 活跃登记：重启对账据此识别"有执行者"的中间态，不做中断标记。
-    active_key = (sanitize_owner_id(owner_id), str(snapshot.get("snapshot_id") or ""))
-    _ACTIVE_FETCH_SNAPSHOTS.add(active_key)
-
-    async def _runner() -> None:
-        try:
-            await fetcher.run(snapshot)
-        except EvidenceError as exc:
-            logger.warning(
-                "Redmine evidence fetch failed (issue=%s): %s",
-                snapshot.get("issue_id"), exc,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # 后台任务不得向上抛出
-            logger.exception("Redmine evidence fetch crashed: %s", exc)
-            # 未预期异常也必须把快照推进到 failed 终态，绝不留在 fetching。
-            try:
-                fetcher.store.update_snapshot(
-                    str(snapshot.get("snapshot_id") or ""),
-                    status="failed",
-                    error_json=[{
-                        "stage": "issue",
-                        "message": f"抓取任务异常终止: {type(exc).__name__}",
-                    }],
-                )
-            except Exception:  # pragma: no cover - 存储层已不可用时只记日志
-                logger.exception(
-                    "Failed to mark evidence snapshot %s as failed",
-                    snapshot.get("snapshot_id"),
-                )
-
-    task = asyncio.create_task(_runner())
-    _BACKGROUND_TASKS.add(task)
-
-    def _forget(done_task: asyncio.Task) -> None:
-        _BACKGROUND_TASKS.discard(done_task)
-        _ACTIVE_FETCH_SNAPSHOTS.discard(active_key)
-
-    task.add_done_callback(_forget)
-    return task
-
 
 def snapshot_completeness(snapshot: dict[str, Any], artifacts: list[dict[str, Any]] | None = None) -> dict[str, bool]:
     """计算 completeness，失败绝不能标记 complete。"""

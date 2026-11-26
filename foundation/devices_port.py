@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from typing import TypedDict
 
 
 logger = logging.getLogger(__name__)
 
-HostInventoryProvider = Callable[[str], dict[str, Any] | None]
+class HostInventory(TypedDict):
+    devices: list[str]
+    source_os: str
+    available: bool
+    error: str
+
+
+HostInventoryProvider = Callable[[str], HostInventory | None]
 
 _inventory_provider: HostInventoryProvider | None = None
 
@@ -27,8 +34,8 @@ def configure_host_inventory_provider(provider: HostInventoryProvider | None) ->
     _inventory_provider = provider
 
 
-def host_local_device_inventory(device_host: str) -> dict[str, Any] | None:
-    """Return ``{"devices": [...], "source_os": str, "available": bool}``.
+def host_local_device_inventory(device_host: str) -> HostInventory | None:
+    """Return ``{"devices": [...], "source_os": str, "available": bool, "error": str}``.
 
     ``None`` means the capability is not wired (single-module consumers) or
     the host has no inventory yet; callers fall back to "no data".

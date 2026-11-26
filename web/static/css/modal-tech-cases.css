@@ -417,7 +417,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   border-collapse: separate; border-spacing: 0; table-layout: fixed;
 }
 #firmware-share-modal .firmware-share-table :is(th,td) {
-  padding: 9px 10px; white-space: nowrap; vertical-align: middle;
+  white-space: nowrap;
   border-bottom: 1px solid var(--tech-edge-soft);
 }
 #firmware-share-modal .firmware-share-table thead th {

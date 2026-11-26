@@ -262,8 +262,6 @@ async function saveSettings() {
     briefConfig.agent_profile = dailyBriefSetting('agent_profile').value.trim();
     briefConfig.model = dailyBriefSetting('model').value.trim();
     briefConfig.max_parallel_issues = parseInt(dailyBriefSetting('max_parallel_issues').value) || 1;
-    briefConfig.max_turns = 0;
-    briefConfig.issue_timeout_seconds = 0;
     dailyBriefConfigCache = await api('/api/redmine-agent/daily-brief/config', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},

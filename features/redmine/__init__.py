@@ -1,3 +1,8 @@
+from typing import Any
+
+from fastapi import Path, Query, Request
+from fastapi.responses import JSONResponse
+
 from .agent import RESOLVED_STATUSES
 from .api import (
     configure_agent_factories,
@@ -32,29 +37,43 @@ from .utils import (
 )
 
 
-async def get_workload_statistics(*args, **kwargs):
+async def get_workload_statistics(
+    request: Request,
+    stale_days: int | None = Query(None, ge=1, le=30),
+    list_limit: int = Query(30, ge=1, le=100),
+    name: str = Query(""),
+    refresh: bool = Query(False),
+) -> dict[str, Any] | JSONResponse:
     from .statistics_api import get_workload_statistics as implementation
 
-    return await implementation(*args, **kwargs)
+    return await implementation(request, stale_days=stale_days, list_limit=list_limit, name=name, refresh=refresh)
 
 
-async def analyze_issue_for_assistant(*args, **kwargs):
+async def analyze_issue_for_assistant(
+    request: Request, issue_ref: str, analysis_mode: str = "incremental", analysis_hint: str = "",
+) -> dict[str, Any] | JSONResponse:
     from .daily_brief.api import analyze_issue_for_assistant as implementation
 
-    return await implementation(*args, **kwargs)
+    return await implementation(request, issue_ref, analysis_mode, analysis_hint)
 
 
-async def get_analysis_for_assistant(*args, **kwargs):
+async def get_analysis_for_assistant(request: Request, run_id: str) -> dict[str, Any] | JSONResponse:
     from .daily_brief.api import get_analysis_for_assistant as implementation
 
-    return await implementation(*args, **kwargs)
+    return await implementation(request, run_id)
 
 
-async def get_analysis_events_for_assistant(*args, **kwargs):
+async def get_analysis_events_for_assistant(
+    request: Request,
+    run_id: str,
+    issue_id: int = Path(ge=1),
+    after_sequence: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+) -> dict[str, Any] | JSONResponse:
     """Public Redmine facade for owner-checked analysis progress events."""
     from .daily_brief.api import get_issue_analysis_events as implementation
 
-    return await implementation(*args, **kwargs)
+    return await implementation(request, run_id, issue_id, after_sequence=after_sequence, limit=limit)
 
 
 __all__ = [

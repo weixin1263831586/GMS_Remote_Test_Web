@@ -366,14 +366,14 @@ async function removeDepartmentOwner(owner, btn) {
   }
 }
 async function syncRedmineMembers(btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '同步中'; }
+  setActionButtonBusy(btn, true, '同步中');
   try {
     config = await api('/api/gerrit-dashboard/sync-redmine-members', {method:'POST'});
     await loadDepartment(true);
   } catch (e) {
     notifyUser('同步成员失败', e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '同步成员'; }
+    setActionButtonBusy(btn, false);
   }
 }
 function changeUrl(item) {

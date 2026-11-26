@@ -20,6 +20,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
+from tests.architecture._import_refs import module_names
+
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,8 +32,7 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     # Same-host bridge: the documented exception in AGENTS.md.
     "features/cluster/local_bridge.py": {
         "worker.adb_proxy",
-        "worker.inventory",
-        "worker.process_inventory",
+        "worker.device_actions",
         "worker.suite_actions",
     },
     # Cluster suite transfer/execution surfaces (worker-role execution).
@@ -39,27 +40,21 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
         "worker.adb_proxy",
         "worker.config",
         "worker.device_actions",
-        "worker.inventory",
-    },
-    "features/cluster/deployment/api.py": {
-        "worker.process_inventory",
+        "worker.suite_actions",
     },
     "features/cluster/device_operations/api.py": {
-        # 同主机桥接面（同 deployment/api.py 先例）：AOA 回放派发前
-        # 判定本机是否可抑制 adb daemon（ Tradefed 任务/ADB Proxy 导入
-        # 检查，见 _local_aoa_adb_suppression_allowed）。
+        # Local AOA execution and ADB suppression safety checks.
         "worker.adb_proxy",
-        "worker.inventory",
-        "worker.process_inventory",
+        "worker.device_actions",
     },
     "features/cluster/transfers/ingest.py": {
         "worker.android_inspection",
     },
     "features/cluster/transfers/api.py": {
         "worker.config",
-        "worker.inventory",
+        "worker.suite_actions",
     },
-    # adb proxy + fastboot workflow execution surfaces.
+    # ADB proxy execution surfaces.
     "features/devices/adb/proxy_security.py": {
         "worker.adb_proxy",
     },
@@ -71,13 +66,9 @@ ALLOWED_FEATURE_WORKER_IMPORTS: dict[str, set[str]] = {
     },
     "features/devices/bootloader_api.py": {
         "worker.adb_proxy",
-        "worker.fastboot_workflow",
     },
     "features/firmware/api_helpers.py": {
         "worker.adb_proxy",
-    },
-    "features/firmware/gsi_burn.py": {
-        "worker.fastboot_workflow",
     },
 }
 
@@ -89,13 +80,8 @@ ALLOWED_WORKER_FEATURE_IMPORTS: dict[str, set[str]] = {}
 
 def imported_modules(path: Path) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"))
-    modules: set[str] = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            modules.update(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            modules.add(node.module)
-    return modules
+    package = ".".join(path.relative_to(ROOT).parent.parts)
+    return module_names(tree, package)
 
 
 def worker_modules(modules: set[str]) -> set[str]:

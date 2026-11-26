@@ -20,9 +20,8 @@ input, select { height:var(--ui-control-height); border:1px solid var(--border);
 input::placeholder { color:var(--muted); }
 select { appearance:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card); border:1px solid var(--border);  table-layout:fixed; }
-th, td { box-sizing:border-box; border-bottom:1px solid var(--border); padding:5px 8px; text-align:left; vertical-align:middle; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-th { background:var(--head); height:var(--ui-table-header-height); }
-tbody td:not(.wrap) { height:var(--ui-table-row-height); }
+th, td { border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+th { background:var(--head); }
 td.wrap { white-space:normal; overflow:visible; text-overflow:unset; }
 /* 单一表格工作区：表头、表体、分页在文档流中分配空间。 */
 .table-wrap, .tables-area { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }

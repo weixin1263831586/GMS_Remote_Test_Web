@@ -2,41 +2,12 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from foundation.cluster_port import ACTIVE_JOB_STATUSES
-
 
 __all__ = [
-    "ACTIVE_JOB_STATUSES",
     "SuiteApkAnalyzeRequest",
     "TestParseArgsRequest",
-    "TestStartRequest",
     "TradefedListResultsRequest",
 ]
-
-
-class TestStartRequest(BaseModel):
-    # 空值表示部署配置中的本地 Worker。
-    worker_id: str = ""
-    test_type: str = ""
-    test_module: str = ""
-    test_case: str = ""
-    retry_dir: str = ""
-    test_suite: str = ""
-    local_server: str = ""
-    devices: list[str] = Field(default_factory=list)
-    client_id: str = "test_client"
-    automation_run_id: str = ""
-    device_reservation_id: str = ""
-    build_id: str = ""
-    build_artifact_id: str = ""
-    gerrit_change_id: str = ""
-    gerrit_patchset: str = ""
-    redmine_issue_id: str = ""
-    shard_count: int = Field(default=0, ge=0, le=32, strict=True)
-    preparations: list[str] = Field(default_factory=list, max_length=8)
-    queue_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
-    execution_timeout_seconds: int = Field(default=0, ge=0, le=604800, strict=True)
-    output_idle_timeout_seconds: int = Field(default=0, ge=0, le=86400, strict=True)
 
 
 class TestParseArgsRequest(BaseModel):

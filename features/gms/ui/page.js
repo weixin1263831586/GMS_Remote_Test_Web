@@ -72,7 +72,11 @@
     async function fetchJson(url) {
       const r = await fetch(url);
       const data = await r.json();
-      if (!r.ok || !data.success) throw new Error(data.error || 'HTTP ' + r.status);
+      if (!r.ok || !data.success) {
+        const error = new Error(data.error || 'HTTP ' + r.status);
+        error.status = r.status;
+        throw error;
+      }
       return data;
     }
     function sectionBadgeText(text) {
@@ -364,6 +368,10 @@
     }
     function setTab(next) {
       if (!allTabs.includes(next)) return;
+      if (tab !== next) {
+        document.getElementById('tables-area').innerHTML = '<span class="muted">加载中…</span>';
+        sectionBadgeText('');
+      }
       tab = next;
       offset = 0;
       total = 0;
@@ -637,7 +645,12 @@
       } catch (err) {
         if (generation !== queryGeneration || request !== criticalGerritRequest || tab !== 'critical') return;
         criticalGerritMessage = err && err.message ? err.message : 'Gerrit 核对失败';
-        if (criticalGerritReady && gerritByPatch) {
+        if (err.status === 401 || err.status === 403) {
+          gerritByPatch = {};
+          criticalGerritReady = true;
+          populateCriticalFilters();
+          renderCritical(true);
+        } else if (criticalGerritReady && gerritByPatch) {
           criticalGerritMessage += '（保留上次核对结果）';
           paintGerritBadge(criticalGerritMessage);
         } else {
@@ -668,14 +681,19 @@
         items.push(...data.items);
       } while (items.length < sourceTotal);
       if (items.length !== sourceTotal || new Set(items.map(criticalKey)).size !== items.length) throw new Error('分页记录不一致，请重新查询');
+      const sameSnapshot = criticalItems && JSON.stringify(criticalItems) === JSON.stringify(items)
+        && criticalCoverage === (data.coverage_complete !== false)
+        && criticalAvailable === (data.available !== false);
       criticalItems = items;
       criticalCoverage = data.coverage_complete !== false;
       criticalAvailable = data.available !== false;
-      gerritByPatch = null;
-      criticalGerritReady = false;
-      criticalGerritMessage = '';
+      if (!sameSnapshot) {
+        gerritByPatch = null;
+        criticalGerritReady = false;
+        criticalGerritMessage = '';
+      }
       populateCriticalFilters();
-      renderCritical();
+      renderCritical(Boolean(sameSnapshot));
       if (items.length) loadGerrit(generation);
       else { criticalGerritReady = true; setGerritBusy(false); renderCritical(); }
     }
@@ -722,7 +740,6 @@
       const generation = ++queryGeneration;
       setGerritBusy(false);
       globalSearchActive = true;
-      sectionBadgeText('');
       const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
         const params = new URLSearchParams({q, limit, offset: 0});
         try {
@@ -761,16 +778,44 @@
       document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
     }
     function runQuery() {
-      const q = document.getElementById('q').value.trim();
-      if (q) {
-        searchAll(q).catch(err => {
-          document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(err.message)}</span>`;
-        });
-        return;
-      }
-      reload(true).catch(showQueryError);
+      return reload(true).catch(showQueryError);
     }
+    let activeQueryRequest = 0;
+    let displayedQueryScope = '';
     async function reload(reset=false) {
+      const request = ++activeQueryRequest;
+      if (reset) offset = 0;
+      const button = document.getElementById('gms-query-btn');
+      const area = document.getElementById('tables-area');
+      const q = document.getElementById('q').value.trim();
+      const scope = q ? JSON.stringify(['search', q]) : JSON.stringify([tab, tab === 'critical' ? 0 : offset,
+        ...Array.from(document.querySelectorAll('.filters input,.filters select')).filter(el => el.getClientRects().length).map(el => [el.id, el.value])]);
+      const sameScope = displayedQueryScope === scope;
+      if (!sameScope) {
+        area.innerHTML = '<span class="muted">查询中…</span>';
+        sectionBadgeText('');
+      }
+      setActionButtonBusy(button, true, '查询中');
+      area.setAttribute('aria-busy', 'true');
+      try {
+        await reloadData(reset);
+        if (request === activeQueryRequest) displayedQueryScope = scope;
+      } catch (err) {
+        if (request === activeQueryRequest) {
+          if (!sameScope || err.status === 401 || err.status === 403) {
+            area.textContent = err.message || '查询失败';
+            displayedQueryScope = '';
+          }
+          notifyUser('查询失败', err.message || '请重试', 'error');
+        }
+      } finally {
+        if (request === activeQueryRequest) {
+          setActionButtonBusy(button, false);
+          area.setAttribute('aria-busy', 'false');
+        }
+      }
+    }
+    async function reloadData(reset=false) {
       if (reset) offset = 0;
       const q = document.getElementById('q').value.trim();
       if (q) { await searchAll(q); return; }
@@ -778,7 +823,6 @@
       setGerritBusy(false);
       globalSearchActive = false;
       document.querySelector('.pager').style.display = '';
-      sectionBadgeText('');
       const params = new URLSearchParams({limit, offset});
       if (q) params.set('q', q);
       const area = document.getElementById('tables-area');
@@ -828,14 +872,18 @@
         detailRecords.length=0;
         sections = tableHtml(PATCH_HEADERS, patchRows(data.items), '无记录', PATCH_WIDTHS);
       } else if (tab === 'critical') {
-        criticalItems = null;
         setGerritBusy(true);
-        area.innerHTML = '<span class="muted">加载公告记录…</span>';
+        if (!area.querySelector('.critical-matrix')) area.innerHTML = '<span class="muted">加载公告记录…</span>';
         try { await loadCriticalIndex(generation); }
         catch (err) {
           if (generation === queryGeneration && tab === 'critical') {
             setGerritBusy(false);
-            area.textContent = err.message;
+            if (err.status === 401 || err.status === 403) {
+              criticalItems = null;
+              gerritByPatch = null;
+              criticalGerritReady = false;
+            }
+            throw err;
           }
         }
         return;
@@ -896,12 +944,14 @@
       critical:['gms_bulletins'],
     };
     function showQueryError(err) {
-      document.getElementById('tables-area').textContent = err.message || '查询失败';
-      sectionBadgeText('查询失败，请重试');
+      const area = document.getElementById('tables-area');
+      if (!area.querySelector('table')) area.textContent = err.message || '查询失败';
+      notifyUser('查询失败', err.message || '请重试', 'error');
     }
     function loadAll(reset=false) {
-      loadSummary();
-      reload(reset).catch(showQueryError);
+      return withActionButtonBusy(document.getElementById('gms-refresh-btn'), '刷新中', async () => {
+        await Promise.all([loadSummary(), reload(reset)]);
+      }).catch(showQueryError);
     }
     let syncInProgress = false;
     function setSyncBusy(busy) {

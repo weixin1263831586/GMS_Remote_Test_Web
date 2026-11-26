@@ -22,10 +22,10 @@ gms-rt-debug-session-request() {
         esac
         shift 2
     done
-    if ! [[ "$minutes" =~ ^[0-9]{1,3}$ ]] || [ "$((10#$minutes))" -lt 15 ] || [ "$((10#$minutes))" -gt 120 ]; then
+    if ! [[ "$minutes" =~ ^[0-9]{1,3}$ ]] || [ "$minutes" -lt 15 ] || [ "$minutes" -gt 120 ]; then
         _gms_debug_usage '--minutes must be an integer from 15 to 120'; return $?
     fi
-    minutes=$((10#$minutes))
+    minutes=$(printf '%s' "$minutes" | sed 's/^0*//')
     local selected=()
     IFS=',' read -r -a selected <<< "$operations"
     if [ -z "$operations" ] || [[ "$operations" == *, ]]; then

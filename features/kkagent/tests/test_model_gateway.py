@@ -218,11 +218,11 @@ async def test_real_cli_accepts_catalog_overlay_and_applies_isolation_policy(cat
 
 
 def test_bootstrap_injects_source_search_into_report_analyzer(catalog, monkeypatch):
+    from bootstrap import dependencies
     from bootstrap.dependencies import _report_failure_analyzer_factory
-    from features.reports import ReportAnalyzer
 
     search = Mock(return_value=[{"path": "src/Test.java", "url": "https://source.invalid/Test.java"}])
-    monkeypatch.setattr(ReportAnalyzer, "rk_codesearch", search)
+    monkeypatch.setattr(dependencies, "search_indexed_source", search)
     analyzer = _report_failure_analyzer_factory()
     assert analyzer._fetch_source_code_android("Test")["file_path"] == "src/Test.java"
     search.assert_called_once_with("Test", max_results=3)

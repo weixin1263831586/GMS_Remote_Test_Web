@@ -1,13 +1,13 @@
 %% 以设备归属和任务回执为中心；报告按来源展示，不假设全部回传 Controller。
 flowchart TB
     Request["Web / Agent 测试目标"]
-    Gate["Controller / 鉴权与预检"]
+    Gate["Controller / 鉴权 / 租约预检"]
     Job["ATS / Cluster Job"]
     Worker["Worker / Tradefed 执行"]
     Device["Android 设备"]
     Evidence["Worker 原生 results / logs"]
     Report["套件浏览 / 报告登记"]
-    Diagnosis["报告分析 / 知识库（可选）"]
+    Diagnosis["报告分析 / 证据与知识（可选）"]
 
     Request -->|"设备 / 套件"| Gate
     Gate -->|"任务入队"| Job

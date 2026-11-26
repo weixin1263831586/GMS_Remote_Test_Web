@@ -138,10 +138,9 @@
 #agent-access-refresh { min-width: 76px; white-space: nowrap; }
 .agent-access-table-wrap { min-height: 150px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
 .agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
-.agent-access-table th { position: sticky; top: 0; z-index: 1; padding: 11px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg);   text-align: left; }
-.agent-access-table td { padding: 10px 12px; border-bottom: 1px solid var(--border-color); color: var(--text-primary);  line-height: 1.5; vertical-align: middle; white-space: nowrap; }
+.agent-access-table th { position: sticky; top: 0; z-index: 1; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg);   text-align: left; }
+.agent-access-table td { color: var(--text-primary);  line-height: 1.5; white-space: nowrap; }
 .agent-access-table th { white-space: nowrap; }
-.agent-access-table tbody tr:last-child td { border-bottom: 0; }
 .agent-access-table tbody tr:hover { background: color-mix(in srgb, var(--primary-color) 4%, transparent); }
 .agent-token-id,
 .agent-token-secondary { display: inline; margin-left: 8px; color: var(--text-secondary);  line-height: 1.5; white-space: nowrap; }
@@ -304,7 +303,6 @@
     text-overflow: ellipsis;
 }
 #sdk-config-panel .sdk-source-table td:last-child {
-    box-sizing: border-box;
     white-space: nowrap;
 }
 #sdk-config-panel .sdk-source-actions {

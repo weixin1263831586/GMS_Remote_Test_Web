@@ -1,8 +1,4 @@
-"""Device-facing worker actions: probing, USB/IP, allow-listed ops, flashing, metrics.
-
-从 inventory.py 拆出：设备探测/USB/IP/设备操作/固件与
-GSI 烧写/主机指标。套件执行逻辑见 suite_actions.py。
-"""
+"""Device-facing worker actions: probing, USB/IP, allow-listed ops, flashing, metrics."""
 
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from foundation.fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 from foundation.host_metrics import collect_host_metrics
 from foundation.native_tools import resolve_native_tool
 from foundation.security import has_control_chars, quote_device_shell_arg
@@ -30,7 +27,6 @@ from foundation.transport_contract import execute_external_transport
 
 from .adb_suppression import adb_daemon_suppressed as _adb_daemon_suppressed
 from .config import WorkerConfig
-from .fastboot_workflow import FastbootPreparer, subprocess_runner, vendor_partition
 
 
 logger = logging.getLogger(__name__)

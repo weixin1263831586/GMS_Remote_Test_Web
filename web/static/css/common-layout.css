@@ -1103,10 +1103,10 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 .suite-suite-item {
+    padding: 8px 10px;
     cursor: pointer;
 }
 .suite-suite-item:hover,

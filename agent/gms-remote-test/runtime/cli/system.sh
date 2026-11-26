@@ -723,8 +723,7 @@ gms-rt-system-selfcheck() {
     auth_ok=true
     auth_json=$(api_call "/auth/status" 2>/dev/null) || auth_ok=false
     _gms_rt_selfcheck_is_json "$auth_json" || { auth_ok=false; auth_json='{}'; }
-    if [ "$auth_ok" = true ] && ! jq -e '.authenticated == true or .auth_required == false' \
-        >/dev/null 2>&1 <<< "$auth_json"; then
+    if [ "$auth_ok" = true ] && ! printf '%s' "$auth_json" | jq -e '.authenticated == true or .auth_required == false' >/dev/null 2>&1; then
         auth_ok=false
     fi
     local credential_mode

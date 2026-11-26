@@ -1,4 +1,4 @@
-"""RedmineAgent: nightly Redmine triage and report generation."""
+"""Issue attachment summary analysis; full evidence is handled separately."""
 
 from __future__ import annotations
 
@@ -9,19 +9,18 @@ import re
 import shutil
 import tempfile
 import zipfile
+from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from features.redmine.analysis import MAX_FAILURE_LINES, _truncate
 from features.redmine.cert_rules import detect_certification_errors
-from features.redmine.evidence.client_attachments import RedmineAttachment
-from features.redmine.tesseract_finder import (
-    configure_usable_tesseract,
-)
+from features.redmine.client import RedmineAttachment, RedmineClient
 from features.redmine.utils import sanitize_attachment_filename
 
 
 if TYPE_CHECKING:
-    from features.redmine.client import RedmineClient
+    from features.redmine.repository import RedmineAgentDB
 
 
 logger = logging.getLogger(__name__)
@@ -56,8 +55,16 @@ _ERROR_LINE_RE = re.compile("|".join(_ERROR_LINE_PATTERNS), re.IGNORECASE)
 MAX_ERROR_BLOCKS = 5            # max grouped error blocks
 
 
-class AttachmentAnalysisMixin:
-    async def _process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
+class AttachmentAnalysis:
+    def __init__(
+        self, db: RedmineAgentDB, attachments_dir: Path,
+        report_analyzer_factory: Callable[..., Any] | None,
+    ):
+        self.db = db
+        self.attachments_dir = attachments_dir
+        self.report_analyzer_factory = report_analyzer_factory
+
+    async def process_attachment(self, client: RedmineClient, issue_id: int, attachment: RedmineAttachment) -> dict[str, Any]:
         issue_dir = self.attachments_dir / str(issue_id)
         issue_dir.mkdir(parents=True, exist_ok=True)
         safe_name = sanitize_attachment_filename(attachment.filename, f"attachment_{attachment.id}")
@@ -136,7 +143,8 @@ class AttachmentAnalysisMixin:
             "failures": failures,
         }
 
-    def _analyze_text_attachment(self, path: str) -> dict[str, Any]:
+    @staticmethod
+    def _analyze_text_attachment(path: str) -> dict[str, Any]:
         """Stream complete logs so late failures survive without loading GBs into RAM."""
         replacement_count = 0
         interesting_count = 0
@@ -247,35 +255,15 @@ class AttachmentAnalysisMixin:
 
     @staticmethod
     def _run_ocr(path: str) -> str:
-        """Best-effort OCR via pytesseract. Returns '' if unavailable or it fails.
-
-        Uses a bundled tesseract binary (tools/tesseract) when the system one is
-        not installed, so screenshot analysis works without apt/sudo access.
-        Full-image tiling mirrors evidence_images so both OCR paths behave
-        identically with the evidence-pipeline OCR path.
-        """
+        """Best-effort OCR for the issue summary; full evidence is stored separately."""
         try:
             import pytesseract
             from PIL import Image
 
-            # OCR 限额从 evidence_images 延迟导入：该模块经 evidence →
-            # evidence_fetch 回指本包，顶层导入会造成循环（agent.py →
-            # analysis_attachments → evidence_images → evidence →
-            # evidence_fetch → evidence_images）。
-            from features.redmine.evidence.images import (
-                ocr_image_text,
-            )
-        except Exception:
-            return ""
-        try:
-            # OCR engine selection is cached; the shared configurator also
-            # resets library paths when falling back to system Tesseract.
-            cmd = configure_usable_tesseract()
-            if cmd:
-                import pytesseract.pytesseract as _pt
-                _pt.tesseract_cmd = cmd
-            with Image.open(path) as image:
-                return ocr_image_text(image, pytesseract)
+            from features.redmine.evidence.images import read_image_ocr
+
+            text, note = read_image_ocr(path, pytesseract, Image)
+            return f"{text}\n[{note}]" if note else text
         except Exception as exc:
             logger.debug("[RedmineAgent] OCR skipped for %s: %s", path, exc)
             return ""

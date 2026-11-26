@@ -46,7 +46,7 @@ done
 # shellcheck source=/dev/null
 . /etc/os-release
 [[ "$ID" == ubuntu && "$VERSION_ID" == 22.04 ]] || fail "Ubuntu 22.04 required"
-[[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT > 0 && 10#$PORT <= 65535)) || fail "invalid HTTPS port"
+[[ "$PORT" =~ ^[0-9]{1,5}$ ]] && [ "$PORT" -gt 0 ] && [ "$PORT" -le 65535 ] || fail "invalid HTTPS port"
 [[ "$SERVICE" =~ ^[a-z][a-z0-9_-]*$ ]] || fail "invalid service name"
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/$SERVICE}"
 for p in "$PREFIX" "$STATE" "$ETC" "$BACKUP_DIR"; do
@@ -81,7 +81,7 @@ if ! $YES; then
  read -r -p "Service user [$RUN_USER]: " v; RUN_USER="${v:-$RUN_USER}"
 fi
 [[ "$HOST" =~ ^[a-zA-Z0-9._-]+$ ]] || fail "invalid hostname"
-[[ "$PORT" =~ ^[0-9]+$ ]] && ((10#$PORT > 0 && 10#$PORT <= 65535)) || fail "invalid port"
+[[ "$PORT" =~ ^[0-9]{1,5}$ ]] && [ "$PORT" -gt 0 ] && [ "$PORT" -le 65535 ] || fail "invalid port"
 [[ "$RUN_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] || fail "invalid user"
 exec 8>/tmp/gms-compiled-installer.lock
 flock -n 8 || fail "installer already running"

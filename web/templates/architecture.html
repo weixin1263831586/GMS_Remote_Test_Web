@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>GMS Remote Test - 系统架构</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261120-single-edge-template">
+  <link rel="stylesheet" href="/static/css/architecture-layers.css?v=20261126-table-dedup">
   <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-type-size-dedup-v1">
-  <link rel="stylesheet" href="/static/css/architecture-v2.css?v=20261120-single-edge-template">
-  <link rel="stylesheet" href="/static/css/architecture-scenes.css?v=20261118-singleline-v7">
+  <link rel="stylesheet" href="/static/css/architecture-v2.css?v=20261126-table-dedup">
+  <link rel="stylesheet" href="/static/css/architecture-scenes.css?v=20261126-table-dedup-final">
   <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-divider">
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 </head>
 <body class="architecture-v2">
@@ -31,9 +31,9 @@
     </section>
     <div class="arch-v2-bottom arch-v2-bottom--platform">
       <section class="arch-v2-info-panel"><h2>模块职责与依赖</h2><div class="arch-v2-table-scroll"><table><thead><tr><th>模块</th><th>职责边界</th><th>主要连接</th></tr></thead><tbody>
-        <tr><td>Controller</td><td>认证、任务与设备租约、状态审计</td><td>Web / Worker / 外部服务</td></tr><tr><td>Worker</td><td>Tradefed / ADB、结果与日志采集</td><td>Controller / Android</td></tr><tr><td>USB/IP</td><td>从 Source 导出 USB 设备并接入 Worker</td><td>Source / Worker</td></tr><tr><td>ADB Proxy</td><td>受控命令代理与设备路由</td><td>ADB 客户端 / 设备</td></tr><tr><td>外部协同</td><td>工单、代码、知识、受控构建</td><td>Redmine / Gerrit 等</td></tr>
+        <tr><td>Controller</td><td>认证、任务与设备租约、状态审计</td><td>Web / Worker / 外部服务</td></tr><tr><td>Worker</td><td>Tradefed / ADB、结果与日志采集</td><td>Controller / Android</td></tr><tr><td>USB/IP</td><td>从 Source 导出 USB 设备并接入 Worker</td><td>Source / Worker</td></tr><tr><td>ADB Proxy</td><td>受控命令代理与设备路由</td><td>ADB 客户端 / 设备</td></tr><tr><td>外部协同</td><td>工单、代码、模型、受控构建</td><td>Redmine / Gerrit / SDK</td></tr><tr><td>Knowledge</td><td>个人知识、联邦检索及授权召回</td><td>Wiki / CDD / Web / PDF</td></tr><tr><td>Bootstrap / Runtime</td><td>应用组装、服务注入与类型契约</td><td>Feature / Foundation</td></tr><tr><td>Feature / Foundation</td><td>业务公共接口、Port 与公共基础设施</td><td>存储 / SSH / 服务</td></tr>
       </tbody></table></div></section>
-      <section class="arch-v2-info-panel"><h2>核心数据流（事件流）</h2><ol class="arch-v2-timeline"><li>请求接入与权限校验</li><li>资源选择与设备租约</li><li>Worker Poll / ACK 与测试执行</li><li>日志、原生结果与任务状态回传</li><li>报告索引与问题证据分析</li><li>结果追踪、修复与经验沉淀</li></ol></section>
+      <section class="arch-v2-info-panel"><h2>核心数据流（事件流）</h2><ol class="arch-v2-timeline"><li>请求接入与权限校验</li><li>资源选择与设备租约</li><li>Worker Poll / ACK 与测试执行</li><li>日志、原生结果与任务状态回传</li><li>报告索引、证据快照与知识召回</li><li>证据门禁、结论复核与结果追踪</li></ol></section>
     </div>
       </div>
 
@@ -73,12 +73,12 @@
     <section class="arch-v2-panel arch-v2-flow" aria-label="Agent · 证据诊断与复核">
       <div class="arch-v2-svg-frame arch-scene-placeholder" role="status">加载 AGENT / ANALYSIS 架构视图…</div>
     </section>
-    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>诊断路径</h2><p>上下文与工单 → 预采集日志、APK、SDK / 代码证据 → 分析复核</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>执行与追踪</h2><p>Controller 返回 run_id，后台分析状态独立跟踪并回送当前运行结果</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>安全与沉淀</h2><p>按工单属主隔离，引用可追溯；取消 Agent 跟踪不等于取消后台任务</p></article></div>
+    <div class="arch-v2-bottom arch-v2-flow-bottom"><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--access"><h2><span class="arch-v2-step">01</span>诊断路径</h2><p>工单证据快照 → 官方引用与背景知识 → 模型分析、证据门禁与结论复核</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--worker"><h2><span class="arch-v2-step">02</span>执行与追踪</h2><p>Controller 返回 run_id，后台分析状态独立跟踪并回送当前运行结果</p></article><article class="arch-v2-info-panel arch-v2-mini arch-v2-mini--risk"><h2><span class="arch-v2-step">03</span>安全与沉淀</h2><p>公共背景知识与 owner 授权资料隔离；修复建议不等于执行或工单回写</p></article></div>
 
   </div>
 </main>
 <script src="/static/js/pages/architecture-view.js?v=20261116-clear-arrow-labels" defer></script>
-<script src="/static/js/pages/architecture-scene-data.js?v=20261118-singleline-v7" defer></script>
-<script src="/static/js/pages/architecture-scenes.js?v=20261118-singleline-v7" defer></script>
+<script src="/static/js/pages/architecture-scene-data.js?v=20261126-architecture-flow" defer></script>
+<script src="/static/js/pages/architecture-scenes.js?v=20261126-table-dedup-final" defer></script>
 </body>
 </html>

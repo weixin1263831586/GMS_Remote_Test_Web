@@ -2089,6 +2089,18 @@
   },
   {
     "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/external/partner-policy-grant"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/knowledge/external/partner-policy-grant"
+  },
+  {
+    "methods": [
       "POST"
     ],
     "path": "/api/knowledge/external/reindex"
@@ -2104,6 +2116,36 @@
       "GET"
     ],
     "path": "/api/knowledge/external/sources"
+  },
+  {
+    "methods": [
+      "GET"
+    ],
+    "path": "/api/knowledge/external/web-sources"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/web-sources"
+  },
+  {
+    "methods": [
+      "DELETE"
+    ],
+    "path": "/api/knowledge/external/web-sources/{source_id}"
+  },
+  {
+    "methods": [
+      "PUT"
+    ],
+    "path": "/api/knowledge/external/web-sources/{source_id}"
+  },
+  {
+    "methods": [
+      "POST"
+    ],
+    "path": "/api/knowledge/external/web-sources/{source_id}/sync"
   },
   {
     "methods": [

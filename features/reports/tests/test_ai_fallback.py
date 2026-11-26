@@ -10,6 +10,30 @@ from features.reports.ai_diagnosis import (
     public_provider_error,
 )
 from features.reports.api_helpers import AnalysisMode
+from features.reports.dependencies import ReportDependencies, configure_report_dependencies
+from foundation.files import FileUtils
+
+
+class ReportDependencyTests(unittest.TestCase):
+    def test_registration_requires_explicit_current_dependencies(self):
+        target = ReportDependencies()
+        factory = Mock()
+        resolver = Mock()
+        empty_target = Mock()
+        with patch('features.reports.dependencies.dependencies', target):
+            configure_report_dependencies(
+                file_utils=FileUtils,
+                universal_analyzer_factory=factory,
+                resolve_suite_target=resolver,
+                make_empty_suite_target=empty_target,
+            )
+            self.assertIs(target.file_utils, FileUtils)
+            self.assertIs(target.universal_analyzer_factory, factory)
+            self.assertIs(target.resolve_suite_target, resolver)
+            self.assertIs(target.make_empty_suite_target, empty_target)
+            with self.assertRaises(TypeError):
+                configure_report_dependencies(file_utils=FileUtils)
+            self.assertFalse(hasattr(target, 'ssh_manager'))
 
 
 class ReportAiFallbackTests(unittest.TestCase):

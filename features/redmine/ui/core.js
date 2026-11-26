@@ -96,7 +96,6 @@ function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 // 数据区加载占位：超新星动画（.loading-orbit 舞台，样式见 loading-orbit.css）。
-// redmine 页面不引 utils.js，此处独立提供（与 utils.js 同名同实现）。
 // stage=true 启用视口锚定舞台（.loading-orbit--stage，fixed 居中）。
 function loadingOrbitHtml(text, stage) {
   return '<div class="loading-orbit' + (stage ? ' loading-orbit--stage' : '') + '" role="status" aria-label="' + esc(text) + '">'
@@ -294,16 +293,18 @@ function updateRedmineToolbar() {
   if (action) {
     action.hidden = !isAnalysisTab;
     action.setAttribute('aria-hidden', String(!isAnalysisTab));
-    action.disabled = false;
-    action.title = '';
-    if (currentTab === 'cases') {
-      action.textContent = '📚 导入';
-      action.title = '批量导入工单并进行结构化分析';
-    } else {
-      action.textContent = '🔍 扫描';
-      action.title = currentTab === 'runs'
-        ? '扫描最近 48 小时工单并生成扫描记录'
-        : '扫描最近 48 小时工单并更新工单分析';
+    if (action.getAttribute('aria-busy') !== 'true') {
+      action.disabled = false;
+      action.title = '';
+      if (currentTab === 'cases') {
+        action.textContent = '📚 导入';
+        action.title = '批量导入工单并进行结构化分析';
+      } else {
+        action.innerHTML = '<svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 扫描';
+        action.title = currentTab === 'runs'
+          ? '扫描最近 48 小时工单并生成扫描记录'
+          : '扫描最近 48 小时工单并更新工单分析';
+      }
     }
   }
   if (refresh) {
@@ -318,23 +319,8 @@ async function runRedmineContextAction() {
   return startScan();
 }
 
-function setRefreshButtonBusy(busy) {
-  var btn = document.getElementById('refreshBtn');
-  if (!btn) return;
-  btn.disabled = busy;
-  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
-  btn.textContent = busy ? '⏳ 刷新中' : '🔃 刷新';
-}
-
-// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
-// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
-async function withRefreshButtonBusy(task) {
-  setRefreshButtonBusy(true);
-  try {
-    await task();
-  } finally {
-    setRefreshButtonBusy(false);
-  }
+function withRefreshButtonBusy(task) {
+  return withActionButtonBusy(document.getElementById('refreshBtn'), '刷新中', task);
 }
 
 async function reloadCurrentTabView() {
@@ -943,4 +929,107 @@ function copyText(text, btn) {
     btn.textContent = '✓';
     setTimeout(function() { btn.textContent = old; }, 1500);
   });
+}
+
+// Shared diagnosis presentation for Daily Brief and single-issue analysis.
+function dailyBriefEvidenceTag(evidenceStatus) {
+  var status = String(evidenceStatus || '').trim();
+  if (!status) return '';
+  var text = ({
+    succeeded: '实机取证成功',
+    service_unavailable: '取证服务暂不可用',
+    invalid_request: '取证请求无效',
+    device_unavailable: '设备取证未完成',
+    unavailable: '实机取证失败',
+    collecting: '实机取证中',
+    not_collected: '未执行实机取证'
+  })[status] || '未执行实机取证';
+  var evidenceClass = status === 'succeeded' ? 'evidence-ok'
+    : (['service_unavailable', 'invalid_request', 'device_unavailable', 'unavailable'].includes(status)
+      ? 'evidence-failed' : 'evidence-pending');
+  return '<span class="' + evidenceClass + '">' + esc(text) + '</span>';
+}
+
+function dailyBriefEvidenceGateNotice(result) {
+  var value = result && typeof result === 'object' ? result : {};
+  if (!value.needs_human_review) return '';
+  var gate = value.evidence_gate && typeof value.evidence_gate === 'object'
+    ? value.evidence_gate : {};
+  var findings = [];
+  if (gate.attachments_checked === false) findings.push('附件尚未全部读取或校验');
+  if (gate.history_search_required !== false && gate.history_checked !== true) {
+    findings.push('相似历史工单检索未达到要求');
+  }
+  if (gate.source_evidence_required === true && gate.source_evidence_checked !== true) {
+    findings.push('测试失败缺少可追溯的源码级证据');
+  }
+  if (!findings.length) findings.push('运行时证据校验尚未闭环');
+  // 单行紧凑条:findings 内联,标题徽章已含「取证未闭环」,不再 <ul> 大块铺陈。
+  return '<div class="daily-brief-warning daily-brief-gate-notice"><b>⚠️ 取证未闭环 · 仅供人工复核</b>'
+    + '<span class="daily-brief-gate-findings">' + esc(findings.join('；')) + '</span></div>';
+}
+
+function dailyBriefSystemMetadata(result, extraChips) {
+  var meta = result && result.report_metadata;
+  var chips = String(extraChips || '');
+  if (!meta || typeof meta !== 'object') {
+    // 无元数据也要让质量徽章有处安放(与正文同一视觉行)。
+    return chips ? '<div class="daily-brief-section"><div class="daily-brief-section-body daily-brief-meta-row">' + chips + '</div></div>' : '';
+  }
+  var source = meta.source === 'redmine_live' ? 'Redmine 实时校验' : '分析快照';
+  var fields = [
+    ['报告人', meta.author_name], ['当前负责人', meta.assigned_to_name],
+    ['状态', meta.status_name], ['Redmine 更新时间', meta.updated_on],
+    ['系统校验时间', meta.verified_at], ['数据来源', source]
+  ].filter(function (item) { return String(item[1] || '').trim(); });
+  return '<div class="daily-brief-section"><div class="daily-brief-section-body daily-brief-meta-row">'
+    + fields.map(function (item) { return '<span class="daily-brief-meta-item"><b>'
+      + esc(item[0]) + '</b> ' + esc(item[1]) + '</span>'; }).join('')
+    + chips + '</div></div>';
+}
+
+function dailyBriefQualityChip(result) {
+  var quality = String((result || {}).evidence_quality || '');
+  if (!quality) return '';
+  var label = ({ verified: '证据已验证', partial: '证据部分闭环', insufficient: '证据不足' })[quality] || quality;
+  var cls = ({ verified: 'quality-verified', partial: 'quality-partial', insufficient: 'quality-insufficient' })[quality] || 'quality-partial';
+  return '<span class="daily-brief-quality-chip ' + cls + '">' + esc(label) + '</span>';
+}
+
+function singleIssueAnalysisMeta(run, issue) {
+  var timestamp = String(run.finished_at || run.started_at || '').replace('T', ' ').slice(0, 16);
+  var tags = timestamp ? ['<span>分析时间 ' + esc(timestamp) + '</span>'] : [];
+  var serial = String(run.device_serial || '').trim();
+  if (serial) {
+    tags.push('<span>设备 ' + esc(serial) + '</span>');
+    tags.push(dailyBriefEvidenceTag(((issue.ai_execution || {}).device_evidence_status) || 'not_collected'));
+  }
+  return tags.join('');
+}
+
+
+function dailyBriefPolicyEvidence(result) {
+  var checks = ((result || {}).evidence_gate || {}).official_reference_checks || [];
+  var sources = {};
+  checks.forEach(function (check) {
+    ['web_documents', 'gms_requirements', 'owner_policy_imports'].forEach(function (key) {
+      var source = (check.sources || {})[key];
+      if (source) sources[key] = source;
+    });
+  });
+  var keys = Object.keys(sources);
+  if (!keys.length) return '';
+  var labels = {web_documents: '公开 CDD / 技术规范', gms_requirements: 'Google GMS 政策', owner_policy_imports: '账号授权导入规范'};
+  var statusLabels = {matched: '已召回候选条款', no_match: '未检索到候选', unavailable: '来源不可用', not_applicable: '未执行'};
+  return '<div class="daily-brief-section"><div class="daily-brief-section-body">'
+    + '<b>Google 官方规范论证</b><div class="muted">规范候选不是已验证根因，需结合设备版本及实际证据判断。</div>'
+    + keys.map(function (key) {
+      var source = sources[key];
+      var refs = (source.references || []).filter(function (ref) {
+        return /^(POL-|ref:gms-policy:|ref:owner-policy:)/.test(String(ref));
+      });
+      return '<div><b>' + esc(labels[key]) + '</b> · '
+        + esc(statusLabels[source.status] || '状态未知') + ' · ' + esc(source.count || 0) + ' 条'
+        + (refs.length ? '<div class="muted">' + esc(refs.join(' · ')) + '</div>' : '') + '</div>';
+    }).join('') + '</div></div>';
 }

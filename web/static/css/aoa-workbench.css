@@ -281,7 +281,6 @@
 .aoa-config-column > .aoa-result { flex: 1 1 48px; min-height: 40px; max-height: 120px; }
 .aoa-config-column > .aoa-result[hidden] { display: none; }
 .aoa-command-table {
-    --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) 60.5px 156px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
@@ -289,14 +288,16 @@
     flex: 1;
     flex-direction: column;
     min-height: 0;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 .aoa-command-list-header, .aoa-command-row {
     align-items: center;
     display: grid;
 
     gap: 6px;
-    grid-template-columns: var(--aoa-command-columns);
+    grid-template-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) 60.5px 156px;
+    grid-template-rows: auto;
 }
 .aoa-command-list-header {
     border-bottom: 1px solid var(--border-color);
@@ -308,9 +309,10 @@
     padding: 5px 9px;
     scrollbar-gutter: stable;
 }
-.aoa-command-label { grid-column: 2; }
-.aoa-comment-label { grid-column: 3; padding-left: 6px; }
-.aoa-actions-label { align-items: center; display: flex; gap: 8px; grid-column: 4 / 6; justify-content: flex-end; }
+.aoa-command-list-header, .aoa-command-list { min-width: 440px; box-sizing: border-box; }
+.aoa-command-label { grid-column: 2; grid-row: 1; white-space: nowrap; }
+.aoa-comment-label { grid-column: 3; grid-row: 1; padding-left: 6px; white-space: nowrap; }
+.aoa-actions-label { align-items: center; display: flex; gap: 8px; grid-column: 4 / 6; grid-row: 1; justify-content: flex-end; white-space: nowrap; }
 .aoa-debug-cluster { align-items: center; display: inline-flex; flex: none; gap: 6px; min-width: 0; }
 #aoa-panel .aoa-debug-cluster .aoa-debug-option { gap: 4px; }
 #aoa-panel .aoa-debug-cluster #aoa-debug-end {  min-height: 20px; padding: 0 6px; }
@@ -327,12 +329,16 @@
 .aoa-command-list li:last-child { border-bottom: 0; }
 .aoa-command-list code {  line-height: 18px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--success-color); }
 .aoa-command-row { min-height: 22px; }
+.aoa-command-row > .aoa-command-index { grid-column: 1; grid-row: 1; }
+.aoa-command-row > code, .aoa-command-row > .aoa-command-editor { grid-column: 2; grid-row: 1; }
+.aoa-command-row > .aoa-command-comment { grid-column: 3; grid-row: 1; min-width: 0; width: 100%; box-sizing: border-box; }
 .aoa-command-row > .aoa-command-state { grid-column: 4; grid-row: 1; }
 .aoa-command-row > .aoa-command-actions { grid-column: 5; grid-row: 1; }
 .aoa-command-row:has(.aoa-command-editor) > .aoa-command-actions { grid-column: 4 / 6; }
 /* 标定态（定位 → 保存/取消）同编辑模式：5 个按钮跨到状态列，防止删除被 156px 列裁掉。 */
 .aoa-command-row.aoa-command-calibrating > .aoa-command-actions { grid-column: 4 / 6; }
-.aoa-command-row:has(.aoa-command-editor) > .aoa-command-state { visibility: hidden; }
+.aoa-command-row:has(.aoa-command-editor) > .aoa-command-state,
+.aoa-command-row.aoa-command-calibrating > .aoa-command-state { visibility: hidden; }
 #aoa-panel input.aoa-command-comment { background: transparent; border-color: transparent; border-left-color: var(--border-color); color: var(--text-secondary); height: var(--ui-aoa-command-editor-height); padding: 1px 6px; text-overflow: ellipsis; }
 #aoa-panel input.aoa-command-comment:focus { background: var(--darker-bg); border-color: var(--primary-color); color: var(--text-primary); }
 .aoa-command-index { color: var(--info-color); flex: none;  font-variant-numeric: tabular-nums;  line-height: 18px; min-width: 2ch; text-align: right; }
@@ -382,15 +388,7 @@
     .aoa-device-selectors, .aoa-form-grid, .aoa-replay-runner { grid-template-columns: minmax(0, 1fr); }
     .aoa-replay-actions { justify-content: flex-start; }
     .aoa-screen-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .aoa-command-table { --aoa-command-columns: 3ch minmax(0, 1.5fr) minmax(0, 1fr) auto; }
-    .aoa-actions-label { grid-column: 2 / -1; grid-row: 2; justify-content: flex-start; }
-    .aoa-debug-cluster { flex: 1; justify-content: flex-end; }
-    .aoa-command-row > code, .aoa-command-row > .aoa-command-editor { grid-column: 2; grid-row: 1; }
-    .aoa-command-row > .aoa-command-comment { grid-column: 3; grid-row: 1; }
-    .aoa-command-row > .aoa-command-index { align-self: start; grid-column: 1; grid-row: 1; line-height: 20px; }
-    .aoa-command-row > .aoa-command-state { grid-column: 1; grid-row: 2; }
-    .aoa-command-row > .aoa-command-actions { grid-column: 2 / -1; grid-row: 2; justify-self: end; }
-    .aoa-command-row:has(.aoa-command-editor) > .aoa-command-actions { grid-column: 2 / -1; }
+
 }
 
 .aoa-command-state { flex: none;  color: var(--text-secondary); line-height: 22px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; width: 5.5em; }
@@ -401,6 +399,6 @@
 .aoa-command-paused { background: color-mix(in srgb, var(--warning-color) 12%, transparent); border-left: 2px solid var(--warning-color); }
 .aoa-command-failed { background: color-mix(in srgb, var(--danger-color) 12%, transparent); border-left: 2px solid var(--danger-color); }
 
-.aoa-command-actions { display: flex; flex: none; gap: 4px; margin-left: auto; }
+.aoa-command-actions { display: flex; flex: none; flex-wrap: nowrap; gap: 4px; margin-left: auto; white-space: nowrap; }
 .aoa-command-editor { flex: 1; min-width: 0; width: 100%;  padding: 2px 4px; }
 #aoa-panel input.aoa-command-editor { height: var(--ui-aoa-command-editor-height); padding: 1px 6px; }

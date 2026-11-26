@@ -311,10 +311,8 @@ class DeviceOperationsTests(unittest.TestCase):
             def get_runtime_config(self):
                 return runtime_config
 
-            def save_runtime_config(self, config):
-                saved_config = dict(config)
-                runtime_config.clear()
-                runtime_config.update(saved_config)
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
                 return True
 
         global_state = SimpleNamespace(

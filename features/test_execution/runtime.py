@@ -2,32 +2,47 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from foundation.config import ConfigManager
+from foundation.runtime_contracts import (
+    ApiHelpProvider,
+    ApkFilenameNormalizer,
+    ApkTaskCreator,
+    ClientIdResolver,
+    ClusterTestStarter,
+    ControllerStateContract,
+    FileCleanup,
+    SafePathJoin,
+    SSHManagerContract,
+    WebSocketSender,
+)
 
 
-RuntimeCallable = Callable[..., object]
+if TYPE_CHECKING:
+    from .suite_tasks import SuiteTaskStore
 
 
 @dataclass
 class TestExecutionRuntime:
-    config_manager: object | None = None
-    ssh_manager: object | None = None
-    global_state: object | None = None
+    config_manager: ConfigManager | None = None
+    ssh_manager: SSHManagerContract | None = None
+    global_state: ControllerStateContract | None = None
     project_root: Path | None = None
-    safe_websocket_send: RuntimeCallable | None = None
-    generate_help_or_continue: RuntimeCallable | None = None
-    get_client_id_from_request: RuntimeCallable | None = None
+    safe_websocket_send: WebSocketSender | None = None
+    generate_help_or_continue: ApiHelpProvider | None = None
+    get_client_id_from_request: ClientIdResolver | None = None
     apk_max_file_size: int = 0
     apk_upload_dir: Path | None = None
     max_log_entries: int = 10000
-    create_apk_task: RuntimeCallable | None = None
-    normalize_apk_filename: RuntimeCallable | None = None
-    safe_join: RuntimeCallable | None = None
-    cleanup_files: RuntimeCallable | None = None
-    start_cluster_test: RuntimeCallable | None = None
-    suite_task_store: object | None = None
+    create_apk_task: ApkTaskCreator | None = None
+    normalize_apk_filename: ApkFilenameNormalizer | None = None
+    safe_join: SafePathJoin | None = None
+    cleanup_files: FileCleanup | None = None
+    start_cluster_test: ClusterTestStarter | None = None
+    suite_task_store: SuiteTaskStore | None = None
 
 
 _runtime = TestExecutionRuntime()
@@ -46,22 +61,22 @@ def __getattr__(name: str) -> object:
 
 def configure_runtime(
     *,
-    selected_config_manager: object,
-    selected_ssh_manager: object,
-    selected_global_state: object,
+    selected_config_manager: ConfigManager,
+    selected_ssh_manager: SSHManagerContract,
+    selected_global_state: ControllerStateContract,
     selected_project_root: Path,
-    selected_safe_websocket_send: RuntimeCallable | None = None,
-    selected_generate_help_or_continue: RuntimeCallable | None = None,
-    selected_get_client_id_from_request: RuntimeCallable | None = None,
+    selected_safe_websocket_send: WebSocketSender | None = None,
+    selected_generate_help_or_continue: ApiHelpProvider | None = None,
+    selected_get_client_id_from_request: ClientIdResolver | None = None,
     selected_apk_max_file_size: int = 0,
     selected_apk_upload_dir: Path | None = None,
     selected_max_log_entries: int = 10000,
-    selected_create_apk_task: RuntimeCallable | None = None,
-    selected_normalize_apk_filename: RuntimeCallable | None = None,
-    selected_safe_join: RuntimeCallable | None = None,
-    selected_cleanup_files: RuntimeCallable | None = None,
-    selected_start_cluster_test: RuntimeCallable | None = None,
-    selected_suite_task_store: object | None = None,
+    selected_create_apk_task: ApkTaskCreator | None = None,
+    selected_normalize_apk_filename: ApkFilenameNormalizer | None = None,
+    selected_safe_join: SafePathJoin | None = None,
+    selected_cleanup_files: FileCleanup | None = None,
+    selected_start_cluster_test: ClusterTestStarter | None = None,
+    selected_suite_task_store: SuiteTaskStore | None = None,
 ) -> None:
     for name in _RUNTIME_FIELDS:
         globals().pop(name, None)
@@ -87,22 +102,22 @@ def configure_runtime(
 
 def configure_test_execution_dependencies(
     *,
-    config_manager: object,
-    ssh_manager: object,
-    global_state: object,
+    config_manager: ConfigManager,
+    ssh_manager: SSHManagerContract,
+    global_state: ControllerStateContract,
     project_root: Path,
-    safe_websocket_send: RuntimeCallable,
-    generate_help_or_continue: RuntimeCallable,
-    get_client_id_from_request: RuntimeCallable,
+    safe_websocket_send: WebSocketSender,
+    generate_help_or_continue: ApiHelpProvider,
+    get_client_id_from_request: ClientIdResolver,
     apk_max_file_size: int,
     apk_upload_dir: Path,
     max_log_entries: int,
-    create_apk_task: RuntimeCallable,
-    normalize_apk_filename: RuntimeCallable,
-    safe_join: RuntimeCallable,
-    cleanup_files: RuntimeCallable,
-    start_cluster_test: RuntimeCallable | None = None,
-    suite_task_store: object | None = None,
+    create_apk_task: ApkTaskCreator,
+    normalize_apk_filename: ApkFilenameNormalizer,
+    safe_join: SafePathJoin,
+    cleanup_files: FileCleanup,
+    start_cluster_test: ClusterTestStarter | None = None,
+    suite_task_store: SuiteTaskStore | None = None,
 ) -> None:
     configure_runtime(
         selected_config_manager=config_manager,

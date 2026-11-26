@@ -32,7 +32,7 @@ from .clients import (
     hide_sensitive_info,
     owner_id_from_request,
 )
-from .storage_paths import owner_storage_key
+from .storage_paths import owner_preferences_dir
 
 
 config_manager = runtime.config_manager
@@ -58,16 +58,6 @@ def get_effective_local_server(client_id: str, requested_local_server: str = "",
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-
-
-def _update_runtime_sections(updates: dict[str, Any]) -> bool:
-    """Use atomic section updates, retaining compatibility with test doubles."""
-    updater = getattr(config_manager, 'update_runtime_config', None)
-    if callable(updater):
-        return updater(updates)
-    existing = config_manager.get_runtime_config()
-    existing.update(updates)
-    return config_manager.save_runtime_config(existing)
 
 
 SIDEBAR_PAGES = {
@@ -218,7 +208,7 @@ async def update_external_services_config(
         url = f"{parsed.scheme}://{parsed.netloc}"
     external = dict(config_manager.load_config().get("external_services") or {})
     external["gms_assistant_url"] = url
-    if not _update_runtime_sections({"external_services": external}):
+    if not config_manager.update_runtime_config({"external_services": external}):
         return error_response("保存 GMS助手配置失败", status_code=500)
     return success_response({"gms_assistant_url": url})
 
@@ -403,7 +393,7 @@ async def update_config(
     # 只更新允许字段，保留 Gerrit/Redmine/USB-IP 等其他运行时段落。
     runtime_updates = {key: req[key] for key in runtime_keys if key in req}
 
-    if _update_runtime_sections(runtime_updates):
+    if config_manager.update_runtime_config(runtime_updates):
         return success_response()
     else:
         return error_response("保存配置失败", status_code=500)
@@ -570,7 +560,7 @@ async def update_static_routes_config(
             return error_response(error, status_code=400)
 
     payload = {'enabled': next_enabled, 'routes': routes}
-    if not _update_runtime_sections({'static_routes': payload}):
+    if not config_manager.update_runtime_config({'static_routes': payload}):
         return error_response("保存路由配置失败", status_code=500)
     config_manager.invalidate_cache()
 
@@ -637,9 +627,7 @@ _storage_lock = threading.RLock()
 
 
 def _preferences_path(owner_id: str) -> Path:
-    directory = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory / "navigation.json"
+    return owner_preferences_dir(runtime.data_root, owner_id) / 'navigation.json'
 
 
 def load_navigation_preferences(owner_id: str) -> dict[str, list[str]]:

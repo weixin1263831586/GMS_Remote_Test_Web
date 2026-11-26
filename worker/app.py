@@ -19,6 +19,10 @@ from urllib.parse import quote, urlencode
 
 from foundation.log_setup import resolve_log_level
 from foundation.networking import parse_vpn_connection_names, probe_tcp_quality
+from foundation.process_inventory import (
+    discover_tradefed_processes,
+    process_inventory_capability_status,
+)
 from foundation.tradefed_progress import parse_progress_line
 from foundation.transport_contract import TransportOperationError
 
@@ -36,27 +40,25 @@ from .android_inspection import _aapt2_path, prepare_device_export
 from .client import ControllerClient
 from .command_events import CommandEventUploader
 from .config import WorkerConfig
-from .inventory import (
+from .device_actions import (
     aoa_capabilities,
     browse_directory,
     copy_image_into,
     execute_device_action,
-    execute_suite_action,
     execute_usbip_action,
     flash_firmware,
     flash_gsi,
     host_metrics,
+    probe_devices,
+)
+from .runtime import WorkerRuntime
+from .suite_actions import (
+    execute_suite_action,
     import_suite_report,
     prepare_suite_export,
-    probe_devices,
     scan_suites,
     tradefed_launcher_families,
 )
-from .process_inventory import (
-    discover_tradefed_processes,
-    process_inventory_capability_status,
-)
-from .runtime import WorkerRuntime
 
 
 _log_level = resolve_log_level(os.environ.get("GMS_LOG_LEVEL"))

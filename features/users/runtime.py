@@ -2,18 +2,34 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict
+
+from typing_extensions import Unpack
+
+from foundation.runtime_contracts import ControllerStateContract, SSHAsyncManagerContract, UserStateProvider
+
+
+if TYPE_CHECKING:
+    from foundation.config import ConfigManager
 
 
 @dataclass
 class UserRuntime:
-    config_manager: object | None = None
+    config_manager: ConfigManager | None = None
     data_root: Path | None = None
-    global_state: object | None = None
-    ssh_async_manager: object | None = None
-    get_or_create_user_state: Callable[..., object] | None = None
+    global_state: ControllerStateContract | None = None
+    ssh_async_manager: SSHAsyncManagerContract | None = None
+    get_or_create_user_state: UserStateProvider | None = None
+
+
+class UserRuntimeBindings(TypedDict, total=False):
+    config_manager: ConfigManager | None
+    data_root: str | Path | None
+    global_state: ControllerStateContract | None
+    ssh_async_manager: SSHAsyncManagerContract | None
+    get_or_create_user_state: UserStateProvider | None
 
 
 _runtime = UserRuntime()
@@ -30,7 +46,7 @@ def __getattr__(name: str) -> object:
     raise AttributeError(name)
 
 
-def configure_runtime(**values: object) -> None:
+def configure_runtime(**values: Unpack[UserRuntimeBindings]) -> None:
     invalid = set(values) - _RUNTIME_FIELDS
     if invalid:
         raise TypeError(f"unknown user runtime bindings: {sorted(invalid)}")
@@ -42,11 +58,24 @@ def configure_runtime(**values: object) -> None:
         setattr(_runtime, name, value)
 
 
-def configure_user_dependencies(**values: object) -> None:
-    """Bootstrap 装配入口:运行时绑定之外,同步注入 config/sessions 的配置管理器。"""
+def configure_user_dependencies(
+    *,
+    config_manager: ConfigManager,
+    data_root: Path,
+    global_state: ControllerStateContract,
+    ssh_async_manager: SSHAsyncManagerContract,
+    get_or_create_user_state: UserStateProvider,
+) -> None:
+    """Wire user runtime and configuration consumers."""
     from . import config_api
     from .sessions import client_manager
 
-    configure_runtime(**values)
-    client_manager.config_manager = values["config_manager"]
-    config_api.config_manager = values["config_manager"]
+    configure_runtime(
+        config_manager=config_manager,
+        data_root=data_root,
+        global_state=global_state,
+        ssh_async_manager=ssh_async_manager,
+        get_or_create_user_state=get_or_create_user_state,
+    )
+    client_manager.config_manager = config_manager
+    config_api.config_manager = config_manager

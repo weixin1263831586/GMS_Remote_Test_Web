@@ -37,13 +37,11 @@ symbol/line/commit 并逐项复核）才能升级到 ``revision_verified`` /
 from __future__ import annotations
 
 import logging
-import re
 import time
 from typing import Any
 
+from features.sdk import search_indexed_paths
 from foundation.redaction import redact_sensitive_text
-
-from .archive import codesearch_script_location, run_codesearch_process
 
 
 logger = logging.getLogger(__name__)
@@ -104,43 +102,12 @@ def verify_anchor_in_codesearch(
     if not term or len(term) > _MAX_ANCHOR_FIELD_LEN or "/" not in str(anchor.get("path") or ""):
         # 没有路径级 anchor（如 url-only）无从溯源。
         return {"path_present": None, "evidence_level": EVIDENCE_UNKNOWN, "verification": None}
-    from .archive import get_opengrok_project_for_android_version
-
-    codesearch_script, codesearch_dir = codesearch_script_location()
-    opengrok_config: dict[str, Any] = {}
-    try:
-        from foundation.config import ConfigManager
-
-        opengrok_config = ConfigManager().load_config().get("opengrok", {}) or {}
-    except Exception:  # 配置缺失时退回默认项目，不阻塞溯源
-        pass
-    version_project = get_opengrok_project_for_android_version(
-        android_version, opengrok_config
+    version_project, paths = search_indexed_paths(
+        term, android_version=android_version, timeout=timeout,
     )
-    project_args = ["--project", version_project] if version_project else []
-    # 用完整相对路径检索，并在结果侧再次做路径后缀校验。只按文件名会让
-    # Android.bp / Utils.java 等常见名称把完全无关的文件误标为路径命中。
-    result = run_codesearch_process(
-        [
-            "python3", codesearch_script, "search",
-            "--keywords", term, "--search-field", "path",
-            "--limit", "10", *project_args,
-        ],
-        codesearch_dir,
-        timeout=timeout,
-    )
-    if result is None:
+    if paths is None:
         return {"path_present": None, "evidence_level": EVIDENCE_UNKNOWN, "verification": None}
-    if not result.stdout.strip():
-        return {"path_present": False, "evidence_level": EVIDENCE_PATH_MISSING, "verification": None}
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        match = re.match(r"^\[[^\]]+\]\s+(.+)$", line)
-        if match is None:
-            continue
-        found_path = match.group(1).strip()
-        if not found_path:
-            continue
+    for found_path in paths:
         if _path_matches_anchor(found_path, anchor):
             verification = {
                 "repo": str(anchor.get("repo") or ""),
@@ -245,6 +212,13 @@ def verify_background_anchors(
                             0.0, time_budget - (time.monotonic() - started)
                         )
                 outcome_cache[key] = outcome
+            verification = outcome["verification"]
+            if verification is not None:
+                verification = {
+                    **verification,
+                    "revision": str(anchor.get("revision") or ""),
+                    "evidence_type": str(anchor.get("evidence_type") or "aosp"),
+                }
             row = {
                 "hit_title": str(hit.get("title") or ""),
                 # 结构化回挂 key：召回层无 id 时留空，消费方据此跳过该
@@ -262,7 +236,7 @@ def verify_background_anchors(
                 # evidence_level 是 UI/报告应使用的唯一语义标签。
                 "path_present": outcome["path_present"],
                 "evidence_level": outcome["evidence_level"],
-                "verification": outcome["verification"],
+                "verification": verification,
             }
             if outcome.get("reason"):
                 # 预算耗尽的 unknown 与「溯源器不可用」需要可区分。

@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GMS 更新中心</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261124-flex-table-pager">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261126-table-geometry">
   <link rel="stylesheet" href="/static/css/modal.css">
   <link rel="stylesheet" href="/static/css/modal-tech.css">
   <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css">
   <script src="/static/js/dialog-frame.js" defer></script>
+  <script src="/static/js/utils.js?v=20261126-action-busy"></script>
+  <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261126-table-geometry">
   <style>
     :root { color-scheme: dark; --border:var(--border-color); --muted:var(--text-secondary); --bg:var(--dark-bg); --text:var(--text-primary); --head:var(--light-bg); --card:var(--card-bg); --primary:var(--primary-color); }
     /* All eight tabs share one left-aligned navigation and right-aligned action bar. */
@@ -85,7 +87,7 @@
     .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35);  z-index:9999; display:none; }
     .toast.error { background:#3b1118; border-color:#7f1d1d; }
   </style>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-divider">
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 </head>
 <body>
@@ -93,9 +95,9 @@
     <h1>GMS 更新中心</h1>
     <div id="summary" class="summary">加载中…</div>
     <div class="actions">
-      <button data-click="startSync" data-a0="incremental">增量扫描</button>
-      <button data-click="startSync" data-a0="full" class="secondary">全量扫描</button>
-      <button data-click="loadAll" class="secondary">刷新</button>
+      <button data-busy-size="plain" data-click="startSync" data-a0="incremental">增量扫描</button>
+      <button data-busy-size="plain" data-click="startSync" data-a0="full" class="secondary">全量扫描</button>
+      <button id="gms-refresh-btn" data-busy-size="short" data-click="loadAll" class="secondary">刷新</button>
     </div>
 
   </header>
@@ -138,7 +140,7 @@
         <button type="button" class="critical-filter" id="critical_kind" aria-label="补丁类型" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部类型</button>
         <button type="button" class="critical-filter" id="gerrit_status" aria-label="Gerrit合入状态" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none" disabled>全部状态</button>
         <button id="gerrit-refresh" style="display:none" data-click="refreshCriticalGerrit">重新核对</button>
-        <button data-click="runQuery" data-a0="true">查询</button>
+        <button id="gms-query-btn" data-busy-size="short" data-click="runQuery" data-a0="true">查询</button>
         <button type="button" id="critical-legacy-toggle" style="display:none" aria-pressed="false" title="显示 Android 14 以下版本列，不改变合入统计">显示历史版本</button>
       </div>
     </div>

@@ -137,6 +137,7 @@
                 sessionStorage.removeItem('gms_devices_view');
                 sessionStorage.removeItem('gms_users_view');
                 sessionStorage.removeItem('gms_audit_view');
+                sessionStorage.removeItem('gms_knowledge_view');
                 sessionStorage.removeItem('gms_cluster_active_tab');
                 // A one-shot marker also overrides an iframe URL restored with
                 // ?tab=management, which otherwise wins over sessionStorage.

@@ -33,15 +33,7 @@ def load_usbip_assignments() -> dict[str, dict]:
 
 def save_usbip_assignments(assignments: dict[str, dict]) -> bool:
     """持久化 assignment 快照;失败抛 RuntimeError(调用方以真值判断)。"""
-    updater = getattr(runtime.config_manager, "update_runtime_config", None)
-    if callable(updater):
-        saved = updater({"usbip_cluster_assignments": assignments})
-    else:
-        getter = getattr(runtime.config_manager, "get_runtime_config", None)
-        runtime_config = getter() if callable(getter) else {}
-        runtime_config = runtime_config or {}
-        runtime_config["usbip_cluster_assignments"] = assignments
-        saved = runtime.config_manager.save_runtime_config(runtime_config)
+    saved = runtime.config_manager.update_runtime_config({"usbip_cluster_assignments": assignments})
     if not saved:
         raise RuntimeError("无法保存USB/IP集群分配状态")
     # 成功路径必须显式返回 True，调用方以真值判断保存是否成功。

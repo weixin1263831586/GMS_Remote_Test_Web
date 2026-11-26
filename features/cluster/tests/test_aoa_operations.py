@@ -59,7 +59,7 @@ class AoaOperationsTests(ClusterApiHardeningFixture, unittest.TestCase):
             return {"success": True, "adb_recovered": True, "adb_state": "device"}
 
         try:
-            with patch("worker.inventory.execute_device_action", side_effect=execute):
+            with patch("worker.device_actions.execute_device_action", side_effect=execute):
                 first = self.client.post("/api/cluster/devices/actions", json=body)
                 assert started.wait(2)
                 second = self.client.post("/api/cluster/devices/actions", json=body)
@@ -117,7 +117,7 @@ class AoaOperationsTests(ClusterApiHardeningFixture, unittest.TestCase):
                 check()
             return {"success": True}
 
-        with patch("worker.inventory.execute_device_action", side_effect=execute):
+        with patch("worker.device_actions.execute_device_action", side_effect=execute):
             response = self.client.post("/api/cluster/devices/actions", json={
                 "worker_id": "worker-246", "devices": ["ABC"], "action": "aoa_record_input",
                 "aoa_record": {"action": "calibrate"},

@@ -897,18 +897,13 @@ async function refreshTestSuites() {
     const button = document.getElementById('refresh-suites-btn');
     if (button?.disabled) return;
     if (button) {
-        button.disabled = true;
-        button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…';
-        button.setAttribute('aria-busy', 'true');
+        setActionButtonBusy(button, true, '刷新中');
     }
-    showToast('正在刷新测试套件...', 'info');
     try {
         await loadTestSuites(true);
     } finally {
         if (button) {
-            button.disabled = false;
-            button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新套件';
-            button.removeAttribute('aria-busy');
+            setActionButtonBusy(button, false);
         }
     }
 }

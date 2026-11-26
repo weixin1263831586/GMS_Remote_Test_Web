@@ -6,18 +6,16 @@ import asyncio
 import json
 import logging
 import os
-import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any
 
-from features.redmine.analysis.ai import AiAnalysisMixin
-from features.redmine.analysis.attachments import AttachmentAnalysisMixin
-from features.redmine.analysis.issue import IssueAnalysisMixin
-from features.redmine.analysis.reporting import ReportingAnalysisMixin
-from features.redmine.analysis.resolution import ResolutionAnalysisMixin
-from features.redmine.analysis.similarity import SimilarityAnalysisMixin
+from features.redmine.analysis import _truncate
+from features.redmine.analysis.ai import IssueModelAnalysis
+from features.redmine.analysis.attachments import AttachmentAnalysis
+from features.redmine.analysis.reporting import IssueReporting
+from features.redmine.analysis.similarity import IssueSimilarity
 from features.redmine.client import RedmineClient
 from features.redmine.config import config_manager
 from features.redmine.repository import (
@@ -26,7 +24,7 @@ from features.redmine.repository import (
 from features.redmine.repository import (
     RedmineAgentDB,
 )
-from features.redmine.utils import to_iso8601
+from features.redmine.utils import detect_android_version, detect_soc_platform, to_iso8601
 from foundation.config import settings
 
 
@@ -75,15 +73,21 @@ def _obj_name(value: Any) -> str:
     return str(getattr(value, "name", "") or value)
 
 
-class RedmineAgent(
-    AttachmentAnalysisMixin,
-    IssueAnalysisMixin,
-    SimilarityAnalysisMixin,
-    AiAnalysisMixin,
-    ResolutionAnalysisMixin,
-    ReportingAnalysisMixin,
-):
+def _obj_email(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(
+        getattr(value, "mail", "")
+        or getattr(value, "email", "")
+        or getattr(value, "login", "")
+        or ""
+    )
+
+
+class RedmineAgent:
     """Batch agent for assigned Redmine issue triage."""
+
+    _reporting = IssueReporting()
 
     def __init__(
         self,
@@ -98,9 +102,68 @@ class RedmineAgent(
         self.config_manager = redmine_config_manager or config_manager
         self.attachments_dir = attachments_dir or settings.data_root / "redmine/attachments"
         self.attachments_dir.mkdir(parents=True, exist_ok=True)
-        self._ai_config_cache: dict[str, Any] | None = None
-        self.report_analyzer_factory = report_analyzer_factory
-        self.ai_analyzer_factory = ai_analyzer_factory
+        self._model_analysis = IssueModelAnalysis(ai_analyzer_factory)
+        self._similarity = IssueSimilarity(self.db, self._model_analysis)
+        self._attachments = AttachmentAnalysis(
+            self.db, self.attachments_dir, report_analyzer_factory,
+        )
+
+    def _issue_payload(self, issue: Any, run_id: str, journals: list[dict[str, Any]], attachment_records: list[dict[str, Any]], failures: list[dict[str, Any]]) -> dict[str, Any]:
+        fixed_version = _obj_name(getattr(issue, "fixed_version", None))
+        return {
+            "issue_id": int(issue.id),
+            "run_id": run_id,
+            "subject": str(issue.subject or ""),
+            "status_name": _obj_name(getattr(issue, "status", None)),
+            "priority_name": _obj_name(getattr(issue, "priority", None)),
+            "project_name": _obj_name(getattr(issue, "project", None)),
+            "tracker_name": _obj_name(getattr(issue, "tracker", None)),
+            "author_name": _obj_name(getattr(issue, "author", None)),
+            "assigned_to_name": _obj_name(getattr(issue, "assigned_to", None)),
+            "created_on": _iso(issue.created_on),
+            "updated_on": _iso(issue.updated_on),
+            "description": str(issue.description or ""),
+            "fixed_version": fixed_version,
+            "component": self._extract_custom_field(issue, "Component_fae"),
+            "soc_platform": detect_soc_platform(
+                str(issue.subject or ""),
+                str(issue.description or ""),
+                fixed_version,
+            ),
+            "android_version": detect_android_version(
+                str(issue.subject or ""),
+                str(issue.description or ""),
+                fixed_version,
+            ),
+            "start_date": _iso(issue.start_date),
+            "due_date": _iso(issue.due_date),
+            "closed_on": _iso(issue.closed_on),
+            "done_ratio": int(getattr(issue, "done_ratio", 0) or 0),
+            "journals_json": journals,
+            "attachments_json": attachment_records,
+            "failures_json": failures[:50],
+        }
+
+    def _extract_journals(self, journals: list[Any]) -> list[dict[str, Any]]:
+        result = []
+        for item in journals:
+            details = []
+            for detail in getattr(item, "details", []):
+                details.append({
+                    "property": str(getattr(detail, "property", "")),
+                    "name": str(getattr(detail, "name", "")),
+                    "old_value": str(getattr(detail, "old_value", "")),
+                    "new_value": str(getattr(detail, "new_value", "")),
+                })
+            result.append({
+                "id": str(getattr(item, "id", "")),
+                "user": _obj_name(getattr(item, "user", None)),
+                "user_email": _obj_email(getattr(item, "user", None)),
+                "created_on": _iso(getattr(item, "created_on", "")),
+                "notes": _truncate(str(getattr(item, "notes", "")), 2000),
+                "details": details,
+            })
+        return result
 
     async def sync_all_assigned_issues(
         self,
@@ -359,7 +422,7 @@ class RedmineAgent(
                                           analysis_status="failed", error=str(exc))
                     self.db.upsert_issue(failed_payload)
 
-            report = self._build_run_report(run_id, issue_results)
+            report = self._reporting._build_run_report(run_id, issue_results)
             report_path = self.db.write_run_report(run_id, report)
             summary = {
                 "assigned_to": assigned_to,
@@ -394,7 +457,7 @@ class RedmineAgent(
         failures = []
 
         for attachment in attachments:
-            attachment_result = await self._process_attachment(client, issue_id, attachment)
+            attachment_result = await self._attachments.process_attachment(client, issue_id, attachment)
             attachment_records.append(attachment_result)
             analysis = attachment_result.get("analysis_json") or {}
             if analysis.get("failures"):
@@ -407,14 +470,14 @@ class RedmineAgent(
         status_name = _obj_name(getattr(issue, "status", None))
         issue_payload["is_resolved"] = int(status_name in RESOLVED_STATUSES)
 
-        references = await self._find_similar_references(client, issue_payload, failures)
+        references = await self._similarity.find_similar_references(client, issue_payload, failures)
 
-        ai_result = await self._summarize_with_model(issue_payload, failures, references)
+        ai_result = await self._model_analysis.summarize_issue(issue_payload, failures, references)
 
-        structured = self._extract_structured_fields(ai_result, issue_payload, failures, references)
+        structured = self._reporting._extract_structured_fields(ai_result, issue_payload, failures, references)
         issue_payload.update(structured)
 
-        document = self._build_issue_document(issue_payload)
+        document = self._reporting._build_issue_document(issue_payload)
         doc_path = self.db.write_issue_doc(issue_id, document)
         issue_payload["doc_path"] = doc_path
         issue_payload["doc_content"] = document
@@ -521,8 +584,8 @@ class RedmineAgent(
             "description": description,
             "fixed_version": fixed_version,
             "component": RedmineAgent._extract_custom_field(issue_stub, "Component_fae"),
-            "soc_platform": RedmineAgent._parse_soc_platform(subject, description, fixed_version),
-            "android_version": RedmineAgent._parse_android_version(subject, description, fixed_version),
+            "soc_platform": detect_soc_platform(subject, description, fixed_version),
+            "android_version": detect_android_version(subject, description, fixed_version),
             "start_date": _iso(issue_stub.start_date),
             "due_date": _iso(issue_stub.due_date),
             "closed_on": _iso(issue_stub.closed_on),
@@ -535,23 +598,6 @@ class RedmineAgent(
         for keyword, category in (("VTS", "VTS"), ("GTS", "GTS"), ("CTS", "CTS"), ("GSI", "GSI"), ("GMS", "GMS认证")):
             if keyword in text:
                 return category
-        return ""
-
-    @staticmethod
-    def _parse_soc_platform(subject: str, description: str, fixed_version: str) -> str:
-        """Extract SoC platform (e.g. RK3576, RK3399) from subject, description or version."""
-        text = f"{subject} {description} {fixed_version}"
-        match = re.search(r"(RK\d{4,})", text, re.IGNORECASE)
-        return match.group(1).upper() if match else ""
-
-    @staticmethod
-    def _parse_android_version(subject: str, description: str, fixed_version: str) -> str:
-        """Extract Android version (e.g. Android16, Android14) from text."""
-        text = f"{subject} {description} {fixed_version}"
-        # Match "Android16", "Android 14", "ANDROID16.0", "ANDROID12_SDK"
-        match = re.search(r"android\s*(\d+(?:\.\d+)*)", text, re.IGNORECASE)
-        if match:
-            return f"Android{match.group(1)}"
         return ""
 
     @staticmethod

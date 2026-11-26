@@ -13,7 +13,8 @@ from typing import Any
 
 from foundation.config import settings
 
-from .agent_tokens import AgentTokenEnrollmentMixin, AgentTokenServiceMixin
+from .agent_enrollment import AgentTokenEnrollmentMixin
+from .agent_tokens import AgentTokenServiceMixin
 from .approval_tokens import ApprovalTokenServiceMixin
 from .constants import (  # noqa: F401  (re-exported for back-compat)
     AGENT_ROLE,

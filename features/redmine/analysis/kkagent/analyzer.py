@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import contextvars
 import functools
 import json
@@ -39,7 +40,6 @@ from .evidence_gate import gate_and_errors, gate_errors
 from .native_summary import native_evidence_repair_prompt, native_summary_result
 from .output import has_textual_gms_tool_call, parse_issue_result
 from .preflight import probe_kkagent_mcp_health
-from .repair_policy import approved_repair_call, repair_policy_env
 from .trace import KkAgentTrace, ToolTrace, consume_line, trace_from_summary
 
 
@@ -71,6 +71,42 @@ def analyzer_version() -> str:
     except OSError:
         pass
     return PROMPT_VERSION
+
+
+def signed_source_path(result_id: str) -> str:
+    if not result_id.startswith("src1_"):
+        return ""
+    encoded, separator, signature = result_id[5:].rpartition("_")
+    if not separator or not signature or len(encoded) > 1600:
+        return ""
+    try:
+        value = json.loads(base64.urlsafe_b64decode(
+            encoded + "=" * (-len(encoded) % 4)
+        ).decode("utf-8"))
+        return str(value.get("path") or "") if isinstance(value, dict) else ""
+    except (ValueError, TypeError, UnicodeError):
+        return ""
+
+
+def repair_policy_env(entry: dict[str, Any], targets: list[str]) -> dict[str, str]:
+    env = dict(entry.get("_kkagent_config_env") or {})
+    env["GMS_MCP_REPAIR_POLICY"] = json.dumps(
+        {"mode": "targeted_exact" if targets else "deny", "targets": targets},
+        ensure_ascii=False,
+    )
+    return env
+
+
+def approved_repair_call(call: Any, targets: list[str]) -> bool:
+    """Post-execution defense in depth; MCP pre-dispatch guard is authoritative."""
+    if call.tool_name == "gms_rt_sdk_search":
+        path = str(call.tool_input.get("path") or "")
+        scope = str(call.tool_input.get("repo_scope") or "").strip("/")
+        return path in targets and bool(scope) and path.startswith(scope + "/")
+    if call.tool_name == "gms_rt_sdk_read":
+        path = signed_source_path(str(call.tool_input.get("result_id") or ""))
+        return path in targets
+    return False
 
 
 # Output/evidence repair and factual revision have separate bounded budgets
@@ -317,6 +353,10 @@ class KkAgentRedmineAnalyzer:
                 "Mainline release inclusion is official release evidence, not proof that this "
                 "device/build contains the fix. Keep exemptions and Critical Fix applicability "
                 "conditional on matching module, test, Android version and release. "
+                "For matched web_documents, gms_requirements or owner_policy_imports, include a separate Google official policy section, "
+                "citing the exact POL-, ref:gms-policy or ref:owner-policy token for each relevant requirement. "
+                "CDD and web documents are normative or explanatory candidates only; verify Android version, "
+                "device category and each condition against issue evidence. Never infer actual root cause from a policy alone. "
                 "Unavailable sources and incomplete coverage are not zero hits. For further "
                 "read-only lookup use gms_rt_redmine_references on this same snapshot_id."
             )

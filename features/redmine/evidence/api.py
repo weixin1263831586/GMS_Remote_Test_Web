@@ -23,13 +23,12 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from features.auth import require_agent_scope
+from features.redmine.evidence.fetch import EvidenceFetcher, start_evidence_fetch
 from features.redmine.evidence.service import (
     DOWNLOAD_POLICIES,
     EvidenceError,
-    EvidenceFetcher,
     parse_issue_ref,
     snapshot_completeness,
-    start_evidence_fetch,
     wait_for_snapshot,
 )
 from features.redmine.evidence.store import owner_evidence_store

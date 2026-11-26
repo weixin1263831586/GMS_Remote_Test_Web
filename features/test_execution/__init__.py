@@ -1,10 +1,8 @@
 """Test execution feature package."""
 
 from .models import (
-    ACTIVE_JOB_STATUSES,
     SuiteApkAnalyzeRequest,
     TestParseArgsRequest,
-    TestStartRequest,
     TradefedListResultsRequest,
 )
 from .suite_helpers import get_available_test_suites, resolve_suite_reference, resolve_tradefed_target
@@ -40,10 +38,8 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "ACTIVE_JOB_STATUSES",
     "SuiteApkAnalyzeRequest",
     "TestParseArgsRequest",
-    "TestStartRequest",
     "TradefedListResultsRequest",
     "create_suite_apk_analysis_task",
     "detect_test_type_from_suite_path",

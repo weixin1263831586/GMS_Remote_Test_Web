@@ -14,6 +14,16 @@ class OpsStoreTests(unittest.TestCase):
 
         return OpsStore(Path(tmp) / "ops/ops.sqlite3")
 
+    def test_incident_result_matches_shared_contract(self):
+        from foundation.ops_port import IncidentResult, OpsEvent
+
+        with TemporaryDirectory() as tmp:
+            store = self._store(tmp)
+            result = store.record_incident(severity="info", kind="test", message="test")
+            self.assertEqual(set(result), IncidentResult.__required_keys__)
+            self.assertIsNotNone(result["event"])
+            self.assertEqual(set(result["event"]), OpsEvent.__required_keys__)
+
     def test_schema_is_idempotent_across_instances(self):
         with TemporaryDirectory() as tmp:
             first = self._store(tmp)

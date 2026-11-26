@@ -14,14 +14,14 @@
 #page-security-audit .audit-disk-filters > .combo-box { flex: 0 1 174px; min-width: 123px; max-width: 200px; }
 #page-security-audit .audit-disk-table { min-width: 1010px; table-layout: fixed; }
 #page-security-audit .audit-disk-table thead th {
-    position: sticky; top: 0; z-index: 2; height: var(--ui-table-header-height);
-    padding: 9px 10px; text-align: left; background: var(--light-bg);
+    position: sticky; top: 0; z-index: 2;
+    text-align: left; background: var(--light-bg);
     border-bottom: 1px solid var(--border-color);
 }
 #page-security-audit .audit-disk-table :is(th:nth-child(3),th:nth-child(4),th:nth-child(6)),
 #page-security-audit .audit-disk-table :is(td:nth-child(3),td:nth-child(4),td:nth-child(6)) { text-align: center; }
 #page-security-audit.page-ui-rework .audit-disk-table tbody td {
-    height: var(--ui-table-row-height); padding: 8px 10px; max-width: 0;
+    max-width: 0;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #page-security-audit .audit-disk-row { cursor: pointer; }

@@ -3,7 +3,6 @@ from .analysis_agent import ReportAnalysisAgent, ReportScanIncompleteError
 from .api import diagnose_report_failure
 from .api_helpers import ReportDiagnosisRequest, resolve_redmine_knowledge_service
 from .archive import ReportAnalyzer
-from .archive import ReportAnalyzer as ArchiveReportAnalyzer
 from .display import (
     report_client_display_id,
     report_name_from_result_dir,
@@ -16,7 +15,6 @@ from .xml_parser import XMLReportParser
 
 
 __all__ = [
-    "ArchiveReportAnalyzer",
     "ReportAnalysisAgent",
     "ReportAnalyzer",
     "ReportDiagnosisRequest",

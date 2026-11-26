@@ -249,13 +249,13 @@ async function loadFirmwareShares() {
     const hadRenderedShares = tbody.dataset.loaded === 'true';
     tbody.setAttribute('aria-busy', 'true');
     if (!hadRenderedShares) {
-        tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">加载中...</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-secondary); text-align: center;">加载中...</td></tr>';
     }
     try {
         const result = await firmwareShareApi('/api/firmware-shares');
         const records = result.data?.records || [];
         if (!records.length) {
-            tbody.innerHTML = '<tr><td colspan="5" style="padding: 14px; color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-secondary); text-align: center;">暂无共享固件</td></tr>';
             tbody.dataset.loaded = 'true';
             return;
         }
@@ -290,7 +290,7 @@ async function loadFirmwareShares() {
         });
     } catch (error) {
         if (hadRenderedShares) showToast(`共享固件列表刷新失败: ${error.message}`, 'error');
-        else tbody.innerHTML = `<tr><td colspan="5" style="padding: 14px; color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;
+        else tbody.innerHTML = `<tr><td colspan="5" style="color: var(--danger-color); text-align: center;">${escapeHtml(error.message)}</td></tr>`;
     } finally {
         tbody.setAttribute('aria-busy', 'false');
     }

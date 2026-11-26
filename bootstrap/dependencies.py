@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 from features.automation import register_worker_status_port
 from features.cluster import register_cluster_port
-from features.devices import register_devices_port
+from features.devices.inventory.host import register_devices_port
 from features.devices.locks import devices_display_name_resolver
 from features.email import (
     configure_attachment_resolver,
@@ -19,11 +20,12 @@ from features.redmine.agent import RedmineAgent
 from features.redmine.repository import RedmineAgentDB
 from features.redmine.service import RedmineService
 from features.reports import ReportAnalyzer, ReportFailureAnalyzer
+from features.sdk import search_indexed_source
 from foundation.config import ConfigManager, RuntimeSettings, settings
 from foundation.device_locks import configure_display_name_resolver
 
 
-def _universal_analyzer_factory(config=None):
+def _universal_analyzer_factory(config: dict[str, Any] | None = None) -> UniversalAIAnalyzer:
     """Shared text-generation and provider gateway factory."""
     if config is None:
         from foundation.config import config_manager
@@ -33,16 +35,16 @@ def _universal_analyzer_factory(config=None):
     return UniversalAIAnalyzer(config)
 
 
-def _report_failure_analyzer_factory(config=None):
+def _report_failure_analyzer_factory(config: dict[str, Any] | None = None) -> ReportFailureAnalyzer:
     """Report diagnosis with an injected Android source search provider."""
     if config is None:
         from foundation.config import config_manager
 
         config = config_manager.get_ai_config()
 
-    def _codesearch_source_search(class_name: str) -> list[dict]:
+    def _codesearch_source_search(class_name: str) -> list[dict[str, Any]]:
         try:
-            return ReportAnalyzer().rk_codesearch(class_name, max_results=3) or []
+            return search_indexed_source(class_name, max_results=3) or []
         except Exception:
             return []
 
@@ -94,14 +96,12 @@ def _wire_sdk_source_rank_hints() -> None:
     def _codesearch_hints(query: str) -> list[tuple[str, float]]:
         """OpenGrok 符号落点 → 仓前缀提示（权重最高：真实代码索引）。
 
-        ``rk_codesearch`` 返回 dict 或 path/line 列表；两种形状都按路径
+        ``search_indexed_source`` 返回 dict 或 path/line 列表；两种形状都按路径
         前两段归一化成子仓相对前缀。任何异常静默降级（排序失败不得
         阻塞检索）。
         """
         try:
-            from features.reports import ReportAnalyzer
-
-            results = ReportAnalyzer().rk_codesearch(str(query or ""), max_results=5) or []
+            results = search_indexed_source(str(query or ""), max_results=5) or []
         except Exception:
             return []
         hints: dict[str, float] = {}
@@ -130,7 +130,7 @@ class AppServices:
     redmine: RedmineService
 
 
-def _wire_cross_feature_services() -> None:
+def _wire_cross_feature_services(runtime_settings: RuntimeSettings = settings) -> None:
     """Connect cross-feature seams that features cannot wire themselves.
 
     - cluster / automation: register the foundation access ports that
@@ -159,10 +159,8 @@ def _wire_cross_feature_services() -> None:
     # 内部模块直连闭合跨 feature 依赖。
     from features.automation.repository import AutomationStore
     from foundation.automation_port import configure_active_run_ids_provider
-    from foundation.config import settings
-
     def _active_automation_run_ids() -> set[str]:
-        store = AutomationStore(settings.data_root / "automation/automation.sqlite3")
+        store = AutomationStore(runtime_settings.data_root / "automation/automation.sqlite3")
         # 必须全量查询非终态任务：list_runs 的 limit 上限（500）会把更早
         # 入队/在途的任务漏掉，其暂存固件会被清理语义误判为可回收。
         return set(store.active_run_ids())
@@ -187,7 +185,7 @@ def build_services(
     runtime_settings: RuntimeSettings | None = None,
 ) -> AppServices:
     selected = settings if runtime_settings is None else runtime_settings
-    _wire_cross_feature_services()
+    _wire_cross_feature_services(selected)
     redmine_repository = RedmineAgentDB(
         db_path=selected.data_root / "redmine/redmine.sqlite3",
         docs_dir=selected.data_root / "redmine/docs",

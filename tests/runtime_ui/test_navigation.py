@@ -7,6 +7,116 @@ from tests.runtime_ui.harness import REPO_ROOT, RuntimeUiHarness, expect
 
 
 class RuntimeNavigationTests(RuntimeUiHarness):
+
+    def test_knowledge_tabs_and_external_source_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            calls = []
+            deny = [False]
+            submitted = []
+
+            def sources(route):
+                calls.append(route.request.method)
+                if route.request.method == 'POST':
+                    submitted.append(route.request.post_data_json)
+                    route.fulfill(json={'success': True, 'data': {'id': 'new', 'sync': {'status': 'ready'}}})
+                    return
+                if deny[0]:
+                    route.fulfill(status=403, json={
+                        'detail': {'message': 'Elevation required', 'elevation_required': True},
+                    })
+                else:
+                    route.fulfill(json={'success': True, 'data': {'sources': [{
+                        'id': 'cdd16', 'name': 'Android 16 CDD',
+                        'url': 'https://source.android.com/docs/compatibility/16/android-16-cdd',
+                        'android_version': 16, 'indexed_count': 4441, 'enabled': True,
+                        'revision': 'revision16', 'synced_at': '', 'error': '',
+                    }]}})
+
+            page.route('**/api/knowledge/external/web-sources', sources)
+            page.route('**/api/knowledge/external/partner-policy-grant', lambda route: route.fulfill(
+                json={'success': True, 'data': {'enabled': False}}
+            ))
+            page.evaluate("switchPage('notes', null)")
+            page.wait_for_function('kbState.initialized')
+            root = page.locator('#page-notes')
+            personal = root.locator('[data-kb-view="personal"]')
+            external = root.locator('[data-kb-view="external"]')
+            panel = root.locator('[data-kb-external]')
+            expect(root.locator('.page-header-actions .users-view-tabs')).to_have_count(1)
+            expect(personal).to_have_attribute('aria-selected', 'true')
+            expect(panel).to_be_hidden()
+            external.click()
+            expect(external).to_have_class(re.compile(r'\bactive\b'))
+            expect(external).to_have_attribute('aria-selected', 'true')
+            expect(personal).to_have_attribute('aria-selected', 'false')
+            expect(root.locator('.kb-layout')).to_be_hidden()
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('Android 16 CDD')
+            expect(panel.locator('[data-kb-status]')).to_have_count(0)
+            expect(panel.locator('form [data-kb-refresh]')).to_be_visible()
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            expect(panel.locator('form [name="kind"], form [name="license"], form [name="android_version"]')).to_have_count(0)
+            expect(panel.locator('[data-kb-reset]')).to_be_hidden()
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('GMS Certification Requirements')
+            table = panel.locator('.kb-source-table')
+            expect(table.locator('colgroup col')).to_have_count(6)
+            expect(table.locator('tbody tr').first.locator('td').nth(3)).to_have_text('4441')
+            geometry = table.evaluate("""table => {
+                const headers = [...table.tHead.rows[0].cells];
+                return [...table.tBodies[0].rows].flatMap(row => [...row.cells].map((cell, index) => {
+                    const head = headers[index];
+                    const a = head.getBoundingClientRect();
+                    const b = cell.getBoundingClientRect();
+                    const style = getComputedStyle(cell);
+                    return {
+                        aligned: Math.abs(a.x - b.x) < 1 && Math.abs(a.width - b.width) < 1,
+                        textAligned: getComputedStyle(head).textAlign === style.textAlign,
+                        expectedAlignment: style.textAlign === (index < 2 ? 'left' : 'center'),
+                        noWrap: style.whiteSpace === 'nowrap',
+                        clipped: style.overflowX === 'hidden' && style.textOverflow === 'ellipsis',
+                        compact: index !== 2 || b.width <= 80,
+                        actionsFit: index !== 5 || cell.firstElementChild.scrollWidth <= cell.firstElementChild.clientWidth + 1,
+                    };
+                }));
+            }""")
+            for cell in geometry:
+                self.assertTrue(all(cell.values()), cell)
+            url_cell = table.locator('tbody tr').first.locator('td').nth(1)
+            expect(url_cell).to_have_attribute('title', 'https://source.android.com/docs/compatibility/16/android-16-cdd')
+            form = panel.locator('form')
+            url = 'https://source.android.com/docs/compatibility/17/android-17-cdd'
+            form.locator('[name="url"]').fill(url)
+            form.locator('[data-kb-submit]').click()
+            expect(form.locator('[name="url"]')).to_have_value('')
+            expect(form.locator('[data-kb-submit]')).to_be_enabled()
+            self.assertEqual(submitted[-1], {'url': url, 'name': ''})
+            form.locator('[name="url"]').fill(url)
+            form.locator('[name="name"]').fill('手写名称')
+            form.locator('[data-kb-submit]').click()
+            expect(form.locator('[name="url"]')).to_have_value('')
+            expect(form.locator('[data-kb-submit]')).to_be_enabled()
+            self.assertEqual(submitted[-1], {'url': url, 'name': '手写名称'})
+            deny[0] = True
+            page.evaluate('window.requestElevatedAccess = async () => false')
+            panel.locator('[data-kb-refresh]').click()
+            expect(page.locator('#toast')).to_contain_text('已取消管理员验证')
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('Android 16 CDD')
+            expect(panel).not_to_contain_text('HTTP 403')
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            deny[0] = False
+            panel.locator('[data-kb-refresh]').click()
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            self.assertGreaterEqual(len(calls), 3)
+            personal.click()
+            expect(personal).to_have_attribute('aria-selected', 'true')
+            expect(personal).to_have_class(re.compile(r'\bactive\b'))
+            expect(external).to_have_attribute('aria-selected', 'false')
+            expect(panel).to_be_hidden()
+            expect(root.locator('.kb-layout')).to_be_visible()
+        finally:
+            page.close()
+
     def test_vpn_proxy_builtin_card_opens_management_panel_once(self):
         page = self.new_page()
         try:
@@ -356,7 +466,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         finally:
             page.close()
 
-    def test_websites_init_and_migration_never_post_to_server(self):
+    def test_websites_init_never_posts_to_server(self):
         """Initialization and defaults are local; only user mutations may sync."""
         page = self.new_page()
         save_requests = []
@@ -367,13 +477,11 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             else None,
         )
         try:
-            # Seed the legacy flat storage so the init path exercises the
-            # migrateToCategories + saveCategories branch, then load the
-            # shell with an empty categorized store.
+            # Seed current categorized storage.
             page.add_init_script(
                 """
                 localStorage.setItem('gms_tools_categories', JSON.stringify({
-                    '其他': [{ icon: '🧪', title: 'Legacy Tool', url: 'https://legacy.example' }]
+                    '其他': [{ icon: '🧪', title: 'My Tool', url: 'https://example.test' }]
                 }));
                 """
             )

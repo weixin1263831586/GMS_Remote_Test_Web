@@ -72,27 +72,23 @@
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
 }
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) thead th {
-    position: sticky; top: 0; z-index: 1; height: var(--ui-table-header-height);
-    padding: 9px 10px;
+    position: sticky; top: 0; z-index: 1;
     background: var(--light-bg); border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
 }
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody td {
-    height: var(--ui-table-row-height); padding: 8px 10px;
-    border-bottom: 1px solid var(--border-color); vertical-align: middle;
+    border-bottom: 1px solid var(--border-color);
 }
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
 }
-.page-ui-rework :is(.table-placeholder, .suite-empty) {
-    color: var(--text-muted);  padding: 20px 12px;
-}
+.page-ui-rework :is(.table-placeholder, .suite-empty) { color: var(--text-muted); }
+.page-ui-rework .suite-empty { padding: 20px 12px; }
 /* 测试工作台：保留三列配置、设备/操作两列、双日志 Tab 与所有按钮。 */
 #page-test.page-ui-rework :is(.input-container, .adb-frame, .control-frame, .log-frame) {
     background: var(--card-bg); border: 1px solid var(--border-color);
     border-radius: 8px; box-shadow: none; backdrop-filter: none;
 }
-#page-test.page-ui-rework .input-container { padding: 12px; margin-bottom: 10px; }
 #page-test.page-ui-rework .input-table td { padding-right: 10px; }
 #page-test.page-ui-rework .input-table td:last-child { padding-right: 0; }
 #page-test.page-ui-rework .middle-row {
@@ -266,6 +262,22 @@
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 9%, var(--card-bg));
 }
+/* 外部知识源：长网址占用剩余宽度，短字段和操作列保持紧凑。 */
+#page-notes [data-kb-sources] { overflow-x: auto; }
+#page-notes .kb-source-table { table-layout: fixed; min-width: 1120px; }
+#page-notes .kb-source-table col:nth-child(1) { width: 270px; }
+#page-notes .kb-source-table col:nth-child(3) { width: 76px; }
+#page-notes .kb-source-table col:nth-child(4) { width: 100px; }
+#page-notes .kb-source-table col:nth-child(5) { width: 164px; }
+#page-notes .kb-source-table col:nth-child(6) { width: 270px; }
+#page-notes .kb-source-table :is(th, td) {
+    text-align: center; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis;
+}
+#page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
+#page-notes .kb-source-actions { display: flex; align-items: center; justify-content: center; gap: 4px; }
+#page-notes .kb-source-actions > button { flex-shrink: 0; white-space: nowrap; }
+
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
 #page-notes.page-ui-rework .kb-layout { gap: 10px; }
 #page-notes.page-ui-rework .kb-layout > .pane {
@@ -373,6 +385,7 @@
     display: inline-flex; align-items: center; justify-content: center; gap: 6px;
     flex: 0 0 auto; min-height: var(--ui-control-height); padding: 6px 13px; white-space: nowrap;
 }
+#page-security-audit .audit-filter-bar .audit-toolbar-button[data-busy-size] { padding-inline:6px; gap:2px; }
 #page-security-audit .audit-filter-bar .audit-toolbar-export {
     background: color-mix(in srgb, var(--primary-color) 17%, var(--card-bg));
     border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
@@ -406,14 +419,14 @@
 }
 #page-security-audit .audit-log-table { table-layout: fixed; min-width: 780px; }
 #page-security-audit .audit-log-table thead th {
-    position: sticky; top: 0; z-index: 2; height: var(--ui-table-header-height); padding: 9px 10px;
+    position: sticky; top: 0; z-index: 2;
     text-align: left;  border-bottom: 1px solid var(--border-color);
     background: var(--light-bg);
 }
 #page-security-audit .audit-log-table :is(th:nth-child(2),th:nth-child(3),th:nth-child(6)),
 #page-security-audit .audit-log-table :is(td:nth-child(2),td:nth-child(3),td:nth-child(6)) { text-align: center; }
 #page-security-audit.page-ui-rework .audit-log-table tbody td {
-    height: var(--ui-table-row-height); max-width: 0; padding: 8px 10px;
+    max-width: 0;
      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 #page-security-audit .audit-log-row { cursor: pointer; }
@@ -507,14 +520,14 @@
 }
 #page-security-audit .audit-mail-table { min-width:780px; table-layout:fixed; }
 #page-security-audit .audit-mail-table thead th {
-    position:sticky; top:0; z-index:2; height:var(--ui-table-header-height); padding:9px 10px;
+    position:sticky; top:0; z-index:2;
     text-align:left;
     border-bottom:1px solid var(--border-color); background:var(--light-bg);
 }
 #page-security-audit .audit-mail-table th:last-child,
 #page-security-audit .audit-mail-table td:last-child { text-align:center; }
 #page-security-audit.page-ui-rework .audit-mail-table tbody td {
-    height:var(--ui-table-row-height); max-width:0; padding:8px 10px;
+    max-width:0;
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 #page-security-audit .audit-mail-row { cursor:pointer; }
@@ -761,13 +774,13 @@
     align-items: center; column-gap: var(--suite-row-gap);
 }
 #page-test-suites .suite-file-table-head {
-    min-height: var(--ui-table-header-height-dense); flex: 0 0 auto; padding: 0 12px;
+    flex: 0 0 auto;
     background: var(--light-bg); border-bottom: 1px solid var(--border-color);
     color: var(--text-muted);
 }
 #page-test-suites .suite-file-list { min-height: 0; overflow-y: auto; overflow-x: hidden; }
 #page-test-suites.page-ui-rework .suite-file-row {
-    min-height: var(--ui-table-row-height); padding: 7px 12px; border-radius: 0;
+    border-radius: 0;
     border: 0; border-bottom: 1px solid var(--border-color);
     background: transparent; box-shadow: none;
 }
@@ -882,9 +895,6 @@
 #page-users .users-col-actions {width:125px}
 #page-users :is(.users-table,.agent-token-table,.sdk-source-table) :is(th,td) {
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-}
-#page-users :is(.users-table,.agent-token-table,.sdk-source-table) tbody td {
-    height:var(--ui-table-row-height);box-sizing:border-box;vertical-align:middle;
 }
 #page-users .users-table .users-empty-message,
 #page-users :is(.agent-token-table,.sdk-source-table) .agent-access-empty {

@@ -45,9 +45,7 @@ jobs:
         run: |
           set -euo pipefail
           python -m pytest -q tests/test_live_module_audit.py tests/test_soak_host_config.py
-          python -m pytest --collect-only -q \
-            features worker/tests tests/architecture tests/contract \
-            tests/integration tests/unit tests/quality tests/reliability \
+          make repository-test PY=python PYTEST_ARGS="--collect-only" \
             > "$RUNNER_TEMP/gms-test-collection.txt"
           tail -n 1 "$RUNNER_TEMP/gms-test-collection.txt"
       - name: Repository-wide feature and Worker regression in isolated scratch
@@ -62,10 +60,8 @@ jobs:
           unset GMS_DATA_ROOT
           set +e
           HOME="$RUNNER_TEMP/gms-audit-home" \
-            python -m pytest -q \
-              features worker/tests tests/architecture tests/contract \
-              tests/integration tests/unit tests/quality tests/reliability \
-              --junitxml="$RUNNER_TEMP/gms-full-regression.xml"
+            make repository-test PY=python \
+              PYTEST_ARGS="--junitxml=$RUNNER_TEMP/gms-full-regression.xml"
           code=$?
           echo "$code" > "$RUNNER_TEMP/gms-full-regression.exit"
           exit 0

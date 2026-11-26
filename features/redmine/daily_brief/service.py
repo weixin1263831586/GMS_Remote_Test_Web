@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 from features.sdk import sdk_sources_available as _sdk_sources_available  # noqa: E402
 
 from .config import (  # noqa: E402
-    DEFAULT_BRIEF_CONFIG,
     RUNTIME_CONFIG_KEY,
     analyzer_env_extra,
     build_brief_analyzer,
@@ -518,6 +517,40 @@ class DailyBriefService:
         )
         return self._enqueue_new_run(run)
 
+    def enqueue_reanalysis(
+        self, brief_date: str, issue_id: int,
+        run_id: str | None = None,
+    ) -> dict[str, Any]:
+        """单 issue 重新分析入队。
+
+        优先绑定显式 run_id 精确操作；未提供时才回落
+        该日期最新 run（旧 API 兼容）。
+        """
+        if run_id:
+            run = self.repository.get_run(run_id)
+            if run is None or run.owner_id != self.owner_id:
+                return {"error": f"daily brief run not found: {run_id}"}
+        else:
+            run = self.latest_run(brief_date)
+            if run is None:
+                return {"error": f"no daily brief run for {brief_date}"}
+        record = self.repository.get_issue(run.run_id, issue_id)
+        if record is None:
+            return {"error": f"issue {issue_id} not in run {run.run_id}"}
+        if run.status not in TERMINAL_RUN_STATUSES:
+            return {"error": f"run {run.run_id} is still executing; retry after it finishes", "code": "STATE_CONFLICT"}
+        job, created = self.repository.enqueue_job(
+            run.run_id, kind="issue", issue_id=issue_id
+        )
+        return {
+            "run_id": run.run_id,
+            "job_id": job["job_id"],
+            "issue_id": issue_id,
+            "status": "pending",
+            "queued": created,
+        }
+
+
     def _enqueue_new_run(self, run: DailyBriefRun) -> dict[str, Any]:
         created, job, job_created = self.repository.create_run_and_enqueue_job(run)
         persisted = self.repository.get_run(job["run_id"])
@@ -548,7 +581,7 @@ class DailyBriefService:
             self.repository.delete_issues(run.run_id)
             # 重冻结会删掉全部 issue 行；仍在排队的 issue-job 必须一并
             # 作废，否则它们随后被领取时读不到 issue 行。
-            self.repository.jobs.cancel_queued_issue_jobs(run.run_id)
+            self.repository.cancel_queued_issue_jobs(run.run_id)
         # 复用 run 重新执行前清除上一轮的取消标志。
         self.repository.clear_cancel(run.run_id)
         self.repository.update_run(run)
@@ -1190,7 +1223,7 @@ class DailyBriefService:
             return {"error": f"issue {issue_id} no longer in run {run.run_id}"}
         return {"run_id": run.run_id, "issue_id": issue_id, "status": refreshed.status}
 
-__all__ = ["DEFAULT_BRIEF_CONFIG", "DailyBriefService", "normalize_daily_brief_config"]
+__all__ = ["DailyBriefService"]
 
 
 def valid_resume_trace(

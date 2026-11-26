@@ -1729,11 +1729,9 @@ ALL_TOOLS: list[dict[str, Any]] = [
         {
             "name": "gms_rt_knowledge_search",
             "description": (
-                "Search background-only Android system-mechanism knowledge "
-                "(android-internals wiki; ADR 0014). Hits explain how a "
-                "mechanism (LMKD, Binder, Choreographer, ...) is supposed to "
-                "work and carry provenance (chapter, applicable_versions, "
-                "last_verified, license). Background only: never verified "
+                "Search external Android knowledge: system mechanisms and public CDD requirements. "
+                "Use POL- citation tokens for exact retained text, or compare:SECTION|ID for current version comparison. "
+                "Results carry provenance. Normative candidates require applicability checks; never verified "
                 "root-cause evidence, never a substitute for gms_rt_sdk_* "
                 "source forensics. CLI equivalent: gms-rt-knowledge-search."
             ),
@@ -1744,7 +1742,7 @@ ALL_TOOLS: list[dict[str, Any]] = [
                         "type": "string",
                         "minLength": 0,
                         "maxLength": 256,
-                        "description": "Mechanism keywords, e.g. 'LMKD PRESSURE_AFTER_KILL'.",
+                        "description": "Mechanism or CDD keywords, POL- citation token, or compare:SECTION|ID.",
                     },
                     "limit": {"type": "integer", "minimum": 1, "maximum": 10},
                     "android_api_level": {

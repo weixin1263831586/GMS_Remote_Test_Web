@@ -36,9 +36,6 @@ DEFAULT_BRIEF_CONFIG: dict[str, Any] = {
     # device_evidence toolset（snapshot/logcat/只读 shell），prompt 会
     # 告知模型该设备可用于运行时佐证。空 = 不做设备实证。
     "device_serial": "",
-    # Legacy configuration keys remain readable; analysis has no hard budget.
-    "max_turns": 0,
-    "issue_timeout_seconds": 0,
     "max_parallel_issues": 1,
     "max_issues": 50,
     "stale_days": DEFAULT_STALE_DAYS,
@@ -178,7 +175,7 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
 
 
 def build_brief_analyzer(config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
-    """Build unbudgeted analysis; legacy budgets cannot truncate evidence gathering."""
+    """Build analysis without a hard step or duration budget."""
     return KkAgentRedmineAnalyzer(
         max_turns=0,
         timeout_seconds=0,

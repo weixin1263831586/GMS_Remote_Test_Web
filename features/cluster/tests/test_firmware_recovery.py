@@ -14,6 +14,7 @@ from features.cluster.firmware_recovery import (
     release_local_firmware_recovery,
     run_local_firmware_recovery,
 )
+from foundation.cluster_port import FirmwareRecoveryResult, FrozenFirmwareRecovery, PreparedFirmwareRecovery
 from foundation.error_model import ApiError
 
 from .api_hardening_fixture import ClusterApiHardeningFixture
@@ -209,10 +210,21 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
             source_type="firmware", ttl_seconds=3600)
         return prepare_local_firmware_recovery(self.request, "browser-client", ["ABC"], "profile-1", 0)
 
+    def test_prepared_recovery_matches_port_contract(self):
+        snapshot = self.freeze(boot_wait_seconds="12")
+        self.assertEqual(set(snapshot), FrozenFirmwareRecovery.__required_keys__)
+        self.assertEqual(snapshot["boot_wait_seconds"], 12)
+        prepared = self.prepare_local()
+        try:
+            self.assertEqual(set(prepared), PreparedFirmwareRecovery.__required_keys__)
+            self.assertEqual(set(prepared["snapshot"]), FrozenFirmwareRecovery.__required_keys__)
+        finally:
+            release_local_firmware_recovery(prepared)
+
     def test_local_receipt_runs_once_and_keeps_original_burn_lock(self):
         prepared = self.prepare_local()
         execute = Mock(return_value={"success": True, "adb_recovered": True})
-        with patch("worker.inventory.execute_device_action", execute):
+        with patch("worker.device_actions.execute_device_action", execute):
             first = asyncio.run(run_local_firmware_recovery(prepared))
             second = asyncio.run(run_local_firmware_recovery(prepared))
         assert first["success"] is True and first["command_id"] == second["command_id"]
@@ -226,13 +238,13 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
     def test_lost_burn_claim_never_sends_hid(self):
         prepared = self.prepare_local()
         self.repo.claims.release("firmware:browser-client")
-        with patch("worker.inventory.execute_device_action") as execute, self.assertRaises(RuntimeError):
+        with patch("worker.device_actions.execute_device_action") as execute, self.assertRaises(RuntimeError):
             asyncio.run(run_local_firmware_recovery(prepared))
         execute.assert_not_called()
 
     def test_completed_input_without_adb_is_failed_recovery(self):
         prepared = self.prepare_local()
-        with patch("worker.inventory.execute_device_action", return_value={"success": True, "adb_recovered": False}):
+        with patch("worker.device_actions.execute_device_action", return_value={"success": True, "adb_recovered": False}):
             result = asyncio.run(run_local_firmware_recovery(prepared))
         assert result["success"] is False and result["reconcile_required"] is True
 
@@ -240,7 +252,7 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         prepared = self.prepare_local()
         receipt = {"success": False, "adb_recovered": True, "adb_state": "device",
                    "native_mode_restored": False, "commands_executed": 1, "commands_total": 1}
-        with patch("worker.inventory.execute_device_action", return_value=receipt):
+        with patch("worker.device_actions.execute_device_action", return_value=receipt):
             result = asyncio.run(run_local_firmware_recovery(prepared))
         assert result["success"] is False
         assert "ADB 已连接" in result["error"] and "USB" in result["error"]
@@ -252,6 +264,10 @@ class FirmwareRecoveryTests(ClusterApiHardeningFixture, unittest.TestCase):
         prepared = self.prepare_local()
         with patch.object(self.repo, "start_local_command", side_effect=RuntimeError("sqlite busy")):
             receipt = asyncio.run(run_local_firmware_recovery(prepared))
-        assert receipt["status"] == "failed"
+        assert FirmwareRecoveryResult.__required_keys__ <= set(receipt)
+        assert receipt["success"] is False
+        assert receipt["reconcile_required"] is True
+        assert receipt["replay_completed"] is False
+        assert self.repo.get_command(receipt["command_id"])["status"] == "failed"
         assert "reconcile" in (receipt.get("error") or "")
         assert self.repo.claims.active_claim("worker-246:ABC") is not None

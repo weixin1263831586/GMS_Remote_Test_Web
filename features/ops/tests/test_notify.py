@@ -113,10 +113,10 @@ class WebhookTests(unittest.TestCase):
 
 class DispatchTests(unittest.TestCase):
     def test_disabled_config_sends_nothing(self):
-        self.assertEqual(
-            notify_incident({"kind": "k"}, cfg={"enabled": False})["reason"],
-            "ops alerts disabled",
-        )
+        result = notify_incident({"kind": "k"}, cfg={"enabled": False})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["sent"], [])
+        self.assertEqual(result["reason"], "ops alerts disabled")
 
     def test_enabled_config_calls_webhook(self):
         with mock.patch(

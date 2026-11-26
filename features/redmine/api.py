@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from features.auth import require_authenticated_user
 from features.email import send_email
 from features.redmine.agent import RedmineAgent
+from features.redmine.analysis.reporting import IssueReporting
 from features.redmine.config import config_manager
 from features.redmine.dashboard import (
     add_department_profile,
@@ -360,11 +361,11 @@ def _enrich_issue_for_display(
     manager），多 owner 部署下不能用全局配置拼附件链接。
     """
     ai = issue.get("ai_json") or {}
-    enriched = RedmineAgent.enrich_issue_display_fields({
+    enriched = IssueReporting.enrich_issue_display_fields({
         **issue,
         "title": issue.get("subject") or ai.get("title", ""),
-        "problem_description": issue.get("problem_description") or RedmineAgent.extract_description(issue),
-        "error_info": issue.get("error_info") or RedmineAgent.extract_error_from_failures(issue.get("failures_json", [])),
+        "problem_description": issue.get("problem_description") or IssueReporting.extract_description(issue),
+        "error_info": issue.get("error_info") or IssueReporting.extract_error_from_failures(issue.get("failures_json", [])),
         "error_analysis": issue.get("error_analysis") or ai.get("root_cause_guess", ""),
         "solution": issue.get("solution") or ai.get("solution", ""),
         "patch_direction": issue.get("patch_direction") or ai.get("patch_direction", ""),
@@ -379,9 +380,9 @@ def _enrich_issue_for_display(
     if fact:
         raw_analysis = issue.get("error_analysis") or ai.get("root_cause_guess", "")
         raw_solution = issue.get("solution") or ai.get("solution", "")
-        if not RedmineAgent._meaningful_field(raw_analysis) and fact.get("root_cause"):
+        if not IssueReporting._meaningful_field(raw_analysis) and fact.get("root_cause"):
             enriched["error_analysis"] = fact["root_cause"]
-        if not RedmineAgent._meaningful_field(raw_solution) and fact.get("solution"):
+        if not IssueReporting._meaningful_field(raw_solution) and fact.get("solution"):
             enriched["solution"] = fact["solution"]
         if fact.get("verification"):
             current = str(enriched.get("solution") or "")
@@ -957,18 +958,6 @@ async def update_email_config(request: Request):
         "***" if email.get("encrypted_password") else ""
     )
     return {"success": True, "data": {"email": public_email, "email_mode": "smtp" if email.get("smtp_host") else "unconfigured"}}
-
-
-from . import statistics_api as _statistics_api  # noqa: E402
-
-
-router.include_router(_statistics_api.router)
-
-from .knowledge import api as _knowledge_api  # noqa: E402
-
-
-router.include_router(_knowledge_api.router)
-get_department_overdue_statistics = _statistics_api.get_department_overdue_statistics
 
 
 def _send_reminder_email(to_addr: str, subject: str, body: str, manager=None) -> dict[str, Any]:

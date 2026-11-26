@@ -3,19 +3,33 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
+from typing import Any
+
+from starlette.requests import Request
 
 from features.auth import AGENT_ROLE, is_machine_principal, principal_owner_id, require_human_principal
 from features.devices import profile_store, usbip_source_host_for_device
 from foundation.aoa_hid_mode import profile_hid_options
 from foundation.aoa_profile import commands_digest, parse_profile_commands
 from foundation.aoa_recovery_policy import firmware_compatibility, require_verified_recovery, target_firmware_context
+from foundation.cluster_port import (
+    ClusterRepositoryContract,
+    ClusterServiceContract,
+    FirmwareRecoveryResult,
+    FrozenFirmwareRecovery,
+    PreparedFirmwareRecovery,
+)
 from foundation.error_model import ApiError
 
 
 logger = logging.getLogger(__name__)
 
 
-def preflight_firmware_recovery(request, cluster, worker_id, devices, profile_id, boot_wait_seconds=60):
+def preflight_firmware_recovery(
+    request: Request, cluster: ClusterServiceContract, worker_id: str, devices: list[str],
+    profile_id: str, boot_wait_seconds: int | str = 60,
+) -> dict[str, Any]:
     """Read-only readiness check before any upload, claim or firmware command."""
     worker_id = worker_id or cluster.config.local_worker_id
     if not worker_id:
@@ -37,8 +51,10 @@ def preflight_firmware_recovery(request, cluster, worker_id, devices, profile_id
             "mapping_policy": snapshot["mapping_options"]["aoa_mapping_policy"]}
 
 
-def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[str],
-                             profile_id: str, boot_wait_seconds=60) -> dict | None:
+def freeze_firmware_recovery(
+    request: Request, repository: ClusterRepositoryContract, worker_id: str, devices: list[str],
+    profile_id: str, boot_wait_seconds: int | str = 60,
+) -> FrozenFirmwareRecovery | None:
     if not profile_id:
         return None
     # ADR 0012 human-only，双层守卫：
@@ -131,8 +147,10 @@ def freeze_firmware_recovery(request, repository, worker_id: str, devices: list[
     }
 
 
-def prepare_local_firmware_recovery(request, client_id: str, devices: list[str],
-                                    profile_id: str, boot_wait_seconds=60) -> dict | None:
+def prepare_local_firmware_recovery(
+    request: Request, client_id: str, devices: list[str],
+    profile_id: str, boot_wait_seconds: int | str = 60,
+) -> PreparedFirmwareRecovery | None:
     if not profile_id:
         return None
     from .api import service
@@ -164,14 +182,14 @@ def prepare_local_firmware_recovery(request, client_id: str, devices: list[str],
             "operation_id": f"firmware-aoa:{claim['id']}"}
 
 
-def release_local_firmware_recovery(prepared: dict | None) -> None:
+def release_local_firmware_recovery(prepared: PreparedFirmwareRecovery | None) -> None:
     if prepared:
         from .api import service
 
         service().repository.claims.release(prepared["extra_claim_source_id"])
 
 
-def validate_local_firmware_recovery(prepared: dict | None) -> None:
+def validate_local_firmware_recovery(prepared: PreparedFirmwareRecovery | None) -> None:
     if prepared:
         from .api import service
         from .device_operations.api import validate_local_firmware_identity
@@ -184,25 +202,27 @@ def validate_local_firmware_recovery(prepared: dict | None) -> None:
         validate_local_firmware_identity(prepared["device_id"], prepared["snapshot"]["usb_port_path"])
 
 
-def refresh_post_burn_inventory(repository, worker_id: str) -> None:
+def refresh_post_burn_inventory(repository: ClusterRepositoryContract, worker_id: str) -> None:
     """烧写恢复完成后立即把本机设备清单写入库存（best-effort）。
 
     真实 agent 守护进程的下一个周期心跳（默认 15s）之前，库存还停留在
     accessory 窗口的 usb_only；完成触发的设备列表刷新会拿到旧快照。
     本函数让 Controller 主机烧写结束后库存立即可用。探测器经
-    local_bridge 同宿主桥（worker.inventory，白名单内）；
+    local_bridge 同宿主桥；
     刷新失败只告警，绝不影响烧写/恢复结果。
     """
     from . import local_bridge
 
     try:
         devices = local_bridge._probe_devices()
-        repository.refresh_devices(worker_id, devices)
+        repository.refresh_worker_devices(worker_id, devices)
     except Exception:
         logger.warning("post-burn inventory refresh failed", exc_info=True)
 
 
-async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
+async def run_local_firmware_recovery(
+    prepared: PreparedFirmwareRecovery, on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> FirmwareRecoveryResult:
     """Continue the frozen burn claim, with a durable receipt before HID input."""
     from .api import service
     from .device_operations.api import execute_local_firmware_aoa
@@ -258,12 +278,9 @@ async def run_local_firmware_recovery(prepared: dict, on_event=None) -> dict:
             "error": "local AOA recovery dispatch failed; firmware already flashed, "
                      "replay the AOA recovery separately (reconcile required)",
         })
-        await asyncio.to_thread(
-            refresh_post_burn_inventory, repository, prepared["worker_id"])
-        return repository.get_command(command["id"])
-    current = repository.get_command(command["id"])
+    current = repository.get_command(command["id"]) or {}
     result = current.get("result") or {}
-    success = (current["status"] == "completed" and result.get("success") is True
+    success = (current.get("status") == "completed" and result.get("success") is True
                and result.get("adb_recovered") is True)
     from foundation.aoa_recovery_policy import recovery_failure_reason
 

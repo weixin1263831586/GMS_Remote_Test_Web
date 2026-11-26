@@ -22,7 +22,6 @@ from typing import Any
 
 from features.email.config import (
     email_password,
-    load_email_config,
     resolve_email_config,
 )
 from features.email.message import (
@@ -126,7 +125,7 @@ def _send_pipeline(
     manager,
 ) -> dict[str, Any]:
     """执行一次发送，返回结果字典（不发台账）。"""
-    email_cfg = load_email_config(manager)
+    email_cfg = resolve_email_config(manager)
     # 全局总开关：`email.enabled=false`（或 GMS_EMAIL_ENABLED=0）关闭全部
     # 出站邮件——Redmine 提醒、ATS 运行通知、运维告警、通用发送 API 都
     # 走这个单一收口；默认开启（缺配置 ≠ 关闭）。

@@ -13,26 +13,37 @@ from .external import (
     federated_search,
     federated_status,
 )
+from .external.web_sources import (
+    WebKnowledgeProvider,
+    partner_policy_allowed,
+    policy_search_terms,
+    recall_web_references,
+)
+from .policy_imports import recall_owner_policy_imports
 
 
 __all__ = [
     "EVIDENCE_LEVEL_BACKGROUND",
     "ExternalKnowledgeError",
     "ExternalKnowledgeProvider",
+    "ExternalSearchRequest",
     "KnowledgeHit",
     "ProviderStatus",
     "federated_reindex",
     "federated_search",
     "federated_status",
     "page_router",
+    "partner_policy_allowed",
+    "policy_search_terms",
+    "recall_owner_policy_imports",
+    "recall_web_references",
     "router",
+    "sync_due_web_sources",
 ]
 
 
 _LAZY_API_EXPORTS = {
-    "AndroidInternalsProvider": ".external.android_internals",
     "ExternalSearchRequest": ".external_api",
-    "index_db_path": ".external.android_internals",
 }
 
 
@@ -46,3 +57,7 @@ def __getattr__(name: str):
     value = getattr(import_module(module_path, __name__), name)
     globals()[name] = value
     return value
+
+
+def sync_due_web_sources():
+    return WebKnowledgeProvider().sync_due()

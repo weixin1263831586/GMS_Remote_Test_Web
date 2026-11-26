@@ -6,6 +6,8 @@ on:
     paths:
       - 'web/static/css/ui-sizing.css'
       - 'web/static/css/aoa-workbench.css'
+      - 'tests/runtime_ui/test_aoa_workbench.py'
+      - 'tests/runtime_ui/test_aoa_calibrate_locate.py'
       - 'web/static/css/workspace-panels.css'
       - 'web/static/js/shell/utility-tools.js'
       - 'web/shell/components/tools-page-body.html'
@@ -111,6 +113,8 @@ jobs:
             tests/test_ui_sizing_contract.py \
             tests/test_typography_contract.py \
             features/reports/tests/test_analysis_agent.py \
+            tests/runtime_ui/test_aoa_workbench.py::RuntimeAoaWorkbenchTests::test_command_grid_keeps_labels_comments_and_actions_on_one_line \
+            tests/runtime_ui/test_aoa_calibrate_locate.py \
             tests/runtime_ui/test_ui_sizing_rendered.py \
             tests/runtime_ui/test_page_outer_inset.py \
             tests/runtime_ui/test_header_action_alignment.py \

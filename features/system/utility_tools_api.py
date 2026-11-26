@@ -56,22 +56,6 @@ def _download_name(tool_id: str) -> str:
     return UTILITY_TOOL_MANIFEST[tool_id]['download_name']
 
 
-def _resolve_tool_id(tool_id_or_name: str) -> str:
-    """Map a request path to a manifest tool_id.
-
-    Accepts the stable ID first; a legacy manifest file name (e.g. a tool
-    card saved in a browser's localStorage before the stable-ID migration)
-    is tolerated and mapped to its tool so old client state keeps working.
-    """
-    normalized = str(tool_id_or_name or '').strip('/')
-    if normalized in UTILITY_TOOL_MANIFEST:
-        return normalized
-    for tool_id, entry in UTILITY_TOOL_MANIFEST.items():
-        if normalized in (entry['download_name'], entry['path']):
-            return tool_id
-    return normalized
-
-
 @router.get('/api/tools/list')
 @handle_api_errors
 async def list_utility_tools():
@@ -132,11 +116,10 @@ async def browse_utility_tools(
 @router.get('/api/tools/download/{tool_id:path}')
 @handle_api_errors
 async def download_utility_tool(tool_id: str):
-    """按稳定 tool_id 下载 tools/ 清单中的文件（兼容历史文件名）"""
-    resolved_id = _resolve_tool_id(tool_id)
-    full_path = _resolve_allowed_utility_tool(resolved_id)
+    """按 tool_id 下载清单中的文件"""
+    full_path = _resolve_allowed_utility_tool(tool_id)
     return FileResponse(
         path=str(full_path),
-        filename=_download_name(resolved_id),
+        filename=_download_name(tool_id),
         media_type='application/octet-stream',
     )

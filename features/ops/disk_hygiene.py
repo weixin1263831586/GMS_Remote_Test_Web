@@ -20,15 +20,20 @@ from __future__ import annotations
 import shutil
 import time
 from pathlib import Path
-from typing import Any
 
 from foundation.config import settings
+from foundation.ops_port import (
+    DEFAULT_STAGE_MAX_AGE_DAYS,
+    DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
+    DirectorySize,
+    DiskCleanupPreview,
+    DiskCleanupResult,
+    StageCandidate,
+)
 
 
 STAGE_SUBDIR = "automation/artifact-stage"
 STALE_PART_SECONDS = 24 * 3600
-DEFAULT_STAGE_MAX_AGE_DAYS = 7
-DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS = 7
 
 
 def disk_free_gb() -> float | None:
@@ -38,9 +43,9 @@ def disk_free_gb() -> float | None:
         return None
 
 
-def largest_dirs_under(root: Path, *, limit: int = 5) -> list[dict[str, Any]]:
+def largest_dirs_under(root: Path, *, limit: int = 5) -> list[DirectorySize]:
     """Best-effort top-level size overview (one level deep)."""
-    entries: list[dict[str, Any]] = []
+    entries: list[DirectorySize] = []
     try:
         iterator = list(root.iterdir())[:200]
     except OSError:
@@ -208,10 +213,10 @@ def _protected_stage_run_ids() -> set[str] | None:
 
 def _stage_candidates(
     stage_root: Path, *, stage_max_age_days: int
-) -> list[dict[str, Any]]:
+) -> list[StageCandidate]:
     """Shared candidate list for preview, dry-run and actual cleanup."""
     stage_cutoff = time.time() - stage_max_age_days * 86400
-    candidates: list[dict[str, Any]] = []
+    candidates: list[StageCandidate] = []
     if not stage_root.is_dir() or stage_root.is_symlink():
         return candidates
     try:
@@ -263,7 +268,7 @@ def _stage_candidates(
 
 def preview_cleanup(
     *, stage_max_age_days: int = DEFAULT_STAGE_MAX_AGE_DAYS
-) -> dict[str, Any]:
+) -> DiskCleanupPreview:
     stage_root = settings.data_root / STAGE_SUBDIR
     staged = _stage_candidates(stage_root, stage_max_age_days=stage_max_age_days)
     staged.sort(key=lambda item: item["size_gb"], reverse=True)
@@ -286,7 +291,7 @@ def run_cleanup(
     upload_temp_max_age_days: int = DEFAULT_UPLOAD_TEMP_MAX_AGE_DAYS,
     include_stage: bool = False,
     dry_run: bool = True,
-) -> dict[str, Any]:
+) -> DiskCleanupResult:
     """Sweep rebuildable files.
 
     ``include_stage=False`` (the default) keeps staged firmware untouched —
@@ -335,10 +340,11 @@ def run_cleanup(
     freed += amount
     removed += count
 
+    free = disk_free_gb()
     return {
         "dry_run": False,
         "include_stage": include_stage,
         "freed_bytes": freed,
         "removed_files": removed,
-        "disk_free_gb": round(disk_free_gb(), 2) if disk_free_gb() is not None else None,
+        "disk_free_gb": round(free, 2) if free is not None else None,
     }

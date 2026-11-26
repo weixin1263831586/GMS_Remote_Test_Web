@@ -58,11 +58,6 @@ def resolve_email_config(manager: Any = None) -> dict[str, Any]:
     return merged
 
 
-def load_email_config(manager) -> dict[str, Any]:
-    """从 redmine_dashboard.email 读取 SMTP 配置（兼容旧调用）。"""
-    return resolve_email_config(manager)
-
-
 def email_password(email_cfg: dict[str, Any]) -> str:
     """SMTP 密码优先取密文解密；遗留明文仅作旧部署兼容读取。"""
     encrypted = str(email_cfg.get("encrypted_password") or "").strip()

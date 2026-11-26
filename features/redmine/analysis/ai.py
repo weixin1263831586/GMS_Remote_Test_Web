@@ -1,4 +1,4 @@
-"""RedmineAgent: nightly Redmine triage and report generation."""
+"""Model-backed issue analysis and shared model execution."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+from collections.abc import Callable
 from typing import Any
 
 import requests
@@ -18,9 +19,13 @@ from features.redmine.config import config_manager
 logger = logging.getLogger(__name__)
 
 
-class AiAnalysisMixin:
-    async def _summarize_with_model(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> dict[str, Any]:
-        config = self._load_ai_config()
+class IssueModelAnalysis:
+    def __init__(self, ai_analyzer_factory: Callable[..., Any] | None):
+        self.ai_analyzer_factory = ai_analyzer_factory
+        self._ai_config_cache: dict[str, Any] | None = None
+
+    async def summarize_issue(self, issue_payload: dict[str, Any], failures: list[dict[str, Any]], references: list[dict[str, Any]]) -> dict[str, Any]:
+        config = self.load_config()
         if self.ai_analyzer_factory is None:
             return {"success": False, "error": "AI model not configured"}
         analyzer = self.ai_analyzer_factory(config)
@@ -34,7 +39,7 @@ class AiAnalysisMixin:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
 
-    def _load_ai_config(self) -> dict[str, Any]:
+    def load_config(self) -> dict[str, Any]:
         if self._ai_config_cache is not None:
             return self._ai_config_cache
 
@@ -70,7 +75,7 @@ class AiAnalysisMixin:
 
     def _call_model(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> dict[str, Any]:
         """Call the AI model and parse the structured seven-field JSON response."""
-        raw = self._call_model_raw(analyzer, provider_name, provider, prompt)
+        raw = self.call_model_raw(analyzer, provider_name, provider, prompt)
         try:
             match = re.search(r"\{.*\}", raw, re.S)
             result = json.loads(match.group(0) if match else raw)
@@ -88,7 +93,7 @@ class AiAnalysisMixin:
         except Exception:
             return {"success": False, "provider": provider_name, "summary": raw[:1200], "reply_draft": ""}
 
-    def _call_model_raw(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> str:
+    def call_model_raw(self, analyzer: Any, provider_name: str, provider: dict[str, Any], prompt: str) -> str:
         """Call the AI model and return raw text response.
 
         Reuses UniversalAIAnalyzer's HTTP request logic to avoid duplicating
@@ -178,50 +183,3 @@ Redmine: #{issue_payload.get('issue_id')} {issue_payload.get('subject')}
 6. reference_redmine 从上面的历史参考单中选择确实相关的，并说明为什么相关
 7. 代码块格式：diff内容用```diff（必须有--- a/file, +++ b/file, @@...@@, -/+行），shell命令用```shell（$前缀），XML配置用```xml，纯报错堆栈用```
 """
-
-    @staticmethod
-    def _ensure_code_block(text: str, lang: str = "") -> str:
-        """Wrap text in a markdown code block if not already wrapped."""
-        text = str(text or "").strip()
-        if not text or text.startswith("```"):
-            return text
-        return f"```{lang}\n{text}\n```"
-
-    @staticmethod
-    def _wrap_patch_direction(text: str) -> str:
-        """Intelligently wrap patch_direction in the appropriate code block."""
-        text = str(text or "").strip()
-        if not text or text.startswith("```"):
-            return text
-        # Detect unified diff patterns
-        if re.search(r"^---\s+[ab]/", text, re.M) or re.search(r"^\+\+\+\s+[ab]/", text, re.M):
-            return f"```diff\n{text}\n```"
-        # Detect shell command patterns ($ prefix)
-        if re.search(r"^\$\s+", text, re.M):
-            return f"```shell\n{text}\n```"
-        # Detect XML content
-        if re.search(r"<\?xml|<[\w:-]+\s+[^>]*>", text):
-            return f"```xml\n{text}\n```"
-        # Default: wrap as generic code
-        return f"```\n{text}\n```"
-
-    @staticmethod
-    def _html_code_block(text: str, lang: str = "") -> str:
-        """Wrap text in <pre><code class="lang"> HTML block for Redmine display."""
-        text = str(text or "").strip()
-        if not text:
-            return ""
-        cls = f' class="{lang}"' if lang else ""
-        return f"<pre><code{cls}>\n{text}\n</code></pre>"
-
-    @staticmethod
-    def _detect_code_lang(text: str) -> str:
-        """Detect code language from content patterns."""
-        text = str(text or "")
-        if re.search(r"^---\s+[ab]/", text, re.M) or re.search(r"^\+\+\+\s+[ab]/", text, re.M):
-            return "diff"
-        if re.search(r"^\$\s+", text, re.M):
-            return "shell"
-        if re.search(r"<\?xml|<[\w:-]+\s+[^>]*>", text):
-            return "xml"
-        return ""

@@ -517,14 +517,12 @@ const RESULT_COLUMN_RENDERERS = {
         const v = String(r.device_serial ?? '-');
         return {
             text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
-            style: 'padding: 4px 6px;',
         };
     },
     'build id': r => {
         const v = String(r.build_id ?? '-');
         return {
             text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
-            style: 'padding: 4px 6px;',
         };
     },
     'product': r => ({ text: escapeHtml(String(r.product ?? '-')) }),
@@ -573,7 +571,7 @@ function renderTestResults(results, columns) {
     const numericCols = new Set(['pass', 'fail', 'warning']);
     const headerCells = cols.map(name => {
         const align = numericCols.has(name.toLowerCase()) ? 'right' : 'left';
-        return `<th style="padding: 8px; text-align: ${align}; white-space: nowrap;">${escapeHtml(name)}</th>`;
+        return `<th style="text-align: ${align}; white-space: nowrap;">${escapeHtml(name)}</th>`;
     }).join('');
 
     listEl.innerHTML = `
@@ -598,7 +596,7 @@ function renderTestResults(results, columns) {
             const cell = renderer ? renderer(r) : { text: '' };
             const titleAttr = cell.title ? ` title="${escapeHtml(cell.title)}"` : '';
             // nowrap：每列单行显示，避免内容换行造成视觉错位。
-            return `<td style="padding: 8px; white-space: nowrap; ${cell.style || ''}"${titleAttr}>${cell.text}</td>`;
+            return `<td style="white-space: nowrap; ${cell.style || ''}"${titleAttr}>${cell.text}</td>`;
         }).join('');
         tr.innerHTML = cells;
 

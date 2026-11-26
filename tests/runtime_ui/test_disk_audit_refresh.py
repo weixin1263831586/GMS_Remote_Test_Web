@@ -118,12 +118,14 @@ class DiskAuditRefreshTests(RuntimeUiHarness):
                     });
                     try {
                         const button = document.getElementById('audit-disk-refresh-btn');
-                        const label = document.getElementById('audit-disk-refresh-label');
+                        const initialWidth = button.getBoundingClientRect().width;
+                        const initialSummary = document.getElementById('audit-disk-scanned-at').textContent;
                         const first = loadDiskArtifactAudit(true);
                         const firstBusy = button.disabled
-                            && label.textContent.includes('扫描中')
-                            && document.getElementById('audit-disk-scanned-at')
-                                .textContent.includes('正在');
+                            && button.textContent.includes('扫描中')
+                            && button.getAttribute('aria-busy') === 'true'
+                            && button.getBoundingClientRect().width === initialWidth
+                            && document.getElementById('audit-disk-scanned-at').textContent === initialSummary;
                         const rejected = await loadDiskArtifactAudit(true);
                         const noDuplicate = rejected === false && calls.length === 1;
                         calls[0].resolve(payload(2048));
@@ -131,7 +133,8 @@ class DiskAuditRefreshTests(RuntimeUiHarness):
                         const firstValue = document.getElementById('audit-disk-bytes')
                             .textContent;
                         const firstDone = !button.disabled
-                            && label.textContent.includes('刷新');
+                            && button.textContent.includes('刷新')
+                            && button.getBoundingClientRect().width === initialWidth;
                         const second = loadDiskArtifactAudit(true);
                         const secondBusy = button.disabled;
                         calls[1].resolve(payload(4096));

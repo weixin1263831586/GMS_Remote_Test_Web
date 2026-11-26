@@ -33,18 +33,22 @@ jobs:
           python-version: ${{ matrix.python-version }}
       # Audit pinned dependencies; waivers require a reason and exit condition.
       - name: Audit runtime dependencies
+        env:
+          AUDIT_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           python -m pip install --upgrade pip pip-audit
-          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+          if [ "$AUDIT_PYTHON_VERSION" = "3.10" ]; then
             WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
             pip-audit -r requirements.txt --strict $WAIVERS
           else
             pip-audit -r requirements.txt --strict
           fi
       - name: Audit dev dependencies
+        env:
+          AUDIT_PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
           # requirements-dev.txt 内联 requirements.txt,同栈审计（豁免同上）。
-          if [ "${{ matrix.python-version }}" = "3.10" ]; then
+          if [ "$AUDIT_PYTHON_VERSION" = "3.10" ]; then
             WAIVERS=$(grep -v '^#' .github/pip-audit-py310-waivers.txt | sed '/^$/d' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
             pip-audit -r requirements-dev.txt --strict $WAIVERS
           else
@@ -106,8 +110,7 @@ jobs:
   #   边界在源码以 `# nosemgrep: <rule>` 就地豁免并写明理由；
   # - WARNING 级作为存量改进清单随 artifact 上传，不阻断；
   # - 刻意排除的规则（纯 import 告警/与平台约定冲突的误报）逐条列出：
-  #   B404(仅 import subprocess)、B313..B410 组合族(与 use-defused-xml
-  #   同源：标准库 ET 不解析外部实体，lxml 已在 _LXML_PARSER 显式关闭)、
+  #   B404(仅 import subprocess)、B313..B410 组合族(XML 解析显式禁用外部实体与网络访问)、
   #   B101(assert 是测试与防御式检查的合法用法)。
   static-sast:
     name: static-sast
@@ -119,14 +122,14 @@ jobs:
         with:
           python-version: "3.10"
       - name: Semgrep scan
-        env:
-          SEMGREP_RULES: p/bandit p/owasp-top-ten p/python
+        id: semgrep
         run: |
           python -m pip install --upgrade pip
           python -m pip install semgrep==1.187.0
           mkdir -p artifacts
           # Without --error, findings do not change the scanner exit status.
           # Strict mode rejects scan failures; the next step gates findings by severity.
+          set +e
           semgrep scan --config p/bandit --config p/owasp-top-ten \
               --config p/python . \
               --exclude-rule gitlab.bandit.B404 \
@@ -135,36 +138,17 @@ jobs:
               --exclude-rule gitlab.bandit.B101 \
               --json --output artifacts/semgrep.json \
               --metrics=off --strict
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          test -s artifacts/semgrep.json
       - name: Gate on ERROR-severity findings
-        run: |
-          python - <<'PY'
-          import json, pathlib
-          data = json.loads(pathlib.Path("artifacts/semgrep.json").read_text())
-          if data["errors"]:
-              for issue in data["errors"]:
-                  print(f"::error::Semgrep scan error: {issue}")
-              raise SystemExit(1)
-          scanned = set(data["paths"]["scanned"])
-          required = {
-              "plugins/codesearch/scripts/codesearch.py",
-              "plugins/codesearch/scripts/mcp_server.py",
-              "tools/scripts/agent/release.py",
-          }
-          if missing := required - scanned:
-              print(f"::error::Semgrep required targets not scanned: {sorted(missing)}")
-              raise SystemExit(1)
-          errors = [f for f in data["results"]
-                    if f["extra"]["severity"] in {"ERROR", "HIGH", "CRITICAL"}]
-          for f in errors:
-              loc = f"{f['path']}:{f['start']['line']}"
-              print(f"::error file={f['path']},line={f['start']['line']}"
-                    f"::{f['check_id']} at {loc}")
-          print(f"semgrep: {len(data.get('results', []))} findings, "
-                f"{len(errors)} ERROR (gate)")
-          raise SystemExit(1 if errors else 0)
-          PY
+        if: ${{ !cancelled() }}
+        env:
+          SEMGREP_EXIT_CODE: ${{ steps.semgrep.outputs.exit_code }}
+        run: python tools/scripts/maintenance/check_semgrep_report.py artifacts/semgrep.json --scan-exit-code "$SEMGREP_EXIT_CODE"
       - name: Upload semgrep report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: semgrep-report
@@ -343,9 +327,11 @@ jobs:
         run: |
           bash tools/scripts/testing/prepare_knowledge_quality_corpus.sh
       - name: Golden query corpus recall gate
+        env:
+          GMS_KNOWLEDGE_INDEX: ${{ steps.knowledge.outputs.index }}
         run: |
           # Read the index path from the preceding step output.
-          idx="${{ steps.knowledge.outputs.index }}"
+          idx="$GMS_KNOWLEDGE_INDEX"
           test -n "${idx}" || { echo "::error::prepare step did not emit index output"; exit 1; }
           test -f "${idx}" || { echo "::error::temp index missing: ${idx}"; exit 1; }
           GMS_WIKI_INDEX_DB="${idx}" pytest \
@@ -541,12 +527,14 @@ jobs:
 
       - name: Browser E2E and smoke tests
         shell: bash
+        env:
+          BROWSER_SHARD: ${{ matrix.shard }}
         run: |
           set -euo pipefail
           mkdir -p artifacts
           # Verbose node ids and faulthandler provide an exact last-running
           # test and Python stacks if a browser/iframe request stops progressing.
-          case "${{ matrix.shard }}" in
+          case "$BROWSER_SHARD" in
             early)
               pytest tests/e2e tests/runtime_ui/test_[a-c]*.py -vv \
                 -o faulthandler_timeout=180 --durations=25 \

@@ -1,5 +1,7 @@
 """UI geometry entrypoint and no-wrap guarantees across page roots."""
 
+import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -19,6 +21,105 @@ ENTRYPOINTS = (
     "features/devices/deployment/api.py",
     "features/devices/debug/api.py",
 )
+
+
+# Geometry belongs to the shared table template, not to page-level rules.
+_TABLE_SELECTOR = re.compile(
+    r"(?:^|[\s>,+~:(])(?:th|td|tr|thead|tbody)(?:$|[\s.#:\[>,+~)])"
+    r"|suite-file-(?:row|table-head)\b|\.dcfg-(?:th|td)\b",
+    re.I,
+)
+_GEOMETRY = re.compile(
+    r"(?:^|[;\s])(?:min-height|max-height|height|padding(?:-[\w-]+)?|"
+    r"vertical-align|box-sizing)\s*:", re.I,
+)
+_TABLE_TOKEN = re.compile(r"--ui-table-[\w-]+\s*:")
+_CELL_TAG = re.compile(
+    r"""<(?:th|td|tr|thead|tbody)\b[^>]*?\bstyle\s*=\s*(["'])(.*?)\1""",
+    re.I | re.S,
+)
+_CELL_DOM = re.compile(
+    r"\b(?:td|th|tr|cell|row|thead|tbody)\w*\.style\."
+    r"(?:padding\w*|(?:min|max)?Height|height|verticalAlign|boxSizing)\s*=",
+    re.I,
+)
+# Explicit non-data-table exceptions; new exceptions require a named reason.
+_SPECIAL_TABLE_RULES = {
+    "features/redmine/ui/page.css": {
+        ".analysis-doc .md-table th, .analysis-doc .md-table td",  # Markdown prose
+    },
+    "web/static/css/common.css": {
+        ".input-table td", ".input-table td:first-child", ".input-table td:last-child",
+    },
+    "web/static/css/common-page.css": {".input-table td"},  # responsive form
+    "web/static/css/other-workspaces.css": {
+        "#page-test.page-ui-rework .input-table td",
+        "#page-test.page-ui-rework .input-table td:last-child",
+    },
+    "web/shell/components/head.html": {".project-guide-map th, .project-guide-map td"},
+    # These selectors target interactive controls, not cells. Touch sizes differ.
+    "features/cluster/ui/page.html": {"td button,td select,td input"},
+}
+_EXTERNAL_MAIL_STYLES = {
+    "web/static/js/pages/api-docs.js": {"padding:4px 12px 4px 0;color:#666;", "padding:4px 0;"},
+    "features/gms/radar/notifications.py": {
+        "padding:10px 11px;text-align:{align};'\n"
+        "        'background:#f3f5f9;color:#495465;border-bottom:1px solid #dce1e9;'\n"
+        "        f'font-weight:600;",
+    },
+}
+
+
+def _tracked_ui_sources():
+    """Enumerate repository sources, including new files, not a fixed page list."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True,
+    )
+    for name in result.stdout.decode("utf-8").split("\0"):
+        path = Path(name)
+        if not name or path.suffix not in {".css", ".html", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".py"}:
+            continue
+        if "vendor" in path.parts or "node_modules" in path.parts:
+            continue
+        if "tests" in path.parts or path.name.startswith("test_"):
+            continue
+        yield path
+
+
+def _table_geometry_violations(path, source):
+    if path == "web/static/css/ui-sizing.css":
+        return []
+    errors = []
+    if path.endswith(".css"):
+        styles = [source]
+    else:
+        styles = re.findall(r"<style\b[^>]*>(.*?)</style\s*>", source, re.I | re.S)
+    for css in styles:
+        # Python HTML templates may escape braces for f-strings.
+        if path.endswith(".py"):
+            css = css.replace("{{", "{").replace("}}", "}")
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        if _TABLE_TOKEN.search(css):
+            errors.append("local --ui-table-* definition")
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            selector = " ".join(match[1].split())
+            if not _TABLE_SELECTOR.search(selector) or not _GEOMETRY.search(match[2]):
+                continue
+            if selector in _SPECIAL_TABLE_RULES.get(path, set()):
+                continue
+            errors.append(f"local cell geometry: {selector}")
+    if not path.endswith(".css"):
+        for match in _CELL_TAG.finditer(source):
+            if not _GEOMETRY.search(match[2]):
+                continue
+            if match[2] in _EXTERNAL_MAIL_STYLES.get(path, set()):
+                continue
+            line = source.count("\n", 0, match.start()) + 1
+            errors.append(f"line {line}: inline table cell geometry")
+        for match in _CELL_DOM.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            errors.append(f"line {line}: {match[0]}")
+    return errors
 
 
 class UiSizingContractTests(unittest.TestCase):
@@ -79,8 +180,10 @@ class UiSizingContractTests(unittest.TestCase):
             "control-height-dense": 28,
             "control-height-small": 26,
             "segmented-inner-height": 24,
-            "table-header-height": 42,
-            "table-row-height": 44,
+            "table-header-height": 38,
+            "table-row-height": 36,
+            "table-cell-padding-block": 2,
+            "table-cell-padding-inline": 10,
             "stat-height": 95,
             "stat-height-compact": 70,
             "card-heading-height": 42,
@@ -142,12 +245,13 @@ class UiSizingContractTests(unittest.TestCase):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
             "common-components.css": ("--ui-control-height-dense", "--ui-control-height-large"),
-            "other-workspaces.css": ("--ui-table-row-height", "--ui-stat-height"),
-            "device-inventory.css": ("--ui-table-header-height", "--ui-control-height"),
-            "api-docs-workbench.css": ("--ui-table-row-height", "--ui-stat-height"),
+            "other-workspaces.css": ("--ui-stat-height",),
+            "device-inventory.css": ("--ui-control-height",),
+            "api-docs-workbench.css": ("--ui-stat-height",),
             "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
-            "data-table-page.css": ("--ui-table-header-height", "--ui-control-height"),
+            "data-table-page.css": ("--ui-control-height",),
+            "ui-sizing.css": ("--ui-table-header-height", "--ui-table-row-height", "--ui-table-cell-padding-block", "--ui-table-cell-padding-inline"),
         }
         for name, roles in mapping.items():
             source = (CSS / name).read_text(encoding="utf-8")
@@ -164,10 +268,6 @@ class UiSizingContractTests(unittest.TestCase):
             ),
             "web/static/css/apk-workbench.css": (
                 "--ui-tab-height", "--ui-tab-height-narrow", "--ui-control-height-dense",
-            ),
-            "web/static/css/other-workspaces.css": (
-                "--ui-table-header-height", "--ui-table-row-height",
-                "--ui-table-header-height-dense",
             ),
             "web/static/css/common-layout.css": ("--ui-control-height-icon",),
             "web/static/css/agent-access.css": ("--ui-control-height-dialog",),
@@ -186,7 +286,7 @@ class UiSizingContractTests(unittest.TestCase):
                 "--ui-control-height-icon",
             ),
             "features/cluster/ui/page.html": (
-                "--ui-table-row-height-dense", "--ui-touch-target-height",
+                "--ui-touch-target-height",
             ),
             "features/gerrit/ui/page.html": ("--ui-control-height-icon",),
             "features/gms/radar/ui/page.html": ("--ui-control-height",),
@@ -218,19 +318,92 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertIn("var(--ui-control-height-dialog-field)", (
             ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8"))
 
-    def test_audit_table_geometry_uses_same_role_as_common_table(self):
-        source = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
-        for suffix in ("audit-log-table", "audit-mail-table"):
-            for row_kind, role in (
-                ("thead th", "table-header-height"),
-                ("tbody td", "table-row-height"),
-            ):
-                with self.subTest(table=suffix, part=row_kind):
-                    selector = "." + suffix + " " + row_kind
-                    self.assertIn(selector, source)
-                    rule = source.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
-                    self.assertIn("var(--ui-" + role + ")", rule)
+    def test_data_table_geometry_has_one_shared_template(self):
+        source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        for selector, role in (
+            ("> thead > tr > :is(th, td)", "table-header-height"),
+            ("> tbody > tr:not(:where(.group-row:not(.device-group-row))) > :is(td, th)", "table-row-height"),
+            (".suite-file-table-head", "table-header-height"),
+            (".suite-file-row", "table-row-height"),
+        ):
+            with self.subTest(selector=selector):
+                rule = source.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
+                self.assertIn("var(--ui-" + role + ")", rule)
+        self.assertNotIn("--ui-table-header-height-dense", source)
+        self.assertNotIn("--ui-table-row-height-dense", source)
+        for name in (
+            "ui-foundations.css", "other-workspaces.css", "device-inventory.css",
+            "agent-access.css", "audit-disk.css", "api-docs-workbench.css",
+            "data-table-page.css",
+        ):
+            with self.subTest(name=name):
+                local = (CSS / name).read_text(encoding="utf-8")
+                self.assertNotIn("var(--ui-table-header-height", local)
+                self.assertNotIn("var(--ui-table-row-height", local)
 
+
+    def test_no_local_geometry_in_remaining_data_table_renderers(self):
+        paths = (
+            "web/static/js/pages/test-reports.js",
+            "web/static/js/pages/security-audit.js",
+            "web/static/js/shell/shell-device-management.js",
+            "web/static/js/pages/firmware-burn-share.js",
+            "web/shell/dialogs/firmware-share.html",
+            "web/static/js/shell/shell-device-groups.js",
+            "web/static/js/pages/test-control.js",
+            "web/static/js/pages/test-suite-browser-reports.js",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                self.assertNotRegex(
+                    source, r"""<(?:th|td|tr)\b[^>]*style=["'][^"']*(?:height|padding|vertical-align)\s*:"""
+                )
+        test_control = (ROOT / "web/static/js/pages/test-control.js").read_text(encoding="utf-8")
+        self.assertNotRegex(test_control, r"\bcell\.style\.(?:padding\w*|height|verticalAlign)\s*=")
+        suite = (ROOT / paths[-1]).read_text(encoding="utf-8")
+        self.assertNotIn("style: 'padding:", suite)
+        notes = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
+        rule = notes.split(".kb-source-table :is(th, td) {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("vertical-align", rule)
+        proxy = (CSS / "vpn-proxy-panel.css").read_text(encoding="utf-8")
+        rule = proxy.split(".tech-dialog--vpn-proxy th, .tech-dialog--vpn-proxy td {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("padding:", rule)
+        architecture = (CSS / "architecture-scenes.css").read_text(encoding="utf-8")
+        self.assertNotIn("height:34px;padding:7px 9px", architecture)
+        scene = (ROOT / "web/static/js/pages/architecture-scenes.js").read_text(encoding="utf-8")
+        self.assertIn('class="ui-detail-table"', scene)
+
+    def test_detail_tables_are_explicit_and_data_tables_have_no_cell_overrides(self):
+        redmine = (ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(redmine, r"\.dept-table\s+td\.col-person\s*\{[^}]*padding")
+        for selector in (".info-table th {", ".info-table td {"):
+            rule = redmine.split(selector, 1)[1].split("}", 1)[0]
+            self.assertNotIn("padding:", rule)
+        issues = (ROOT / "features/redmine/ui/issues.js").read_text(encoding="utf-8")
+        self.assertIn('class="info-table ui-detail-table"', issues)
+        components = (CSS / "common-components.css").read_text(encoding="utf-8")
+        self.assertNotIn(".dcfg-tab table:not(:has(> thead))", components)
+        sizing = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        self.assertNotIn(".dcfg-tab", sizing)
+        self.assertIn("table.ui-detail-table > tbody > tr > :is(th, td)", sizing)
+
+    def test_aoa_command_grid_has_one_layout_owner(self):
+        source = (CSS / "aoa-workbench.css").read_text(encoding="utf-8")
+        self.assertRegex(source, r"grid-template-columns:\s*3ch minmax\(0, 1\.5fr\) minmax\(0, 1fr\) 60\.5px 156px;")
+        self.assertIn("grid-column: 5; grid-row: 1;", source)
+        self.assertIn("grid-column: 4 / 6;", source)
+        for path in CSS.rglob("*.css"):
+            if path.name == "aoa-workbench.css":
+                continue
+            css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+            for selector, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+                if re.search(r"\.aoa-(?:command-list-header|command-row|command-actions|command-state|actions-label|command-list)\b", selector):
+                    self.assertNotRegex(
+                        declarations,
+                        r"(?:^|[;\s])(?:grid-template-(?:columns|rows)|grid-column|grid-row|row-gap|white-space|overflow-wrap|padding(?:-top|-bottom)?)\s*:",
+                        f"{path}: {selector}",
+                    )
 
     def test_existing_single_line_layouts_not_replaced_by_wrapping(self):
         cases = {
@@ -246,6 +419,34 @@ class UiSizingContractTests(unittest.TestCase):
                     self.assertIn(p, source)
         self.assertIn("overflow:auto!important", (CSS / "api-docs-workbench.css").read_text(encoding="utf-8"))
         self.assertIn("white-space: nowrap", (CSS / "ui-sizing.css").read_text(encoding="utf-8"))
+
+
+    def test_tracked_sources_have_no_local_data_table_geometry(self):
+        paths = list(_tracked_ui_sources())
+        self.assertTrue(paths, "No tracked sources were discovered")
+        failures = []
+        for path in paths:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            for violation in _table_geometry_violations(path.as_posix(), source):
+                failures.append(f"{path}: {violation}")
+        self.assertFalse(failures, "\n" + "\n".join(failures))
+
+    def test_table_geometry_scanner_detects_repeated_tokens_and_inline_rules(self):
+        samples = (
+            ("feature.css", ".ordinary td { height: 36px; }"),
+            ("feature.css", "@media(max-width:600px){ .ordinary th { padding: var(--ui-table-cell-padding-block); }}"),
+            ("feature.css", ".ordinary :is(th, td) { box-sizing: border-box; }"),
+            ("feature.css", ":root { --ui-table-row-height:36px; }"),
+            ("feature.html", '<style>.ordinary td { vertical-align: middle; }</style>'),
+            ("feature.js", '<td style="padding:2px 10px">value</td>'),
+            ("feature.js", "cell.style.padding = '2px 10px';"),
+            ("feature.py", '<style>.ordinary td {{ height:36px; }}</style>'),
+        )
+        for path, source in samples:
+            with self.subTest(path=path, source=source):
+                self.assertTrue(_table_geometry_violations(path, source))
+        self.assertFalse(_table_geometry_violations("feature.css", ".ordinary td { width: 120px; white-space: nowrap; }"))
+        self.assertFalse(_table_geometry_violations("web/static/css/common.css", ".input-table td { padding: 0 5px; }"))
 
 
 if __name__ == "__main__":

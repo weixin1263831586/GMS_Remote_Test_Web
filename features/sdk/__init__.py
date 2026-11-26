@@ -1,6 +1,10 @@
 """Android SDK registration and reproducible source search public surface."""
 
 from . import source_api, source_manage_api
+from .source_codesearch import (
+    search_indexed_paths,
+    search_indexed_source,
+)
 from .source_provider import initialize_source_runtime, registry_state, sdk_sources_available
 from .source_repo_rank import configure_codesearch_hints, configure_knowledge_hints
 
@@ -45,6 +49,8 @@ __all__ = [
     "list_sdk_sources",
     "registry_state",
     "sdk_sources_available",
+    "search_indexed_paths",
+    "search_indexed_source",
     "source_api",
     "source_manage_api",
 ]

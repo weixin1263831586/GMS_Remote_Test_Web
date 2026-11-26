@@ -6,13 +6,27 @@ import gzip
 import hashlib
 import os
 import re
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Protocol
 
 from foundation.error_model import ApiError
 
 
-def initialize_retention_schema(conn):
+if TYPE_CHECKING:
+    from features.auth import CurrentUser
+
+
+class RetentionRepository(Protocol):
+    @property
+    def db_path(self) -> Path: ...
+
+    def connect(self) -> sqlite3.Connection: ...
+
+
+def initialize_retention_schema(conn: sqlite3.Connection) -> None:
     conn.execute('''CREATE TABLE IF NOT EXISTS cluster_retention_policies (
         owner_id TEXT PRIMARY KEY, username TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
         archive_days INTEGER NOT NULL DEFAULT 7, delete_days INTEGER NOT NULL DEFAULT 30,
@@ -26,16 +40,18 @@ def initialize_retention_schema(conn):
 
 
 class ArtifactRetention:
-    def __init__(self, repository):
+    def __init__(self, repository: RetentionRepository) -> None:
         self.repo = repository
         self.root = (repository.db_path.parent / 'artifacts').resolve()
 
-    def policy(self, owner):
+    def policy(self, owner: str) -> dict[str, Any]:
         with self.repo.connect() as conn:
             row = conn.execute('SELECT * FROM cluster_retention_policies WHERE owner_id=?', (owner,)).fetchone()
         return dict(row) if row else {'owner_id': owner, 'enabled': False, 'archive_days': 7, 'delete_days': 30}
 
-    def save_policy(self, principal, *, enabled, archive_days, delete_days):
+    def save_policy(
+        self, principal: CurrentUser, *, enabled: bool, archive_days: int, delete_days: int,
+    ) -> dict[str, Any]:
         if not 1 <= archive_days <= 3650 or (delete_days and not archive_days < delete_days <= 3650):
             raise ApiError.malformed_request('Delete age must exceed archive age; zero disables deletion')
         with self.repo.connect() as conn:
@@ -46,7 +62,7 @@ class ArtifactRetention:
                          (principal.resource_owner_id, principal.username, enabled, archive_days, delete_days))
         return self.policy(principal.resource_owner_id)
 
-    def owned_artifact(self, conn, owner, artifact_id):
+    def owned_artifact(self, conn: sqlite3.Connection, owner: str, artifact_id: str) -> dict[str, Any]:
         row = conn.execute('''SELECT a.*,j.status AS job_status,COALESCE(p.pinned,0) AS pinned
             FROM cluster_job_artifacts a JOIN cluster_jobs j ON j.id=a.job_id
             LEFT JOIN cluster_artifact_pins p ON p.artifact_id=a.id
@@ -55,14 +71,14 @@ class ArtifactRetention:
             raise ApiError.not_found('Artifact not found')
         return dict(row)
 
-    def pin(self, owner, artifact_id, pinned):
+    def pin(self, owner: str, artifact_id: str, pinned: bool) -> None:
         with self.repo.connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
             self.owned_artifact(conn, owner, artifact_id)
             conn.execute('''INSERT INTO cluster_artifact_pins VALUES (?,?,?)
                 ON CONFLICT(artifact_id) DO UPDATE SET pinned=excluded.pinned''', (artifact_id, owner, pinned))
 
-    def _path(self, relative):
+    def _path(self, relative: str) -> Path:
         path = self.root / relative
         resolved = path.resolve()
         if path.is_symlink() or not resolved.is_relative_to(self.root) or any(
@@ -72,7 +88,7 @@ class ArtifactRetention:
         return path
 
     @staticmethod
-    def operation(item, policy):
+    def operation(item: dict[str, Any], policy: dict[str, Any]) -> str:
         if (item['pinned'] or item['job_status'] not in ('completed', 'failed', 'cancelled')
                 or not re.fullmatch(r'[a-f0-9]{64}', item['sha256'])):
             return ''
@@ -88,7 +104,7 @@ class ArtifactRetention:
             return 'delete'
         return ''
 
-    def preview(self, owner):
+    def preview(self, owner: str) -> dict[str, Any]:
         policy = self.policy(owner)
         with self.repo.connect() as conn:
             rows = conn.execute('''SELECT a.*,j.status AS job_status,COALESCE(p.pinned,0) AS pinned
@@ -105,7 +121,9 @@ class ArtifactRetention:
                 'candidate_bytes': sum(item['size_bytes'] for item in items if item['operation']),
                 'limited_to': 1000}
 
-    def _check(self, conn, owner, selection, policy):
+    def _check(
+        self, conn: sqlite3.Connection, owner: str, selection: dict[str, Any], policy: dict[str, Any],
+    ) -> tuple[dict[str, Any], Path, str]:
         item = self.owned_artifact(conn, owner, selection['id'])
         operation = self.operation(item, policy)
         if not operation or selection['operation'] != operation or selection['sha256'] != item['sha256']:
@@ -115,7 +133,7 @@ class ArtifactRetention:
             raise ApiError.conflict('Artifact file is unavailable')
         return item, path, operation
 
-    def apply(self, owner, selections):
+    def apply(self, owner: str, selections: list[dict[str, Any]]) -> dict[str, list[str]]:
         if not selections or len(selections) > 25:
             raise ApiError.malformed_request('Select between 1 and 25 previewed log artifacts')
         if len({selection['id'] for selection in selections}) != len(selections):
@@ -131,7 +149,7 @@ class ArtifactRetention:
             completed.append(selection['id'])
         return {'completed': completed}
 
-    def _apply_one(self, owner, selection):
+    def _apply_one(self, owner: str, selection: dict[str, Any]) -> None:
         policy = self.policy(owner)
         with self.repo.connect() as conn:
             item, source, operation = self._check(conn, owner, selection, policy)
@@ -195,7 +213,7 @@ class ArtifactRetention:
         finally:
             temporary.unlink(missing_ok=True)
 
-    def recover(self, *, operation_id=None):
+    def recover(self, *, operation_id: str | None = None) -> None:
         """Recover only journaled paths, never scan or remove arbitrary runtime files."""
         with self.repo.connect() as conn:
             conn.execute('BEGIN IMMEDIATE')
@@ -217,7 +235,7 @@ class ArtifactRetention:
                 conn.execute("UPDATE cluster_retention_journal SET status='recovered' WHERE id=?", (row['id'],))
 
 
-def run_enabled_retention(repository):
+def run_enabled_retention(repository: RetentionRepository) -> None:
     from features.auth import auth_service
 
     service = ArtifactRetention(repository)

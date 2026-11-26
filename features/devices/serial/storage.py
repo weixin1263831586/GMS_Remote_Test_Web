@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import contextlib
 import importlib
 import json
 import logging
-import os
 import re
 import threading
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from foundation.cluster_port import get_local_worker_id
+from foundation.private_config import write_atomic_text
 
 
 logger = logging.getLogger(__name__)
@@ -83,24 +81,13 @@ class BindingStore:
 
     def _save_unlocked(self, bindings: dict[str, dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(
-            f".{self.path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
-        )
-        try:
-            temporary.write_text(
-                json.dumps(
-                    {"schema_version": 2, "bindings": bindings},
-                    ensure_ascii=False,
-                    indent=2,
-                    sort_keys=True,
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-            os.replace(temporary, self.path)
-        finally:
-            with contextlib.suppress(OSError):
-                temporary.unlink()
+        payload = json.dumps(
+            {"schema_version": 2, "bindings": bindings},
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        ) + "\n"
+        write_atomic_text(self.path, payload)
 
     def list(self) -> dict[str, dict[str, Any]]:
         with self._lock:

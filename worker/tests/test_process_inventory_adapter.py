@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from foundation.native_tools import NativeToolUnavailableError
-from worker.process_inventory import (
+from foundation.process_inventory import (
     discover_tradefed_processes,
     process_inventory_capability_status,
 )
@@ -83,7 +83,7 @@ def test_process_inventory_rejects_malformed_native_record(tmp_path: Path):
 
 def test_process_inventory_capability_reports_missing_native_tool():
     with patch(
-        "worker.process_inventory.resolve_native_tool",
+        "foundation.process_inventory.resolve_native_tool",
         side_effect=NativeToolUnavailableError("missing"),
     ):
         status = process_inventory_capability_status()

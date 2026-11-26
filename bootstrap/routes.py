@@ -52,6 +52,7 @@ from features.ops import api as ops
 from features.redmine import api as redmine
 from features.redmine import apk_import_api as redmine_apk_import
 from features.redmine import credentials_api as redmine_credentials
+from features.redmine import statistics_api as redmine_statistics
 from features.redmine import users_api as redmine_users_api
 from features.redmine.api import configure_redmine_service
 from features.redmine.daily_brief import api as redmine_daily_brief
@@ -62,6 +63,7 @@ from features.redmine.dashboard import (
 )
 from features.redmine.evidence import api as redmine_evidence
 from features.redmine.evidence import search_api as redmine_evidence_search
+from features.redmine.knowledge import api as redmine_knowledge
 from features.redmine.reply import api as redmine_reply
 from features.reports import api as reports
 from features.reports.dependencies import configure_report_dependencies
@@ -101,9 +103,6 @@ from foundation.config import (
     APK_UPLOAD_DIR,
     DEVICE_CACHE_TTL,
     FIRMWARE_TRANSFER_TIMEOUT,
-    GSI_PROGRESS_INCREMENT,
-    GSI_PROGRESS_MAX,
-    GSI_PROGRESS_POLL_INTERVAL,
     JADX_PATH,
     JADX_TIMEOUT,
     MAX_LOG_ENTRIES,
@@ -151,6 +150,8 @@ ALL_ROUTERS = [
     knowledge.router,
     knowledge.page_router,
     redmine.router,
+    redmine_statistics.router,
+    redmine_knowledge.router,
     redmine.page_router,
     redmine_users_api.router,
     redmine_evidence.router,
@@ -219,9 +220,6 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             get_client_id_from_request=get_client_id_from_request,
             project_root=PROJECT_ROOT,
             firmware_transfer_timeout=FIRMWARE_TRANSFER_TIMEOUT,
-            gsi_progress_increment=GSI_PROGRESS_INCREMENT,
-            gsi_progress_max=GSI_PROGRESS_MAX,
-            gsi_progress_poll_interval=GSI_PROGRESS_POLL_INTERVAL,
             lock_firmware_devices=lock_firmware_devices,
             release_firmware_devices=release_firmware_devices,
         )
@@ -259,7 +257,6 @@ def include_routes(app: FastAPI, templates, services=None) -> None:
             cleanup_files=cleanup_files,
         )
         configure_report_dependencies(
-            ssh_manager=ssh_manager,
             file_utils=FileUtils,
             universal_analyzer_factory=_report_failure_analyzer_factory,
             resolve_suite_target=resolve_suite_diagnosis_target,

@@ -1,6 +1,6 @@
 # 设备 Bootloader 锁定/解锁 oem 命令
 
-本文档定位：描述平台 Bootloader 锁定/解锁与 GSI 烧写使用的 fastboot oem 命令选型——`board:<action>` 与 `at-<action>-vboot` 的判定依据、执行路径差异、失败兜底与恢复行为。判定逻辑实现在 `worker/fastboot_workflow.py` 的 `PreparedFastbootDevice.oem_argument()` 与 `FastbootPreparer.apply_oem_action()`。
+本文档定位：描述平台 Bootloader 锁定/解锁与 GSI 烧写使用的 fastboot oem 命令选型——`board:<action>` 与 `at-<action>-vboot` 的判定依据、执行路径差异、失败兜底与恢复行为。判定逻辑实现在 `foundation/fastboot_workflow.py` 的 `PreparedFastbootDevice.oem_argument()` 与 `FastbootPreparer.apply_oem_action()`。
 
 ## 背景（2026-09 锁定事故根因）
 
@@ -32,7 +32,7 @@ commit `641e843` 之前，RK3572 用 `oem board:<action>`、其余平台一律�
 | 纯 Android 17（如 RK3588GMS7） | `ro.vendor.api_level >= 202604` | `oem board:lock` | `oem board:unlock` | 对应 `at-*-vboot` |
 | GRF+SSI（如 RK3562GMS1）及一切旧 vendor | `ro.vendor.api_level < 202604`（含未知=0） | `oem at-lock-vboot` | `oem at-unlock-vboot` | 对应 `board:*` |
 
-- 常量：`ANDROID_17_VENDOR_API_LEVEL = 202604`（`worker/fastboot_workflow.py`）。
+- 常量：`ANDROID_17_VENDOR_API_LEVEL = 202604`（`foundation/fastboot_workflow.py`）。
 - 版本未知（设备已在 fastboot、无 ADB 读取窗口）按旧 vendor 处理，默认 `at-*-vboot`，由 unrecognized 兜底纠正误判。
 
 ## 执行路径对比

@@ -6,7 +6,6 @@ import fcntl
 import logging
 import os
 import stat
-import tempfile
 import threading
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -18,6 +17,7 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from foundation.config import settings
 from foundation.key_cache import cached_key, key_file_fingerprint
+from foundation.private_config import write_atomic_bytes
 from foundation.runtime_settings import is_production_environment
 
 
@@ -73,23 +73,7 @@ def _atomic_write_private_file(path: Path, payload: bytes) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    descriptor, name = tempfile.mkstemp(
-        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent
-    )
-    temporary = Path(name)
-    try:
-        with os.fdopen(descriptor, "wb") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    finally:
-        temporary.unlink(missing_ok=True)
+    write_atomic_bytes(path, payload, sync_directory=True)
 
 
 def _key_path() -> Path:

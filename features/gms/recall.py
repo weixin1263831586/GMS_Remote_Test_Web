@@ -118,3 +118,68 @@ def recall_mainline_references(identifiers, *, data_root=None, limit=20):
                                         kind="critical_patch", limit=limit),
         },
     }
+
+
+def recall_gms_requirements(terms, *, data_root=None, limit=5):
+    """Read already-authorized scanner records; callers must enforce recipient authorization."""
+    root = Path(data_root) if data_root is not None else settings.data_root
+    path = root / 'gms_update.sqlite3'
+    terms = list(dict.fromkeys(str(term).strip()[:100] for term in terms if len(str(term).strip()) >= 3))[:12]
+    unavailable = {'status': 'unavailable', 'coverage_complete': False, 'items': []}
+    if not path.is_file():
+        return {**unavailable, 'reason': 'GMS requirements index unavailable'}
+    if not terms:
+        return {'status': 'not_applicable', 'coverage_complete': False, 'items': []}
+    try:
+        with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=3) as conn:
+            conn.row_factory = sqlite3.Row
+            source = conn.execute(
+                "SELECT * FROM gms_update_sources WHERE source_key='gms_requirements' AND status_code=200"
+            ).fetchone()
+            if source is None or not source['content_hash']:
+                return {**unavailable, 'reason': 'No verified GMS requirements scan'}
+            latest = conn.execute(
+                "SELECT state FROM gms_update_source_results WHERE source_key='gms_requirements' ORDER BY run_id DESC LIMIT 1"
+            ).fetchone()
+            # Only the scanner's configured GMS policy document is eligible.
+            if not source['url'].startswith('https://docs.partner.android.com/gms/policies/domains/reqs'):
+                return {**unavailable, 'reason': 'Unexpected GMS requirements source'}
+            candidates = []
+            for table, key, section, text_column in (
+                ('gms_update_requirement_sections', 'section_key', 'path', 'text_excerpt'),
+                ('gms_update_requirement_table_rows', 'row_key', 'section_title', 'row_text'),
+                ('gms_update_requirement_version_tags', 'tag_key', 'section_title', 'text_excerpt'),
+            ):
+                columns = (section, text_column)
+                predicates = ' OR '.join(
+                    f'{column} LIKE ? ESCAPE "\\"' for _term in terms for column in columns
+                )
+                params = [f'%{escape_like(term)}%' for term in terms for _ in columns]
+                sql = f"SELECT * FROM {table} WHERE source_key='gms_requirements' AND ({predicates}) LIMIT 200"
+                for row in conn.execute(sql, params):
+                    combined = f'{row[section]} {row[text_column]}'.casefold()
+                    score = sum(term.casefold() in combined for term in terms)
+                    item = {
+                        'reference': 'ref:gms-policy:' + row[key] + ':' + row['content_hash'][:16],
+                        'source_url': source['url'],
+                        'source_revision': source['content_hash'],
+                        'section': row[section],
+                        'original_text': matched_excerpt(row[text_column], terms),
+                        'content_sha256': row['content_hash'],
+                        'fetched_at': source['last_scanned_at'],
+                        'source_kind': table.removeprefix('gms_update_requirement_'),
+                        'status': 'candidate',
+                    }
+                    if table.endswith('_version_tags'):
+                        item.update(android_version=row['android_version'], change_kind=row['change_kind'],
+                                    requirement_ids=row['requirement_ids'])
+                    if table.endswith('_table_rows'):
+                        item['table_headers'] = row['headers_json'][:2000]
+                    candidates.append((score, item))
+    except sqlite3.Error:
+        return {**unavailable, 'reason': 'GMS requirements query failed'}
+    candidates.sort(key=lambda pair: (-pair[0], pair[1]['reference']))
+    items = [item for _, item in candidates[:limit]]
+    return {'status': 'matched' if items else 'no_match', 'coverage_complete': False, 'items': items,
+            'source_scan_state': latest['state'] if latest else 'unknown',
+            'reason': 'Authorized retained scanner records; current applicability requires verification'}

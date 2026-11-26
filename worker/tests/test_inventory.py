@@ -9,8 +9,8 @@ from worker.device_actions import (
     _DEVICE_DETAILS_CACHE,
     _details_refresh_at,
     _probe_usb_only_devices,
+    probe_devices,
 )
-from worker.inventory import probe_devices
 
 
 @pytest.fixture(autouse=True)

@@ -317,13 +317,7 @@ class ClusterInventoryRepositoryMixin:
         worker_id: str,
         devices: list[dict[str, Any]],
     ) -> None:
-        """Apply a device snapshot for a Worker without waiting for the next heartbeat.
-
-        Remote USB/IP attach/detach commands already return the Worker's current
-        device list. Reusing that snapshot here keeps ``cluster_worker_devices``
-        (and therefore the UI) consistent immediately, instead of lagging up to
-        one heartbeat interval (~15s) after an operation completed.
-        """
+        """Apply a Worker device snapshot without changing its session or heartbeat."""
         now = _utc_now()
         with self._lock, self.connect() as conn:
             self._replace_devices(conn, worker_id, devices or [], now)
@@ -389,23 +383,11 @@ class ClusterInventoryRepositoryMixin:
         if worker is not None and str(worker["status"] or "") != "offline":
             emit_worker_availability(worker, "offline")
 
-    def refresh_devices(self, worker_id: str, devices: list[dict]) -> None:
-        """Restore completion writes ONLY the device inventory for this worker.
-
-        真实 agent 守护进程以短周期心跳（默认 15s）喂库存；本地烧写（Controller
-        进程内执行）完成 AOA 恢复后若只等下一个心跳，完成触发的设备刷新
-        会拉到 accessory 窗口的 usb_only 旧快照。这里复用心跳的设备写入
-        （含租约/预留 → allocated/reserved 守卫），不触碰 cluster_workers
-        的 session/status——守护进程仍是会话所有者，下一次心跳照常接管。
-        """
-        with self._lock, self.connect() as conn:
-            self._replace_devices(conn, worker_id, devices, _utc_now())
-
     def _replace_devices(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        devices: list[dict],
+        devices: list[dict[str, Any]],
         now: str,
         external_serials: set[str] | None = None,
     ) -> None:
@@ -489,9 +471,9 @@ class ClusterInventoryRepositoryMixin:
 
     def _replace_worker_tests(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        tests: list[dict],
+        tests: list[dict[str, Any]],
         now: str,
     ) -> None:
         conn.execute("DELETE FROM cluster_worker_tests WHERE worker_id=?", (worker_id,))
@@ -532,9 +514,9 @@ class ClusterInventoryRepositoryMixin:
 
     def _replace_suites(
         self,
-        conn,
+        conn: sqlite3.Connection,
         worker_id: str,
-        suites: list[dict],
+        suites: list[dict[str, Any]],
         now: str,
     ) -> None:
         conn.execute(
@@ -567,7 +549,7 @@ class ClusterInventoryRepositoryMixin:
                 ),
             )
 
-    def replace_worker_suites(self, worker_id: str, suites: list[dict]) -> None:
+    def replace_worker_suites(self, worker_id: str, suites: list[dict[str, Any]]) -> None:
         """Replace one Worker's suite inventory from a refresh command ACK."""
         if not worker_id:
             raise ValueError("worker_id is required")

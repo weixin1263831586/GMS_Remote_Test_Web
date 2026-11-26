@@ -154,3 +154,47 @@ def bounded_stale_days(value: Any, fallback: Any = 3) -> int:
         if parsed >= 1:
             return min(parsed, 30)
     return 3
+
+
+def detect_soc_platform(subject: str, description: str, fixed_version: str) -> str:
+    """Extract the Rockchip platform from issue metadata."""
+    match = re.search(r"(RK\d{4,})", f"{subject} {description} {fixed_version}", re.IGNORECASE)
+    return match.group(1).upper() if match else ""
+
+
+def detect_android_version(
+    subject: str, description: str, fixed_version: str, *, major_only: bool = False,
+) -> str:
+    """Extract Android version; case matching can normalize to the major version."""
+    match = re.search(r"android\s*(\d+(?:\.\d+)*)", f"{subject} {description} {fixed_version}", re.IGNORECASE)
+    if not match:
+        return ""
+    version = match.group(1)
+    return f"Android{version.split('.')[0] if major_only else version}"
+
+
+def search_query_tokens(query: str) -> list[str]:
+    """Bound FTS query tokens while preserving whole test identifiers."""
+    return [token for token in query.replace('"', " ").split() if len(token) >= 2][:12]
+
+
+def build_search_fts_query(query: str, *, phrase_symbols: bool = False) -> str:
+    """Build a quoted OR query; archive searches preserve test-name phrases."""
+    clauses = []
+    for token in search_query_tokens(query):
+        if phrase_symbols and "_" in token:
+            parts = [part for part in re.split(r"[^A-Za-z0-9]+", token) if len(part) >= 2]
+            if len(parts) >= 2:
+                clauses.append(" ".join(f'"{part}"' for part in parts))
+                continue
+        clauses.append(f'"{token}"')
+    return " OR ".join(clauses) or '"empty"'
+
+
+def similarity_level(score: float) -> str:
+    """Shared display levels; each retrieval path owns its scoring formula."""
+    if score >= 70:
+        return "high"
+    if score >= 40:
+        return "medium"
+    return "low"

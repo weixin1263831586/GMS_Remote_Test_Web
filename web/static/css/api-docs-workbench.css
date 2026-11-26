@@ -31,8 +31,8 @@
 #page-api-docs .api-side-heading .ui-icon { width:18px;height:18px;color:var(--primary-light); }
 #page-api-docs.page-ui-rework .api-table-scroll.list-table-wrap { flex:1 1 auto;min-height:0;height:0;max-height:none;overflow:auto!important;border:0;border-radius:0;background:transparent; }
 #page-api-docs .api-docs-table { table-layout:fixed;min-width:880px; }
-#page-api-docs .api-docs-table thead th { position:sticky;top:0;z-index:2;box-sizing:border-box;height:var(--ui-table-header-height);min-height:var(--ui-table-header-height);padding:6px 10px;line-height:23px;text-align:left;background:var(--light-bg);color:var(--text-secondary);border-bottom:1px solid var(--border-color); }
-#page-api-docs.page-ui-rework .api-docs-table tbody td { height:var(--ui-table-row-height);padding:7px 10px;max-width:0;vertical-align:middle;border-bottom:1px solid var(--border-color); }
+#page-api-docs .api-docs-table thead th { position:sticky;top:0;z-index:2;text-align:left;background:var(--light-bg);color:var(--text-secondary);border-bottom:1px solid var(--border-color); }
+#page-api-docs.page-ui-rework .api-docs-table tbody td { max-width:0;border-bottom:1px solid var(--border-color); }
 #page-api-docs .api-row:hover { background:var(--lighter-bg); }
 #page-api-docs .api-path,#page-api-docs .api-title,#page-api-docs .api-skill-copy { display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis; }
 #page-api-docs .api-path { color:var(--text-primary); }

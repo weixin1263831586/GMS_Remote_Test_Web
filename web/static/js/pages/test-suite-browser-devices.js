@@ -280,11 +280,8 @@ async function refreshDevices() {
     const button = document.getElementById('refresh-devices-btn');
     if (button?.disabled) return;
     if (button) {
-        button.disabled = true;
-        button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…';
-        button.setAttribute('aria-busy', 'true');
+        setActionButtonBusy(button, true, '刷新中');
     }
-    showToast('正在刷新设备列表...', 'info');
     try {
         // 集群模式下触发真正的 Worker 端 refresh_devices（重新 adb devices
         // 并回写 Controller）。该命令最长可达 Worker 命令超时（15s+），不能
@@ -320,9 +317,7 @@ async function refreshDevices() {
         showToast(`刷新设备失败: ${error.message}`, 'error');
     } finally {
         if (button) {
-            button.disabled = false;
-            button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新设备';
-            button.removeAttribute('aria-busy');
+            setActionButtonBusy(button, false);
         }
     }
 }

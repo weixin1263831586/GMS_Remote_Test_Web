@@ -1,7 +1,7 @@
 """Physical USB topology binding for one lease-protected AOA operation."""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 class UsbBinding:
     port: str = ""
     validate: Callable[[], None] | None = None
-    cleanup_errors: list[dict] = field(default_factory=list)
+    cleanup_errors: list[dict[str, str]] = field(default_factory=list)
 
 
 _binding: ContextVar[UsbBinding | None] = ContextVar("aoa_usb_binding", default=None)
@@ -24,7 +24,7 @@ def port_path(device) -> str:
 
 
 @contextmanager
-def bind_usb(port: str = "", validate=None):
+def bind_usb(port: str = "", validate: Callable[[], None] | None = None) -> Iterator[None]:
     token = _binding.set(UsbBinding(port, validate))
     try:
         yield
@@ -37,7 +37,7 @@ def bound_port() -> str:
     return binding.port if binding else ""
 
 
-def cleanup_diagnostics() -> list[dict]:
+def cleanup_diagnostics() -> list[dict[str, str]]:
     binding = _binding.get()
     return binding.cleanup_errors if binding else []
 
@@ -75,7 +75,9 @@ def find_bound_device(usb_core, serial: str, serial_finder):
     return device
 
 
-def cleanup_steps(steps, errors: list[dict]) -> None:
+def cleanup_steps(
+    steps: Iterable[tuple[str, Callable[[], object]]], errors: list[dict[str, str]],
+) -> None:
     """Keep every cleanup independent and retain diagnostics."""
     for name, cleanup in steps:
         try:

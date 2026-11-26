@@ -6,11 +6,26 @@ system feature does not import the automation feature directly.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict
 
 
-WorkerStatusProvider = Callable[[], dict[str, Any]]
+logger = logging.getLogger(__name__)
+
+class AutomationWorkerStatus(TypedDict):
+    """Scheduler status exposed to health, metrics and automation consumers."""
+
+    running: bool
+    enabled: bool
+    interval_seconds: int
+    executor: str
+    last_tick_result: dict[str, Any]
+    last_tick_seconds_ago: float | None
+    advancement_running: bool
+
+
+WorkerStatusProvider = Callable[[], AutomationWorkerStatus]
 
 _worker_status_provider: WorkerStatusProvider | None = None
 
@@ -23,7 +38,7 @@ def configure_worker_status_provider(
     _worker_status_provider = provider
 
 
-def get_worker_status() -> dict[str, Any]:
+def get_worker_status() -> AutomationWorkerStatus:
     """Return scheduler status, or raise when automation is unavailable."""
     if _worker_status_provider is None:
         raise RuntimeError("automation worker status is not configured")
@@ -48,7 +63,11 @@ def advancement_paused() -> bool:
     """
     if _advancement_gate is None:
         return False
-    return bool(_advancement_gate())
+    try:
+        return bool(_advancement_gate())
+    except Exception:
+        logger.exception("automation advancement gate failed; advancement continues")
+        return False
 
 
 ActiveRunIdsProvider = Callable[[], set[str]]

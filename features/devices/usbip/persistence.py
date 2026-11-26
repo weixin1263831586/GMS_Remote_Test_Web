@@ -7,6 +7,7 @@ import re
 import threading
 import time
 import uuid
+from collections.abc import Iterable
 
 from .. import runtime
 from .manager import usbip_manager
@@ -101,12 +102,7 @@ def migrate_local_usbip_busid(
         assignments.pop(old_key)
         assignments[new_key] = migrated
 
-        updater = getattr(runtime.config_manager, "update_runtime_config", None)
-        if callable(updater):
-            saved = updater({"usbip_cluster_assignments": assignments})
-        else:
-            runtime_config["usbip_cluster_assignments"] = assignments
-            saved = runtime.config_manager.save_runtime_config(runtime_config)
+        saved = runtime.config_manager.update_runtime_config({"usbip_cluster_assignments": assignments})
         if not saved:
             return False, "保存USB/IP新BUSID分配失败"
     return True, ""
@@ -162,12 +158,8 @@ def record_usbip_source_os(device_host: str, source_os: str) -> None:
         ):
             return
         cached[host] = {"os": os_value, "timestamp": time.time()}
-        updater = getattr(runtime.config_manager, "update_runtime_config", None)
-        if callable(updater):
-            updater({"usbip_source_os": cached})
-        else:
-            runtime_config["usbip_source_os"] = cached
-            runtime.config_manager.save_runtime_config(runtime_config)
+        if not runtime.config_manager.update_runtime_config({"usbip_source_os": cached}):
+            logger.warning("[USB/IP] Failed to persist source OS for %s", host)
 
 
 def record_usbip_network_quality(
@@ -193,12 +185,26 @@ def record_usbip_network_quality(
                 "timestamp": time.time(),
             },
         ]
-        updater = getattr(runtime.config_manager, "update_runtime_config", None)
-        if callable(updater):
-            updater({"usbip_network_quality_history": history})
-        else:
-            runtime_config["usbip_network_quality_history"] = history
-            runtime.config_manager.save_runtime_config(runtime_config)
+        if not runtime.config_manager.update_runtime_config({"usbip_network_quality_history": history}):
+            logger.warning("[USB/IP] Failed to persist network quality for %s", device_host)
+
+
+def update_usbip_source_records(
+    *,
+    updates: dict[str, dict[str, object]] | None = None,
+    remove: Iterable[str] = (),
+) -> bool:
+    """Merge source records under the shared persistence lock."""
+    with usbip_assignment_lock:
+        runtime_config = runtime.config_manager.get_runtime_config() or {}
+        current = runtime_config.get("usbip_devices_source") or {}
+        sources = dict(current) if isinstance(current, dict) else {}
+        sources.update(updates or {})
+        for serial in remove:
+            sources.pop(serial, None)
+        if sources == current:
+            return True
+        return runtime.config_manager.update_runtime_config({"usbip_devices_source": sources})
 
 
 def persist_local_usbip_sources(
@@ -218,39 +224,34 @@ def persist_local_usbip_sources(
     timestamp = time.time()
     updates: dict[str, dict[str, object]] = {}
     try:
-        runtime_config = runtime.config_manager.get_runtime_config() or {}
-        persisted = runtime_config.get("usbip_devices_source") or {}
-        if not isinstance(persisted, dict):
-            persisted = {}
-        persisted = dict(persisted)
-        for serial in serials:
-            existing = persisted.get(serial) or {}
-            existing_source = str(existing.get("source") or "").strip()
-            if existing_source and existing_source != device_host:
-                logger.info(
-                    "[USB/IP] Keep existing source for %s: %s (new: %s)",
-                    serial,
-                    existing_source,
-                    device_host,
-                )
-                continue
-            record = {"source": device_host, "timestamp": timestamp}
-            resolved_os = str(source_os or "").strip() or str(
-                existing.get("source_os") or ""
-            ).strip()
-            if resolved_os:
-                record["source_os"] = resolved_os
-            updates[serial] = record
-        if updates:
-            persisted.update(updates)
-            updater = getattr(runtime.config_manager, "update_runtime_config", None)
-            if callable(updater):
-                saved = updater({"usbip_devices_source": persisted})
-            else:
-                runtime_config["usbip_devices_source"] = persisted
-                saved = runtime.config_manager.save_runtime_config(runtime_config)
-            if not saved:
-                raise RuntimeError("无法保存USB/IP设备来源")
+        with usbip_assignment_lock:
+            runtime_config = runtime.config_manager.get_runtime_config() or {}
+            persisted = runtime_config.get("usbip_devices_source") or {}
+            if not isinstance(persisted, dict):
+                persisted = {}
+            persisted = dict(persisted)
+            for serial in serials:
+                existing = persisted.get(serial) or {}
+                existing_source = str(existing.get("source") or "").strip()
+                if existing_source and existing_source != device_host:
+                    logger.info(
+                        "[USB/IP] Keep existing source for %s: %s (new: %s)",
+                        serial,
+                        existing_source,
+                        device_host,
+                    )
+                    continue
+                record = {"source": device_host, "timestamp": timestamp}
+                resolved_os = str(source_os or "").strip() or str(
+                    existing.get("source_os") or ""
+                ).strip()
+                if resolved_os:
+                    record["source_os"] = resolved_os
+                updates[serial] = record
+            if updates:
+                saved = update_usbip_source_records(updates=updates)
+                if not saved:
+                    raise RuntimeError("无法保存USB/IP设备来源")
     except Exception as exc:
         logger.warning("[USB/IP] Failed to persist local device sources: %s", exc)
 

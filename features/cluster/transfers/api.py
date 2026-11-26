@@ -121,7 +121,7 @@ def _local_worker_config(data_root: Path):
 
 
 def _complete_local_report_export(transfer: dict) -> dict:
-    from worker.inventory import prepare_suite_export
+    from worker.suite_actions import prepare_suite_export
 
     metadata = transfer.get("metadata") or {}
     config = _local_worker_config(_report_copy_local_root())
@@ -178,7 +178,7 @@ def _complete_local_report_export(transfer: dict) -> dict:
 
 
 def _import_report_to_local_worker(transfer: dict) -> dict:
-    from worker.inventory import import_suite_report
+    from worker.suite_actions import import_suite_report
 
     metadata = transfer.get("metadata") or {}
     source = (_transfer_root() / str(transfer.get("relative_path") or "")).resolve()

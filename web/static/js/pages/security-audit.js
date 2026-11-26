@@ -54,7 +54,7 @@ function getSecurityAuditFilterKey() {
 function securityAuditGateHtml() {
     return `
         <tr>
-            <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+            <td colspan="6" class="table-placeholder">
                 <div style="margin-bottom: 12px;">🔒 此页面需要管理员权限，请先提权后查看。</div>
                 <button class="btn-xs btn-primary" type="button" data-click="elevateSecurityAuditView">🔓 立即提权</button>
             </td>
@@ -110,7 +110,7 @@ async function loadSecurityAudit(reset = false) {
         securityAuditState.offset = 0;
         if (!hadRenderedRecords) tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="6" class="table-placeholder">
                     加载中...
                 </td>
             </tr>
@@ -147,7 +147,7 @@ async function loadSecurityAudit(reset = false) {
                 ? securityAuditGateHtml()
                 : `
                     <tr>
-                        <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                        <td colspan="6" class="table-placeholder">
                             加载失败: ${escapeHtml(error.message)}
                         </td>
                     </tr>
@@ -316,7 +316,7 @@ function renderSecurityAuditRows(records) {
     if (!records.length) {
         tbody.innerHTML = `
             <tr>
-                <td colspan="6" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+                <td colspan="6" class="table-placeholder">
                     暂无审计记录
                 </td>
             </tr>
@@ -590,7 +590,7 @@ function renderAuditOutboxRows(items, { append = false } = {}) {
     if (!tbody) return;
     if (!items.length && !append) {
         tbody.innerHTML = `
-            <tr><td colspan="5" style="padding: 40px; text-align: center; color: var(--text-secondary);">
+            <tr><td colspan="5" class="table-placeholder">
                 暂无历史邮件（当前筛选条件下无匹配）
             </td></tr>`;
         return;

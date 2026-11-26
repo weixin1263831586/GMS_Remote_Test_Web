@@ -18,7 +18,7 @@ let pendingDepartmentTargetSelect = 'departmentProfile';
 let pendingTrendChartKey = '';
 let gerritWorkspaceContext = {};
 let pendingWorkspaceChangeId = '';
-const gerritDashboardRequestGeneration = {personal: 0, department: 0};
+const gerritDashboardRequestGeneration = {personal: 0, department: 0, query: 0};
 const esc = window.escapeHtml;
 async function api(url, options) {
   const r = await fetch(url, {credentials: 'same-origin', cache: 'no-store', ...(options || {})});
@@ -59,7 +59,10 @@ async function init() {
   if (ownerInput) ownerInput.value = person.owner || config.default_owner || '';
   if (currentTab === 'personal') await loadPersonal(false);
   else if (currentTab === 'department') await loadDepartment(false);
-  else await loadChanges();
+  else {
+    renderHeaderTabControls();
+    await loadChanges();
+  }
 }
 function showSettings() {
   document.getElementById('settingBaseUrl').value = config.base_url || '';
@@ -301,30 +304,15 @@ async function showGerritTrendDetail(granularity, label) {
     body.innerHTML = '<span class="error">' + esc(e.message) + '</span>';
   }
 }
-function setRefreshButtonBusy(busy) {
-  var btn = document.getElementById('refreshBtn');
-  if (!btn) return;
-  btn.disabled = busy;
-  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
-  btn.textContent = busy ? '⏳ 刷新中' : '🔄 刷新';
-}
-
-// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
-// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
-async function withRefreshButtonBusy(task) {
-  setRefreshButtonBusy(true);
-  try {
-    await task();
-  } finally {
-    setRefreshButtonBusy(false);
-  }
+function withRefreshButtonBusy(task) {
+  return withActionButtonBusy(document.getElementById('refreshBtn'), '刷新中', task);
 }
 
 async function refreshCurrentTab() {
+  if (currentTab === 'query') return loadChanges();
   await withRefreshButtonBusy(async function() {
     if (currentTab === 'personal') await loadPersonal(true);
     else if (currentTab === 'department') await loadDepartment(true);
-    else await loadChanges();
   });
 }
 function findPersonalProfile(id) {
@@ -438,18 +426,45 @@ async function loadDepartment(refresh) {
     }
   }
 }
+let renderedGerritQueryScope = '';
 async function loadChanges() {
   if (currentTab !== 'query') return;
+  const requestGeneration = ++gerritDashboardRequestGeneration.query;
   const profileId = document.getElementById('profile').value || '';
   const query = document.getElementById('query').value || '';
+  const scope = JSON.stringify([profileId, query]);
+  const button = document.getElementById('queryBtn');
+  const rows = document.getElementById('rows');
+  const panel = document.getElementById('tab-query');
+  const isLatest = () => requestGeneration === gerritDashboardRequestGeneration.query;
   saveGerritProfileState();
-  document.getElementById('status').textContent = '查询中...';
+  setActionButtonBusy(button, true, '查询中');
+  panel.setAttribute('aria-busy', 'true');
   try {
     const data = await api('/api/gerrit-dashboard/changes?profile_id=' + encodeURIComponent(profileId) + '&query=' + encodeURIComponent(query));
-    document.getElementById('status').innerHTML = data.error ? '<span class="error">' + esc(data.error) + '</span>' : '';
-    document.getElementById('rows').innerHTML = (data.items || []).map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
+    if (!isLatest()) return;
+    const items = data.items || [];
+    if (data.error) {
+      if (currentTab === 'query') notifyUser('Gerrit 查询失败', data.error, 'error');
+      if (!items.length) {
+        if (renderedGerritQueryScope !== scope || !rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+        return;
+      }
+    }
+    rows.innerHTML = items.map(renderRow).join('') || '<tr><td colspan="6" class="muted">无记录</td></tr>';
+    renderedGerritQueryScope = scope;
   } catch (e) {
-    document.getElementById('status').innerHTML = '<span class="error">' + esc(e.message) + '</span>';
+    if (!isLatest()) return;
+    if (currentTab === 'query') notifyUser('Gerrit 查询失败', e.message, 'error');
+    if (renderedGerritQueryScope !== scope || !rows.children.length || e.status === 401 || e.status === 403) {
+      rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
+      renderedGerritQueryScope = '';
+    }
+  } finally {
+    if (isLatest()) {
+      setActionButtonBusy(button, false);
+      panel.setAttribute('aria-busy', 'false');
+    }
   }
 }
 function placeholderHtml(innerHtml) {

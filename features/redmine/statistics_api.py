@@ -45,7 +45,7 @@ from .utils import bounded_stale_days
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(prefix="/api/redmine-agent")
 
 
 def _request_user_id(request: Request | None) -> str:

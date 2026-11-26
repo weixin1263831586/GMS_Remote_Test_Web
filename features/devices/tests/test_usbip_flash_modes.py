@@ -33,13 +33,12 @@ abc                                   Android ADB Interface
         self.assertEqual(
             configured_usbip_vid_pids({
                 "usbip_vid_pids": ["2207:0006", "18D1:4D00", "invalid"],
-                "usbip_vid_pid": "05ac:12a8",
             }),
             ("2207:0006", "18d1:4d00"),
         )
         self.assertEqual(
-            configured_usbip_vid_pids({"usbip_vid_pid": "05ac:12a8"}),
-            ("2207:0006", "18d1:4d00", "2207:351a", "2207:350e", "05ac:12a8"),
+            configured_usbip_vid_pids({}),
+            ("2207:0006", "18d1:4d00", "2207:351a", "2207:350e"),
         )
 
     def test_protocol_parsers_include_recovery_and_vendor_fastboot_label(self):
@@ -134,6 +133,9 @@ abc                                   Android ADB Interface
             def get_runtime_config(self):
                 return {}
 
+            def update_runtime_config(self, updates):
+                return True
+
             def save_runtime_config(self, data):
                 return True
 
@@ -184,6 +186,9 @@ abc                                   Android ADB Interface
 
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True
@@ -408,6 +413,9 @@ abc                                   Android ADB Interface
 
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                return True
 
             def save_runtime_config(self, data):
                 return True

@@ -932,7 +932,7 @@ body.overlay-open { overflow: hidden; }
 .resource-checksum { overflow-wrap: anywhere;   color: var(--muted); }
 .live-progress { padding: 8px; max-height: 240px; overflow: auto; flex-shrink: 0; }
 .live-progress table, .resource-workspace table { width: 100%; border-collapse: collapse;  }
-.live-progress td, .resource-workspace td, .resource-workspace th { padding: 6px; border-bottom: 1px solid var(--border); text-align: left; overflow-wrap: anywhere; }
+.live-progress td, .resource-workspace td, .resource-workspace th { border-bottom: 1px solid var(--border); text-align: left; overflow-wrap: anywhere; }
 .test-plan-selection { width: auto; }
 .plan-import textarea { width: 100%; box-sizing: border-box; }
 

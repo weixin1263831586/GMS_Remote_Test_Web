@@ -108,8 +108,9 @@ def test_suite_refresh_and_test_toggle_preserve_requested_text_and_icon_contract
     assert "GmsUi.icon('play') + ' 开始测试'" not in control
     assert "GmsUi.icon('stop') + ' 停止测试'" not in control
     suites = (ROOT / "web/static/js/shell/workspace-devices.js").read_text(encoding="utf-8")
-    assert "button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新中…'" in suites
-    assert "button.innerHTML = GmsUi.testEmoji('🔄') + ' 刷新套件'" in suites
+    assert "setActionButtonBusy(button, true, '刷新中')" in suites
+    assert "await loadTestSuites(true)" in suites
+    assert "setActionButtonBusy(button, false)" in suites
 
 
 def test_test_workspace_action_icons_preserve_color_and_semantics():
@@ -159,8 +160,15 @@ def test_test_workspace_action_icons_preserve_color_and_semantics():
 
 
 def test_dynamic_device_button_labels_preserve_color_icons():
+    source = (ROOT / "web/shell/pages/test.html").read_text(encoding="utf-8")
+    refresh = re.search(r'<button[^>]*id="refresh-devices-btn"[^>]*>(.*?)</button>', source, re.DOTALL)
+    assert refresh and '<span class="test-action-icon" aria-hidden="true">🔄</span>' in refresh.group(1)
+    assert "刷新设备" in refresh.group(1)
+    devices = (ROOT / "web/static/js/pages/test-suite-browser-devices.js").read_text(encoding="utf-8")
+    assert "setActionButtonBusy(button, true, '刷新中')" in devices
+    assert "await loadDevices(true, {source: 'manual'})" in devices
+    assert "setActionButtonBusy(button, false)" in devices
     sources = {
-        "web/static/js/pages/test-suite-browser-devices.js": ("刷新中…", "刷新设备"),
         "web/static/js/pages/firmware-burn-usbip.js": ("USB/IP", "连接中..."),
         "web/static/js/pages/vpn-control.js": ("连接 VPN", "断开设备"),
         "web/static/js/pages/auth-elevation.js": ("USB/IP", "断开设备"),

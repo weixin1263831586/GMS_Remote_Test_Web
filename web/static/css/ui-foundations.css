@@ -158,9 +158,6 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
     background: color-mix(in srgb, var(--danger-color, #f06b78) 13%, transparent);
     border-color: var(--danger-color, #f06b78);
 }
-:is(.list-table, .ui-table) th { padding: 9px 10px;   }
-:is(.list-table, .ui-table) tbody td { height: var(--ui-table-row-height); padding: 9px 10px !important; vertical-align: middle;  }
-:is(.list-table, .ui-table) tbody tr:not(:last-child) td { border-bottom: 1px solid var(--border-color, var(--border, #2b384b)); }
 #page-devices .devices-table-wrap { min-width: 0; max-width: 100%; }
 .device-management-table { width: 100%; min-width: 1120px; }
 .device-management-table th, .device-management-table td { text-align: left; overflow: hidden; white-space: nowrap; }
@@ -184,7 +181,6 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
 .device-row-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .device-row-actions .btn-xxs { flex: 1 1 0; width: auto; min-width: 0; min-height: var(--ui-control-height-small); max-height: var(--ui-control-height-small); padding: 2px 6px;  overflow: hidden; }
 .device-row-actions .device-release-action { flex: 0 1 auto; width: auto; }
-.device-management-table .device-group-row td { height: auto; padding: 6px 10px !important; }
 .device-battery { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
 .device-battery.is-low { color: var(--danger-color); }
 .device-battery.is-medium { color: var(--warning-color); }
@@ -197,3 +193,10 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
     #page-test .middle-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     #page-test .middle-row > :is(.adb-frame, .control-frame) { min-width: 0; }
 }
+
+/* Compact fixed widths for idle and busy labels. */
+button[data-busy-size] { box-sizing:border-box; padding-inline:6px; }
+button[data-busy-size="short"] { width:64px; flex-shrink:0; white-space:nowrap; }
+button[data-busy-size="plain"] { width:76px; flex-shrink:0; white-space:nowrap; }
+button[data-busy-size="icon"] { width:82px; flex-shrink:0; white-space:nowrap; }
+button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }

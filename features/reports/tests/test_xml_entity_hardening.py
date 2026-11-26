@@ -3,8 +3,7 @@
 测试报告（test_result.xml 等）产自设备与套件运行环境，属不可信证据。
 ``_LXML_PARSER`` 必须以 ``resolve_entities=False, no_network=True`` 构建：
 外部实体（XXE）与实体展开放大（billion laughs）都不允许在解析路径上
-发生。lxml 不可用时标准库 ElementTree 天然不解析外部实体，同一测试
-同样必须通过。
+发生。
 """
 
 from __future__ import annotations
@@ -12,7 +11,6 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from features.reports.models import USE_LXML
 from features.reports.xml_parser import XMLReportParser
 
 
@@ -86,18 +84,16 @@ class XxeHardeningTests(unittest.TestCase):
         report = self.parser.parse_content(BENIGN)
         self.assertIsNotNone(report)
 
-    def test_parser_flags_present_when_lxml(self):
+    def test_parser_disables_entity_resolution(self):
         """lxml 路径必须显式禁用实体展开（防手滑回退）。
 
         lxml 的 XMLParser 不暴露 resolve_entities 属性，用行为验证：
         内部实体引用必须原样保留，而不是被展开成实体内容。
         """
 
-        if not USE_LXML:
-            self.skipTest("lxml 不可用，走 ElementTree 路径")
         from lxml import etree as lxml_etree
 
-        from features.reports.models import _LXML_PARSER
+        from features.reports.xml_parser import _LXML_PARSER
 
         document = (
             '<?xml version="1.0"?><!DOCTYPE r ['

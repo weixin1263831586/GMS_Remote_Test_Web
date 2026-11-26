@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 from features.auth import require_elevated_admin_when_auth_required
 from features.users import get_client_username_from_request
 from foundation.error_model import ApiError
+from foundation.private_config import atomic_write_json
 from foundation.responses import error_response, success_response
 from foundation.secrets import decrypt_secret, encrypt_secret
 from foundation.ssh_security import configure_strict_host_keys
@@ -123,13 +124,7 @@ def _load_records() -> list[dict[str, Any]]:
 def _save_records(records: list[dict[str, Any]]) -> None:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(f'{path.suffix}.{uuid.uuid4().hex}.tmp')
-    try:
-        tmp.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
-        tmp.replace(path)
-    finally:
-        with suppress(OSError):
-            tmp.unlink()
+    atomic_write_json(path, records)
 
 
 def _parse_remote_spec(value: str) -> tuple[str, str | None, str]:

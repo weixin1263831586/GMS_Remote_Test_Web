@@ -16,6 +16,7 @@ from features.auth import (
     require_authenticated_user_when_auth_required,
 )
 from features.reports.access import can_access_report, get_accessible_report_by_timestamp
+from features.sdk import search_indexed_source
 from foundation.config import settings
 from foundation.redaction import redact_sensitive_text
 from foundation.responses import error_response, success_response
@@ -504,14 +505,13 @@ async def diagnose_report_failure(request: ReportDiagnosisRequest, http_request:
         )
 
         source_search_results = []
-        analyzer = ReportAnalyzer()
         search_terms = list(class_names[:3])
         if failure_location and failure_location.get("file_name"):
             search_terms.append(failure_location["file_name"])
         search_terms.extend(keywords[:3])
 
         source_search_coros = [
-            asyncio.to_thread(analyzer.rk_codesearch, term, failure_location, 5, request.android_version or '')
+            asyncio.to_thread(search_indexed_source, term, failure_location, 5, request.android_version or '')
             for term in search_terms if term
         ]
         if source_search_coros:

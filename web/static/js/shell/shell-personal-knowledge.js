@@ -1,6 +1,7 @@
         // ==================== 个人知识库 ====================
         const kbState = {
             initialized: false,
+            policyImport: false,
             spaces: [],
             nodes: [],
             currentSpace: 'gms',
@@ -18,10 +19,19 @@
             return result && result.data !== undefined ? result.data : result;
         }
 
-        async function kbFetch(url, options) {
+        async function kbFetch(url, options, retried = false) {
             const response = await fetch(url, {credentials: 'same-origin', ...(options || {})});
             const result = await response.json().catch(() => ({}));
-            if (!response.ok || result.success === false) throw new Error(result.error || result.message || `HTTP ${response.status}`);
+            if (!retried && (url.startsWith('/api/knowledge/external/') || (url === '/api/knowledge/upload' && kbState.policyImport)) && response.status === 403 && result.detail?.elevation_required && typeof window.requestElevatedAccess === 'function') {
+                if (await window.requestElevatedAccess('管理外部知识源')) return kbFetch(url, options, true);
+                throw new Error('已取消管理员验证');
+            }
+            if (!response.ok || result.success === false) {
+                if (response.status === 403 && url.startsWith('/api/knowledge/external/')) {
+                    throw new Error('外部知识源管理需要管理员授权');
+                }
+                throw new Error(result.error || result.message || result.detail?.message || `HTTP ${response.status}`);
+            }
             return kbApiData(result);
         }
 
@@ -41,7 +51,214 @@
             const title = document.getElementById('kb-doc-title');
             const tags = document.getElementById('kb-doc-tags');
             [content, title, tags].forEach(el => { if (el) el.addEventListener('input', () => kbState.dirty = true); });
+            kbInitExternalSources();
             await kbRefreshAll();
+        }
+
+
+        function kbInitExternalSources() {
+            const page = document.getElementById('page-notes');
+            const panel = page?.querySelector('[data-kb-external]');
+            const personal = page?.querySelector('.kb-layout');
+            if (!panel || !personal) return;
+            const form = panel.querySelector('[data-kb-source-form]');
+            const list = panel.querySelector('[data-kb-sources]');
+            const refreshButton = panel.querySelector('[data-kb-refresh]');
+            const api = '/api/knowledge/external/web-sources';
+            const controls = form.elements;
+            const submitButton = panel.querySelector('[data-kb-submit]');
+            const resetButton = panel.querySelector('[data-kb-reset]');
+            const partnerApi = '/api/knowledge/external/partner-policy-grant';
+            const partnerUrl = 'https://docs.partner.android.com/gms/policies/domains/reqs';
+            let editing = null;
+            let busy = false;
+            let partnerEnabled = null;
+
+            function reset() {
+                form.reset();
+                editing = null;
+                controls.namedItem('url').readOnly = false;
+                submitButton.textContent = '添加';
+                resetButton.hidden = true;
+                resetButton.style.display = 'none';
+            }
+            function edit(source) {
+                editing = source;
+                controls.namedItem('name').value = source.name || '';
+                controls.namedItem('url').value = source.url;
+                controls.namedItem('url').readOnly = true;
+                submitButton.textContent = '保存';
+                resetButton.hidden = false;
+                resetButton.style.display = '';
+                controls.namedItem('name').focus();
+            }
+            function button(label, action) {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'btn-xs';
+                b.textContent = label;
+                if (label === '同步') b.dataset.busySize = 'short';
+                b.addEventListener('click', action);
+                return b;
+            }
+            async function grantPartner(enabled) {
+                if (enabled && !await window.showConfirmDialog('授权 Google Partner 政策分析', '确认当前账号有权访问 Google Partner 文档，并允许当前已启用的 AI 模型处理相关政策片段。模型目录改变后须重新授权。')) return;
+                await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
+            }
+            function sourceRequest(source, enabled) {
+                return kbFetch(api + '/' + encodeURIComponent(source.id), {
+                    method: 'PUT', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: source.url, name: source.name || '', enabled})
+                });
+            }
+            async function load() {
+                const data = await kbFetch(api);
+                try {
+                    const grant = await kbFetch(partnerApi);
+                    partnerEnabled = Boolean(grant.enabled);
+                } catch (error) {
+                    partnerEnabled = null;
+                    showToast(error.message, 'warning');
+                }
+                const table = document.createElement('table');
+                table.className = 'list-table kb-source-table';
+                const columns = ['知识源名称', '网址', '版本', '索引条目', '状态', '操作'];
+                const colgroup = document.createElement('colgroup');
+                for (let i = 0; i < columns.length; i++) colgroup.append(document.createElement('col'));
+                table.append(colgroup);
+                const header = table.createTHead().insertRow();
+                for (const title of columns) {
+                    const th = document.createElement('th');
+                    th.textContent = title;
+                    th.scope = 'col';
+                    header.append(th);
+                }
+                const body = table.createTBody();
+                for (const source of data.sources || []) {
+                    const row = body.insertRow();
+                    for (const value of [source.name || source.url, source.url, source.android_version ?? '通用',
+                        source.indexed_count ?? '—',
+                        !source.enabled ? '已禁用' : source.error ? (source.revision ? '同步失败，保留旧索引' : '同步失败') : source.revision ? '已同步' : '待同步']) {
+                        const cell = row.insertCell();
+                        cell.textContent = String(value);
+                        cell.title = String(value);
+                    }
+                    const actions = document.createElement('div');
+                    actions.className = 'kb-source-actions';
+                    row.insertCell().append(actions);
+                    actions.append(button('编辑', () => edit(source)),
+                        button('同步', event => run(async () => {
+                            const result = await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
+                            showToast(result.status === 'in_progress' ? '知识源正在同步' : '知识源同步完成', 'info');
+                        }, event.currentTarget, '同步中')),
+                        button(source.enabled ? '禁用' : '启用', () => run(() => sourceRequest(source, !source.enabled))),
+                        button('删除', async () => {
+                            if (await window.showConfirmDialog('删除外部知识源', '删除此知识源及其索引和历史修订？')) {
+                                run(async () => {
+                                    await kbFetch(api + '/' + encodeURIComponent(source.id), {method: 'DELETE'});
+                                    if (editing?.id === source.id) reset();
+                                });
+                            }
+                        }));
+                }
+                const partner = body.insertRow();
+                for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
+                    partnerEnabled === null ? '授权状态未知' : partnerEnabled ? '已授权' : '待授权']) {
+                    const cell = partner.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const actions = document.createElement('div');
+                actions.className = 'kb-source-actions';
+                partner.insertCell().append(actions);
+                actions.append(button(partnerEnabled ? '撤销授权' : '授权', () => run(() => grantPartner(!partnerEnabled))),
+                    button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
+                    button('导入授权文档', async () => {
+                        if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
+                    }));
+                list.replaceChildren(table);
+            }
+            async function run(action, trigger = refreshButton, label = '刷新中') {
+                if (busy) return;
+                busy = true;
+                setActionButtonBusy(trigger, true, label);
+                refreshButton.disabled = true;
+                submitButton.disabled = true;
+                panel.setAttribute('aria-busy', 'true');
+                try {
+                    await action();
+                    await load();
+                } catch (error) {
+                    showToast(error.message, 'warning');
+                } finally {
+                    busy = false;
+                    setActionButtonBusy(trigger, false);
+                    refreshButton.disabled = false;
+                    submitButton.disabled = false;
+                    submitButton.textContent = editing ? '保存' : '添加';
+                    panel.setAttribute('aria-busy', 'false');
+                }
+            }
+            form.addEventListener('submit', event => {
+                event.preventDefault();
+                run(async () => {
+                    const values = new FormData(form);
+                    const url = String(values.get('url') || '').trim();
+                    const name = String(values.get('name') || '').trim();
+                    const parsed = new URL(url);
+                    if (!editing && parsed.protocol === 'https:' && parsed.hostname === 'docs.partner.android.com'
+                            && !parsed.username && !parsed.password && !parsed.port
+                            && parsed.pathname.replace(/\/$/, '') === '/gms/policies/domains/reqs') {
+                        if (!partnerEnabled) await grantPartner(true);
+                        reset();
+                        return;
+                    }
+                    const payload = {url, name};
+                    if (!editing && !(parsed.protocol === 'https:' && parsed.hostname === 'source.android.com'
+                            && parsed.pathname.startsWith('/docs/'))) {
+                        if (!await window.showConfirmDialog('确认知识源使用权限', '请确认此公开文档允许在本系统中建立共享索引，并允许已配置的 AI 模型处理相关内容。')) return;
+                        payload.authorized_for_ai_processing = true;
+                    }
+                    if (!editing) setActionButtonBusy(submitButton, true, '入库中');
+                    const result = await kbFetch(api + (editing ? '/' + encodeURIComponent(editing.id) : ''), {
+                        method: editing ? 'PUT' : 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify(payload)
+                    });
+                    reset();
+                    if (result.sync?.status === 'error') {
+                        showToast('知识源已添加，首次同步失败，可重试同步', 'warning');
+                    } else if (result.sync?.status === 'in_progress') {
+                        showToast('知识源正在同步', 'info');
+                    } else {
+                        showToast(result.sync?.status === 'ready' ? '知识源已同步入库' : '知识源已保存', 'success');
+                    }
+                }, submitButton, editing ? '保存中' : '添加中');
+            });
+            resetButton.addEventListener('click', reset);
+            refreshButton.addEventListener('click', () => run(async () => {}));
+            const tabs = [...page.querySelectorAll('[data-kb-view]')];
+            function switchView(view) {
+                const selected = view === 'external' ? 'external' : 'personal';
+                const external = selected === 'external';
+                panel.hidden = !external;
+                panel.style.display = external ? '' : 'none';
+                personal.style.display = external ? 'none' : '';
+                for (const tab of tabs) {
+                    const active = tab.dataset.kbView === selected;
+                    tab.classList.toggle('active', active);
+                    tab.setAttribute('aria-selected', String(active));
+                }
+                try { sessionStorage.setItem('gms_knowledge_view', selected); } catch (_error) {}
+                if (external) run(async () => {});
+            }
+            for (const tab of tabs) {
+                tab.addEventListener('click', () => switchView(tab.dataset.kbView));
+            }
+            let saved = 'personal';
+            try { saved = sessionStorage.getItem('gms_knowledge_view'); } catch (_error) {}
+            switchView(saved === 'external' && state.elevated ? 'external' : 'personal');
         }
 
         async function kbRefreshAll() {
@@ -95,6 +312,8 @@
             const box = document.getElementById('kb-doc-list');
             const requestGeneration = ++kbState.docsRequestGeneration;
             const hadRenderedDocs = kbState.docsLoaded;
+            const searchButton = document.querySelector('#page-notes [data-click="kbSearch"]');
+            setActionButtonBusy(searchButton, true, '搜索中');
             if (box) {
                 box.setAttribute('aria-busy', 'true');
                 if (!hadRenderedDocs) {
@@ -130,8 +349,9 @@
                 if (hadRenderedDocs) showToast('文档列表刷新失败: ' + error.message, 'error');
                 else if (box) box.innerHTML = `<div class="suite-empty" style="padding:20px;text-align:center;">加载失败: ${kbEsc(error.message)}</div>`;
             } finally {
-                if (requestGeneration === kbState.docsRequestGeneration && box) {
-                    box.setAttribute('aria-busy', 'false');
+                if (requestGeneration === kbState.docsRequestGeneration) {
+                    box?.setAttribute('aria-busy', 'false');
+                    setActionButtonBusy(searchButton, false);
                 }
             }
         }
@@ -304,8 +524,12 @@
 
         function kbSearch() { kbLoadDocs(); }
 
-        function kbOpenUpload() {
-            document.getElementById('kb-upload-input').value = '';
+        function kbOpenUpload(policy = false) {
+            kbState.policyImport = policy === true;
+            const input = document.getElementById('kb-upload-input');
+            if (!input.dataset.defaultAccept) input.dataset.defaultAccept = input.accept || '*/*';
+            input.accept = kbState.policyImport ? '.pdf,.html,.htm' : input.dataset.defaultAccept;
+            input.value = '';
             document.getElementById('kb-upload-status').textContent = '';
             ModalManager.open('kb-upload-modal');
         }
@@ -322,6 +546,7 @@
                     form.append('file', files[i]);
                     form.append('space_id', kbState.currentSpace);
                     form.append('parent_id', kbState.currentParent);
+                    if (kbState.policyImport) form.append('tags', 'external-policy-ai-approved');
                     const doc = await kbFetch('/api/knowledge/upload', {method:'POST', body:form});
                     kbState.currentDocId = doc.doc_id;
                 }

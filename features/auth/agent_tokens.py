@@ -272,9 +272,3 @@ class AgentTokenServiceMixin:
         return bool(values) and all(
             cls.agent_acl_allows(record, kind, value) for value in values
         )
-
-
-# Enrollment-code lifecycle moved to agent_enrollment.py (line-budget split);
-# re-exported so ``from .agent_tokens import AgentTokenEnrollmentMixin`` and
-# the AuthService mixin order stay stable for back-compat.
-from .agent_enrollment import AgentTokenEnrollmentMixin  # noqa: E402,F401

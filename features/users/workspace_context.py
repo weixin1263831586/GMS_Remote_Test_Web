@@ -25,7 +25,7 @@ from foundation.responses import success_response
 
 from . import runtime
 from .clients import owner_id_from_request
-from .storage_paths import owner_storage_key
+from .storage_paths import owner_preferences_dir
 
 
 router = APIRouter(prefix="/api/users/workspace-context")
@@ -140,9 +140,7 @@ def _default_context() -> dict:
 
 
 def _context_path(owner_id: str) -> Path:
-    root = Path(runtime.data_root) / "user_prefs" / owner_storage_key(owner_id)
-    root.mkdir(parents=True, exist_ok=True)
-    return root / "workspace_context.json"
+    return owner_preferences_dir(runtime.data_root, owner_id) / 'workspace_context.json'
 
 
 def load_workspace_context(owner_id: str) -> dict:

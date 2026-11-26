@@ -321,7 +321,7 @@ async function showConfig() {
     }
     const usbipVidPids = Array.isArray(config.usbip_vid_pids)
         ? config.usbip_vid_pids.join(', ')
-        : String(config.usbip_vid_pid || '');
+        : '';
 
     // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
     // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。
@@ -441,14 +441,14 @@ async function showConfig() {
             <table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background: var(--darker-bg);">
-                        <th style="padding:5px 6px;text-align:left;">设备主机</th>
-                        <th style="padding:5px 6px;text-align:left;">用户名</th>
-                        <th style="padding:5px 6px;text-align:left;">密码</th>
-                        <th style="padding:5px 6px;text-align:center;">操作</th>
+                        <th style="text-align:left;">设备主机</th>
+                        <th style="text-align:left;">用户名</th>
+                        <th style="text-align:left;">密码</th>
+                        <th style="text-align:center;">操作</th>
                     </tr>
                 </thead>
                 <tbody id="client-creds-table-body">
-                    <tr><td colspan="4" style="padding:20px;text-align:center;">加载中...</td></tr>
+                    <tr><td colspan="4" style="text-align:center;">加载中...</td></tr>
                 </tbody>
             </table>
             <div class="modal-form-row" style="margin-top:8px;gap:6px;">
@@ -471,13 +471,13 @@ async function showConfig() {
             <table style="width:100%;border-collapse:collapse;">
                 <thead>
                     <tr style="background: var(--darker-bg);">
-                        <th style="padding:5px 6px;text-align:left;">目标网段</th>
-                        <th style="padding:5px 6px;text-align:left;">网关</th>
-                        <th style="padding:5px 6px;text-align:center;">操作</th>
+                        <th style="text-align:left;">目标网段</th>
+                        <th style="text-align:left;">网关</th>
+                        <th style="text-align:center;">操作</th>
                     </tr>
                 </thead>
                 <tbody id="static-routes-table-body">
-                    <tr><td colspan="3" style="padding:20px;text-align:center;">加载中...</td></tr>
+                    <tr><td colspan="3" style="text-align:center;">加载中...</td></tr>
                 </tbody>
             </table>
             <div class="modal-form-row" style="margin-top:8px;gap:6px;">
@@ -556,20 +556,20 @@ async function loadEmailOutbox() {
             const preview = String(item.subject || '') +
                 (item.body_preview ? `　<span style="color:var(--text-muted,#888);">${escapeJsAttr(item.body_preview.slice(0, 60))}…</span>` : '');
             return `<tr>
-                <td style="padding:4px 6px;white-space:nowrap;">${escapeJsAttr(item.created_at || '')}</td>
-                <td style="padding:4px 6px;white-space:nowrap;">${channelLabel}${ref}</td>
-                <td style="padding:4px 6px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(toText)}">${escapeJsAttr(toText)}</td>
-                <td style="padding:4px 6px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(item.subject || '')}">${preview}</td>
-                <td style="padding:4px 6px;white-space:nowrap;">${state}</td>
+                <td style="white-space:nowrap;">${escapeJsAttr(item.created_at || '')}</td>
+                <td style="white-space:nowrap;">${channelLabel}${ref}</td>
+                <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(toText)}">${escapeJsAttr(toText)}</td>
+                <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeJsAttr(item.subject || '')}">${preview}</td>
+                <td style="white-space:nowrap;">${state}</td>
             </tr>`;
         }).join('');
         listEl.innerHTML = `<table style="width:100%;border-collapse:collapse;">
             <thead><tr style="background:var(--darker-bg,#222);">
-                <th style="padding:4px 6px;text-align:left;">时间(UTC)</th>
-                <th style="padding:4px 6px;text-align:left;">通道</th>
-                <th style="padding:4px 6px;text-align:left;">收件人</th>
-                <th style="padding:4px 6px;text-align:left;">主题/预览</th>
-                <th style="padding:4px 6px;text-align:left;">结果</th>
+                <th style="text-align:left;">时间(UTC)</th>
+                <th style="text-align:left;">通道</th>
+                <th style="text-align:left;">收件人</th>
+                <th style="text-align:left;">主题/预览</th>
+                <th style="text-align:left;">结果</th>
             </tr></thead><tbody>${rows}</tbody></table>
             <div class="history-mail-count" style="padding:4px 6px;color:var(--text-muted,#888);">共 ${data.total} 条，显示最近 ${items.length} 条</div>`;
     } catch (error) {
@@ -736,7 +736,6 @@ function renderClientCredentialsMessage(tbody, message, color) {
     const row = document.createElement('tr');
     const cell = document.createElement('td');
     cell.colSpan = 4;
-    cell.style.padding = '20px';
     cell.style.textAlign = 'center';
     if (color) cell.style.color = color;
     cell.textContent = message;
@@ -746,7 +745,6 @@ function renderClientCredentialsMessage(tbody, message, color) {
 
 function appendClientCredentialCell(row, text, color) {
     const cell = document.createElement('td');
-    cell.style.padding = '4px 6px';
     if (color) cell.style.color = color;
     cell.textContent = text;
     row.appendChild(cell);
@@ -825,7 +823,7 @@ async function loadStaticRoutes() {
 function renderStaticRoutesMessage(message, color) {
     const tbody = document.getElementById('static-routes-table-body');
     if (!tbody) return;
-    tbody.innerHTML = `<tr><td colspan="3" style="padding:20px;text-align:center;${color ? `color:${color};` : ''}">${escapeHtml(message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="3" style="text-align:center;${color ? `color:${color};` : ''}">${escapeHtml(message)}</td></tr>`;
 }
 
 function renderStaticRoutesTable(routes) {
@@ -837,9 +835,9 @@ function renderStaticRoutesTable(routes) {
     }
     tbody.innerHTML = routes.map(route => `
         <tr data-destination="${escapeHtml(route.destination)}" data-gateway="${escapeHtml(route.gateway)}" style="border-bottom: 1px solid var(--border-color);">
-            <td class="ui-mono" style="padding:5px 6px;">${escapeHtml(route.destination)}</td>
-            <td class="ui-mono" style="padding:5px 6px;">${escapeHtml(route.gateway)}</td>
-            <td style="padding:5px 6px;text-align:center;">
+            <td class="ui-mono">${escapeHtml(route.destination)}</td>
+            <td class="ui-mono">${escapeHtml(route.gateway)}</td>
+            <td style="text-align:center;">
                 <button class="btn-xxs" type="button" data-action="delete-static-route">删除</button>
             </td>
         </tr>

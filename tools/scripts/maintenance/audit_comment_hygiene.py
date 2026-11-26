@@ -6,6 +6,7 @@ documentation findings require review; files are never modified.
 """
 from __future__ import annotations
 
+import ast
 import io
 import re
 import subprocess
@@ -46,20 +47,27 @@ HISTORY_ADVISORY = re.compile(
 
 
 def python_comments(path: Path, data: str):
+    """Extract lexical comments and actual Python docstrings."""
     try:
         for token in tokenize.generate_tokens(io.StringIO(data).readline):
             if token.type == tokenize.COMMENT:
                 yield token.start[0], token.string.lstrip("# ")
-            elif token.type == tokenize.STRING:
-                stripped = token.string.lstrip("rRuUbBfF")
-                if stripped.startswith(('"""', "'''")):
-                    # Triple-quoted docstrings may span many lines; report only
-                    # matching excerpts, without treating arbitrary literals as code.
-                    for offset, line in enumerate(token.string.splitlines()):
-                        yield token.start[0] + offset, line.strip(" \t\"'")
     except (tokenize.TokenError, IndentationError):
-        # Source validity is checked by the normal lint/test jobs.
         pass
+
+    try:
+        tree = ast.parse(data, filename=str(path))
+    except SyntaxError:
+        # Syntax failures are reported by the repository's lint gate.
+        return
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if ast.get_docstring(node, clean=False) is None:
+            continue
+        statement = node.body[0]
+        for offset, line in enumerate(statement.value.value.splitlines()):
+            yield statement.lineno + offset, line.strip()
 
 
 def other_comments(path: Path, data: str):

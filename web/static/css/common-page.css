@@ -1015,19 +1015,13 @@ body.apk-resizing {
     transition: none;
 }
 
-#agent-access-entry,
-#sdk-config-entry,
-#audit-outbox-entry,
-#audit-disk-entry {
+.users-view-tabs > div {
     display: flex;
     align-items: stretch;
     border-left: 1px solid var(--border-color);
 }
 
-#agent-access-entry > .btn-xs,
-#sdk-config-entry > .btn-xs,
-#audit-outbox-entry > .btn-xs,
-#audit-disk-entry > .btn-xs {
+.users-view-tabs > div > .btn-xs {
     flex: 1;
 }
 
@@ -1082,7 +1076,6 @@ body.apk-resizing {
 }
 
 .users-table th {
-    padding: 5px 6px;
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
     background: var(--darker-bg);
@@ -1091,16 +1084,11 @@ body.apk-resizing {
 }
 
 .users-table tbody tr {
-    border-bottom: 1px solid var(--border-color);
     transition: background 0.12s ease;
 }
 
 .users-table tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, transparent);
-}
-
-.users-table tbody tr:last-child td {
-    border-bottom: 0 !important;
 }
 
 .users-col-identity { width: 200px; }

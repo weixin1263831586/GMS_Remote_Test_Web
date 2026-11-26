@@ -230,6 +230,8 @@ class WorkerDeploymentTests(unittest.TestCase):
         self.assertIn("foundation/__init__.py", names)
         self.assertIn("foundation/networking.py", names)
         self.assertIn("foundation/transport_contract.py", names)
+        self.assertIn("foundation/fastboot_workflow.py", names)
+        self.assertNotIn("worker/fastboot_workflow.py", names)
 
         installer = (
             project_root / "scripts/deployment/worker/install_cluster_worker.sh"
@@ -508,6 +510,12 @@ class LocalSoftwareReconfigurationTests(unittest.TestCase):
         with deployment._LOCAL_SOFTWARE_LOCK:
             deployment._LOCAL_SOFTWARE_TASKS.clear()
             deployment._LOCAL_SOFTWARE_ACTIVE_TASK = ""
+
+    def test_rejects_option_shaped_local_service_name(self):
+        from features.cluster.deployment.api import _local_software_service_name
+
+        with patch.dict("os.environ", {"GMS_SERVICE_NAME": "--bad"}), self.assertRaises(RuntimeError):
+            _local_software_service_name()
 
     def test_starts_the_restricted_local_software_unit(self):
         from features.cluster.deployment.api import _reconfigure_local_software

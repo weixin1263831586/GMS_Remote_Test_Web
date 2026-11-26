@@ -14,6 +14,7 @@ import threading
 from typing import Any
 
 from foundation.config import settings
+from foundation.ops_port import IncidentResult
 
 from .store import OPS_FLAG_PAUSED, OpsStore
 
@@ -78,10 +79,22 @@ def set_advancement_paused(paused: bool, updated_by: str = "") -> dict[str, Any]
     }
 
 
-def record_incident(**kwargs: Any) -> dict[str, Any]:
-    """Record an incident; never raises (callers sit inside watchdog paths)."""
+def record_incident(
+    *,
+    severity: str,
+    kind: str,
+    message: str,
+    subject: str = '',
+    dedup_key: str = '',
+    next_actions: list[dict[str, Any]] | None = None,
+    suppress_minutes: int = 60,
+) -> IncidentResult:
+    """Record an incident without interrupting watchdog execution."""
     try:
-        return get_ops_store().record_incident(**kwargs)
+        return get_ops_store().record_incident(
+            severity=severity, kind=kind, message=message, subject=subject,
+            dedup_key=dedup_key, next_actions=next_actions, suppress_minutes=suppress_minutes,
+        )
     except Exception:
         logger.exception("ops incident recording failed")
         return {"event": None, "suppressed": True}

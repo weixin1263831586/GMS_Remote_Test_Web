@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gerrit 看板</title>
-  <script src="/static/js/utils.js?v=20261113-shared-clipboard"></script>
+  <script src="/static/js/utils.js?v=20261126-action-busy"></script>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --panel2:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); --warn:var(--warning-color); --bad:var(--danger-color); --surface:var(--light-bg); --accent:var(--lighter-bg); }
@@ -30,6 +30,7 @@
     .header-toolbar .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
     /* 右对齐聚簇内的输入限宽，避免把 Tab 行挤爆（Redmine searchInput 同款）。 */
     #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
+    #queryBtn:disabled { cursor:wait; opacity:.7; }
     #owner { width:clamp(180px, 18vw, 260px); min-width:180px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
     .select-with-add select { padding-right:28px; min-width:180px; }
@@ -69,7 +70,7 @@
     .owner-title { display:flex; justify-content:space-between; align-items:center; gap:10px; margin:0 0 8px; }
     .owner-title h2 { margin:0;  }
     table { width:100%; border-collapse:collapse; min-width:820px; }
-    th,td { border-bottom:1px solid var(--border); padding:8px 10px; text-align:left;  vertical-align:top; }
+    th,td { border-bottom:1px solid var(--border); text-align:left; }
     th { color:var(--muted); background:var(--panel2); }
     a { color:var(--primary-light); text-decoration:none;  }
     a.member-link:hover { text-decoration:underline; }
@@ -77,9 +78,8 @@
     .wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; }
     .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:18px; }
     .dept-table { width:100%; border-collapse:collapse; min-width:760px;  }
-    .dept-table th { height:var(--ui-table-header-height); text-align:left; color:var(--muted);   padding:8px 10px; background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
-    .dept-table td { height:var(--ui-table-row-height); padding:9px 10px; border-bottom:1px solid var(--border); white-space:nowrap; }
-    .dept-table tr:last-child td { border-bottom:0; }
+    .dept-table th { text-align:left; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
+    .dept-table td { white-space:nowrap; }
     .dept-table tbody tr:hover { background:var(--light-bg); }
     .dept-action-btn { width:48px; min-width:48px; max-width:48px; padding:0; text-align:center; overflow:hidden; white-space:nowrap; }
     .change-title { max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -159,18 +159,18 @@
 
 </style>
 <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
-<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261117-semantic-icon-palette">
+<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261126-table-divider">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action">
 <link rel="stylesheet" href="/static/css/form-controls.css?v=20261125-unified-password-control">
 <script src="/static/js/password-controls.js?v=20261125-unified-password-control" defer></script>
 <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261120-type-size-dedup-v1">
-<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261120-type-size-dedup-v1">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261126-table-geometry">
 <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261120-type-size-dedup-v1">
 <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
 <script src="/static/js/dialog-prompts.js?v=20261116-aligned-corner-path"></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs"></script>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8">
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-divider">
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 </head>
 <body>
@@ -185,13 +185,13 @@
       <div id="queryFilters" hidden>
         <select id="profile" data-change="loadChanges" aria-label="查询场景"></select>
         <input id="query" placeholder="Gerrit query，例如 status:open owner:self">
-        <button class="secondary" data-click="loadChanges">查询</button>
+        <button id="queryBtn" data-busy-size="short" type="button" class="secondary" data-click="loadChanges" aria-busy="false">查询</button>
       </div>
       <div id="dynamicFilters" hidden></div>
     </div>
     <div class="btn-group">
-      <button id="syncMembersBtn" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
-      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+      <button id="syncMembersBtn" data-busy-size="plain" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
+      <button id="refreshBtn" data-busy-size="icon" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
       <button class="secondary" data-click="showSettings" title="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
     </div>
   </div>
@@ -213,7 +213,6 @@
     <div id="departmentContent"></div>
   </section>
   <section id="tab-query" class="tab-content ui-page-edge">
-    <div id="status" class="muted status-line">加载中...</div>
     <div class="wrap"><table class="ui-table"><thead><tr><th>变更</th><th>项目</th><th>分支</th><th>状态</th><th>Owner</th><th>更新时间</th></tr></thead><tbody id="rows"></tbody></table></div>
   </section>
 </main>

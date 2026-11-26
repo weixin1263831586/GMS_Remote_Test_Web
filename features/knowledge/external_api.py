@@ -16,6 +16,7 @@ reindex。Handler 全部为普通 ``def``——provider 内部是同步阻塞 I/
 from __future__ import annotations
 
 import logging
+import sqlite3
 
 from fastapi import APIRouter, Query, Request
 from pydantic import BaseModel, Field
@@ -35,6 +36,7 @@ from .external import (
     federated_search,
     federated_status,
 )
+from .external.web_sources import WebKnowledgeProvider
 
 
 def _federated_provider(source_id: str):
@@ -84,6 +86,22 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         unknown = _validate_sources(payload.sources)
         if unknown:
             return error_response(unknown, 422)
+    # Exact citation retrieval and version comparison use the existing search contract.
+    if query.startswith('POL-') or query.startswith('compare:'):
+        if payload.sources and 'web_documents' not in payload.sources:
+            return error_response('请求的来源不包含外部网页', 422)
+        provider = WebKnowledgeProvider()
+        if query.startswith('POL-'):
+            item = provider.read_requirement(query)
+            return success_response(data={'results': [{**item, 'evidence_level': 'background'}] if item else [],
+                                          'sources_status': federated_status()})
+        parts = query.removeprefix('compare:').rsplit('|', 1)
+        if len(parts) != 2 or not all(part.strip() for part in parts):
+            return error_response('对比格式：compare:章节|条款编号', 422)
+        rows = provider.compare_requirements(parts[0].strip(), parts[1].strip())
+        return success_response(data={'results': [{**row, 'evidence_level': 'background'} for row in rows],
+                                      'sources_status': federated_status(),
+                                      'comparison_scope': 'current revisions; exact section and requirement ID'})
     try:
         data = federated_search(
             query,
@@ -166,3 +184,96 @@ def agent_android_internals_status(request: Request):
     require_agent_scope("knowledge.read")(request)
     rows = [s for s in federated_status() if s.get("source") == KNOWN_SOURCES[0]]
     return success_response(data={"sources": rows})
+
+
+class WebSourceRequest(BaseModel):
+    url: str = Field(..., min_length=1, max_length=2048)
+    name: str = Field('', max_length=160)
+    enabled: bool | None = None
+    authorized_for_ai_processing: bool = False
+
+
+def _initial_sync(provider, source_id):
+    try:
+        return provider.sync(source_id)
+    except Exception as exc:
+        logger.warning('Web knowledge initial synchronization failed: %s', type(exc).__name__)
+        return {'source_id': source_id, 'status': 'error'}
+
+@router.get("/web-sources")
+@handle_api_errors
+def list_web_sources(request: Request):
+    require_elevated_admin(request)
+    return success_response(data={"sources": WebKnowledgeProvider().list_sources()})
+
+
+@router.post("/web-sources")
+@handle_api_errors
+def create_web_source(request: Request, payload: WebSourceRequest):
+    require_elevated_admin(request)
+    provider = WebKnowledgeProvider()
+    try:
+        source_id = provider.save_url(**payload.model_dump())
+    except (ValueError, sqlite3.IntegrityError):
+        return error_response('知识源网址无效、重复或未经内容使用授权', 422)
+    sync = _initial_sync(provider, source_id) if payload.enabled is not False else {'status': 'disabled'}
+    return success_response(data={'id': source_id, 'sync': sync})
+
+
+@router.put("/web-sources/{source_id}")
+@handle_api_errors
+def update_web_source(request: Request, source_id: str, payload: WebSourceRequest):
+    require_elevated_admin(request)
+    provider = WebKnowledgeProvider()
+    try:
+        provider.save_url(source_id=source_id, **payload.model_dump())
+    except (ValueError, sqlite3.IntegrityError):
+        return error_response('知识源配置无效或不存在；更换网址请添加新知识源', 422)
+    source = next((row for row in provider.list_sources() if row['id'] == source_id), None)
+    sync = _initial_sync(provider, source_id) if source and source['enabled'] and not source['revision'] else None
+    return success_response(data={'id': source_id, 'sync': sync})
+
+
+@router.delete("/web-sources/{source_id}")
+@handle_api_errors
+def delete_web_source(request: Request, source_id: str):
+    require_elevated_admin(request)
+    WebKnowledgeProvider().delete(source_id)
+    return success_response(data={"id": source_id})
+
+
+@router.post("/web-sources/{source_id}/sync")
+@handle_api_errors
+def sync_web_source(request: Request, source_id: str):
+    require_elevated_admin(request)
+    try:
+        data = WebKnowledgeProvider().sync(source_id)
+    except Exception as exc:
+        logger.warning("Web knowledge synchronization failed: %s", type(exc).__name__)
+        return error_response("知识源同步失败；请检查网址、访问权限和文档格式，已有索引未覆盖", 502)
+    return success_response(data=data)
+
+
+class PartnerGrantRequest(BaseModel):
+    enabled: bool
+    authorized_for_ai_processing: bool = False
+
+
+@router.get('/partner-policy-grant')
+@handle_api_errors
+def get_partner_policy_grant(request: Request):
+    user = require_elevated_admin(request)
+    return success_response(data={'enabled': WebKnowledgeProvider().has_partner_grant(user.resource_owner_id)})
+
+
+@router.put('/partner-policy-grant')
+@handle_api_errors
+def update_partner_policy_grant(request: Request, payload: PartnerGrantRequest):
+    user = require_elevated_admin(request)
+    if payload.enabled and not payload.authorized_for_ai_processing:
+        return error_response('需要确认当前账号有权访问并向配置的分析模型提供 GMS 政策内容', 422)
+    try:
+        WebKnowledgeProvider().set_partner_grant(user.resource_owner_id, payload.enabled)
+    except ValueError:
+        return error_response('当前模型目录无法验证，请先配置分析模型', 422)
+    return success_response(data={'enabled': payload.enabled})

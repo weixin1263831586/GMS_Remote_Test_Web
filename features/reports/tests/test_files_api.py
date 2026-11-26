@@ -88,9 +88,7 @@ class ReportFilesApiTests(unittest.TestCase):
             ), patch(
                 "features.reports.files_api.can_access_report",
                 return_value=True,
-            ), patch.object(files_api.dependencies, "file_utils", object()), patch.object(
-                files_api.dependencies, "ssh_manager", None
-            ):
+            ), patch.object(files_api.dependencies, "file_utils", object()):
                 response = asyncio.run(download_report(
                     request,
                     report_id=None,

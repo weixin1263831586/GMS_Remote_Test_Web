@@ -21,7 +21,9 @@ import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+from foundation.ops_port import IncidentResult, OpsEvent
 
 
 OPS_FLAG_PAUSED = "advancement_paused"
@@ -212,7 +214,7 @@ class OpsStore:
         message: str,
         next_actions: list[dict[str, Any]] | None = None,
         suppress_minutes: int = 60,
-    ) -> dict[str, Any]:
+    ) -> IncidentResult:
         """Insert one incident unless an identical open one is still fresh.
 
         ``suppress_minutes <= 0`` disables suppression (kill-switch changes
@@ -259,7 +261,7 @@ class OpsStore:
                     else None
                 )
                 if age is not None and age <= timedelta(minutes=suppress_minutes):
-                    return {"event": dict(row), "suppressed": True}
+                    return {"event": cast(OpsEvent, dict(row)), "suppressed": True}
             conn.execute(
                 """INSERT INTO ops_events
                    (id, created_at, severity, kind, subject, dedup_key,
@@ -278,12 +280,12 @@ class OpsStore:
             )
         return {"event": self.get_event(event_id), "suppressed": False}
 
-    def get_event(self, event_id: str) -> dict[str, Any] | None:
+    def get_event(self, event_id: str) -> OpsEvent | None:
         with self._connect() as conn:
             row = conn.execute(
                 "SELECT * FROM ops_events WHERE id=?", (event_id,)
             ).fetchone()
-        return dict(row) if row is not None else None
+        return cast(OpsEvent, dict(row)) if row is not None else None
 
     def list_events(
         self, *, status: str = "", limit: int = 100

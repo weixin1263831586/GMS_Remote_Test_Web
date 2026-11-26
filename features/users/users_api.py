@@ -186,12 +186,10 @@ async def remove_configured_user(request: Request, _elevated=Depends(require_ele
             if state.get("client_ip") == ip and state.get("running", False):
                 return error_response(f"用户 {ip} 正在测试中，请等待其测试结束后再移除", 409)
 
-    del client_hosts[ip]
-    runtime_config = runtime.config_manager.prepare_client_config({"client_hosts": client_hosts})
-    if not runtime.config_manager.save_runtime_config(runtime_config):
+    if not runtime.config_manager.remove_client_host(ip):
         return error_response("保存配置失败", 500)
 
-    client_manager.client_hosts = client_hosts
+    client_manager.client_hosts = runtime.config_manager.get_runtime_config().get("client_hosts", {})
     logger.info(f"[Remove User] removed configured user {ip}")
     return JSONResponse(content={"success": True, "ip": ip})
 
@@ -325,7 +323,7 @@ async def list_users(
 
     # 合并持久化 Worker 任务的所有者和设备租约。
     try:
-        from features.users.cluster_access import get_cluster_service
+        from foundation.cluster_port import get_cluster_service
 
         cluster_service = get_cluster_service()
         jobs = (

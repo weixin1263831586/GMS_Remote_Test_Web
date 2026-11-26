@@ -81,7 +81,7 @@ def main() -> int:
             argv.append("--json")
     # 开发者 launcher 的刻意 re-exec：以受限环境重新进入本工具链，
     # argv 由 argparse 组装，无外部输入直接进入。
-    os.execve(sys.executable, argv, env)  # nosemgrep: python.lang.security.audit.dangerous-os-exec-tainted-env-args.dangerous-os-exec-tainted-env-args
+    os.execve(sys.executable, argv, env)
     return 127
 
 

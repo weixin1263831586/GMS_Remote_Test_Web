@@ -9,8 +9,9 @@ from pydantic import ValidationError
 from features.auth import CurrentUser
 from features.devices.models import USBIPDisconnectRequest, USBIPStartRequest
 from features.devices.tests.usbip_runtime_fixture import UsbipRuntimeTestCase, global_state
-from features.devices.usbip.manager import USBIPManager, find_device_host_password, parse_usbipd_android_busids
+from features.devices.usbip.manager import USBIPManager, parse_usbipd_android_busids
 from foundation.command_result import CommandResult
+from foundation.ssh import find_device_host_password
 
 
 class UsbipConnectionTests(UsbipRuntimeTestCase):
@@ -209,6 +210,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 runtime_config.clear()
@@ -1013,7 +1018,7 @@ BUSID  VID:PID    DEVICE                                                        
             ]
         }
         with patch(
-            "features.devices.ssh_credentials.decrypt_secret",
+            "foundation.secrets.decrypt_secret",
             side_effect=lambda value: {"enc66": "pw66", "enc67": "pw67"}[value],
         ):
             self.assertEqual(find_device_host_password("hcq@172.16.14.66", config), "pw66")
@@ -1035,6 +1040,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return {}
+
+            def update_runtime_config(self, updates):
+                saved.setdefault("runtime", {}).update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 saved["runtime"] = data
@@ -1075,6 +1084,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return runtime_config
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 saved = dict(data)
@@ -1221,6 +1234,10 @@ BUSID  VID:PID    DEVICE                                                        
 
             def get_runtime_config(self):
                 return dict(runtime_config)
+
+            def update_runtime_config(self, updates):
+                runtime_config.update(updates)
+                return True
 
             def save_runtime_config(self, data):
                 runtime_config.clear()

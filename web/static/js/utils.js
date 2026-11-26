@@ -161,3 +161,40 @@ window.safeHeaderPercentEncode = safeHeaderPercentEncode;
 window.formatBytes = formatBytes;
 window.triggerDownload = triggerDownload;
 window.copyTextToClipboard = copyTextToClipboard;
+
+// Keep the operation icon and restore the idle markup after a request.
+const actionButtonStates = new WeakMap();
+function setActionButtonBusy(button, busy, label) {
+    if (!button) return;
+    let state = actionButtonStates.get(button);
+    if (busy) {
+        if (!state) {
+            state = {nodes: [...button.childNodes], disabled: button.disabled,
+                ariaBusy: button.getAttribute('aria-busy')};
+            actionButtonStates.set(button, state);
+        }
+        const icons = state.nodes.filter(node => node.nodeType === 1 &&
+            node.matches('svg.ui-icon, .test-action-icon'));
+        button.replaceChildren(...icons, document.createTextNode((icons.length ? ' ' : '') + label));
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+    } else if (state) {
+        button.replaceChildren(...state.nodes);
+        button.disabled = state.disabled;
+        if (state.ariaBusy === null) button.removeAttribute('aria-busy');
+        else button.setAttribute('aria-busy', state.ariaBusy);
+        actionButtonStates.delete(button);
+    }
+}
+async function withActionButtonBusy(button, label, task) {
+    setActionButtonBusy(button, true, label);
+    const state = actionButtonStates.get(button);
+    if (state) state.pending = (state.pending || 0) + 1;
+    try {
+        return await task();
+    } finally {
+        if (state && actionButtonStates.get(button) === state && --state.pending === 0) {
+            setActionButtonBusy(button, false);
+        }
+    }
+}

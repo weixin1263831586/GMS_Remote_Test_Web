@@ -17,7 +17,8 @@ max_jobs="$5"
 user="${connection%%@*}"
 host="${connection#*@}"
 port=22
-if [[ "$host" =~ ^\[([^]]+)\](:([0-9]+))?$ ]]; then
+ipv6_host_pattern='^\[([^]]+)\](:([0-9]+))?$'
+if [[ "$host" =~ $ipv6_host_pattern ]]; then
     port="${BASH_REMATCH[3]:-22}"
     host="${BASH_REMATCH[1]}"
 elif [[ "$host" =~ ^([^:]+):([0-9]+)$ ]]; then
@@ -25,7 +26,7 @@ elif [[ "$host" =~ ^([^:]+):([0-9]+)$ ]]; then
     host="${BASH_REMATCH[1]}"
 fi
 [[ "$user" =~ ^[a-zA-Z0-9._-]+$ && "$host" =~ ^[a-zA-Z0-9.:_-]+$ && "$host" != -* ]] || exit 2
-[[ "$port" =~ ^[0-9]{1,5}$ ]] && ((10#$port > 0 && 10#$port <= 65535)) || exit 2
+[[ "$port" =~ ^[0-9]{1,5}$ ]] && [ "$port" -gt 0 ] && [ "$port" -le 65535 ] || exit 2
 target="$user@$host"
 scp_target="$target"
 [[ "$host" != *:* ]] || scp_target="$user@[$host]"

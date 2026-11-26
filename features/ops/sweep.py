@@ -17,6 +17,9 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from foundation.cluster_port import get_cluster_service
+from foundation.ops_port import AlertSweepResult
+
 from .notify import load_ops_alerts_config, notify_incident
 from .rules import evaluate
 
@@ -27,25 +30,14 @@ logger = logging.getLogger(__name__)
 MAX_RETRY_EVENTS = 20
 
 
-def _safe_import_call(module: str, func: str) -> Any:
-    try:
-        target = __import__(module, fromlist=[func])
-        return getattr(target, func)()
-    except Exception:
-        logger.debug("ops sweep skipped %s.%s", module, func, exc_info=True)
-        return None
-
-
 def build_snapshot() -> dict[str, Any]:
     from foundation.config import settings
 
     snapshot: dict[str, Any] = {}
-    workers = _safe_import_call("features.cluster", "get_cluster_service")
-    if workers is not None:
-        try:
-            snapshot["workers"] = workers.list_workers()
-        except Exception:
-            logger.debug("ops sweep could not list workers", exc_info=True)
+    try:
+        snapshot["workers"] = get_cluster_service().list_workers()
+    except Exception:
+        logger.debug("ops sweep could not list workers", exc_info=True)
 
     try:
         from features.automation import get_automation_service, get_worker_status
@@ -70,12 +62,7 @@ def _dispatch(store: Any, event: dict[str, Any], cfg: dict[str, Any]) -> bool:
     attempts = int(event.get("notify_attempts") or 0) + 1
     try:
         dispatch = notify_incident(event, cfg=cfg)
-        # notify_incident 返回 {"ok": bool}；兼容旧 {"sent": [...]} 形状。
-        if "ok" in dispatch:
-            ok = bool(dispatch["ok"])
-        else:
-            sent = dispatch.get("sent") or []
-            ok = bool(sent) and all(item.get("sent") for item in sent)
+        ok = bool(dispatch["ok"])
     except Exception:
         logger.exception("ops notification dispatch failed for %s", event_id)
         ok = False
@@ -113,7 +100,7 @@ def _deliver_pending(cfg: dict[str, Any]) -> int:
     return notified
 
 
-def run_ops_sweep(cfg: dict[str, Any] | None = None) -> dict[str, int]:
+def run_ops_sweep(cfg: dict[str, Any] | None = None) -> AlertSweepResult:
     """One alert sweep; safe to call from the maintenance tick every pass."""
     from . import record_incident
 

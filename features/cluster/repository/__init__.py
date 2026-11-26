@@ -9,6 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from typing_extensions import Unpack
+
+from foundation.cluster_port import TransferUpdate
 from foundation.device_claims import DeviceClaimRegistry
 
 from ..admission import worker_admission_state
@@ -43,7 +46,7 @@ class ClusterRepository(
         db_path: str | Path,
         claim_db_path: str | Path | None = None,
         claim_lease_ttl_seconds: int = 90,
-    ):
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if claim_db_path is None:
@@ -661,7 +664,7 @@ class ClusterRepository(
     def update_transfer(
         self,
         transfer_id: str,
-        **values: Any,
+        **values: Unpack[TransferUpdate],
     ) -> dict[str, Any] | None:
         allowed = {
             "status",

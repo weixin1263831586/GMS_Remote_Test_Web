@@ -11,7 +11,7 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
         page = self.new_page()
         errors = []
         page.on('pageerror', lambda error: errors.append(str(error)))
-        expected = {'platform': 7, 'usbip': 7, 'aoa': 7, 'firmware': 7,
+        expected = {'platform': 7, 'usbip': 7, 'aoa': 7, 'firmware': 8,
                     'test-flow': 9, 'agent-analysis': 11}
         try:
             self.goto_shell(page)
@@ -35,7 +35,8 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
                     const paths = [...svg.querySelectorAll('.arch-scene-path')];
                     return paths.length > 0 &&
                         svg.querySelectorAll('.arch-scene-path-halo').length === 0 &&
-                        paths.every(path => getComputedStyle(path).filter === 'none');
+                        paths.every(path => getComputedStyle(path).filter === 'none') &&
+                        svg.querySelectorAll('.arch-scene-edge-pill').length === paths.length;
                 }'''), name)
                 expect(pane.locator('.arch-scene-ground')).to_have_count(0)
                 if name == 'test-flow':

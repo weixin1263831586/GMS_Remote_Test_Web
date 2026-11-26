@@ -25,6 +25,7 @@ from foundation.networking import is_local_host
 from foundation.private_config import write_private_json
 from foundation.runtime_config_store import RuntimeConfigStore
 from foundation.runtime_settings import RuntimeSettings
+from foundation.ssh import find_device_host_password
 
 
 logger = logging.getLogger(__name__)
@@ -41,11 +42,8 @@ PROXY_HEADERS_ENABLED = settings.proxy_headers_enabled
 FORWARDED_ALLOW_IPS = settings.forwarded_allow_ips
 
 
-GSI_PROGRESS_POLL_INTERVAL = 0.5
 DEFAULT_FAVICON_TIMEOUT = 10
 MAX_BATCH_SIZE = 20
-GSI_PROGRESS_INCREMENT = 5
-GSI_PROGRESS_MAX = 95
 MAX_LOG_ENTRIES = 1000
 CLEANUP_INTERVAL_SECONDS = 3600
 USER_STATE_MAX_AGE_HOURS = 24
@@ -428,6 +426,16 @@ class ConfigManager:
             hosts[client_ip] = username
             return self.update_runtime_config({'client_hosts': hosts})
 
+    def remove_client_host(self, client_ip: str) -> bool:
+        """Remove one configured host without rewriting other runtime sections."""
+        with self._runtime_write_lock, self._runtime_transaction():
+            runtime = self._load_runtime_config() or {}
+            hosts = dict(runtime.get('client_hosts') or {})
+            if client_ip not in hosts:
+                return True
+            del hosts[client_ip]
+            return self.update_runtime_config({'client_hosts': hosts})
+
     def update_runtime_config(
         self,
         updates: dict[str, Any],
@@ -563,40 +571,6 @@ class ConfigManager:
         """Save Redmine dashboard profiles to runtime config."""
         return self._save_section('redmine_dashboard', dashboard_config)
 
-    @staticmethod
-    def _encrypt_ssh_credentials(credentials: list) -> list[dict[str, Any]]:
-        from foundation.secrets import encrypt_secret
-
-        protected: list[dict[str, Any]] = []
-        for raw in credentials or []:
-            if not isinstance(raw, dict):
-                continue
-            item = dict(raw)
-            plaintext = str(item.pop("password", "") or "")
-            if plaintext:
-                item["encrypted_password"] = encrypt_secret(plaintext)
-            protected.append(item)
-        return protected
-
-    def prepare_client_config(self, updates: dict[str, Any]) -> dict[str, Any]:
-        """Merge *updates* into the existing client_hosts/client_ssh_credentials and return the full client config."""
-        existing = self._load_runtime_config() or {}
-        existing_credentials = existing.get('client_ssh_credentials', [])
-
-        runtime_config = existing.copy()
-        runtime_config['client_hosts'] = updates.get('client_hosts', existing.get('client_hosts', {}))
-        runtime_config['client_ssh_credentials'] = self._encrypt_ssh_credentials(
-            updates.get('client_ssh_credentials', existing_credentials)
-        )
-
-        # 只有在明确提供local_server时才保存（避免空值覆盖）
-        if updates.get('local_server'):
-            runtime_config['local_server'] = updates['local_server']
-        elif 'local_server' in existing:
-            runtime_config['local_server'] = existing['local_server']
-
-        return runtime_config
-
     def get_device_hosts(self, config: dict[str, Any] = None) -> list:
         """Return the device-host list, reloading config when *config* is omitted."""
         if config is None:
@@ -657,41 +631,9 @@ class ConfigManager:
         username, hostname = device_host.split('@', 1)
         return username.strip(), hostname.strip()
 
-    def find_device_host_password(self, device_host: str, config: dict[str, Any] = None) -> str | None:
+    def find_device_host_password(self, device_host: str, config: dict[str, Any] | None = None) -> str | None:
         """Return an exact host-scoped SSH secret decrypted at use time."""
-        if config is None:
-            config = self.load_config()
-
-        if '@' not in device_host:
-            return None
-
-        username, hostname = self._split_device_host(device_host)
-
-        from foundation.secrets import decrypt_secret
-
-        for cred in config.get('client_ssh_credentials', []):
-            cred_device_host = str(cred.get('device_host') or '').strip()
-            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
-            cred_username = str(cred.get('username') or '').strip()
-            if cred_device_host and cred_device_host == device_host:
-                matched = True
-            else:
-                matched = cred_username == username and cred_host == hostname
-            if not matched:
-                continue
-            encrypted = str(cred.get("encrypted_password") or "")
-            if encrypted:
-                try:
-                    return decrypt_secret(encrypted)
-                except RuntimeError:
-                    logger.warning("SSH credential for %s cannot be decrypted; rotate it", device_host)
-                    return None
-            if cred.get("password"):
-                logger.warning("Ignoring plaintext SSH credential for %s; rotate it", device_host)
-            return None
-
-        logger.debug(f"[Config] No SSH credential found for {device_host}")
-        return None
+        return find_device_host_password(device_host, self.load_config() if config is None else config)
 
     def upsert_device_host_password(self, device_host: str, password: str) -> bool:
         """Insert or update one Windows client SSH password in runtime config."""

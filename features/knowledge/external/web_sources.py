@@ -1,0 +1,394 @@
+"""Public website source configuration, revision storage and FTS5 retrieval."""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+import sqlite3
+import uuid
+from contextlib import closing, contextmanager
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from foundation.config import config_manager, settings
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
+
+from .base import KnowledgeHit, ProviderStatus, SourceAnchor, search_terms
+from .document_index import document_revision, document_title, parse_document
+from .web_fetch import fetch_html, validate_url
+
+
+SOURCE = "web_documents"
+API_TO_ANDROID = {35: 15, 36: 16, 37: 17}
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS sources (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
+ android_version INTEGER, license TEXT NOT NULL, enabled INTEGER NOT NULL,
+ generation TEXT NOT NULL, revision TEXT NOT NULL DEFAULT '', synced_at TEXT NOT NULL DEFAULT '',
+ etag TEXT NOT NULL DEFAULT '', modified TEXT NOT NULL DEFAULT '', error TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS partner_model_grants (
+ owner_id TEXT PRIMARY KEY, model_catalog_hash TEXT NOT NULL, approved_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS owner_import_grants (
+ owner_id TEXT NOT NULL, doc_id TEXT NOT NULL, content_hash TEXT NOT NULL,
+ model_catalog_hash TEXT NOT NULL, approved_at TEXT NOT NULL,
+ PRIMARY KEY(owner_id, doc_id)
+);
+CREATE TABLE IF NOT EXISTS revisions (
+ source_id TEXT NOT NULL, revision TEXT NOT NULL, fetched_at TEXT NOT NULL,
+ PRIMARY KEY(source_id, revision)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
+ source_id UNINDEXED, revision UNINDEXED, section, requirement_id, level UNINDEXED,
+ condition, original, url UNINDEXED, token UNINDEXED, tokenize='unicode61'
+);
+"""
+
+
+def model_catalog_fingerprint():
+    """Bind approval to the enabled model routes without retaining credentials."""
+    config = config_manager.get_ai_config()
+    if not config.get('enabled'):
+        return ''
+    routes = {
+        name: {key: str(provider.get(key) or '') for key in ('model', 'base_url', 'api_format')}
+        for name, provider in (config.get('providers') or {}).items()
+        if isinstance(provider, dict) and provider.get('enabled') and provider.get('model')
+    }
+    if not routes or any(not route['base_url'] for route in routes.values()):
+        return ''
+    return hashlib.sha256(json.dumps(routes, sort_keys=True).encode()).hexdigest()
+
+
+def index_path():
+    return Path(settings.data_root) / "knowledge/external/web_documents.sqlite3"
+
+
+class WebKnowledgeProvider:
+    source_id = SOURCE
+
+    def __init__(self, path: Path | None = None):
+        self.path = path
+
+    def _path(self):
+        return self.path or index_path()
+
+    @contextmanager
+    def _db(self, *, write=False):
+        path = self._path()
+        if write:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(path, timeout=10)
+        else:
+            conn = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=5)
+        with closing(conn), conn:
+            conn.row_factory = sqlite3.Row
+            if write:
+                conn.executescript(_SCHEMA)
+            yield conn
+
+    def set_partner_grant(self, owner_id: str, enabled: bool):
+        if not owner_id:
+            raise ValueError('Owner identity required')
+        fingerprint = model_catalog_fingerprint() if enabled else ''
+        if enabled and not fingerprint:
+            raise ValueError('No verifiable model catalog')
+        with self._db(write=True) as db:
+            if enabled:
+                db.execute('INSERT OR REPLACE INTO partner_model_grants VALUES (?,?,?)',
+                           (owner_id, fingerprint, datetime.now(timezone.utc).isoformat()))
+            else:
+                db.execute('DELETE FROM partner_model_grants WHERE owner_id=?', (owner_id,))
+
+    def has_partner_grant(self, owner_id: str):
+        if not owner_id or not self._path().is_file():
+            return False
+        try:
+            fingerprint = model_catalog_fingerprint()
+            if not fingerprint:
+                return False
+            with self._db() as db:
+                return db.execute('SELECT 1 FROM partner_model_grants WHERE owner_id=? AND model_catalog_hash=?',
+                                  (owner_id, fingerprint)).fetchone() is not None
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            return False
+
+    def approve_import(self, owner_id, doc_id, content_hash):
+        fingerprint = model_catalog_fingerprint()
+        if not owner_id or not doc_id or not fingerprint:
+            raise ValueError('Owner, document and configured model catalog required')
+        with self._db(write=True) as db:
+            db.execute('INSERT OR REPLACE INTO owner_import_grants VALUES (?,?,?,?,?)',
+                       (owner_id, doc_id, content_hash, fingerprint, datetime.now(timezone.utc).isoformat()))
+
+    def approved_imports(self, owner_id):
+        if not owner_id or not self._path().is_file():
+            return {}
+        try:
+            fingerprint = model_catalog_fingerprint()
+            if not fingerprint:
+                return {}
+            with self._db() as db:
+                return {row['doc_id']: row['content_hash'] for row in db.execute(
+                    'SELECT doc_id,content_hash FROM owner_import_grants WHERE owner_id=? AND model_catalog_hash=?',
+                    (owner_id, fingerprint),
+                )}
+        except (sqlite3.Error, OSError, ValueError, TypeError):
+            return {}
+
+    def save_url(self, *, url, name='', enabled=None, source_id=None, authorized_for_ai_processing=False):
+        """Infer public document metadata; unknown sources require explicit content-use approval."""
+        url, name = url.strip(), name.strip()
+        host = validate_url(url)
+        path = urlsplit(url).path
+        match = re.fullmatch(r'/docs/compatibility/(\d+)/android-\1-cdd', path) if host == 'source.android.com' else None
+        version = int(match.group(1)) if match else None
+        kind = 'cdd' if version else 'document'
+        old = None
+        if source_id:
+            old = next((row for row in self.list_sources() if row['id'] == source_id), None)
+            if old is None:
+                raise ValueError('Source not found')
+            if old['url'] != url:
+                raise ValueError('Add a new source when changing the URL')
+        if old:
+            # Preserve the recorded license and source classification on a rename or toggle.
+            license = old['license']
+            kind, version = old['kind'], old['android_version']
+            if enabled is None:
+                enabled = bool(old['enabled'])
+            if not name:
+                name = old['name']
+        elif host == 'source.android.com' and path.startswith('/docs/'):
+            license = 'CC-BY-4.0 (AOSP documentation, unless otherwise noted)'
+        elif authorized_for_ai_processing:
+            license = 'Administrator-approved content use; license not independently verified'
+        else:
+            raise ValueError('Unknown source requires content-use approval')
+        return self.save(name=name, url=url, kind=kind, android_version=version,
+                         license=license, enabled=True if enabled is None else enabled, source_id=source_id)
+
+    def list_sources(self):
+        if not self._path().is_file():
+            return []
+        with self._db() as db:
+            return [dict(r) for r in db.execute(
+                "SELECT s.id,s.name,s.url,s.kind,s.android_version,s.license,s.enabled,s.revision,s.synced_at,s.error, "
+                "(SELECT count(*) FROM clauses c WHERE c.source_id=s.id AND c.revision=s.revision) AS indexed_count "
+                "FROM sources s ORDER BY s.name,s.id")]
+
+    def save(self, *, name, url, kind, android_version, license, enabled=True, source_id=None):
+        name, license = name.strip(), license.strip()
+        host = validate_url(url)
+        if len(name) > 160 or not license or len(license) > 240:
+            raise ValueError("Invalid name or content-use license")
+        if kind not in {"cdd", "document"}:
+            raise ValueError("Unsupported source type")
+        if kind == "cdd" and (host != "source.android.com" or not android_version or
+                url.split("?")[0] != f"https://source.android.com/docs/compatibility/{android_version}/android-{android_version}-cdd"):
+            raise ValueError("CDD URL and Android version must agree")
+        with self._db(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            if source_id:
+                old = db.execute("SELECT * FROM sources WHERE id=?", (source_id,)).fetchone()
+                if old is None:
+                    raise ValueError("Source not found")
+                if (old["url"], old["kind"], old["android_version"], old["license"]) != (
+                        url, kind, android_version, license):
+                    db.execute("DELETE FROM clauses WHERE source_id=?", (source_id,))
+                    db.execute("DELETE FROM revisions WHERE source_id=?", (source_id,))
+                    db.execute("UPDATE sources SET revision='',synced_at='',etag='',modified='',error='' WHERE id=?",
+                               (source_id,))
+                db.execute("UPDATE sources SET name=?,url=?,kind=?,android_version=?,license=?,enabled=?,generation=? WHERE id=?",
+                           (name, url, kind, android_version, license, int(enabled), uuid.uuid4().hex, source_id))
+            else:
+                if db.execute("SELECT count(*) FROM sources").fetchone()[0] >= 64:
+                    raise ValueError("Source limit reached")
+                source_id = uuid.uuid4().hex
+                db.execute("INSERT INTO sources(id,name,url,kind,android_version,license,enabled,generation) VALUES (?,?,?,?,?,?,?,?)",
+                           (source_id, name, url, kind, android_version, license, int(enabled), uuid.uuid4().hex))
+        return source_id
+
+    def delete(self, source_id):
+        with self._db(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM clauses WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM revisions WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM sources WHERE id=?", (source_id,))
+
+    def sync(self, source_id):
+        if not re.fullmatch(r'[0-9a-f]{32}', source_id):
+            raise ValueError('Invalid source identity')
+        lock_path = self._path().parent / 'sync-locks' / (source_id + '.lock')
+        descriptor = try_acquire_sync_lock(lock_path)
+        if descriptor is None:
+            return {'source_id': source_id, 'status': 'in_progress', 'coalesced': True}
+        try:
+            return self._sync(source_id)
+        finally:
+            release_sync_lock(descriptor)
+
+    def _sync(self, source_id):
+        with self._db() as db:
+            row = db.execute("SELECT * FROM sources WHERE id=? AND enabled=1", (source_id,)).fetchone()
+        if row is None:
+            raise ValueError("Source not found or disabled")
+        try:
+            body, etag, modified = fetch_html(row["url"], etag=row["etag"], modified=row["modified"])
+            revision = document_revision(body) if body is not None else row["revision"]
+            if not revision:
+                raise ValueError("No usable revision")
+            clauses = parse_document(body, row["url"], row["kind"], row["android_version"]) if body is not None else []
+            title = (document_title(body) or urlsplit(row['url']).hostname or row['url'])[:160] if body is not None and not row['name'] else ''
+            stamp = datetime.now(timezone.utc).isoformat()
+            with self._db(write=True) as db:
+                db.execute("BEGIN IMMEDIATE")
+                current = db.execute("SELECT generation,revision FROM sources WHERE id=?", (source_id,)).fetchone()
+                if current is None or current["generation"] != row["generation"] or current["revision"] != row["revision"]:
+                    raise ValueError("Source changed during synchronization")
+                exists = db.execute("SELECT 1 FROM revisions WHERE source_id=? AND revision=?",
+                                    (source_id, revision)).fetchone()
+                if not exists:
+                    if body is None:
+                        raise ValueError("Cached revision missing")
+                    db.execute("INSERT INTO revisions VALUES (?,?,?)", (source_id, revision, stamp))
+                    for section, req, level, condition, original, url in clauses:
+                        token = "POL-" + hashlib.sha256(
+                            "\0".join((source_id, revision, section, req, original)).encode()).hexdigest()[:24]
+                        db.execute("INSERT INTO clauses VALUES (?,?,?,?,?,?,?,?,?)",
+                                   (source_id, revision, section, req, level, condition, original, url, token))
+                db.execute("UPDATE sources SET name=CASE WHEN name='' AND ?<>'' THEN ? ELSE name END, "
+                           "revision=?,synced_at=?,etag=?,modified=?,error='' WHERE id=?",
+                           (title, title, revision, stamp, etag, modified, source_id))
+            return {"source_id": source_id, "revision": revision, "status": "ready", "unchanged": body is None}
+        except Exception as exc:
+            with self._db(write=True) as db:
+                db.execute("UPDATE sources SET error=? WHERE id=? AND generation=? AND revision=?",
+                           (type(exc).__name__, source_id, row["generation"], row["revision"]))
+            raise
+
+    def sync_due(self, *, now=None, max_sources=4):
+        """Refresh enabled public sources at most daily; failures retry on the next tick."""
+        now = now or datetime.now(timezone.utc)
+        outcomes = []
+        for source in self.list_sources():
+            if not source['enabled']:
+                continue
+            stamp = source['synced_at']
+            if stamp and not source['error']:
+                try:
+                    if now - datetime.fromisoformat(stamp) < timedelta(hours=24):
+                        continue
+                except ValueError:
+                    pass
+            try:
+                outcomes.append(self.sync(source['id']))
+            except (OSError, ValueError, sqlite3.Error):
+                outcomes.append({'source_id': source['id'], 'status': 'error'})
+            if len(outcomes) >= max_sources:
+                break
+        return outcomes
+
+    def read_requirement(self, token):
+        """Read the full retained clause and its original revision, never a new revision."""
+        if not re.fullmatch(r'POL-[0-9a-f]{24}', token) or not self._path().is_file():
+            return None
+        with self._db() as db:
+            row = db.execute(
+                """SELECT c.*,s.name,s.android_version,s.kind,s.license,
+                          s.revision AS current_revision,r.fetched_at
+                   FROM clauses c JOIN sources s ON c.source_id=s.id
+                   JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
+                   WHERE c.token=? AND s.enabled=1 LIMIT 1""", (token,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def compare_requirements(self, section, requirement_id):
+        """Compare current CDD revisions by exact section and clause, never bare ID."""
+        if not self._path().is_file():
+            return []
+        with self._db() as db:
+            rows = db.execute(
+                """SELECT c.*,s.name,s.android_version,r.fetched_at
+                   FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                   JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
+                   WHERE s.enabled=1 AND s.kind='cdd' AND c.section=? AND c.requirement_id=?
+                   ORDER BY s.android_version,c.token LIMIT 100""", (section, requirement_id),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def status(self):
+        enabled = [r for r in self.list_sources() if r["enabled"]]
+        ready = [r for r in enabled if r["revision"]]
+        status = ("disabled" if not enabled else "error" if any(r["error"] for r in enabled)
+                  else "ready" if len(ready) == len(enabled) else "empty")
+        return ProviderStatus(SOURCE, bool(enabled), status, detail=f"{len(ready)}/{len(enabled)} sources indexed",
+                              doc_count=len(ready), license="per-source",
+                              last_sync_at=max((r["synced_at"] for r in ready), default=""))
+
+    def search(self, query, *, limit=5, android_api_level=None):
+        if not self._path().is_file():
+            return []
+        match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in search_terms(query))
+        if not match:
+            return []
+        version = API_TO_ANDROID.get(android_api_level)
+        if android_api_level is not None and version is None:
+            version = -1
+        with self._db() as db:
+            rows = db.execute(
+                """SELECT c.*,s.name,s.android_version,s.license,s.kind,s.synced_at,s.error,bm25(clauses) AS rank
+                   FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                   WHERE clauses MATCH ? AND s.enabled=1 AND
+                     (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
+                   ORDER BY rank,c.token LIMIT ?""", (match, version, version, min(max(limit, 1), 20))).fetchall()
+        return [KnowledgeHit(source=SOURCE, title=f"{r['name']} / {r['section']} {r['requirement_id']}".strip(),
+                             snippet=r["original"][:6000], source_path=r["token"], chapter=r["section"],
+                             source_revision=r["revision"], applicable_versions=str(r["android_version"] or "unspecified"),
+                             confidence="candidate; applicability unverified", last_verified=r["synced_at"],
+                             license=r["license"], score=-r["rank"],
+                             source_anchors=[SourceAnchor(url=r["url"], revision=r["revision"],
+                                                          evidence_type="official" if r["kind"] == "cdd" else "document")],
+                             extra={"section": r["section"], "requirement_id": r["requirement_id"],
+                                    "requirement_level": r["level"], "applicability_context": r["condition"][:4000],
+                                    "reference": r["token"], "source_url": r["url"],
+                                    "source_kind": r["kind"], "status": "stale" if r["error"] else "indexed"})
+                for r in rows]
+
+
+def partner_policy_allowed(owner_id: str):
+    return WebKnowledgeProvider().has_partner_grant(owner_id)
+
+
+def policy_search_terms(query: str):
+    return search_terms(query, limit=12)
+
+
+def recall_web_references(query: str, *, android_version=None):
+    """Local candidates only; missing hits never establish compliance."""
+    provider = WebKnowledgeProvider()
+    try:
+        selected = [r for r in provider.list_sources() if r["enabled"] and
+                    (android_version is None or r["android_version"] in (None, android_version))]
+        if not selected:
+            return None
+        api = next((k for k, v in API_TO_ANDROID.items() if v == android_version), None)
+        if android_version is not None and api is None:
+            return {"status": "unavailable", "coverage_complete": False, "items": [],
+                    "reason": "Android version mapping not configured"}
+        hits = provider.search(query[:512], limit=5, android_api_level=api)
+        items = [{"reference": h.source_path, "source_url": h.extra["source_url"],
+                  "source_revision": h.source_revision, "title": h.title,
+                  "requirement_id": h.extra["requirement_id"], "requirement_level": h.extra["requirement_level"],
+                  "applicability_context": h.extra["applicability_context"][:2000],
+                  "original_text": h.snippet[:3000], "android_version": h.applicable_versions,
+                  "source_kind": h.extra["source_kind"], "status": h.extra["status"],
+                  "fetched_at": h.last_verified, "license": h.license} for h in hits]
+        return {"status": "matched" if items else "unavailable" if any(not r["revision"] or r["error"] for r in selected) else "no_match",
+                "coverage_complete": False, "items": items,
+                "reason": "Ranked local candidates only; verify applicability and current revision"}
+    except (OSError, sqlite3.Error, ValueError):
+        return {"status": "unavailable", "coverage_complete": False, "items": [],
+                "reason": "Web knowledge index unavailable"}

@@ -8,6 +8,48 @@ from tests.runtime_ui.harness import RuntimeUiHarness
 
 
 class UiSizingRenderedTests(RuntimeUiHarness):
+    def test_test_config_spacing_is_compact_on_desktop(self):
+        """Keep the configuration rows aligned and leave more space for logs."""
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for width, height in ((1440, 900), (1792, 856)):
+                page.set_viewport_size({"width": width, "height": height})
+                page.evaluate("switchPage('test', null)")
+                page.wait_for_function(
+                    "document.getElementById('page-test').classList.contains('active')"
+                )
+                geometry = page.evaluate(
+                    """() => {
+                      const root = document.querySelector('#page-test');
+                      const config = root.querySelector('.input-container');
+                      const style = getComputedStyle(config);
+                      const columns = [...config.querySelectorAll(
+                        '.left-frame, .middle-frame, .right-frame')];
+                      return {
+                        top: parseFloat(style.paddingTop),
+                        bottom: parseFloat(style.paddingBottom),
+                        margin: parseFloat(style.marginBottom),
+                        gaps: columns.map(col => parseFloat(getComputedStyle(col).rowGap)),
+                        rows: columns.map(col => [...col.querySelectorAll('.form-row')]
+                          .map(row => row.getBoundingClientRect().top)),
+                        logHeight: root.querySelector('.log-frame').getBoundingClientRect().height,
+                      };
+                    }"""
+                )
+                with self.subTest(width=width):
+                    self.assertEqual(geometry["top"], 6, geometry)
+                    self.assertEqual(geometry["bottom"], 6, geometry)
+                    self.assertEqual(geometry["margin"], 6, geometry)
+                    self.assertEqual(geometry["gaps"], [4, 4, 4], geometry)
+                    for column in geometry["rows"]:
+                        self.assertEqual(len(column), 3, geometry)
+                        for actual, expected in zip(column, geometry["rows"][0]):
+                            self.assertAlmostEqual(actual, expected, delta=1, msg=str(geometry))
+                    self.assertGreater(geometry["logHeight"], 0, geometry)
+        finally:
+            page.close()
+
     def test_suite_and_analysis_page_frames_follow_header_geometry(self):
         """Three workspace frames start directly below the actual title row."""
         page = self.new_page()

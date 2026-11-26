@@ -6,9 +6,10 @@ flowchart TB
     Run["Redmine 队列 / run_id"]
     Collect["分析 Worker / 取证预检"]
     Evidence["Redmine 正文 / 附件 / 日志"]
-    References["Mainline / CF / 安全补丁"]
-    Review["模型分析 / 逐段复核"]
-    Monitor["Controller 状态 / 报告"]
+    References["官方引用 / owner 授权资料"]
+    Review["模型分析 / 证据门禁 / 结论复核"]
+    Knowledge["Wiki / CDD / Web 背景知识"]
+    Monitor["Controller 状态 / 诊断读模型"]
     Reply["原会话 / 结果与执行步骤"]
 
     Chat -->|"分析目标"| Planner
@@ -18,6 +19,7 @@ flowchart TB
     Evidence -->|"工单取证"| Collect
     References -->|"引用正文"| Collect
     Collect -->|"预检证据包"| Review
+    Knowledge -->|"背景知识"| Review
     Review -->|"结果 / 状态"| Monitor
     Planner -.->|"run_id 查询"| Monitor
     Monitor -->|"终态反馈"| Reply

@@ -1142,7 +1142,6 @@ body {
     z-index: 2;
 }
 .list-table th {
-    padding: 5px 6px;
     border-bottom: 1px solid var(--border-color);
     background: var(--darker-bg);
     color: var(--text-secondary);
@@ -1157,7 +1156,6 @@ body {
     background: color-mix(in srgb, var(--primary-color) 5%, transparent);
 }
 td.table-placeholder {
-    padding: 40px;
     color: var(--text-secondary);
     text-align: center;
 }
@@ -1262,7 +1260,7 @@ td.table-placeholder {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    padding: 6px;
+    padding: 6px 10px;
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(10px);
     flex-shrink: 0;
@@ -1299,7 +1297,7 @@ td.table-placeholder {
 .right-frame {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
 
 /* ADB 设备与操作控制区。 */

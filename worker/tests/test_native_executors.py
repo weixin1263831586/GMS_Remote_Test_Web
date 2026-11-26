@@ -8,11 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from foundation.process_inventory import discover_tradefed_processes
 from foundation.transport_contract import (
     TransportOperationError,
     execute_external_transport,
 )
-from worker.process_inventory import discover_tradefed_processes
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]

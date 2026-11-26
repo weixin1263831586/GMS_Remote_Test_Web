@@ -1,8 +1,4 @@
-"""Suite-facing worker actions: execution, export, and report import.
-
-从 inventory.py 拆出：套件枚举/下载/解压、Tradefed 执行、
-报告导入与导出打包。设备探测与烧写见 device_actions.py。
-"""
+"""Suite-facing worker actions: execution, export, and report import."""
 
 from __future__ import annotations
 
