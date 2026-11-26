@@ -1076,7 +1076,6 @@ body.apk-resizing {
 }
 
 .users-table th {
-    padding: 5px 6px;
     border-bottom: 1px solid var(--border-color);
     color: var(--text-secondary);
     background: var(--darker-bg);
