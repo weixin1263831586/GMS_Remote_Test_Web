@@ -132,3 +132,14 @@ anchor or GMS-10.0-001 clause, not broad title matches. Explicit preload questio
 remain separate. The browser presents clause text and structured tables first;
 section context and revision details are expandable. This is a human-readable
 lookup, not an authorized model analysis of shared Partner content.
+
+### Clipboard images in Conversation Agent
+
+Paste PNG, JPEG or WebP into the composer (at most three images, 4 MiB total).
+The user can remove previews before sending; image-only messages are valid.
+Image turns use the existing local model gateway with a configured, enabled
+provider declaring `capabilities: ["vision"]`. No external provider fallback
+or operational tool execution is allowed. Raw images are validated, stripped
+of metadata and used only for the current analysis; the persisted transcript
+contains the text, image count and resulting answer, not the image bytes.
+Text-only questions continue through the original Agent planning path.

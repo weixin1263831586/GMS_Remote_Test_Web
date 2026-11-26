@@ -53,6 +53,82 @@ let agentModelStatusLoaded = false;
 let agentModelStatusFlight = null;
 let agentElevationFlight = null;
 let agentPolicyReadFlight = null;
+let agentImageDrafts = [];
+let agentImagePasteFlight = false;
+let agentImageSendFlight = false;
+let agentImageDraftGeneration = 0;
+const AGENT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+
+function renderAgentImageDrafts() {
+    const panel = $('agent-image-previews');
+    if (!panel) return;
+    panel.replaceChildren();
+    panel.hidden = agentImageDrafts.length === 0;
+    agentImageDrafts.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'agent-image-preview';
+        const image = document.createElement('img');
+        image.src = item.data;
+        image.alt = '待发送图片 ' + (index + 1);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'btn-xs';
+        remove.textContent = '移除';
+        remove.setAttribute('aria-label', '移除图片 ' + (index + 1));
+        remove.disabled = agentImageSendFlight;
+        remove.addEventListener('click', () => {
+            if (agentImageSendFlight) return;
+            agentImageDrafts = agentImageDrafts.filter(value => value !== item);
+            renderAgentImageDrafts();
+        });
+        card.append(image, remove);
+        panel.append(card);
+    });
+    const execute = document.querySelector('.agent-composer .agent-execute-action');
+    if (execute) execute.disabled = agentImageDrafts.length > 0 || agentImagePasteFlight || agentImageSendFlight;
+}
+
+function clearAgentImageDrafts() {
+    agentImageDraftGeneration++;
+    agentImageDrafts = [];
+    renderAgentImageDrafts();
+}
+
+async function pasteAgentImages(event) {
+    const items = Array.from(event.clipboardData?.items || []);
+    const files = items.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    if (agentImagePasteFlight || agentImageSendFlight) return;
+    if (files.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type))) {
+        showToast('仅支持 PNG、JPEG、WebP 图片', 'warning');
+        return;
+    }
+    if (agentImageDrafts.length + files.length > 3 ||
+        agentImageDrafts.reduce((total, item) => total + item.size, 0) +
+        files.reduce((total, file) => total + file.size, 0) > AGENT_IMAGE_MAX_BYTES) {
+        showToast('每次最多 3 张图片，总大小不超过 4 MB', 'warning');
+        return;
+    }
+    const generation = agentImageDraftGeneration;
+    agentImagePasteFlight = true;
+    renderAgentImageDrafts();
+    try {
+        const images = await Promise.all(files.map(file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve({data: String(reader.result), size: file.size});
+            reader.onerror = reader.onabort = reject;
+            reader.readAsDataURL(file);
+        })));
+        if (generation === agentImageDraftGeneration) agentImageDrafts.push(...images);
+    } catch (_) {
+        showToast('无法读取剪贴板图片，请重新粘贴', 'warning');
+    } finally {
+        agentImagePasteFlight = false;
+        renderAgentImageDrafts();
+    }
+}
 let agentRetryId = '';
 let agentCurrentSession = null;
 let agentSessionDirectory = [];
@@ -319,8 +395,10 @@ function renderAgentMessages(session) {
         }
 
         const escapedContent = escapeHtml(message.content || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        const imageCount = isUser && Number.isInteger(data.image_count) && data.image_count > 0
+            ? `<div class="ui-meta">图片 ${data.image_count} 张（仅本轮分析）</div>` : '';
         const contentHtml = (isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent)
-            + (data.question ? renderAgentQuestion(message, session) : '');
+            + imageCount + (data.question ? renderAgentQuestion(message, session) : '');
         const toneClass = tone ? ` ${tone}` : '';
         const bodyClass = isPlanLike ? 'agent-message-body plan-body' : 'agent-message-body';
 
@@ -747,6 +825,7 @@ function renderAgentSessionDirectory() {
 async function switchAgentSession(sessionId) {
     const target = String(sessionId || '');
     if (!target || target === agentSessionId) return;
+    clearAgentImageDrafts();
     stopAgentPolling();
     agentSessionId = target;
     localStorage.setItem('gms_agent_session_id', agentSessionId);
@@ -850,12 +929,25 @@ function stopAgentPolling() {
 async function sendAgentMessage(execute = false, overrideMessage = '') {
     const input = $('agent-input');
     const message = (overrideMessage || input?.value || '').trim();
-    if (!message && !execute) {
+    if (agentImagePasteFlight || agentImageSendFlight) return;
+    const images = overrideMessage ? [] : agentImageDrafts.map(item => item.data);
+    if (images.length && execute) {
+        showToast('图片请使用发送按钮进行分析', 'warning');
+        return;
+    }
+    const sourceSession = agentSessionId;
+    const generation = agentImageDraftGeneration;
+    if (!message && !execute && !images.length) {
         showToast('请输入 Agent 指令', 'warning');
         return;
     }
 
-    if (input && !overrideMessage) {
+    if (images.length) {
+        agentImageSendFlight = true;
+        if (input) input.disabled = true;
+        renderAgentImageDrafts();
+    }
+    if (input && !overrideMessage && !images.length) {
         if (message && message !== agentInputHistory[0]) {
             agentInputHistory.unshift(message);
             if (agentInputHistory.length > 50) agentInputHistory.length = 50;
@@ -878,7 +970,8 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session_id: agentSessionId || null,
-                message: message || '确认执行',
+                message: message || (images.length ? '' : '确认执行'),
+                ...(images.length ? {images} : {}),
                 execute,
                 workspace_context: getAgentWorkspaceContext()
             })
@@ -902,6 +995,11 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             showToast(result.error || 'Agent 请求失败', 'error');
             return;
         }
+        if (images.length) {
+            if (agentSessionId !== sourceSession || generation !== agentImageDraftGeneration) return;
+            if (input) input.value = '';
+            clearAgentImageDrafts();
+        }
         renderAgentSession(result.data.session);
         const last = result.data.session.messages?.at(-1);
         if (last?.data?.gms_policy_lookup && !execute) {
@@ -912,6 +1010,12 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
         const indicator = document.getElementById('agent-typing');
         if (indicator) indicator.remove();
         showToast(`Agent 请求失败: ${error.message}`, 'error');
+    } finally {
+        if (images.length) {
+            agentImageSendFlight = false;
+            if (input) input.disabled = false;
+            renderAgentImageDrafts();
+        }
     }
 }
 
@@ -1021,6 +1125,7 @@ function confirmAgentPlan() {
 }
 
 function newAgentSession() {
+    clearAgentImageDrafts();
     clearAgentQuestions();
     agentSessionId = '';
     agentCurrentSession = null;
@@ -1089,7 +1194,9 @@ function initAgentPage() {
             // Track current draft when user starts browsing history
             let agentDraftInput = '';
 
+            input.addEventListener('paste', pasteAgentImages);
             input.addEventListener('keydown', (event) => {
+                if (event.isComposing) return;
                 if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     sendAgentMessage(false);

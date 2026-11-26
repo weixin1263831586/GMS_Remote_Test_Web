@@ -130,3 +130,10 @@
 @media (max-width: 760px) {
     #aoa-panel .aoa-header-status { flex: none; align-self: stretch; max-width: 100%; width: 100%; }
 }
+
+/* Clipboard previews occupy space only when images are attached. */
+.agent-image-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 0; background: var(--card-bg); }
+.agent-image-previews[hidden] { display: none; }
+.agent-image-preview { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px; border: 1px solid var(--border-color); border-radius: 6px; }
+.agent-image-preview img { width: 72px; height: 56px; object-fit: contain; background: var(--darker-bg); }
+.agent-image-preview button { flex-shrink: 0; }

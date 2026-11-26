@@ -117,6 +117,7 @@ class AgentChatRequest(BaseModel):
     action: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     workspace_context: dict[str, Any] = Field(default_factory=dict)
+    images: list[str] = Field(default_factory=list)
 
 
 @router.post("/api/agent/chat")
@@ -125,12 +126,26 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     if cleanup_due():
         await _cleanup_sessions()
     message = (req.message or "").strip()
-    if not message:
+    if not message and not req.images:
         return error_response("Message cannot be empty", 400)
+    if req.images:
+        require_human_principal_when_auth_required(request)
+        if req.execute or req.action:
+            return error_response("图片仅支持发送分析，不支持直接执行操作", 400)
+        if not message:
+            message = "请分析图片内容。"
+        if len(req.images) > 3:
+            return error_response("每次最多发送 3 张图片", 400)
 
     client_id = get_client_id_from_request(request)
     session = await _get_or_create_session(req.session_id, client_id)
+    if session.get("agent_image_busy"):
+        return error_response("本轮图片分析尚未完成", 409)
     session["owner_id"] = owner_id_from_request(request)
+    if req.images:
+        from features.assistant.image_input import analyze_image_turn
+
+        return await analyze_image_turn(session, message, req.images)
     if req.workspace_context:
         supplied_workspace = _normalize_workspace_context(req.workspace_context)
         session["workspace_context"] = {

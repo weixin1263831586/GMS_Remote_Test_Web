@@ -91,6 +91,13 @@
             "title": "Execute",
             "type": "boolean"
           },
+          "images": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Images",
+            "type": "array"
+          },
           "message": {
             "default": "",
             "maxLength": 4000,
