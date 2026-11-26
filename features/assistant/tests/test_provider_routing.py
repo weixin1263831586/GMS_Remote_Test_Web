@@ -6,6 +6,30 @@ from features.reports import ReportFailureAnalyzer
 
 
 class ProviderRoutingTests(unittest.TestCase):
+    def test_rag_local_route_never_uses_remote_named_local_or_fallback(self):
+        analyzer = UniversalAIAnalyzer({
+            "enabled": True, "primary_provider": "fake_local",
+            "providers": {
+                "fake_local": {"enabled": True, "base_url": "https://example.invalid", "model": "remote"},
+                "private": {"enabled": True, "base_url": "http://192.168.1.20:3000",
+                            "model": "fixture", "auth_required": False, "api_key": "fixture"},
+            },
+        })
+        self.assertIsNone(analyzer.rag_local_provider("fake_local"))
+        self.assertEqual(analyzer.rag_local_provider(), "private")
+        with patch("features.kkagent.analyzer.post_chat") as post:
+            post.return_value.status_code = 302
+            result = analyzer.generate_local_rag("document", system_prompt="test", provider_name="private")
+            self.assertFalse(result["success"])
+            post.assert_called_once()
+            self.assertFalse(post.call_args.kwargs["allow_redirects"])
+            self.assertTrue(post.call_args.kwargs["direct"])
+            self.assertTrue(post.call_args.args[0].startswith("http://192.168.1.20:3000/"))
+        with patch("features.kkagent.analyzer.post_chat") as post:
+            self.assertFalse(analyzer.generate_local_rag(
+                "document", system_prompt="test", provider_name="fake_local")["success"])
+            post.assert_not_called()
+
     def test_provider_status_distinguishes_enabled_from_ready_and_available(self):
         analyzer = UniversalAIAnalyzer({
             'enabled': True,
