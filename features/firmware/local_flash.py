@@ -8,7 +8,12 @@ import re
 import shlex
 
 from features.devices import parse_adb_device_states
-from foundation.cluster_port import prepare_local_firmware_recovery, run_local_firmware_recovery
+from foundation.cluster_port import (
+    FirmwareRecoveryResult,
+    PreparedFirmwareRecovery,
+    prepare_local_firmware_recovery,
+    run_local_firmware_recovery,
+)
 from foundation.error_model import ApiError
 from foundation.networking import is_local_host
 from foundation.ssh_executor import ssh_executor
@@ -148,7 +153,7 @@ async def run_local_firmware_batch(
     return results, (failed.get("error") if failed else None)
 
 
-def prepare_recovery(request, form, client_id, devices, config):
+def prepare_recovery(request, form, client_id, devices, config) -> PreparedFirmwareRecovery | None:
     profile_id = str(form.get("aoa_profile_id") or "").strip()
     if not profile_id:
         return None
@@ -158,7 +163,7 @@ def prepare_recovery(request, form, client_id, devices, config):
         request, client_id, devices, profile_id, form.get("aoa_boot_wait_seconds", 60))
 
 
-async def recover_after_burn(prepared: dict, client_id: str, results: list) -> dict:
+async def recover_after_burn(prepared: PreparedFirmwareRecovery, client_id: str, results: list) -> FirmwareRecoveryResult:
     loop = asyncio.get_running_loop()
 
     async def emit(event):

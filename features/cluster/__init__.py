@@ -94,22 +94,22 @@ async def _port_device_action_request(request: Request, payload: dict[str, Any])
 
 
 def _port_prepare_local_firmware_recovery(
-    request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int = 60,
-) -> dict[str, Any] | None:
+    request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int | str = 60,
+) -> cluster_port.PreparedFirmwareRecovery | None:
     return prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds=boot_wait_seconds)
 
 
 def _port_run_local_firmware_recovery(
-    prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None,
-) -> Awaitable[dict[str, Any]]:
+    prepared: cluster_port.PreparedFirmwareRecovery, on_event: Callable[[dict[str, Any]], None] | None = None,
+) -> Awaitable[cluster_port.FirmwareRecoveryResult]:
     return run_local_firmware_recovery(prepared, on_event=on_event)
 
 
-def _port_validate_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
+def _port_validate_local_firmware_recovery(prepared: cluster_port.PreparedFirmwareRecovery | None) -> None:
     validate_local_firmware_recovery(prepared)
 
 
-def _port_release_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
+def _port_release_local_firmware_recovery(prepared: cluster_port.PreparedFirmwareRecovery | None) -> None:
     release_local_firmware_recovery(prepared)
 
 

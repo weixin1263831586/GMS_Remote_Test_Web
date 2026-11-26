@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 from starlette.requests import Request
 
@@ -85,13 +85,52 @@ class ClusterServiceContract(Protocol):
     def has_command_agent(self, worker_id: str) -> bool: ...
 
 
+class FrozenFirmwareRecovery(TypedDict):
+    profile_id: str
+    profile_name: str
+    profile_revision: str
+    commands: list[str]
+    commands_sha256: str
+    metadata: dict[str, Any]
+    wait_adb_seconds: int
+    boot_wait_seconds: int
+    usb_port_path: str
+    target_context: dict[str, Any]
+    firmware_compatibility: dict[str, Any] | None
+    mapping_options: dict[str, Any]
+    touch_mapping: dict[str, Any] | None
+
+
+class PreparedFirmwareRecovery(TypedDict):
+    worker_id: str
+    device_id: str
+    snapshot: FrozenFirmwareRecovery
+    owner_id: str
+    claim_source_id: str
+    extra_claim_source_id: str
+    lease_tokens: list[dict[str, Any]]
+    operation_id: str
+
+
+class _FirmwareRecoveryOutcome(TypedDict):
+    success: bool
+    error: str
+    replay_completed: bool
+    reconcile_required: bool
+
+
+class FirmwareRecoveryResult(_FirmwareRecoveryOutcome, total=False):
+    command_id: str
+    result: dict[str, Any]
+
+
 ClusterServiceProvider = Callable[[], ClusterServiceContract]
 WorkerTokens = Callable[[], dict[str, str]]
 CancelJob = Callable[[str, Request], dict[str, Any]]
 AuthenticateWorker = Callable[[str, str | None], None]
 DeviceActionRequest = Callable[[Request, dict[str, Any]], Awaitable[dict[str, Any]]]
 AoaPlaybackControl = Callable[[str, str, str, str], Awaitable[dict[str, Any]]]
-FirmwareRecoveryCheck = Callable[[dict[str, Any] | None], None]
+FirmwareRecoveryCheck = Callable[[PreparedFirmwareRecovery | None], None]
 
 
 class RunWorkerCommand(Protocol):
@@ -111,14 +150,14 @@ class RequireClusterEnabled(Protocol):
 class PrepareFirmwareRecovery(Protocol):
     def __call__(
         self, request: Request, client_id: str, devices: list[str],
-        profile_id: str, boot_wait_seconds: int = 60,
-    ) -> dict[str, Any] | None: ...
+        profile_id: str, boot_wait_seconds: int | str = 60,
+    ) -> PreparedFirmwareRecovery | None: ...
 
 
 class RunFirmwareRecovery(Protocol):
     def __call__(
-        self, prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None,
-    ) -> Awaitable[dict[str, Any]]: ...
+        self, prepared: PreparedFirmwareRecovery, on_event: Callable[[dict[str, Any]], None] | None = None,
+    ) -> Awaitable[FirmwareRecoveryResult]: ...
 
 # Single source of truth for the Controller host's Worker ID. The literal
 # must appear only here (the default), in fixtures/examples/tests/docs, and
@@ -285,28 +324,28 @@ def authenticate_worker(worker_id: str, authorization: str | None) -> None:
     return _authenticate_worker(worker_id, authorization)
 
 
-def prepare_local_firmware_recovery(request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int = 60) -> dict[str, Any] | None:
+def prepare_local_firmware_recovery(request: Request, client_id: str, devices: list[str], profile_id: str, boot_wait_seconds: int | str = 60) -> PreparedFirmwareRecovery | None:
     """Prepare a burn+AOA continuation via the registered cluster boundary."""
     if _prepare_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _prepare_local_firmware_recovery(request, client_id, devices, profile_id, boot_wait_seconds=boot_wait_seconds)
 
 
-def run_local_firmware_recovery(prepared: dict[str, Any], on_event: Callable[[dict[str, Any]], None] | None = None) -> Awaitable[dict[str, Any]]:
+def run_local_firmware_recovery(prepared: PreparedFirmwareRecovery, on_event: Callable[[dict[str, Any]], None] | None = None) -> Awaitable[FirmwareRecoveryResult]:
     """Run a burn+AOA continuation via the registered cluster boundary."""
     if _run_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _run_local_firmware_recovery(prepared, on_event=on_event)
 
 
-def validate_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
+def validate_local_firmware_recovery(prepared: PreparedFirmwareRecovery | None) -> None:
     """Validate staged recovery identity via the registered cluster boundary."""
     if _validate_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
     return _validate_local_firmware_recovery(prepared)
 
 
-def release_local_firmware_recovery(prepared: dict[str, Any] | None) -> None:
+def release_local_firmware_recovery(prepared: PreparedFirmwareRecovery | None) -> None:
     """Release a finished recovery via the registered cluster boundary."""
     if _release_local_firmware_recovery is None:
         raise RuntimeError("local firmware recovery is not configured")
