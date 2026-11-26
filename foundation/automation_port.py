@@ -6,9 +6,12 @@ system feature does not import the automation feature directly.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any
 
+
+logger = logging.getLogger(__name__)
 
 WorkerStatusProvider = Callable[[], dict[str, Any]]
 
@@ -48,7 +51,11 @@ def advancement_paused() -> bool:
     """
     if _advancement_gate is None:
         return False
-    return bool(_advancement_gate())
+    try:
+        return bool(_advancement_gate())
+    except Exception:
+        logger.exception("automation advancement gate failed; advancement continues")
+        return False
 
 
 ActiveRunIdsProvider = Callable[[], set[str]]
