@@ -122,4 +122,11 @@ class CddSemantic:
                     AND (? IS NULL OR s.android_version=?)""", (token, version, version)).fetchone()
                 if row:
                     hits.append((dict(row), score))
+        current = [(source, self._manifest(source)) for source in self._sources(version=version)]
+        if ([(source["id"], source["revision"], tokens) for source, tokens in current] !=
+                [(source["id"], source["revision"], tokens) for source, tokens in manifest]):
+            # A revision changed during recall. Retry against a fresh authorized manifest.
+            return [], {**status, "status": "stale", "coverage_complete": False}
+        if len(hits) != len(ranked):
+            status = {**status, "status": "stale", "coverage_complete": False}
         return hits, status
