@@ -97,6 +97,7 @@
                 b.type = 'button';
                 b.className = 'btn-xs';
                 b.textContent = label;
+                if (label === '同步') b.dataset.busySize = 'short';
                 b.addEventListener('click', action);
                 return b;
             }
@@ -140,11 +141,10 @@
                     }
                     const actions = row.insertCell();
                     actions.append(button('编辑', () => edit(source)),
-                        button('同步', () => run(async () => {
-                            showToast('正在同步知识源…', 'info');
+                        button('同步', event => run(async () => {
                             const result = await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
                             showToast(result.status === 'in_progress' ? '知识源正在同步' : '知识源同步完成', 'info');
-                        })),
+                        }, event.currentTarget, '同步中')),
                         button(source.enabled ? '禁用' : '启用', () => run(() => sourceRequest(source, !source.enabled))),
                         button('删除', async () => {
                             if (await window.showConfirmDialog('删除外部知识源', '删除此知识源及其索引和历史修订？')) {
@@ -170,9 +170,10 @@
                     }));
                 list.replaceChildren(table);
             }
-            async function run(action) {
+            async function run(action, trigger = refreshButton, label = '刷新中') {
                 if (busy) return;
                 busy = true;
+                setActionButtonBusy(trigger, true, label);
                 refreshButton.disabled = true;
                 submitButton.disabled = true;
                 panel.setAttribute('aria-busy', 'true');
@@ -183,8 +184,10 @@
                     showToast(error.message, 'warning');
                 } finally {
                     busy = false;
+                    setActionButtonBusy(trigger, false);
                     refreshButton.disabled = false;
                     submitButton.disabled = false;
+                    submitButton.textContent = editing ? '保存' : '添加';
                     panel.setAttribute('aria-busy', 'false');
                 }
             }
@@ -208,7 +211,7 @@
                         if (!await window.showConfirmDialog('确认知识源使用权限', '请确认此公开文档允许在本系统中建立共享索引，并允许已配置的 AI 模型处理相关内容。')) return;
                         payload.authorized_for_ai_processing = true;
                     }
-                    if (!editing) showToast('正在获取网页并建立索引…', 'info');
+                    if (!editing) setActionButtonBusy(submitButton, true, '入库中');
                     const result = await kbFetch(api + (editing ? '/' + encodeURIComponent(editing.id) : ''), {
                         method: editing ? 'PUT' : 'POST',
                         headers: {'Content-Type': 'application/json'},
@@ -222,7 +225,7 @@
                     } else {
                         showToast(result.sync?.status === 'ready' ? '知识源已同步入库' : '知识源已保存', 'success');
                     }
-                });
+                }, submitButton, editing ? '保存中' : '添加中');
             });
             resetButton.addEventListener('click', reset);
             refreshButton.addEventListener('click', () => run(async () => {}));
@@ -300,6 +303,8 @@
             const box = document.getElementById('kb-doc-list');
             const requestGeneration = ++kbState.docsRequestGeneration;
             const hadRenderedDocs = kbState.docsLoaded;
+            const searchButton = document.querySelector('#page-notes [data-click="kbSearch"]');
+            setActionButtonBusy(searchButton, true, '搜索中');
             if (box) {
                 box.setAttribute('aria-busy', 'true');
                 if (!hadRenderedDocs) {
@@ -335,8 +340,9 @@
                 if (hadRenderedDocs) showToast('文档列表刷新失败: ' + error.message, 'error');
                 else if (box) box.innerHTML = `<div class="suite-empty" style="padding:20px;text-align:center;">加载失败: ${kbEsc(error.message)}</div>`;
             } finally {
-                if (requestGeneration === kbState.docsRequestGeneration && box) {
-                    box.setAttribute('aria-busy', 'false');
+                if (requestGeneration === kbState.docsRequestGeneration) {
+                    box?.setAttribute('aria-busy', 'false');
+                    setActionButtonBusy(searchButton, false);
                 }
             }
         }
