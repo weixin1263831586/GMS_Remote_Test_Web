@@ -35,8 +35,8 @@ _BLOCKS = frozenset(('p', 'li', 'td', 'th', 'dt', 'dd', 'pre', 'div', 'section',
                      'article', 'main', 'caption', 'figcaption', 'ul', 'ol', 'table', 'tr',
                      'thead', 'tbody', 'tfoot', 'figure'))
 _SKIP = frozenset(('script', 'style', 'noscript', 'nav', 'footer', 'button', 'del', 's', 'strike'))
-_START = re.compile(r'^Start of (?:(?:requirements (added|changed) in Android\s+)(\d{2}(?:\s+QPR\d+)?)|Android\s+(\d{2}(?:\s+QPR\d+)?)\s+requirements)', re.I)
-_END = re.compile(r'^End of (?:added|changed|Android|requirements)', re.I)
+_START = re.compile(r'^Start of (?:(?:requirements (added|changed|removed) in Android\s+)(\d{2}(?:\s+QPR\d+)?)|Android\s+(\d{2}(?:\s+QPR\d+)?)\s+requirements)', re.I)
+_END = re.compile(r'^End of (?:added|changed|removed|Android|requirements)', re.I)
 _DEFINITION = re.compile(r'^\s*\[([A-Z]+(?:-[A-Z]+)?-[0-9][A-Z0-9_.-]*)\]')
 _SCOPE = re.compile(r'^(?:chipset|device|product|software|build)(?:[-_]\d+)?$', re.I)
 
@@ -322,6 +322,7 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     coverage = {
         'source_revision': revision,
         'revision_text_scope': 'active_markup_only',
+        'historical_applicability_verified': False,
         'removed_revision_nodes': removed_revision_nodes,
         'section_anchors': {key: value['anchor'] for key, value in sections.items()
                             if value['anchor'] in anchors},

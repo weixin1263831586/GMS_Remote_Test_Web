@@ -341,3 +341,16 @@ def test_device_ram_candidates_prioritize_go_definition_and_exclude_subsystem_me
         assert related['sections'][0]['go_definition']
         assert all(not item['source_url'].endswith('#apf') for item in related['sections'])
         assert not related['applicability_verified']
+
+
+
+def test_removed_marker_preserves_historical_status():
+    parsed = parse_gms_requirements(fetched("""<article class="devsite-article">
+        <h3>Example</h3><p>Start of requirements removed in Android 17</p>
+        <p>[GMS-1-001] Historical example.</p><p>End of removed requirements</p>
+        <p>[GMS-1-002] Another example.</p></article>"""))
+    first, second = parsed.requirement_clauses
+    assert (first.change_kind, first.change_version) == ('removed', 'Android 17')
+    assert not second.change_kind
+    assert not parsed.requirement_coverage['historical_applicability_verified']
+    assert not parsed.requirement_coverage['unclosed_markers']

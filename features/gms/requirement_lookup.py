@@ -308,7 +308,8 @@ def lookup_requirement_sections(conn, query):
             "section_key": key, "title": section["path"], "source_url": url,
             "source_revision": revision, "text": text[:MAX_TEXT],
             "clauses": [{k: item[k] for k in ("requirement_id", "change_version", "change_kind",
-                         "source_url", "content_hash", "original_text", "context_text")}
+                         "source_url", "content_hash", "original_text", "context_text",
+                         "scope_json", "version_mentions_json", "clause_key")}
                         for item in clauses[:MAX_ROWS]],
             "table_rows": table_rows,
             "media": [] if context_limited else [item for item in coverage.get("media", [])
@@ -323,6 +324,7 @@ def lookup_requirement_sections(conn, query):
             "lookup_scope": "low_ram_declaration" if ram_scope else "section",
             "source_revision": revision, "indexed_at": row["indexed_at"],
             "revision_text_scope": coverage.get("revision_text_scope", "unknown"),
+            "historical_applicability_verified": False,
             "latest_scan_confirmed": bool(latest and latest["run_id"] == row["run_id"]
                                           and latest["state"] == "ready"),
             "truncated": len(sections) > MAX_SECTIONS or any(item["truncated"] for item in result),
