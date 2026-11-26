@@ -16,12 +16,9 @@ from unittest.mock import AsyncMock, patch
 from features.redmine.analysis.kkagent import KkAgentAnalysisResult
 from features.redmine.analysis.kkagent.evidence_preflight import EvidencePreflight
 from features.redmine.config import RedmineConfig
+from features.redmine.daily_brief.config import DEFAULT_BRIEF_CONFIG, normalize_daily_brief_config
 from features.redmine.daily_brief.repository import DailyBriefRepository
-from features.redmine.daily_brief.service import (
-    DEFAULT_BRIEF_CONFIG,
-    DailyBriefService,
-    normalize_daily_brief_config,
-)
+from features.redmine.daily_brief.service import DailyBriefService
 
 
 PASS_PREFLIGHT_TARGET = "features.redmine.daily_brief.service.preflight_gms_auth"
@@ -88,12 +85,11 @@ class ConfigTests(unittest.TestCase):
     def test_defaults_and_clamping(self):
         config = normalize_daily_brief_config({
             "max_parallel_issues": 99, "analysis_backend": "weird",
-            "model": " glm-4 ", "max_turns": "bad",
+            "model": " glm-4 ",
         })
         self.assertEqual(config["max_parallel_issues"], 4)
         self.assertEqual(config["analysis_backend"], "kkagent")
         self.assertEqual(config["model"], "glm-4")
-        self.assertEqual(config["max_turns"], DEFAULT_BRIEF_CONFIG["max_turns"])
 
     def test_enabled_defaults_to_opt_in(self):
         """晨报默认关闭：未显式 enabled=true 的 owner 不进入 nightly 调度。"""

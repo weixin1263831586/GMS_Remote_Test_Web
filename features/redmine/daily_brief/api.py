@@ -39,17 +39,15 @@ from ..evidence.service import EvidenceError, owner_base_url, parse_issue_ref
 from ..statistics_api import _has_redmine_credentials, _missing_credentials_payload
 from .analysis_events import event_store_for_repository, progress_to_payload
 from .config import (
+    DEFAULT_BRIEF_CONFIG,
     list_daily_brief_agent_profiles,
     list_daily_brief_model_options,
+    normalize_daily_brief_config,
 )
 from .models import BRIEF_MODES
 from .owner_policy import ADMIN_OWNER_MESSAGE
 from .repository import TERMINAL_RUN_STATUSES
-from .service import (
-    DEFAULT_BRIEF_CONFIG,
-    DailyBriefService,
-    normalize_daily_brief_config,
-)
+from .service import DailyBriefService
 from .session import session_raw_messages, session_transcript
 from .snapshot import (
     DEFAULT_LIST_LIMIT,

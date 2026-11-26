@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from features.redmine.daily_brief.service import DEFAULT_BRIEF_CONFIG, normalize_daily_brief_config
+from features.redmine.daily_brief.config import normalize_daily_brief_config
 from features.redmine.tests.test_daily_brief_service import make_service
 
 
@@ -32,12 +32,11 @@ class AnalyzerBindingTests(unittest.TestCase):
         config = normalize_daily_brief_config({"agent_profile": "bad name;rm -rf"})
         self.assertEqual(config["agent_profile"], "")
 
-    def test_analysis_ignores_legacy_step_budgets(self):
-        self.assertEqual(DEFAULT_BRIEF_CONFIG["max_turns"], 0)
+    def test_analysis_has_no_hard_budget(self):
         analyzer = self.service._build_analyzer({})
-        self.assertEqual(analyzer.max_turns, DEFAULT_BRIEF_CONFIG["max_turns"])
-        analyzer = self.service._build_analyzer({"max_turns": 30})
         self.assertEqual(analyzer.max_turns, 0)
+        self.assertEqual(analyzer.timeout_seconds, 0)
+
 
 
 class CrashRecoveryTests(unittest.TestCase):

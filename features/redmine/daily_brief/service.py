@@ -72,7 +72,6 @@ logger = logging.getLogger(__name__)
 from features.sdk import sdk_sources_available as _sdk_sources_available  # noqa: E402
 
 from .config import (  # noqa: E402
-    DEFAULT_BRIEF_CONFIG,
     RUNTIME_CONFIG_KEY,
     analyzer_env_extra,
     build_brief_analyzer,
@@ -1190,7 +1189,7 @@ class DailyBriefService:
             return {"error": f"issue {issue_id} no longer in run {run.run_id}"}
         return {"run_id": run.run_id, "issue_id": issue_id, "status": refreshed.status}
 
-__all__ = ["DEFAULT_BRIEF_CONFIG", "DailyBriefService", "normalize_daily_brief_config"]
+__all__ = ["DailyBriefService"]
 
 
 def valid_resume_trace(

@@ -80,8 +80,6 @@ display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
   "analysis_backend": "kkagent",
   "model": "",
   "agent_profile": "",
-  "max_turns": 0,
-  "issue_timeout_seconds": 0,
   "max_parallel_issues": 1,
   "max_issues": 50,
   "stale_days": 3,
@@ -99,8 +97,7 @@ display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
   进入 delta 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
 - 分析和同会话修复不设步数、耗时或 Token 预算，以证据充分、结论可用为
-  目标。旧 `max_turns` / `issue_timeout_seconds` 配置仍兼容读取，但统一
-  规范化为 `0`（无限制）。可随时在晨报页面手动停止；外部模型/工具的
+  目标，不提供预算配置项。可随时在晨报页面手动停止；外部模型/工具的
   连接故障仍按执行异常记录。
 - `analysis_backend` 仅支持 `kkagent`；历史上可配置 `direct` 但从未实现，
   已从枚举移除（旧配置值会被规范化回 `kkagent`）。

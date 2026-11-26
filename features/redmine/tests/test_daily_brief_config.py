@@ -74,15 +74,13 @@ def test_device_serial_normalized_and_env_sets_toolsets():
     assert normalize_daily_brief_config({"device_serial": ""})["device_serial"] == ""
 
 
-def test_legacy_budgets_do_not_limit_analysis():
-    config = normalize_daily_brief_config({"max_turns": 20})
-    assert config["max_turns"] == 0
-    assert config["issue_timeout_seconds"] == 0
-    assert build_brief_analyzer(config).max_turns == 0
-    assert build_brief_analyzer(
-        normalize_daily_brief_config({"max_turns": 50})
-    ).max_turns == 0
-    assert build_brief_analyzer({"max_turns": 20, "issue_timeout_seconds": 60}).timeout_seconds == 0
+def test_analysis_budget_is_not_a_setting():
+    config = normalize_daily_brief_config({})
+    assert "max_turns" not in config
+    assert "issue_timeout_seconds" not in config
+    analyzer = build_brief_analyzer(config)
+    assert analyzer.max_turns == 0
+    assert analyzer.timeout_seconds == 0
 
 
 def test_trigger_time_defaults_to_midnight_and_rejects_invalid_values():
