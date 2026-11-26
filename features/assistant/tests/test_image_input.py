@@ -63,21 +63,22 @@ def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt, capability)
 
 
 @pytest.mark.asyncio
-async def test_image_turn_retains_only_text_and_count(monkeypatch):
+async def test_image_turn_retains_private_attachments(monkeypatch, tmp_path):
     import json
 
-    from features.assistant import image_input, session_log
-    import features.knowledge as knowledge
+    import uuid
 
-    monkeypatch.setattr(knowledge, "retrieve_public_cdd_context", lambda _query: [])
+    from features.assistant import image_input, session_store
 
-    monkeypatch.setattr(session_log, "_persist_transcript", lambda _session: None)
+    monkeypatch.setattr(session_store, "default_transcripts_dir", lambda: tmp_path)
     monkeypatch.setattr(image_input.users_runtime, "config_manager", Mock())
+    monkeypatch.setattr("features.knowledge.retrieve_public_cdd_context", lambda _message: [])
     analyzer = Mock()
     analyzer.image_provider.return_value = "local"
     analyzer.generate_image_analysis.return_value = {"success": True, "content": "Visible result"}
     monkeypatch.setattr(image_input, "UniversalAIAnalyzer", lambda _config: analyzer)
-    current = {"session_id": "visual", "status": "idle", "messages": [], "steps": []}
+    current = {"session_id": str(uuid.uuid4()), "client_id": "client-a", "owner_id": "owner-a",
+               "status": "idle", "messages": [], "steps": []}
     raw = image_data()
     result = await image_input.analyze_image_turn(current, "Analyze", [raw])
     assert result.status_code == 200
@@ -88,6 +89,14 @@ async def test_image_turn_retains_only_text_and_count(monkeypatch):
     assert current["steps"][-1]["status"] == "done"
     assert "data:image/" not in json.dumps(current)
     assert "agent_image_busy" not in current
+    image_id = current["messages"][0]["data"]["image_attachments"][0]["id"]
+    record = session_store.load_transcript(current["session_id"])
+    assert record["messages"][0]["data"]["image_attachments"][0]["id"] == image_id
+    content, mime = session_store.read_session_image(record, image_id, "owner-a")
+    assert mime == "image/png" and Image.open(io.BytesIO(content)).size == (12, 12)
+    assert session_store.read_session_image(record, image_id, "owner-b") is None
+    assert session_store.read_session_image(record, "../file", "owner-a") is None
+    assert not any(p.stat().st_mode & 0o077 for p in (tmp_path / current["session_id"]).iterdir())
 
     analyzer.image_provider.return_value = None
     result = await image_input.analyze_image_turn(current, "Analyze", [raw])
@@ -96,23 +105,30 @@ async def test_image_turn_retains_only_text_and_count(monkeypatch):
     assert len(current["messages"]) == 2
     assert current["status"] == "idle"
 
+    session_store.drop_transcript(current["session_id"])
+    assert not (tmp_path / current["session_id"]).exists()
+    assert session_store.read_session_image(record, image_id, "owner-a") is None
+
 
 @pytest.mark.asyncio
-async def test_image_turn_passes_public_context_without_persisting_body(monkeypatch):
+async def test_image_turn_passes_public_context_without_persisting_body(monkeypatch, tmp_path):
     import json
 
     import features.knowledge as knowledge
-    from features.assistant import image_input, session_log
+    import uuid
+
+    from features.assistant import image_input, session_store
 
     context = [{"reference": "POL-" + "a" * 24, "snippet": "background-only"}]
     monkeypatch.setattr(knowledge, "retrieve_public_cdd_context", lambda _query: context)
-    monkeypatch.setattr(session_log, "_persist_transcript", lambda _session: None)
+    monkeypatch.setattr(session_store, "default_transcripts_dir", lambda: tmp_path)
     monkeypatch.setattr(image_input.users_runtime, "config_manager", Mock())
     analyzer = Mock()
     analyzer.image_provider.return_value = "local"
     analyzer.generate_image_analysis.return_value = {"success": True, "content": "Visible result"}
     monkeypatch.setattr(image_input, "UniversalAIAnalyzer", lambda _config: analyzer)
-    current = {"session_id": "visual", "status": "idle", "messages": [], "steps": []}
+    current = {"session_id": str(uuid.uuid4()), "client_id": "client-a", "owner_id": "owner-a",
+               "status": "idle", "messages": [], "steps": []}
     assert (await image_input.analyze_image_turn(current, "Analyze CDD", [image_data()])).status_code == 200
     assert analyzer.generate_image_analysis.call_args.kwargs == {"retrieval_context": context}
     meta = current["messages"][-1]["data"]["retrieval_context"]

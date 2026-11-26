@@ -145,6 +145,9 @@
     border-radius: 6px;
 }
 .agent-image-preview img { display: block; width: 72px; height: 56px; object-fit: contain; background: var(--darker-bg); }
+.agent-message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.agent-message-images .agent-image-preview { cursor: zoom-in; }
+.agent-message-images .agent-image-preview img { width: 144px; height: 104px; max-width: 100%; }
 .agent-image-preview .agent-image-remove {
     position: absolute;
     top: 2px;

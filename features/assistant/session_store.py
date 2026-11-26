@@ -13,15 +13,19 @@
 
 from __future__ import annotations
 
+import base64
 import contextlib
 import fcntl
+import hashlib
 import json
 import re
+import shutil
 import threading
+import uuid
 from pathlib import Path
 from typing import Any
 
-from foundation.private_config import write_atomic_text
+from foundation.private_config import write_atomic_bytes, write_atomic_text
 
 
 _LOCK = threading.Lock()
@@ -261,9 +265,83 @@ def load_transcript(session_id: str, directory: Path | str | None = None) -> dic
     return record if isinstance(record, dict) and record.get("session_id") else None
 
 
+_IMAGE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_MAX_SESSION_IMAGE_BYTES = 64 * 1024 * 1024
+
+
+def _image_directory(session_id: str, directory=None) -> Path:
+    if not _SESSION_ID_RE.fullmatch(session_id):
+        raise ValueError("Invalid session ID")
+    root = Path(directory) if directory else default_transcripts_dir()
+    return root / session_id
+
+
+def _image_owner_key(owner: str) -> str:
+    return hashlib.sha256(owner.encode("utf-8")).hexdigest()
+
+
+def save_session_images(session: dict, images: list[str]) -> list[dict]:
+    """Store normalized images privately; transcript contains references only."""
+    owner = str(session.get("owner_id") or session.get("client_id") or "")
+    if not owner:
+        raise ValueError("Missing image owner")
+    root = _image_directory(session["session_id"])
+    decoded = []
+    for value in images:
+        prefix, payload = value.split(",", 1)
+        mime = {"data:image/png;base64": "image/png", "data:image/jpeg;base64": "image/jpeg"}[prefix]
+        decoded.append((mime, base64.b64decode(payload, validate=True)))
+    root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if sum(p.stat().st_size for p in root.iterdir() if p.is_file()) + sum(
+            len(raw) for _, raw in decoded) > _MAX_SESSION_IMAGE_BYTES:
+        raise ValueError("会话图片存储已达 64 MB 上限，请新建会话")
+    result = []
+    created = []
+    try:
+        for mime, raw in decoded:
+            image_id = uuid.uuid4().hex
+            extension = "png" if mime == "image/png" else "jpg"
+            target = root / f"{_image_owner_key(owner)}-{image_id}.{extension}"
+            write_atomic_bytes(target, raw)
+            created.append(target)
+            result.append({"id": image_id, "mime": mime})
+    except BaseException:
+        for target in created:
+            with contextlib.suppress(OSError):
+                target.unlink()
+        raise
+    return result
+
+
+def read_session_image(session: dict, image_id: str, owner: str) -> tuple[bytes, str] | None:
+    """Read only images referenced by the requested owner's user messages."""
+    if not owner or not _IMAGE_ID_RE.fullmatch(image_id):
+        return None
+    if owner != str(session.get("owner_id") or session.get("client_id") or ""):
+        return None
+    for message in session.get("messages", []):
+        if message.get("role") != "user":
+            continue
+        for image in (message.get("data") or {}).get("image_attachments", []):
+            if image.get("id") != image_id:
+                continue
+            mime = image.get("mime")
+            if mime not in {"image/png", "image/jpeg"}:
+                return None
+            extension = "png" if mime == "image/png" else "jpg"
+            try:
+                path = _image_directory(session["session_id"]) / f"{_image_owner_key(owner)}-{image_id}.{extension}"
+                return path.read_bytes(), mime
+            except (OSError, ValueError):
+                return None
+    return None
+
+
 def drop_transcript(session_id: str, directory: Path | str | None = None) -> None:
     if not _SESSION_ID_RE.match(session_id or ""):
         return
     root = Path(directory) if directory else default_transcripts_dir()
     with contextlib.suppress(OSError):
         (root / f"{session_id}.json").unlink()
+    with contextlib.suppress(OSError):
+        shutil.rmtree(_image_directory(session_id, root))

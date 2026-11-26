@@ -396,10 +396,18 @@ function renderAgentMessages(session) {
         }
 
         const escapedContent = escapeHtml(message.content || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        const attachments = isUser && Array.isArray(data.image_attachments)
+            ? data.image_attachments.slice(0, 3).filter(image => /^[a-f0-9]{32}$/.test(image?.id || '')) : [];
         const imageCount = isUser && Number.isInteger(data.image_count) && data.image_count > 0
-            ? `<div class="ui-meta">图片 ${data.image_count} 张（仅本轮分析）</div>` : '';
+            ? '<div class="ui-meta">图片 ' + data.image_count + ' 张（' + (attachments.length ? '点击查看' : '未保留原图') + '）</div>' : '';
+        const imageHtml = attachments.length ? '<div class="agent-message-images">' + attachments.map((image, index) => {
+            const url = '/api/agent/sessions/' + encodeURIComponent(session.session_id)
+                + '/images/' + encodeURIComponent(image.id);
+            return '<a class="agent-image-preview" href="' + url + '" target="_blank" rel="noopener noreferrer" title="查看图片 ' + (index + 1) + '">'
+                + '<img src="' + url + '" loading="lazy" alt="查看图片 ' + (index + 1) + '"></a>';
+        }).join('') + '</div>' : '';
         const contentHtml = (isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent)
-            + imageCount + (data.question ? renderAgentQuestion(message, session) : '');
+            + imageCount + imageHtml + (data.question ? renderAgentQuestion(message, session) : '');
         const toneClass = tone ? ` ${tone}` : '';
         const bodyClass = isPlanLike ? 'agent-message-body plan-body' : 'agent-message-body';
 

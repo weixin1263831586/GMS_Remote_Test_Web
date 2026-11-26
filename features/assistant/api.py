@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from features.assistant.context import record_user_message, update_context
@@ -547,6 +548,26 @@ async def delete_agent_session(session_id: str, request: Request):
     """Discard one Agent session: drop live state and its recovery anchor."""
     require_human_principal_when_auth_required(request)
     return delete_session(session_id, get_client_id_from_request(request), owner_id_from_request(request))
+
+
+@router.get("/api/agent/sessions/{session_id}/images/{image_id}")
+async def get_agent_image(session_id: str, image_id: str, request: Request):
+    """Serve a private image for its original session owner."""
+    require_human_principal_when_auth_required(request)
+    from features.assistant import session_store
+
+    owner = owner_id_from_request(request) or get_client_id_from_request(request)
+    session = _agent_sessions.get(session_id) or session_store.load_transcript(session_id)
+    image = session_store.read_session_image(session, image_id, owner) if session else None
+    if image is None:
+        return error_response("图片不存在或无权访问", 404)
+    content, mime = image
+    return Response(content, media_type=mime, headers={
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    })
 
 
 @router.get("/api/agent/sessions/{session_id}")

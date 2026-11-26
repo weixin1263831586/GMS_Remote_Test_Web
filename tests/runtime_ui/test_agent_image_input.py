@@ -1,5 +1,6 @@
 """Clipboard image composer browser regression."""
 
+import base64
 import json
 
 from tests.runtime_ui.harness import RuntimeUiHarness, expect
@@ -21,11 +22,15 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
                 route.fulfill(status=200, content_type="application/json", body=json.dumps({
                     "success": True, "data": {"session": {"session_id": "image-test",
                         "status": "idle", "messages": [{"id": "u", "role": "user",
-                        "content": "请分析图片内容。", "data": {"image_count": 1}},
+                        "content": "请分析图片内容。", "data": {"image_count": 1,
+                            "image_attachments": [{"id": "a" * 32, "mime": "image/png"}]}},
                         {"id": "a", "role": "assistant", "content": "image result"}], "steps": []}},
                 }))
 
             page.route("**/api/agent/chat", chat)
+            page.route("**/api/agent/sessions/image-test/images/*", lambda route: route.fulfill(
+                status=200, content_type="image/png",
+                body=base64.b64decode(requests[0]["images"][0].split(",", 1)[1])))
             paste = """async () => {
                 const canvas = document.createElement('canvas');
                 canvas.width = 8;
@@ -63,6 +68,11 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
             editor.press("Enter")
             expect(page.locator("#agent-chat-messages")).to_contain_text("image result")
             expect(page.locator("#agent-chat-messages")).to_contain_text("图片 1 张")
+            attachment = page.locator(".agent-message-images a")
+            expect(attachment).to_have_count(1)
+            expect(attachment).to_have_attribute("target", "_blank")
+            expect(attachment).to_have_attribute("href", "/api/agent/sessions/image-test/images/" + "a" * 32)
+            page.wait_for_function("document.querySelector('.agent-message-images img')?.naturalWidth === 8")
             expect(page.locator("#agent-image-previews")).to_be_hidden()
             self.assertEqual(len(requests), 1)
             self.assertEqual(requests[0]["message"], "")

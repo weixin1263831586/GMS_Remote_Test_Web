@@ -16,6 +16,7 @@ from features.users import runtime as users_runtime
 from foundation.responses import error_response, success_response
 
 from .session_log import _append_message, _append_step, _settle_step, session_payload
+from .session_store import save_session_images
 
 
 MAX_IMAGES = 3
@@ -122,10 +123,18 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
                     step.update(status="error", detail="视觉模型调用失败")
                     _settle_step(step)
                 return error_response("视觉模型调用失败，请检查模型配置或重试；图片未转发到其他模型", 502)
+            try:
+                attachments = save_session_images(session, images)
+            except (OSError, ValueError):
+                if step:
+                    step.update(status="error", detail="图片保存失败")
+                    _settle_step(step)
+                return error_response("图片保存失败或会话存储已达上限，请检查存储或新建会话", 503)
             if step:
                 step.update(status="done", detail=f"已分析 {len(images)} 张图片")
                 _settle_step(step)
-            _append_message(session, "user", message, data={"image_count": len(images)})
+            _append_message(session, "user", message,
+                            data={"image_count": len(images), "image_attachments": attachments})
             _append_message(session, "assistant", result["content"], data={"image_analysis": True, "retrieval_context": {"scope": "public_cdd_only",
                              "coverage_complete": False,
                              "references": [item["reference"] for item in retrieval_context]}})
