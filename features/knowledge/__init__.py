@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from .api import page_router, router
+from .policy_imports import recall_owner_policy_imports
 from .external import (
     EVIDENCE_LEVEL_BACKGROUND,
     ExternalKnowledgeError,
@@ -31,6 +32,7 @@ __all__ = [
     "partner_policy_allowed",
     "policy_search_terms",
     "recall_web_references",
+    "recall_owner_policy_imports",
     "router",
 ]
 
