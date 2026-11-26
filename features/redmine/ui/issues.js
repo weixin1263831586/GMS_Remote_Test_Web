@@ -74,7 +74,7 @@ async function loadIssues(page) {
     } else {
       renderedIssuesScope = '';
       box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
-      document.getElementById('pagination')?.replaceChildren();
+      document.getElementById('issuesPagination')?.replaceChildren();
     }
   } finally {
     if (generation === issuesRequestGeneration) box.setAttribute('aria-busy', 'false');
