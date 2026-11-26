@@ -144,12 +144,12 @@ jobs:
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
           test -s artifacts/semgrep.json
       - name: Gate on ERROR-severity findings
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           SEMGREP_EXIT_CODE: ${{ steps.semgrep.outputs.exit_code }}
         run: python tools/scripts/maintenance/check_semgrep_report.py artifacts/semgrep.json --scan-exit-code "$SEMGREP_EXIT_CODE"
       - name: Upload semgrep report
-        if: always()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: semgrep-report

@@ -3722,42 +3722,26 @@
       },
       "WebSourceRequest": {
         "properties": {
-          "android_version": {
+          "authorized_for_ai_processing": {
+            "default": false,
+            "title": "Authorized For Ai Processing",
+            "type": "boolean"
+          },
+          "enabled": {
             "anyOf": [
               {
-                "maximum": 100,
-                "minimum": 1,
-                "type": "integer"
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Android Version"
-          },
-          "enabled": {
-            "default": true,
-            "title": "Enabled",
-            "type": "boolean"
-          },
-          "kind": {
-            "default": "document",
-            "enum": [
-              "cdd",
-              "document"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "license": {
-            "maxLength": 240,
-            "minLength": 1,
-            "title": "License",
-            "type": "string"
+            "default": null,
+            "title": "Enabled"
           },
           "name": {
+            "default": "",
             "maxLength": 160,
-            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -3769,9 +3753,7 @@
           }
         },
         "required": [
-          "name",
-          "url",
-          "license"
+          "url"
         ],
         "title": "WebSourceRequest",
         "type": "object"
