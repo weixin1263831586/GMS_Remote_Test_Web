@@ -65,7 +65,11 @@ _SPECIAL_TABLE_RULES = {
 }
 _EXTERNAL_MAIL_STYLES = {
     "web/static/js/pages/api-docs.js": {"padding:4px 12px 4px 0;color:#666;", "padding:4px 0;"},
-    "features/gms/radar/notifications.py": {"padding:10px 11px;text-align:{align};"},
+    "features/gms/radar/notifications.py": {
+        "padding:10px 11px;text-align:{align};'\n"
+        "        'background:#f3f5f9;color:#495465;border-bottom:1px solid #dce1e9;'\n"
+        "        f'font-weight:600;",
+    },
 }
 
 
