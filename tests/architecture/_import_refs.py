@@ -10,13 +10,20 @@ def literal_dynamic_targets(tree: ast.AST, package: str = "") -> list[tuple[ast.
     """Resolve statically identifiable dynamic imports."""
     importlib_names = {"importlib"}
     functions = set()
+    builtin_modules = {"builtins"}
+    builtin_functions = {"__import__"}
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             importlib_names.update(alias.asname or alias.name for alias in node.names
                                    if alias.name == "importlib")
+            builtin_modules.update(alias.asname or alias.name for alias in node.names
+                                   if alias.name == "builtins")
         elif isinstance(node, ast.ImportFrom) and node.module == "importlib" and not node.level:
             functions.update(alias.asname or alias.name for alias in node.names
                              if alias.name == "import_module")
+        elif isinstance(node, ast.ImportFrom) and node.module == "builtins" and not node.level:
+            builtin_functions.update(alias.asname or alias.name for alias in node.names
+                                     if alias.name == "__import__")
     result = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
@@ -28,7 +35,12 @@ def literal_dynamic_targets(tree: ast.AST, package: str = "") -> list[tuple[ast.
             isinstance(func, ast.Attribute) and func.attr == "import_module"
             and isinstance(func.value, ast.Name) and func.value.id in importlib_names
         )
-        is_builtin = isinstance(func, ast.Name) and func.id == "__import__"
+        is_builtin = (
+            isinstance(func, ast.Name) and func.id in builtin_functions
+        ) or (
+            isinstance(func, ast.Attribute) and func.attr == "__import__"
+            and isinstance(func.value, ast.Name) and func.value.id in builtin_modules
+        )
         if not (is_import_module or is_builtin):
             continue
         keywords = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
@@ -69,9 +81,9 @@ def module_names(tree: ast.AST, package: str, *, include_dynamic: bool = True) -
                     continue
             if target:
                 result.add(target)
-                if target == "features":
+                if target in {"features", "worker"}:
                     result.update(
-                        f"features.{alias.name}"
+                        f"{target}.{alias.name}"
                         for alias in node.names if alias.name != "*"
                     )
     if include_dynamic:
