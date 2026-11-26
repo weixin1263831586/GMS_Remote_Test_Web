@@ -46,8 +46,11 @@ async function fetchIssueFromRedmine(issueId) {
 }
 
 // ---- Issues list ----
+let issuesRequestGeneration = 0;
+let renderedIssuesScope = '';
 async function loadIssues(page) {
   if (page) currentPage = page;
+  const generation = ++issuesRequestGeneration;
   const search = document.getElementById('searchInput').value.trim();
   const status = document.getElementById('statusFilter').value;
   const priority = document.getElementById('priorityFilter').value;
@@ -56,12 +59,25 @@ async function loadIssues(page) {
   if (search) url += `&search=${encodeURIComponent(search)}`;
   if (status) url += `&status=${encodeURIComponent(status)}`;
   if (priority) url += `&priority=${encodeURIComponent(priority)}`;
+  const box = document.getElementById('issuesList');
+  box.setAttribute('aria-busy', 'true');
   try {
     const data = await api(url);
+    if (generation !== issuesRequestGeneration) return;
     renderIssuesList(data.items || []);
+    renderedIssuesScope = url;
     renderPagination(data.total || 0, data.limit, data.offset);
   } catch (e) {
-    document.getElementById('issuesList').innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+    if (generation !== issuesRequestGeneration) return;
+    if (renderedIssuesScope === url && e.status !== 401 && e.status !== 403) {
+      notifyUser('工单刷新失败', e.message, 'error');
+    } else {
+      renderedIssuesScope = '';
+      box.innerHTML = `<div class="muted">加载失败: ${esc(e.message)}</div>`;
+      document.getElementById('pagination')?.replaceChildren();
+    }
+  } finally {
+    if (generation === issuesRequestGeneration) box.setAttribute('aria-busy', 'false');
   }
 }
 
