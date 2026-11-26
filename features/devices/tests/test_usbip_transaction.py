@@ -32,7 +32,7 @@ CONFIG = {
     "device_host": "hcq@172.16.14.66",
     "device_pswd": "",
     "ubuntu_host": "127.0.0.1",
-    "usbip_vid_pid": "05ac:12a8",
+    "usbip_vid_pids": ["2207:0006", "18d1:4d00", "2207:351a", "2207:350e", "05ac:12a8"],
 }
 
 
