@@ -80,6 +80,9 @@ async def _periodic_cleanup() -> None:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             global_state.cleanup_old_user_states()
+            from features.knowledge import sync_due_web_sources
+
+            await asyncio.to_thread(sync_due_web_sources)
             # 无 job 命令（device_action/flash）的实时日志事件只在
             # delete_job 清理，终态后仍会无限累积；按保留期定期裁剪。
             try:
