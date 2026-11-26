@@ -199,6 +199,7 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
 }
 
 /* Compact fixed widths for idle and busy labels. */
+button[data-busy-size] { box-sizing:border-box; padding-inline:6px; }
 button[data-busy-size="short"] { width:64px; flex-shrink:0; white-space:nowrap; }
 button[data-busy-size="plain"] { width:76px; flex-shrink:0; white-space:nowrap; }
 button[data-busy-size="icon"] { width:82px; flex-shrink:0; white-space:nowrap; }
