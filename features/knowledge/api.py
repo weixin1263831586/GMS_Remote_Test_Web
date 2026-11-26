@@ -358,9 +358,15 @@ async def search_docs(
 
 @personal_router.get("/semantic-index")
 @handle_api_errors
-async def personal_semantic_status(request: Request):
+async def personal_semantic_status(request: Request, kind: str = Query("embedding"),
+                                   approved_only: bool = Query(False)):
     require_human_principal(request)
     owner = _user(request)
+    if kind == "understanding":
+        result = await asyncio.to_thread(_service.document_understanding, owner, approved_only=approved_only)
+        return success_response(data=result)
+    if kind != "embedding" or approved_only:
+        return error_response("未知索引类型", 422)
     try:
         result = await asyncio.to_thread(lambda: PersonalSemantic(_service.store, owner).status())
     except Exception as exc:
@@ -373,9 +379,16 @@ async def personal_semantic_status(request: Request):
 
 @personal_router.post("/semantic-index")
 @handle_api_errors
-async def sync_personal_semantic(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+async def sync_personal_semantic(request: Request, batch_size: int = Query(128, ge=1, le=128),
+                                 kind: str = Query("embedding"), approved_only: bool = Query(False)):
     require_human_principal(request)
     owner = _user(request)
+    if kind == "understanding":
+        result = await asyncio.to_thread(_service.document_understanding, owner, approved_only=approved_only,
+                                         sync=True, batch_size=min(batch_size, 4))
+        return success_response(data=result)
+    if kind != "embedding" or approved_only:
+        return error_response("未知索引类型", 422)
     try:
         result = await asyncio.to_thread(
             lambda: PersonalSemantic(_service.store, owner).sync(batch_size=batch_size))
