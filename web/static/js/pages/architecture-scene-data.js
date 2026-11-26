@@ -6,7 +6,7 @@ window.ArchitectureSceneData = Object.freeze({
    ['entry','用户与入口','统一接入','users','access',34,92,226,166,['Web 工作台','主机桌面 / 终端','测试套件 / ATS',['对话 Agent','对话 / CLI Agent']]],
    ['controller','Controller','控制与调度中心','server','control',387,85,328,181,['认证与权限','任务调度','设备 Claim / Lease','设备管理','服务编排','审计 / 报告索引']],
    ['workers','Worker 集群','执行与结果采集','network','worker',861,92,215,166,[['Worker A','Linux Worker A'],['Worker B','Linux Worker B'],['Tradefed','Tradefed / 测试'],['原生结果 / 日志','原生 results / logs']]],
-   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine / Gerrit',['源码 / AI','SDK / CodeSearch / AI'],['Wiki / CDD','个人知识、Wiki / CDD / Web'],['构建服务','受审计 SSH / 构建服务器']]],
+   ['external','外部协同与知识','受控集成','branch','external',34,350,210,143,['Redmine / Gerrit',['源码 / AI','SDK / CodeSearch / AI'],['RAG / Wiki / CDD','个人知识、Wiki / CDD / Web；本地语义索引与混合召回'],['构建服务','受审计 SSH / 构建服务器']]],
    ['usbip','USB/IP','设备通道','plug','channel',310,350,198,143,['USB 映射','设备透传','热插拔 / 重枚举']],
    ['device','测试设备','物理资源','device','resource',576,350,199,143,[['TV / STB','Android TV / STB'],'手机 / 平板','本地 USB','远端 USB']],
    ['adb','ADB Proxy','调试代理','terminal','teal',842,350,233,143,['ADB 连接','多设备代理','命令转发']]],
@@ -135,12 +135,12 @@ window.ArchitectureSceneData = Object.freeze({
    ['control','Controller / 工具网关','权限门禁与任务状态','server','control',389,35,342,190,['Service Token','权限与审计','受控工具调用','任务校验 / 入队','run_id / 状态','报告索引']],
    ['worker','设备执行 Worker','按需授权 / 独立执行','server','worker',867,44,210,180,['Worker A','Worker B',['ADB / 测试','ADB / Tradefed'],'回执 / 日志']],
    ['evidence','实际证据来源','当前工单与匹配版本','search','access',28,302,214,161,['工单 / 附件','日志 / 报告',['Gerrit / 补丁','Gerrit / Mainline / Critical Fix'],['APK / SDK','APK / SDK / CodeSearch']]],
-   ['collect','分析 Worker / 取证','Redmine 后台执行','search','access',317,302,193,161,['证据快照','版本匹配','引用召回','覆盖检查']],
+   ['collect','分析 Worker / 取证','Redmine 后台执行','search','access',317,302,193,161,['证据快照','版本匹配','证据检索','来源 / 覆盖']],
    ['review','诊断推理 / 复核','模型分析与补证','chip','control',592,302,186,161,[['证据门禁','Evidence Gate / 证据门禁'],['结论复核','Claim Review / 结论复核'],'根因 / 不确定性','补证 / 源码验证']],
    ['report','诊断结果 / 状态','结论与建议（非执行）','chart','resource',859,302,214,161,['引用 / 结论','修复建议','验证计划','报告 / run_id']],
    ['owner','授权参考文档','独立 owner 范围','book','external',27,518,216,112,[['PDF / HTML','owner 授权 PDF / HTML'],['GMS 规范','授权 GMS Requirements']]],
    ['sources','外部知识源','只读 / 来源可追溯','book','external',306,518,216,112,[['Wiki','Android Internals Wiki'],['CDD / Web','Android CDD / Web 文档']]],
-   ['knowledge','知识联邦检索','背景知识 / 版本过滤','search','external',577,518,216,112,['索引 / RRF','来源状态']],
+   ['knowledge','知识联邦检索','背景知识 / 版本过滤','search','external',577,518,216,112,['BM25 / 向量 / RRF','来源 / 覆盖状态']],
    ['output','诊断结果消费','读模型 / 会话反馈','workflow','external',858,518,216,112,[['原会话 / 晨报','原会话 / 每日晨报'],['报告 / 知识','报告 / 按需知识沉淀']]]
   ],
   edges:[
@@ -154,8 +154,8 @@ window.ArchitectureSceneData = Object.freeze({
   legend:[['access','用户 / 证据'],['control','Agent 与调度'],['worker','设备执行'],['resource','诊断输出'],['external','知识 / 结果消费']],
   boundary:['Redmine 后台分析 Worker 与设备执行 Worker 独立；设备操作须另行授权。','外部联邦命中为 background；官方规范是要求依据，不单独证明问题根因。','授权 PDF / HTML 与 GMS 规范按 owner / 授权范围召回，不进入公共索引。','run_id 跟踪权威任务状态；恢复跟踪不等于任务完成或取消。'],
   cards:[
-   ['诊断链路','access',[['入口','对话 / 晨报 / 工单'],['取证','快照、版本与覆盖'],['召回','官方引用 / 背景知识'],['复核','证据门禁 / Claim Review'],['输出','诊断读模型 / run_id']]],
-   ['证据来源','worker',[['Redmine / 日志','当前工单、附件及历史'],['Gerrit / SDK','变更、APK / 版本源码'],['官方规范','Mainline / CF / CDD'],['知识联邦','Wiki / Web，background'],['授权资料','owner PDF / HTML、GMS']]],
+   ['诊断链路','access',[['入口','对话 / 晨报 / 工单'],['取证','快照、版本与覆盖'],['召回','混合召回 / 原文引用'],['复核','证据门禁 / Claim Review'],['输出','诊断读模型 / run_id']]],
+   ['证据来源','worker',[['Redmine / 日志','正文、回复、附件及日志'],['Gerrit / SDK','变更、APK / 版本源码'],['官方规范','Mainline / CF / CDD'],['知识联邦','Wiki / CDD / Web，background'],['授权资料','owner PDF / HTML、GMS']]],
    ['结果输出','risk',[['结论','引用、不确定性、证据缺口'],['修复建议','方案 / 补丁候选 / 验证计划'],['设备验证','另行授权 / Worker 回执'],['报告','统一读模型 / 原会话'],['沉淀','按需回写 / 经验知识']]]
   ]
  }

@@ -622,8 +622,20 @@ def gms_requirement_coverage(request: Request):
         latest = conn.execute("""SELECT run_id,state,discovered,fetched,parsed
             FROM gms_update_source_results WHERE source_key=? ORDER BY run_id DESC LIMIT 1""",
             ('gms_requirements',)).fetchone()
+        coverage = json.loads(row['coverage_json']) if row else None
+        counts = conn.execute("""SELECT count(*) AS total, count(DISTINCT source_revision) AS revisions,
+            min(source_revision) AS revision FROM gms_update_requirement_clauses WHERE source_key=?""",
+            ('gms_requirements',)).fetchone()
+        index_consistent = bool(coverage and counts['total'] > 0
+                                and counts['total'] == coverage.get('clause_candidates')
+                                and counts['revisions'] == 1
+                                and counts['revision'] == coverage.get('source_revision'))
     return {'success': True, 'data': {
-        'coverage': json.loads(row['coverage_json']) if row else None,
+        'coverage': coverage,
+        'index_consistent': index_consistent,
+        'latest_confirmed': bool(index_consistent and latest and row and latest['state'] == 'ready'
+                                 and latest['run_id'] == row['run_id']),
+        'coverage_complete': False,
         'indexed_run_id': row['run_id'] if row else None,
         'indexed_at': row['indexed_at'] if row else None,
         'latest_scan': dict(latest) if latest else None,
@@ -658,5 +670,11 @@ def list_gms_requirement_clauses(request: Request, q: str = Query('', max_length
         rows = conn.execute(f"""SELECT * FROM gms_update_requirement_clauses WHERE {predicate}
             ORDER BY section_title,requirement_id,clause_key LIMIT ? OFFSET ?""",
             [*params, limit, offset]).fetchall()
-    return {'success': True, 'data': {'items': _rows_to_dicts(rows)},
+    items = _rows_to_dicts(rows)
+    for item in items:
+        item.update(source='gms_requirements', reference=item['clause_key'],
+                    evidence_level='requirement_candidate', applicability_verified=False,
+                    original_document_verified=False)
+    return {'success': True, 'data': {'items': items, 'coverage_complete': False,
+                                      'scope': 'authorized_fetched_html_candidates'},
             'meta': {'total': total, 'limit': limit, 'offset': offset}}

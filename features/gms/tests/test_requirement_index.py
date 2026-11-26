@@ -71,3 +71,23 @@ def test_publish_derived_index_with_scan_records(tmp_path):
         _, changes, _ = sync_source(conn, 2, doc, force=True, timestamp='2026-01-02')
         assert changes == 0
         assert conn.execute('SELECT run_id FROM gms_update_requirement_coverage').fetchone()[0] == 2
+
+
+def test_table_ids_media_and_duplicate_anchors_are_not_verified_clauses():
+    parsed = parse_gms_requirements(fetched("""<article class="devsite-article">
+        <h2 id="chapter">1. Chapter</h2>
+        <div id="GMS-1-001">Unrelated anchor</div>
+        <p id="GMS-1-001">[GMS-1-001] MUST preserve feature.</p>
+        <table><tr><th>Rule</th><th>Context</th></tr>
+        <tr><td>[GMS-1-002]</td><td>See this figure <img src="/example.png"></td></tr></table>
+        </article>"""))
+    coverage = parsed.requirement_coverage
+    assert len(parsed.requirement_clauses) == 1
+    assert parsed.requirement_clauses[0].anchor_kind == 'section'
+    assert coverage['duplicate_anchor_count'] == 1
+    assert coverage['table_only_definition_candidates'] == ['GMS-1-002']
+    assert 'GMS-1-002' not in coverage['missing_observed_ids']
+    assert coverage['media_inventory_count'] == 1
+    assert not coverage['applicability_verified']
+    assert not coverage['original_document_verified']
+    assert not coverage['coverage_complete']

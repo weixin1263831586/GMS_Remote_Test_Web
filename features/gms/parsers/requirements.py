@@ -127,7 +127,10 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     article = article_node(fetched.doc)
     source = fetched.source.key
     base = fetched.final_url.split('#', 1)[0]
-    anchors = set(article.xpath('.//@id')) | set(article.xpath('.//a/@name'))
+    anchor_counts = Counter(article.xpath('.//@id') + article.xpath('.//a/@name'))
+    anchors = {key for key, count in anchor_counts.items() if count == 1}
+    table_ids = set()
+    table_definition_candidates = set()
     headings = {}
     sections = {}
     section_occurrences = Counter()
@@ -196,6 +199,14 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
         if event == 'table':
             tables += 1
             section['tables'] += 1
+            # Table rows are indexed independently; IDs in a table are not necessarily
+            # complete clause definitions or evidence of a version's applicability.
+            table_ids.update(requirement_ids(text_content(node)))
+            for cell in node.xpath('.//td|.//th'):
+                definition = _DEFINITION.match(text_content(cell))
+                if definition:
+                    table_definition_candidates.add(definition.group(1))
+            media.extend({**item, 'section_key': current} for item in _media(node, base))
             headers, parsed_rows = table_rows(node, base, complete_headers=True)
             for row in parsed_rows:
                 values = row['values']
@@ -235,8 +246,10 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
             # A bracketed range or a non-applicable statement remains a candidate,
             # never an assertion that every ID in the range is a definition.
             condition = context.get(scope_key, '')
-            anchor = requirement_id if requirement_id in anchors else section['anchor']
-            anchor_kind = 'clause' if requirement_id in anchors else 'section' if anchor in anchors else 'document'
+            local_anchors = set(node.xpath('self::*/@id|.//@id|self::a/@name|.//a/@name'))
+            clause_anchor = requirement_id in anchors and requirement_id in local_anchors
+            anchor = requirement_id if clause_anchor else section['anchor']
+            anchor_kind = 'clause' if clause_anchor else 'section' if anchor in anchors else 'document'
             url = base + ('#' + quote(anchor, safe='-_.:') if anchor_kind != 'document' else '')
             payload = {'id': requirement_id, 'section': current, 'scope': scope, 'text': value,
                        'context': condition, 'marker': active, 'mentions': mentions,
@@ -266,7 +279,8 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     ]
     definitions = Counter(item.requirement_id for item in clauses)
     raw_ids = set(requirement_ids(text_content(article)))
-    covered = set(references)
+    covered = set(references) | table_ids
+    media_total = len(article.xpath('.//img'))
     coverage = {
         'source_revision': revision,
         'source_scope': 'fetched_html_only',
@@ -277,10 +291,18 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
         'missing_observed_ids': sorted(raw_ids - covered),
         'reference_only_ids': sorted(covered - set(definitions)),
         'duplicate_definition_ids': {key: n for key, n in definitions.items() if n > 1},
+        'duplicate_anchor_count': sum(count > 1 for count in anchor_counts.values()),
+        'table_observed_ids': sorted(table_ids),
+        'table_only_definition_candidates': sorted(table_definition_candidates - set(definitions)),
+        'media_inventory_count': media_total,
+        'media_not_in_event_inventory': max(0, media_total - len(media)),
+        'applicability_verified': False,
+        'original_document_verified': False,
         'marker_counts': {f'{version}/{kind}': count for (version, kind), count in marker_counts.items()},
         'unclosed_markers': len(markers), 'orphan_end_markers': orphan_ends,
         'media': media, 'unresolved_media': sum(not item['available'] for item in media),
-        'limitation': 'Definition candidates and fetched DOM coverage only; hidden remote tabs, applicability and PDF equivalence not established.',
+        'limitation': ('Fetched DOM candidates only; table definitions, remote tabs, media content, '
+                       'applicability and PDF equivalence require independent verification.'),
     }
     return ParsedSource(requirement_sections=section_records, requirement_table_rows=rows,
                         requirement_version_tags=list(tags.values()), requirement_clauses=clauses,
