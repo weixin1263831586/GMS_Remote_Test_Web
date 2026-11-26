@@ -7,6 +7,70 @@ from tests.runtime_ui.harness import REPO_ROOT, RuntimeUiHarness, expect
 
 
 class RuntimeNavigationTests(RuntimeUiHarness):
+
+    def test_knowledge_tabs_and_external_source_refresh(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            calls = []
+            deny = [False]
+
+            def sources(route):
+                calls.append(route.request.method)
+                if deny[0]:
+                    route.fulfill(status=403, json={
+                        'detail': {'message': 'Elevation required', 'elevation_required': True},
+                    })
+                else:
+                    route.fulfill(json={'success': True, 'data': {'sources': [{
+                        'id': 'cdd16', 'name': 'Android 16 CDD',
+                        'url': 'https://source.android.com/docs/compatibility/16/android-16-cdd',
+                        'android_version': 16, 'enabled': True,
+                        'revision': 'revision16', 'synced_at': '', 'error': '',
+                    }]}})
+
+            page.route('**/api/knowledge/external/web-sources', sources)
+            page.route('**/api/knowledge/external/partner-policy-grant', lambda route: route.fulfill(
+                json={'success': True, 'data': {'enabled': False}}
+            ))
+            page.evaluate("switchPage('notes', null)")
+            page.wait_for_function('kbState.initialized')
+            root = page.locator('#page-notes')
+            personal = root.locator('[data-kb-view="personal"]')
+            external = root.locator('[data-kb-view="external"]')
+            panel = root.locator('[data-kb-external]')
+            expect(root.locator('.page-header-actions .users-view-tabs')).to_have_count(1)
+            expect(personal).to_have_attribute('aria-selected', 'true')
+            expect(panel).to_be_hidden()
+            external.click()
+            expect(external).to_have_class(re.compile(r'\bactive\b'))
+            expect(external).to_have_attribute('aria-selected', 'true')
+            expect(personal).to_have_attribute('aria-selected', 'false')
+            expect(root.locator('.kb-layout')).to_be_hidden()
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('Android 16 CDD')
+            expect(panel.locator('[data-kb-status]')).to_have_count(0)
+            expect(panel.locator('form [data-kb-refresh]')).to_be_visible()
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            deny[0] = True
+            page.evaluate('window.requestElevatedAccess = async () => false')
+            panel.locator('[data-kb-refresh]').click()
+            expect(page.locator('#toast')).to_contain_text('已取消管理员验证')
+            expect(panel.locator('[data-kb-sources]')).to_contain_text('Android 16 CDD')
+            expect(panel).not_to_contain_text('HTTP 403')
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            deny[0] = False
+            panel.locator('[data-kb-refresh]').click()
+            expect(panel.locator('[data-kb-refresh]')).to_be_enabled()
+            self.assertGreaterEqual(len(calls), 3)
+            personal.click()
+            expect(personal).to_have_attribute('aria-selected', 'true')
+            expect(personal).to_have_class(re.compile(r'\bactive\b'))
+            expect(external).to_have_attribute('aria-selected', 'false')
+            expect(panel).to_be_hidden()
+            expect(root.locator('.kb-layout')).to_be_visible()
+        finally:
+            page.close()
+
     def test_vpn_proxy_builtin_card_opens_management_panel_once(self):
         page = self.new_page()
         try:
