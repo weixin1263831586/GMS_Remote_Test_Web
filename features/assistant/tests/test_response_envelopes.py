@@ -6,7 +6,7 @@ import pytest
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from features.assistant.response import format_payload
+from features.assistant.response import external_knowledge_warnings, format_payload
 from features.assistant.route_invocation import call_router_function
 
 
@@ -50,3 +50,26 @@ def test_registered_sdk_list_tool_formats_its_actual_payload(tool_name):
     }})
     assert "已登记 1 个 SDK 源" in summary
     assert "rk3576" in summary
+
+
+@pytest.mark.parametrize("items", [[], [{"title": "CDD clause"}]])
+def test_external_knowledge_summary_reports_hits_and_degraded_sources(items):
+    tool = SimpleNamespace(name="android_internals_search", display_name="外部知识检索")
+    data = {
+        "results": items,
+        "sources_status": [
+            {"source": "web_documents", "status": "ready"},
+            {"source": "android_internals", "status": "error", "detail": "/private/path"},
+        ],
+    }
+    summary = format_payload(tool, {"success": True, "message": "Success", "data": data})
+    assert ("查询到 1 条" if items else "未检索到") in summary
+    assert "Android 机制 Wiki：检索或索引异常" in summary
+    assert "/private/path" not in summary
+    assert len(external_knowledge_warnings(data)) == 1
+
+
+def test_personal_knowledge_empty_result_is_not_generic_success():
+    tool = SimpleNamespace(name="knowledge_search", display_name="个人知识库检索")
+    summary = format_payload(tool, {"success": True, "message": "Success", "data": {"items": []}})
+    assert summary == "未检索到相关知识记录。"
