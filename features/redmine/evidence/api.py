@@ -328,9 +328,19 @@ async def get_evidence_references(
         if not question:
             return _error_response(EvidenceError("分析问题不能为空", status_code=422))
 
+        owner = _owner(request)
+
         def analyze():
-            corpus = SnapshotCorpus(_owner(request), snapshot_id)
-            result = run_authorized_rag(question, [corpus.source()])
+            from dataclasses import replace
+
+            corpus = SnapshotCorpus(owner, snapshot_id)
+
+            def current(hit):
+                settings = (config_manager.load_config() or {}).get("retrieval") or {}
+                return (isinstance(settings, dict) and settings.get("allow_local_redmine_llm") is True
+                        and corpus.current(hit))
+
+            result = run_authorized_rag(question, [replace(corpus.source(), current=current)])
             return {"snapshot_id": snapshot_id, "rag": result, "coverage_complete": False,
                     "snapshot_bounded": corpus.bounded, "sources": {}}
 
