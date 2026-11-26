@@ -13,6 +13,7 @@ from features.auth import require_elevated_admin
 
 from .mainline_records import escape_like
 from .repository import DB_PATH, connect
+from .requirement_lookup import lookup_requirement_sections
 from .sources import SOURCES
 from .update_records import query_bulletin_patches
 
@@ -649,6 +650,14 @@ def list_gms_requirement_clauses(request: Request, q: str = Query('', max_length
                                  change_version: str = Query('', max_length=40),
                                  limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
     require_elevated_admin(request)
+    if q.startswith(("https://", "http://", "section:")):
+        from features.auth import require_human_principal
+
+        require_human_principal(request)
+        with closing(_get_db()) as conn, conn:
+            conn.execute("BEGIN")
+            data = lookup_requirement_sections(conn, q)
+        return {'success': True, 'data': data}
     where = ['source_key=?']
     params: list[str | int] = ['gms_requirements']
     if requirement_id:

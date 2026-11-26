@@ -3,6 +3,7 @@
 from .mainline_records import query_exemption_match as query_mainline_exemption_match
 from .mainline_records import query_security_patches_by_cve as query_mainline_security_patches
 from .recall import extract_reference_identifiers, recall_mainline_references
+from .requirement_lookup import policy_lookup_target
 from .repository import init_db as init_gms_update_db
 from .repository import initialize as initialize_gms_update
 
@@ -10,6 +11,7 @@ from .repository import initialize as initialize_gms_update
 __all__ = [
     'extract_reference_identifiers',
     'init_gms_update_db',
+    'policy_lookup_target',
     'initialize_gms_update',
     'query_mainline_exemption_match',
     'query_mainline_security_patches',

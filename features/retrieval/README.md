@@ -112,3 +112,17 @@ Daily Brief prompts distinguish completed text scans from complete source
 coverage and require independent verification of historical candidates and
 patch applicability. These are shared evidence rules, not a cross-source
 search service or unrestricted access to protected documents.
+
+
+### Restricted GMS policy lookup
+
+The shared Partner scan has no verified per-account upstream entitlement and
+cannot feed model context. Explicit GMS Requirements URLs, clause IDs and
+GMS RAM certification questions select a human-only lookup in Project Agent.
+The existing elevated-admin clauses endpoint accepts a source URL with its
+fragment or `section:<keyword or clause ID>`. It returns the retained section,
+related table rows, media references, scan revision and explicit limits.
+Only the lookup query is persisted; the browser reads and displays the
+protected result after authorization. No Partner grant or model route is
+enabled, and no upstream URL is fetched by this lookup. Re-synchronize the
+authorized scan to populate the section-anchor inventory for older indexes.

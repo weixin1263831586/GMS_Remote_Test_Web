@@ -253,6 +253,23 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             _append_message(session, "assistant", "待执行计划格式已失效，请重新发起操作。")
         return success_response({"session": _session_payload(session)}, "Agent updated")
 
+    # Restricted shared scan content is displayed only through a human-authorized API.
+    # Keep the query, not the retrieved policy body, in the durable transcript.
+    if not req.action and not req.execute and not session.get("agent_thinking") and session.get("status") != "thinking":
+        from features.gms import policy_lookup_target
+
+        target = policy_lookup_target(message)
+        if target:
+            _append_message(
+                session, "assistant",
+                "已定位 GMS Requirements 检索目标。请查看授权原文、表格及版本条件；"
+                "此结果不进入模型上下文。若索引缺失或过期，需要重新同步授权来源。"
+                "Low RAM 声明不等同于 Android Go 产品认证。",
+                data={"gms_policy_lookup": target},
+            )
+            _append_step(session, "GMS 政策来源定位", "done", "已选择授权原文查询入口，尚未读取内容")
+            return success_response({"session": _session_payload(session)}, "Agent updated")
+
     # Model-led discovery covers the project tool catalog; rules remain a fallback.
     if not req.action or req.action in {"agent_choices", "agent_retry"}:
         from features.assistant.project_agent import start_project_turn

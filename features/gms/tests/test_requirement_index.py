@@ -91,3 +91,35 @@ def test_table_ids_media_and_duplicate_anchors_are_not_verified_clauses():
     assert not coverage['applicability_verified']
     assert not coverage['original_document_verified']
     assert not coverage['coverage_complete']
+
+
+def test_low_ram_section_lookup_preserves_table_note_and_real_anchor(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections, policy_lookup_target
+
+    body = """<article class="devsite-article"><h2>10. Performance</h2>
+    <h3 id="low-ram">Declare Low RAM devices</h3>
+    <p>Start of requirements changed in Android 17</p>
+    <p>[GMS-10.0-001] Example low memory declaration.</p>
+    <p>Note: Example upgrade restriction.</p>
+    <table><tr><th>OS Version</th><th>Must be Low RAM</th><th>Optionally Low RAM</th>
+    <th>Not qualified</th></tr><tr><td>Android 16 or higher</td><td>3 GB</td><td>4 GB</td>
+    <td>Less than 3 GB</td></tr></table><p>Example footnote.</p>
+    <p>End of changed requirements</p><h3>Next section</h3><p>Unrelated text.</p></article>"""
+    with closing(connect(tmp_path / 'lookup.sqlite3')) as conn, conn:
+        sync_source(conn, 1, fetched(body), force=True, timestamp='2026-01-01')
+        url = SOURCE.url + '#low-ram'
+        assert policy_lookup_target(url) == url
+        assert policy_lookup_target('过GMS认证，Android17设备RAM要求，Go和非Go') == 'section:Low RAM'
+        assert policy_lookup_target('Android CDD RAM') == ''
+        for query in (url, 'section:GMS-10.0-001', 'section:Low RAM'):
+            data = lookup_requirement_sections(conn, query)
+            assert data['status'] == 'matched'
+            assert not data['coverage_complete']
+            section = data['sections'][0]
+            assert section['source_url'] == url
+            assert 'Example upgrade restriction' in section['text']
+            assert 'Example footnote' in section['text']
+            assert 'Unrelated text' not in section['text']
+            assert section['table_rows'][0]['values'] == ['Android 16 or higher', '3 GB', '4 GB', 'Less than 3 GB']
+        assert lookup_requirement_sections(conn, SOURCE.url + '#missing')['status'] == 'anchor_not_indexed'
+        assert lookup_requirement_sections(conn, 'https://example.com/#low-ram')['status'] == 'anchor_required'

@@ -283,6 +283,8 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
     media_total = len(article.xpath('.//img'))
     coverage = {
         'source_revision': revision,
+        'section_anchors': {key: value['anchor'] for key, value in sections.items()
+                            if value['anchor'] in anchors},
         'source_scope': 'fetched_html_only',
         'coverage_complete': False,
         'sections': len(section_records), 'tables': tables, 'table_rows': len(rows),
