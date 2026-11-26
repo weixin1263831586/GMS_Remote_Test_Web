@@ -116,6 +116,16 @@ jobs:
                               ('list index out of range', 'index_error'),
                               ('invalid ipv6 url', 'invalid_link'),
                               ('maximum recursion depth', 'recursion_error'),
+                              ('is not defined', 'name_error'),
+                              ('conflicting', 'record_conflict'),
+                              ('has no len()', 'type_error'),
+                              ('not subscriptable', 'type_error'),
+                              ('not iterable', 'type_error'),
+                              ('cannot be serialized', 'serialization_error'),
+                              ('is not json serializable', 'serialization_error'),
+                              ('unsupported operand', 'type_error'),
+                              ('foreign key constraint', 'foreign_key_constraint'),
+                              ('check constraint failed', 'check_constraint'),
                               ('访问失败', 'authorization_or_http_error'),
                           )
                           category = next((label for marker, label in categories if marker in error),
@@ -153,4 +163,75 @@ jobs:
           except Exception as exc:
               report('audit_error_type', type(exc).__name__)
               sys.exit(1)
+          PY
+
+      - name: Reproduce current parser and publication without modifying live index
+        if: always()
+        shell: bash
+        env:
+          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: |
+          set -euo pipefail
+          umask 077
+          python3 - <<'PY'
+          import argparse
+          import contextlib
+          import io
+          import tempfile
+          import traceback
+          from pathlib import Path
+
+          def report(key, value):
+              print(f'{key}={value}', flush=True)
+
+          stage = 'imports'
+          try:
+              # Suppress library output; publish only counts and code coordinates.
+              with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                  from features.gms.fetching import BatchFetcher, build_session, canonical_url, fetch_source
+                  from features.gms.parsers.requirements import parse_gms_requirements
+                  from features.gms.repository import connect
+                  from features.gms.scanner import begin_run
+                  from features.gms.sources import SOURCES
+                  from features.gms.update_records import sync_source
+                  source = next(item for item in SOURCES if item.key == 'gms_requirements')
+                  stage = 'fetch'
+                  args = argparse.Namespace(browser='auto', cookie_file=None, cookie_header=None, verbose=False)
+                  with build_session(args) as session:
+                      fetcher = BatchFetcher(session, retries=0)
+                      fetched = fetch_source(fetcher, source, 25)
+                      if fetcher.documents[canonical_url(source.url)][2] != 'ready':
+                          raise ValueError('unexpected document')
+                  stage = 'parse'
+                  parsed = parse_gms_requirements(fetched)
+                  counts = (len(parsed.requirement_sections), len(parsed.requirement_clauses),
+                            len(parsed.requirement_table_rows))
+                  stage = 'scratch_publish'
+                  with tempfile.TemporaryDirectory(prefix='gms-policy-audit-') as temp:
+                      with contextlib.closing(connect(Path(temp) / 'audit.sqlite3')) as conn:
+                          run_id = begin_run(conn, 'full', [source], 'audit')
+                          with conn:
+                              sync_source(conn, run_id, fetched, force=True,
+                                          timestamp='2026-11-26T00:00:00Z', parsed=parsed)
+                          from features.gms.requirement_lookup import lookup_requirement_sections
+                          stage = 'scratch_lookup'
+                          result = lookup_requirement_sections(conn, 'section:Low RAM')
+                          matched = result.get('status') == 'matched'
+                          rows = sum(len(item.get('table_rows', [])) for item in result.get('sections', []))
+              report('scratch_sections', counts[0])
+              report('scratch_clauses', counts[1])
+              report('scratch_table_rows', counts[2])
+              report('scratch_low_ram_matched', matched)
+              report('scratch_low_ram_rows', rows)
+              report('scratch_result', 'success' if matched and rows else 'missing_low_ram')
+          except Exception as exc:
+              report('scratch_stage', stage)
+              report('scratch_exception_type', type(exc).__name__)
+              for frame in traceback.extract_tb(exc.__traceback__):
+                  path = Path(frame.filename)
+                  if 'features/gms/' in path.as_posix():
+                      report('scratch_code_location', f'{path.name}:{frame.lineno}:{frame.name}')
+              report('scratch_result', 'failed')
+              raise SystemExit(1) from None
           PY

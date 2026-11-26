@@ -57,8 +57,11 @@ def _scope(node):
 
 
 def _safe_url(base, value):
-    resolved = urljoin(base, value or '')
-    return resolved if value and urlsplit(resolved).scheme in ('http', 'https') else ''
+    try:
+        resolved = urljoin(base, value or '')
+        return resolved if value and urlsplit(resolved).scheme in ('http', 'https') else ''
+    except ValueError:
+        return ''
 
 
 def _media(node, base):
@@ -212,8 +215,10 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                 values = row['values']
                 headers_json, values_json = _json(headers), _json(values)
                 identity = (current, headers_json, values_json)
-                occurrence = row_occurrences[identity]
-                row_occurrences[identity] += 1
+                # Count occurrences by the same normalized identity used for row keys.
+                normalized = normalize_key(source, *identity)
+                occurrence = row_occurrences[normalized]
+                row_occurrences[normalized] += 1
                 rows.append(RequirementTableRowRecord(
                     source, normalize_key(source, *identity, str(occurrence)), current, path,
                     tables, row['row_index'], headers_json, values_json, ' | '.join(values),
@@ -256,8 +261,9 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
                        'url': url, 'references': [i for i in ids if i != requirement_id],
                        'media': _media(node, base)}
             identity = (current, requirement_id, _json(scope))
-            ordinal = clause_occurrences[identity]
-            clause_occurrences[identity] += 1
+            normalized = normalize_key(source, *identity)
+            ordinal = clause_occurrences[normalized]
+            clause_occurrences[normalized] += 1
             clauses.append(RequirementClauseRecord(
                 source, normalize_key(source, *identity, str(ordinal)), requirement_id, current, path,
                 value, condition, active[0], active[1], _json(mentions), _json(scope), url, anchor_kind,

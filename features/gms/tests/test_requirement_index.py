@@ -168,3 +168,22 @@ def test_empty_policy_index_distinguishes_failed_scan(tmp_path):
         assert result['latest_scan']['parsed'] == 0
         assert 'error' not in result['latest_scan']
         assert not result['latest_scan_confirmed']
+
+
+def test_case_distinct_table_rows_and_tab_ids_publish_without_key_collisions(tmp_path):
+    doc = fetched("""<article class="devsite-article">
+        <h2 id="low-ram">Example requirements</h2>
+        <div role="tabpanel" id="Device-A"><p>[GMS-1-001] Example A.</p></div>
+        <div role="tabpanel" id="device-a"><p>[GMS-1-001] Example B.</p></div>
+        <table><tr><th>Feature</th></tr><tr><td>Enabled</td></tr>
+        <tr><td>enabled</td></tr></table>
+        <img src="https://[invalid" alt="Unresolved link">
+        </article>""")
+    parsed = parse_gms_requirements(doc)
+    assert len({item.clause_key for item in parsed.requirement_clauses}) == 2
+    assert len({item.row_key for item in parsed.requirement_table_rows}) == 2
+    assert parsed.requirement_coverage['unresolved_media'] == 1
+    with closing(connect(tmp_path / 'collision.sqlite3')) as conn, conn:
+        sync_source(conn, 1, doc, force=True, timestamp='2026-01-01')
+        assert conn.execute('SELECT count(*) FROM gms_update_requirement_table_rows').fetchone()[0] == 2
+        assert conn.execute('SELECT count(*) FROM gms_update_requirement_clauses').fetchone()[0] == 2
