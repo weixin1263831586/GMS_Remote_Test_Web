@@ -56,9 +56,6 @@ _SPECIAL_TABLE_RULES = {
         "#page-test.page-ui-rework .input-table td",
         "#page-test.page-ui-rework .input-table td:last-child",
     },
-    "web/static/css/workspace-panels.css": {
-        "#aoa-panel .aoa-command-table th", "#aoa-panel .aoa-command-table td",
-    },
     "web/shell/components/head.html": {".project-guide-map th, .project-guide-map td"},
     # These selectors target interactive controls, not cells. Touch sizes differ.
     "features/cluster/ui/page.html": {"td button,td select,td input"},
@@ -390,6 +387,23 @@ class UiSizingContractTests(unittest.TestCase):
         sizing = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         self.assertNotIn(".dcfg-tab", sizing)
         self.assertIn("table.ui-detail-table > tbody > tr > :is(th, td)", sizing)
+
+    def test_aoa_command_grid_has_one_layout_owner(self):
+        source = (CSS / "aoa-workbench.css").read_text(encoding="utf-8")
+        self.assertRegex(source, r"grid-template-columns:\s*3ch minmax\(0, 1\.5fr\) minmax\(0, 1fr\) 60\.5px 156px;")
+        self.assertIn("grid-column: 5; grid-row: 1;", source)
+        self.assertIn("grid-column: 4 / 6;", source)
+        for path in CSS.rglob("*.css"):
+            if path.name == "aoa-workbench.css":
+                continue
+            css = re.sub(r"/\*.*?\*/", "", path.read_text(encoding="utf-8"), flags=re.S)
+            for selector, declarations in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
+                if re.search(r"\.aoa-(?:command-list-header|command-row|command-actions|command-state|actions-label|command-list)\b", selector):
+                    self.assertNotRegex(
+                        declarations,
+                        r"(?:^|[;\s])(?:grid-template-(?:columns|rows)|grid-column|grid-row|row-gap|white-space|overflow-wrap|padding(?:-top|-bottom)?)\s*:",
+                        f"{path}: {selector}",
+                    )
 
     def test_existing_single_line_layouts_not_replaced_by_wrapping(self):
         cases = {
