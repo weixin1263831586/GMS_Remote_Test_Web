@@ -1,5 +1,7 @@
 """UI geometry entrypoint and no-wrap guarantees across page roots."""
 
+import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -19,6 +21,104 @@ ENTRYPOINTS = (
     "features/devices/deployment/api.py",
     "features/devices/debug/api.py",
 )
+
+
+# Geometry belongs to the shared table template, not to page-level rules.
+_TABLE_SELECTOR = re.compile(
+    r"(?:^|[\s>,+~:(])(?:th|td|tr|thead|tbody)(?:$|[\s.#:\[>,+~)])"
+    r"|suite-file-(?:row|table-head)\b|\.dcfg-(?:th|td)\b",
+    re.I,
+)
+_GEOMETRY = re.compile(
+    r"(?:^|[;\s])(?:min-height|max-height|height|padding(?:-[\w-]+)?|"
+    r"vertical-align|box-sizing)\s*:", re.I,
+)
+_TABLE_TOKEN = re.compile(r"--ui-table-[\w-]+\s*:")
+_CELL_TAG = re.compile(
+    r"""<(?:th|td|tr|thead|tbody)\b[^>]*?\bstyle\s*=\s*(["'])(.*?)\1""",
+    re.I | re.S,
+)
+_CELL_DOM = re.compile(
+    r"\b(?:td|th|tr|cell|row|thead|tbody)\w*\.style\."
+    r"(?:padding\w*|(?:min|max)?Height|height|verticalAlign|boxSizing)\s*=",
+    re.I,
+)
+# Explicit non-data-table exceptions; new exceptions require a named reason.
+_SPECIAL_TABLE_RULES = {
+    "features/redmine/ui/page.css": {
+        ".analysis-doc .md-table th, .analysis-doc .md-table td",  # Markdown prose
+    },
+    "web/static/css/common.css": {
+        ".input-table td", ".input-table td:first-child", ".input-table td:last-child",
+    },
+    "web/static/css/common-page.css": {".input-table td"},  # responsive form
+    "web/static/css/other-workspaces.css": {
+        "#page-test.page-ui-rework .input-table td",
+        "#page-test.page-ui-rework .input-table td:last-child",
+    },
+    "web/static/css/workspace-panels.css": {
+        "#aoa-panel .aoa-command-table th", "#aoa-panel .aoa-command-table td",
+    },
+    "web/shell/components/head.html": {".project-guide-map th, .project-guide-map td"},
+    # These selectors target interactive controls, not cells. Touch sizes differ.
+    "features/cluster/ui/page.html": {"td button,td select,td input"},
+}
+_EXTERNAL_MAIL_STYLES = {
+    "web/static/js/pages/api-docs.js": {"padding:4px 12px 4px 0;color:#666;", "padding:4px 0;"},
+    "features/gms/radar/notifications.py": {"padding:10px 11px;text-align:{align};"},
+}
+
+
+def _tracked_ui_sources():
+    """Enumerate repository sources, including new files, not a fixed page list."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z"], cwd=ROOT, check=True, capture_output=True,
+    )
+    for name in result.stdout.decode("utf-8").split("\0"):
+        path = Path(name)
+        if not name or path.suffix not in {".css", ".html", ".js", ".mjs", ".ts", ".tsx", ".jsx", ".vue", ".svelte", ".py"}:
+            continue
+        if "vendor" in path.parts or "node_modules" in path.parts:
+            continue
+        if "tests" in path.parts or path.name.startswith("test_"):
+            continue
+        yield path
+
+
+def _table_geometry_violations(path, source):
+    if path == "web/static/css/ui-sizing.css":
+        return []
+    errors = []
+    if path.endswith(".css"):
+        styles = [source]
+    else:
+        styles = re.findall(r"<style\b[^>]*>(.*?)</style\s*>", source, re.I | re.S)
+    for css in styles:
+        # Python HTML templates may escape braces for f-strings.
+        if path.endswith(".py"):
+            css = css.replace("{{", "{").replace("}}", "}")
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        if _TABLE_TOKEN.search(css):
+            errors.append("local --ui-table-* definition")
+        for match in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+            selector = " ".join(match[1].split())
+            if not _TABLE_SELECTOR.search(selector) or not _GEOMETRY.search(match[2]):
+                continue
+            if selector in _SPECIAL_TABLE_RULES.get(path, set()):
+                continue
+            errors.append(f"local cell geometry: {selector}")
+    if not path.endswith(".css"):
+        for match in _CELL_TAG.finditer(source):
+            if not _GEOMETRY.search(match[2]):
+                continue
+            if match[2] in _EXTERNAL_MAIL_STYLES.get(path, set()):
+                continue
+            line = source.count("\n", 0, match.start()) + 1
+            errors.append(f"line {line}: inline table cell geometry")
+        for match in _CELL_DOM.finditer(source):
+            line = source.count("\n", 0, match.start()) + 1
+            errors.append(f"line {line}: {match[0]}")
+    return errors
 
 
 class UiSizingContractTests(unittest.TestCase):
@@ -301,6 +401,34 @@ class UiSizingContractTests(unittest.TestCase):
                     self.assertIn(p, source)
         self.assertIn("overflow:auto!important", (CSS / "api-docs-workbench.css").read_text(encoding="utf-8"))
         self.assertIn("white-space: nowrap", (CSS / "ui-sizing.css").read_text(encoding="utf-8"))
+
+
+    def test_tracked_sources_have_no_local_data_table_geometry(self):
+        paths = list(_tracked_ui_sources())
+        self.assertTrue(paths, "No tracked sources were discovered")
+        failures = []
+        for path in paths:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            for violation in _table_geometry_violations(path.as_posix(), source):
+                failures.append(f"{path}: {violation}")
+        self.assertFalse(failures, "\n" + "\n".join(failures))
+
+    def test_table_geometry_scanner_detects_repeated_tokens_and_inline_rules(self):
+        samples = (
+            ("feature.css", ".ordinary td { height: 36px; }"),
+            ("feature.css", "@media(max-width:600px){ .ordinary th { padding: var(--ui-table-cell-padding-block); }}"),
+            ("feature.css", ".ordinary :is(th, td) { box-sizing: border-box; }"),
+            ("feature.css", ":root { --ui-table-row-height:36px; }"),
+            ("feature.html", '<style>.ordinary td { vertical-align: middle; }</style>'),
+            ("feature.js", '<td style="padding:2px 10px">value</td>'),
+            ("feature.js", "cell.style.padding = '2px 10px';"),
+            ("feature.py", '<style>.ordinary td {{ height:36px; }}</style>'),
+        )
+        for path, source in samples:
+            with self.subTest(path=path, source=source):
+                self.assertTrue(_table_geometry_violations(path, source))
+        self.assertFalse(_table_geometry_violations("feature.css", ".ordinary td { width: 120px; white-space: nowrap; }"))
+        self.assertFalse(_table_geometry_violations("web/static/css/common.css", ".input-table td { padding: 0 5px; }"))
 
 
 if __name__ == "__main__":
