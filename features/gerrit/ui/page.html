@@ -30,6 +30,8 @@
     .header-toolbar .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
     /* 右对齐聚簇内的输入限宽，避免把 Tab 行挤爆（Redmine searchInput 同款）。 */
     #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
+    #queryBtn { flex:0 0 76px; width:76px; white-space:nowrap; }
+    #queryBtn:disabled { cursor:wait; opacity:.7; }
     #owner { width:clamp(180px, 18vw, 260px); min-width:180px; }
     .select-with-add { position:relative; display:inline-flex; align-items:center; }
     .select-with-add select { padding-right:28px; min-width:180px; }
@@ -185,7 +187,7 @@
       <div id="queryFilters" hidden>
         <select id="profile" data-change="loadChanges" aria-label="查询场景"></select>
         <input id="query" placeholder="Gerrit query，例如 status:open owner:self">
-        <button class="secondary" data-click="loadChanges">查询</button>
+        <button id="queryBtn" type="button" class="secondary" data-click="loadChanges" aria-busy="false">查询</button>
       </div>
       <div id="dynamicFilters" hidden></div>
     </div>
@@ -213,7 +215,6 @@
     <div id="departmentContent"></div>
   </section>
   <section id="tab-query" class="tab-content ui-page-edge">
-    <div id="status" class="muted status-line">加载中...</div>
     <div class="wrap"><table class="ui-table"><thead><tr><th>变更</th><th>项目</th><th>分支</th><th>状态</th><th>Owner</th><th>更新时间</th></tr></thead><tbody id="rows"></tbody></table></div>
   </section>
 </main>
