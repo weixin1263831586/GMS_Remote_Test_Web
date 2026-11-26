@@ -322,6 +322,11 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     decision = _parse(result.text)
                     state.rounds += 1
                 kind = decision.get("type")
+                supplementing = any(item.get("evidence_followup") for item in observations
+                                    if isinstance(item, dict))
+                if supplementing and kind in {"workflow", "navigate"}:
+                    observations.append({"error": "补证阶段仅允许只读查询或回答。"})
+                    continue
                 if kind in {"discover", "describe"}:
                     names = decision.get("tools") or []
                     if kind == "discover":
@@ -350,6 +355,9 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     missing = _missing_required_params(tool, params)
                     if missing:
                         observations.append({"error": "缺少参数，请查询资源后用 question 补齐", "missing": missing})
+                        continue
+                    if supplementing and (not tool.is_readonly or tool.requires_confirm or tool.is_dangerous):
+                        observations.append({"error": "补证阶段禁止写操作，请根据已取得证据回答。"})
                         continue
                     if tool.requires_confirm or tool.is_dangerous:
                         # 已有未提交工作流计划时不得隐式覆盖（审核不变量，
@@ -382,6 +390,8 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     safe_payload = redact_sensitive_data(outcome.to_dict())
                     safe = compact_observation(safe_payload)
                     observation = {"tool": tool.name, "result": safe}
+                    if json.loads(safe).get("observation_truncated"):
+                        safe_payload = {**safe_payload, "observation_truncated": True}
                     evidence = summarize_evidence(tool.name, safe_payload) if tool.is_readonly else None
                     if evidence is not None:
                         observation["evidence"] = evidence
@@ -424,6 +434,7 @@ async def handle_project_turn(session: dict, request, req) -> bool:
                     return True
                 if kind == "answer":
                     if state.rounds < MAX_ROUNDS and evidence_followup_required(observations):
+                        _append_step(session, "证据复核", "warning", "发现尚未解决的检索缺口，执行有界只读补证。")
                         observations.append({"evidence_followup": True,
                                              "instruction": "复核当前证据缺口；若影响结论，使用已有只读工具补证，"
                                                             "缩小查询范围、读取原文或翻页。若无可用工具，明确不确定性。"

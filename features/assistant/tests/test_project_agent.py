@@ -555,3 +555,21 @@ async def test_evidence_followup_does_not_repeat_successful_query(model):
     assert execute.await_count == 1
     assert current["messages"][-1]["content"] == "证据范围不完整"
     assert current["messages"][-1]["data"]["evidence_plan"]["has_unresolved_scope"]
+
+
+
+@pytest.mark.asyncio
+async def test_evidence_followup_cannot_start_workflow(model):
+    turn, execute = model
+    execute.return_value = ToolResult(success=True, tool_name="android_internals_search",
+                                      data={"coverage_complete": False, "results": []})
+    turn.side_effect = [
+        decision("call", tool="android_internals_search", params={"query": "CDD"}),
+        decision("answer", text="初步结论"),
+        decision("workflow", entities={}),
+        decision("answer", text="证据不足"),
+    ]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("查询 CDD"))
+    assert execute.await_count == 1
+    assert current["messages"][-1]["content"] == "证据不足"
