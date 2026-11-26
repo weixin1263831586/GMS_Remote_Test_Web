@@ -156,7 +156,8 @@ class UniversalAIAnalyzer:
                 max_tokens=max(1, min(int(max_tokens), int(provider.get("max_tokens") or 4096), 4096)),
                 system_prompt=system_prompt,
             )
-            response = self._post_chat(url, headers, body, fmt, allow_redirects=False)
+            response = post_chat(url, headers, body, fmt, timeout=min(self.timeout, 45),
+                                 allow_redirects=False, direct=True)
             if response.status_code != 200:
                 return {"success": False, "error": "本地 RAG 模型调用失败"}
             content = self._parse_response_raw(response.json(), fmt).strip()
