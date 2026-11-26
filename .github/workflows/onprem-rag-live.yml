@@ -2,7 +2,7 @@ name: On-prem local LLM and retained RAG replay
 
 on:
   push:
-    branches: ['audit/**']
+    branches: ['audit/main-full-review-18fe70e-20261126']
     paths:
       - '.github/workflows/onprem-rag-live.yml'
   workflow_dispatch:
@@ -18,7 +18,7 @@ jobs:
   real-local-model:
     if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
     runs-on: [self-hosted, linux, x64]
-    timeout-minutes: 50
+    timeout-minutes: 65
     steps:
       - name: Verify registered lab Runner
         shell: bash
@@ -45,13 +45,16 @@ jobs:
           "$scratch/venv/bin/python" -m pip install --disable-pip-version-check -r requirements-dev.txt
           export GMS_DATA_ROOT="$scratch/data"
           export PYTHONDONTWRITEBYTECODE=1
+          export GMS_SKIP_RUNTIME_ENV=1
           "$scratch/venv/bin/python" -m pytest -q features/retrieval/tests \
             features/knowledge/tests/test_policy_imports.py \
             features/knowledge/tests/test_cdd_intelligence.py \
             features/knowledge/tests/test_intelligent_documents.py \
-            features/redmine/tests/knowledge/test_intelligent_snapshot.py
+            features/redmine/tests/knowledge/test_intelligent_snapshot.py \
+            tests/architecture/test_dependency_rules.py
           # Do not print model configuration, private text or exception tracebacks.
           # No production writes except the owner-only evaluation report.
+          unset GMS_SKIP_RUNTIME_ENV
           set +e
           "$scratch/venv/bin/python" -m tools.scripts.testing.audit_rag_live \
             --controller-root "$controller" --data-root "$controller/data" \
