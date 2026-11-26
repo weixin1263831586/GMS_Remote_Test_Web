@@ -6,6 +6,8 @@ import os
 
 import pytest
 
+from features.knowledge.external.document_index import coverage_report
+from features.knowledge.external.web_fetch import fetch_html
 from features.knowledge.external.web_sources import WebKnowledgeProvider
 
 
@@ -18,6 +20,11 @@ def test_live_cdd_index(tmp_path, version, api_level):
         name=f'Android {version} CDD', url=url, kind='cdd',
         android_version=version, license='CC-BY-4.0',
     )
+    body, _, _ = fetch_html(url)
+    coverage = coverage_report(body, url, 'cdd', version)
+    assert coverage['indexed_definitions'] >= 50
+    assert not coverage['missing'] and not coverage['unexpected'], coverage
+    print(f'CDD {version} coverage: {coverage}')
     result = provider.sync(source)
     assert len(result['revision']) == 64
     hits = provider.search('Text-to-Speech framework APIs', android_api_level=api_level, limit=20)
