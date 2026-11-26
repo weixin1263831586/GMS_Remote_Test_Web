@@ -15,11 +15,44 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     """Keep coverage and provenance separate from content or model judgments."""
     if not isinstance(payload, dict):
         return None
-    data = payload.get("data", payload)
-    if not isinstance(data, dict):
-        return None
+    data = payload
+    tool_failed = False
+    observation_truncated = False
+    for _ in range(8):
+        tool_failed |= data.get("success") is False
+        observation_truncated |= data.get("observation_truncated") is True
+        nested = data.get("data")
+        if not isinstance(nested, dict):
+            break
+        data = nested
+    else:
+        observation_truncated = True
     source_status = data.get("sources_status")
+    source_groups = data.get("sources")
+    grouped_records = []
+    group_limited = False
+    if isinstance(source_groups, dict) and any(
+        isinstance(row, dict) and isinstance(row.get("items"), list)
+        for row in source_groups.values()
+    ):
+        if source_status is None:
+            source_status = []
+        if isinstance(source_status, list):
+            source_status = list(source_status)
+            group_limited = len(source_groups) > 16
+            for name, row in list(source_groups.items())[:16]:
+                if not isinstance(row, dict) or not isinstance(row.get("items"), list):
+                    group_limited = True
+                    continue
+                source_status.append({**row, "source": str(name),
+                                      "coverage_complete": row.get("coverage_complete") is True
+                                      and not row.get("possibly_truncated")})
+                group_limited |= bool(row.get("possibly_truncated")) or len(row["items"]) > 30
+                grouped_records.extend({**item, "source": str(name)} for item in row["items"][:30]
+                                       if isinstance(item, dict))
     records = next((data[key] for key in _RESULT_KEYS if isinstance(data.get(key), list)), None)
+    if records is None and isinstance(source_groups, dict) and isinstance(source_status, list):
+        records = grouped_records
     batches = data.get("queries")
     batch_rows = [row for row in batches[:16] if isinstance(row, dict)] if isinstance(batches, list) else []
     if records is None and batch_rows:
@@ -38,6 +71,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     references = []
     if data.get("coverage_complete") is False:
         gaps.append("incomplete_coverage")
+    if group_limited:
+        gaps.append("bounded_or_unconfirmed")
     if data.get("source_coverage_complete") is False:
         gaps.append("incomplete_source_scope")
     if data.get("index_complete") is False or data.get("index_warnings"):
@@ -89,9 +124,9 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
         gaps.append("batch_query_without_match")
     if data.get("possibly_truncated") is True or data.get("latest_confirmed") is False:
         gaps.append("bounded_or_unconfirmed")
-    if payload.get("success") is False:
+    if tool_failed:
         gaps.append("tool_failed")
-    if payload.get("observation_truncated") is True:
+    if observation_truncated:
         gaps.append("bounded_or_unconfirmed")
     if records == []:
         gaps.append("no_match_in_returned_scope")
@@ -105,7 +140,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
             for key in ("source_revision", "approved_revision", "available_revision"):
                 if row.get(key):
                     source[key] = str(row[key])[:128]
-            if row.get("coverage_complete") is False:
+            if row.get("coverage_complete") is False and state != "not_applicable":
                 gaps.append("source_coverage:" + source["source"])
             if state in _SOURCE_FAILURES or state == "unknown":
                 gaps.append("source:" + source["source"] + ":" + state)
