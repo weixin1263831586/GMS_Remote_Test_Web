@@ -24,8 +24,14 @@
             const result = await response.json().catch(() => ({}));
             if (!retried && (url.startsWith('/api/knowledge/external/') || (url === '/api/knowledge/upload' && kbState.policyImport)) && response.status === 403 && result.detail?.elevation_required && typeof window.requestElevatedAccess === 'function') {
                 if (await window.requestElevatedAccess('管理外部知识源')) return kbFetch(url, options, true);
+                throw new Error('已取消管理员验证');
             }
-            if (!response.ok || result.success === false) throw new Error(result.error || result.message || result.detail?.message || `HTTP ${response.status}`);
+            if (!response.ok || result.success === false) {
+                if (response.status === 403 && url.startsWith('/api/knowledge/external/')) {
+                    throw new Error('外部知识源管理需要管理员授权');
+                }
+                throw new Error(result.error || result.message || result.detail?.message || `HTTP ${response.status}`);
+            }
             return kbApiData(result);
         }
 
@@ -57,7 +63,7 @@
             if (!panel || !personal) return;
             const form = panel.querySelector('[data-kb-source-form]');
             const list = panel.querySelector('[data-kb-sources]');
-            const status = panel.querySelector('[data-kb-status]');
+            const refreshButton = panel.querySelector('[data-kb-refresh]');
             const api = '/api/knowledge/external/web-sources';
             let editing = '';
             let busy = false;
@@ -77,7 +83,7 @@
                     await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
                     await loadGrant();
-                } catch (error) { status.textContent = error.message; }
+                } catch (error) { showToast(error.message, 'warning'); }
             });
             panel.querySelector('[data-kb-import]').addEventListener('click', async () => {
                 if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
@@ -107,7 +113,7 @@
                 await loadGrant();
                 list.replaceChildren();
                 const table = document.createElement('table');
-                table.className = 'data-table';
+                table.className = 'list-table';
                 const header = table.createTHead().insertRow();
                 for (const title of ['名称', '网址', '版本', '状态', '同步时间', '操作']) {
                     const th = document.createElement('th');
@@ -115,7 +121,14 @@
                     header.append(th);
                 }
                 const body = table.createTBody();
-                for (const source of data.sources || []) {
+                const sources = data.sources || [];
+                if (!sources.length) {
+                    const cell = body.insertRow().insertCell();
+                    cell.colSpan = 6;
+                    cell.className = 'table-placeholder';
+                    cell.textContent = '暂无外部知识源';
+                }
+                for (const source of sources) {
                     const row = body.insertRow();
                     for (const value of [source.name, source.url, source.android_version ?? '未指定',
                         !source.enabled ? '已禁用' : source.error ? (source.revision ? '同步失败，保留旧索引' : '同步失败') : source.revision ? '已索引' : '未同步',
@@ -125,7 +138,7 @@
                     const actions = row.insertCell();
                     actions.append(button('编辑', () => edit(source)),
                         button('同步', () => run(async () => {
-                            status.textContent = '正在同步…';
+                            showToast('正在同步知识源…', 'info');
                             await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
                         })),
                         button('删除', async () => {
@@ -138,18 +151,21 @@
                         }));
                 }
                 list.append(table);
-                status.textContent = '共 ' + (data.sources || []).length + ' 个知识源';
             }
             async function run(action) {
                 if (busy) return;
                 busy = true;
+                refreshButton.disabled = true;
+                panel.setAttribute('aria-busy', 'true');
                 try {
                     await action();
                     await load();
                 } catch (error) {
-                    status.textContent = error.message;
+                    showToast(error.message, 'warning');
                 } finally {
                     busy = false;
+                    refreshButton.disabled = false;
+                    panel.setAttribute('aria-busy', 'false');
                 }
             }
             form.addEventListener('submit', event => {
@@ -168,20 +184,28 @@
                 });
             });
             panel.querySelector('[data-kb-reset]').addEventListener('click', reset);
-            panel.querySelector('[data-kb-refresh]').addEventListener('click', () => run(async () => {}));
-            for (const tab of page.querySelectorAll('[data-kb-view]')) {
-                tab.addEventListener('click', () => {
-                    const external = tab.dataset.kbView === 'external';
-                    panel.hidden = !external;
-                    panel.style.display = external ? '' : 'none';
-                    personal.style.display = external ? 'none' : '';
-                    for (const item of page.querySelectorAll('[data-kb-view]')) {
-                        item.setAttribute('aria-pressed', String(item === tab));
-                    }
-                    if (external) run(async () => {});
-                });
+            refreshButton.addEventListener('click', () => run(async () => {}));
+            const tabs = [...page.querySelectorAll('[data-kb-view]')];
+            function switchView(view) {
+                const selected = view === 'external' ? 'external' : 'personal';
+                const external = selected === 'external';
+                panel.hidden = !external;
+                panel.style.display = external ? '' : 'none';
+                personal.style.display = external ? 'none' : '';
+                for (const tab of tabs) {
+                    const active = tab.dataset.kbView === selected;
+                    tab.classList.toggle('active', active);
+                    tab.setAttribute('aria-selected', String(active));
+                }
+                try { sessionStorage.setItem('gms_knowledge_view', selected); } catch (_error) {}
+                if (external) run(async () => {});
             }
-            panel.style.display = 'none';
+            for (const tab of tabs) {
+                tab.addEventListener('click', () => switchView(tab.dataset.kbView));
+            }
+            let saved = 'personal';
+            try { saved = sessionStorage.getItem('gms_knowledge_view'); } catch (_error) {}
+            switchView(saved === 'external' && state.elevated ? 'external' : 'personal');
         }
 
         async function kbRefreshAll() {
