@@ -601,6 +601,7 @@ class WebKnowledgeProvider:
         return hits
 
     def search_with_status(self, query, *, limit=5, android_api_level=None, public_cdd_only=False):
+        from . import cdd_intelligence
         from .cdd_semantic import CddSemantic
 
         limit = min(max(limit, 1), 20)
@@ -613,17 +614,23 @@ class WebKnowledgeProvider:
             rows, status = CddSemantic(self).search(query, version=version, limit=max(limit, 20),
                                                     fresh_only=public_cdd_only)
         except Exception as exc:
-            return lexical, {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
-        if not rows:
-            return lexical, status
+            rows = []
+            status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+        try:
+            insights = [_clause_hit(row) for row in cdd_intelligence.search(self, query, version=version, limit=limit)]
+        except Exception:
+            insights = []
         dense = [_clause_hit(row, score=score) for row, score in rows]
-        pool = {hit.source_path: hit for hit in [*dense, *lexical]}
+        if not dense and not insights:
+            return lexical, status
+        if insights:
+            status = {**status, "document_understanding_hits": len(insights)}
+        pool = {hit.source_path: hit for hit in [*insights, *dense, *lexical]}
         exact = [key for key, hit in pool.items()
                  if (identifier := str(hit.extra.get("requirement_id") or "")) and
-                 re.search(r"(?<![\\w.-])" + re.escape(identifier) + r"(?![\\w.-])", query, re.I)]
-        keys = fuse_rankings([[hit.source_path for hit in lexical], [hit.source_path for hit in dense]],
-                             limit=limit, exact_keys=exact)
-        # The federation sorts per-provider by score; retain fused order.
+                 re.search(r"(?<![\w.-])" + re.escape(identifier) + r"(?![\w.-])", query, re.I)]
+        keys = fuse_rankings([[hit.source_path for hit in lexical], [hit.source_path for hit in dense],
+                              [hit.source_path for hit in insights]], limit=limit, exact_keys=exact)
         for rank, key in enumerate(keys):
             pool[key].score = -float(rank)
         return [pool[key] for key in keys], status
