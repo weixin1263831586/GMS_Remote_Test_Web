@@ -67,7 +67,13 @@ def sync_due_web_sources():
     provider = WebKnowledgeProvider()
     outcomes = provider.sync_due()
     outcomes.extend(provider.sync_due_semantic())
-    from .service import sync_due_cdd_understanding
+    from .service import sync_due_cdd_understanding, wiki_document_understanding
 
     outcomes.extend(sync_due_cdd_understanding())
+    try:
+        wiki = wiki_document_understanding(sync=True)
+        if wiki.get('status') != 'disabled':
+            outcomes.append({'source_id': 'android_internals', 'operation': 'document_understanding', **wiki})
+    except Exception:
+        outcomes.append({'source_id': 'android_internals', 'operation': 'document_understanding', 'status': 'error'})
     return outcomes
