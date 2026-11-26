@@ -81,9 +81,15 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
             expect(dialog.locator("img")).to_be_visible()
             expect(dialog.locator("img")).to_have_attribute(
                 "src", "/api/agent/sessions/image-test/images/" + "a" * 32)
-            expect(dialog.locator(".modal-content, .modal-header, .tech-frame, button")).to_have_count(0)
+            expect(dialog.locator(".modal-content, .modal-header, .tech-frame")).to_have_count(0)
+            expect(dialog.locator("button")).to_have_count(1)
+            close = dialog.get_by_role("button", name="关闭", exact=True)
+            expect(close).to_be_visible()
+            frame = dialog.locator(".agent-image-viewer-frame")
+            expect(frame).to_have_css("outline-style", "solid")
+            expect(frame).to_have_css("outline-width", "1px")
             page.wait_for_function("""() => {
-                const image = document.querySelector('.agent-image-viewer-modal > img');
+                const image = document.querySelector('.agent-image-viewer-frame > img');
                 if (!image || image.hidden) return false;
                 const size = Math.min(innerWidth, innerHeight) * 0.8;
                 const rect = image.getBoundingClientRect();
@@ -116,6 +122,24 @@ class RuntimeAgentImageInputTests(RuntimeUiHarness):
                                        dimensions["viewportWidth"] / 2, delta=1)
                 self.assertAlmostEqual(dimensions["top"] + dimensions["height"] / 2,
                                        dimensions["viewportHeight"] / 2, delta=1)
+                geometry = frame.evaluate("""frame => {
+                    const r = frame.getBoundingClientRect();
+                    const image = frame.querySelector('img').getBoundingClientRect();
+                    const close = frame.querySelector('button').getBoundingClientRect();
+                    return {frameFits: Math.abs(r.width - image.width) <= 1
+                                && Math.abs(r.height - image.height) <= 1,
+                            closeTop: close.top - r.top,
+                            closeRight: r.right - close.right};
+                }""")
+                self.assertTrue(geometry["frameFits"], geometry)
+                self.assertGreaterEqual(geometry["closeTop"], 0)
+                self.assertLessEqual(geometry["closeTop"], 12)
+                self.assertGreaterEqual(geometry["closeRight"], 0)
+                self.assertLessEqual(geometry["closeRight"], 12)
+            close.click()
+            expect(dialog).to_have_count(0)
+            attachment.click()
+            expect(dialog).to_be_visible()
             page.keyboard.press("Escape")
             expect(dialog).to_have_count(0)
             expect(attachment).to_be_visible()

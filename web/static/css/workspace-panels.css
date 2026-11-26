@@ -149,7 +149,13 @@
 .agent-message-images .agent-image-preview { cursor: zoom-in; height: auto; min-height: 0; background: transparent; }
 .agent-message-images .agent-image-preview img { width: 144px; height: 104px; max-width: 100%; }
 .agent-image-viewer-modal.modal { cursor: zoom-out; }
-.agent-image-viewer-modal > img:not([hidden]) {
+.agent-image-viewer-frame {
+    position: relative;
+    flex: none;
+    outline: 1px solid var(--primary-color);
+    cursor: default;
+}
+.agent-image-viewer-frame > img:not([hidden]) {
     display: block;
     width: min(80vw, calc(80vh * var(--agent-image-ratio, 1)));
     height: auto;
@@ -158,7 +164,16 @@
     object-fit: contain;
     cursor: default;
 }
-.agent-image-viewer-status { color: var(--text-secondary); }
+.agent-image-viewer-frame > .agent-image-viewer-close {
+    position: absolute;
+    top: var(--ui-spacing-sm);
+    right: var(--ui-spacing-sm);
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+.agent-image-viewer-frame > .agent-image-viewer-close:hover { background: var(--lighter-bg); }
+.agent-image-viewer-status { color: var(--text-secondary); padding: 16px 56px 16px 16px; }
 .agent-image-preview .agent-image-remove {
     position: absolute;
     top: 2px;

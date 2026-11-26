@@ -334,7 +334,17 @@ function openAgentImagePreview(button) {
         status.hidden = false;
         status.textContent = '图片不存在或无法读取。';
     });
-    modal.append(image, status);
+    const frame = document.createElement('div');
+    frame.className = 'agent-image-viewer-frame';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'modal-close agent-image-viewer-close';
+    close.setAttribute('aria-label', '关闭');
+    close.title = '关闭';
+    close.textContent = '×';
+    close.addEventListener('click', () => ModalManager.close(modal.id));
+    frame.append(image, status, close);
+    modal.append(frame);
     ModalManager.onClose(modal.id, () => {
         if (chat && sessionId === agentSessionId) {
             chat.scrollTop = scrollTop;
