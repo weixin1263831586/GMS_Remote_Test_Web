@@ -364,6 +364,10 @@
     }
     function setTab(next) {
       if (!allTabs.includes(next)) return;
+      if (tab !== next) {
+        document.getElementById('tables-area').innerHTML = '<span class="muted">加载中…</span>';
+        sectionBadgeText('');
+      }
       tab = next;
       offset = 0;
       total = 0;
@@ -668,14 +672,19 @@
         items.push(...data.items);
       } while (items.length < sourceTotal);
       if (items.length !== sourceTotal || new Set(items.map(criticalKey)).size !== items.length) throw new Error('分页记录不一致，请重新查询');
+      const sameSnapshot = criticalItems && JSON.stringify(criticalItems) === JSON.stringify(items)
+        && criticalCoverage === (data.coverage_complete !== false)
+        && criticalAvailable === (data.available !== false);
       criticalItems = items;
       criticalCoverage = data.coverage_complete !== false;
       criticalAvailable = data.available !== false;
-      gerritByPatch = null;
-      criticalGerritReady = false;
-      criticalGerritMessage = '';
+      if (!sameSnapshot) {
+        gerritByPatch = null;
+        criticalGerritReady = false;
+        criticalGerritMessage = '';
+      }
       populateCriticalFilters();
-      renderCritical();
+      renderCritical(Boolean(sameSnapshot));
       if (items.length) loadGerrit(generation);
       else { criticalGerritReady = true; setGerritBusy(false); renderCritical(); }
     }
@@ -722,7 +731,6 @@
       const generation = ++queryGeneration;
       setGerritBusy(false);
       globalSearchActive = true;
-      sectionBadgeText('');
       const results = await Promise.all(GLOBAL_SEARCH_SOURCES.map(async src => {
         const params = new URLSearchParams({q, limit, offset: 0});
         try {
@@ -761,16 +769,12 @@
       document.getElementById('pageinfo').textContent = `全局搜索「${q}」共 ${totalAll} 条（${counts.join(' · ')}）`;
     }
     function runQuery() {
-      const q = document.getElementById('q').value.trim();
-      if (q) {
-        searchAll(q).catch(err => {
-          document.getElementById('tables-area').innerHTML = `<span class="muted">${esc(err.message)}</span>`;
-        });
-        return;
-      }
-      reload(true).catch(showQueryError);
+      return reload(true).catch(showQueryError);
     }
-    async function reload(reset=false) {
+    function reload(reset=false) {
+      return withActionButtonBusy(document.getElementById('gms-query-btn'), '查询中', () => reloadData(reset));
+    }
+    async function reloadData(reset=false) {
       if (reset) offset = 0;
       const q = document.getElementById('q').value.trim();
       if (q) { await searchAll(q); return; }
@@ -778,7 +782,6 @@
       setGerritBusy(false);
       globalSearchActive = false;
       document.querySelector('.pager').style.display = '';
-      sectionBadgeText('');
       const params = new URLSearchParams({limit, offset});
       if (q) params.set('q', q);
       const area = document.getElementById('tables-area');
@@ -828,14 +831,14 @@
         detailRecords.length=0;
         sections = tableHtml(PATCH_HEADERS, patchRows(data.items), '无记录', PATCH_WIDTHS);
       } else if (tab === 'critical') {
-        criticalItems = null;
         setGerritBusy(true);
-        area.innerHTML = '<span class="muted">加载公告记录…</span>';
+        if (!area.querySelector('.critical-matrix')) area.innerHTML = '<span class="muted">加载公告记录…</span>';
         try { await loadCriticalIndex(generation); }
         catch (err) {
           if (generation === queryGeneration && tab === 'critical') {
             setGerritBusy(false);
-            area.textContent = err.message;
+            if (area.querySelector('.critical-matrix')) notifyUser('公告刷新失败', err.message, 'error');
+            else area.textContent = err.message;
           }
         }
         return;
@@ -896,12 +899,14 @@
       critical:['gms_bulletins'],
     };
     function showQueryError(err) {
-      document.getElementById('tables-area').textContent = err.message || '查询失败';
-      sectionBadgeText('查询失败，请重试');
+      const area = document.getElementById('tables-area');
+      if (!area.querySelector('table')) area.textContent = err.message || '查询失败';
+      notifyUser('查询失败', err.message || '请重试', 'error');
     }
     function loadAll(reset=false) {
-      loadSummary();
-      reload(reset).catch(showQueryError);
+      return withActionButtonBusy(document.getElementById('gms-refresh-btn'), '刷新中', async () => {
+        await Promise.all([loadSummary(), reload(reset)]);
+      }).catch(showQueryError);
     }
     let syncInProgress = false;
     function setSyncBusy(busy) {
