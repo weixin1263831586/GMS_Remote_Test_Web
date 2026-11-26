@@ -65,40 +65,32 @@
             const list = panel.querySelector('[data-kb-sources]');
             const refreshButton = panel.querySelector('[data-kb-refresh]');
             const api = '/api/knowledge/external/web-sources';
-            let editing = '';
-            let busy = false;
-            const partnerButton = panel.querySelector('[data-kb-partner-grant]');
-            const partnerApi = '/api/knowledge/external/partner-policy-grant';
-            let partnerEnabled = null;
-            async function loadGrant() {
-                const data = await kbFetch(partnerApi);
-                partnerEnabled = Boolean(data.enabled);
-                partnerButton.textContent = partnerEnabled ? '关闭当前账号政策分析授权' : '启用当前账号政策分析授权';
-            }
-            partnerButton.addEventListener('click', async () => {
-                try {
-                    if (partnerEnabled === null) { await loadGrant(); return; }
-                    const enabled = !partnerEnabled;
-                    if (enabled && !await window.showConfirmDialog('授权 Google Partner 政策分析', '确认当前账号有权访问 Google Partner 文档，并已获得将相关片段交给当前所有已启用的 AI 分析模型处理的许可？模型目录改变后需要重新授权。')) return;
-                    await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
-                    await loadGrant();
-                } catch (error) { showToast(error.message, 'warning'); }
-            });
-            panel.querySelector('[data-kb-import]').addEventListener('click', async () => {
-                if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
-            });
             const controls = form.elements;
+            const submitButton = panel.querySelector('[data-kb-submit]');
+            const resetButton = panel.querySelector('[data-kb-reset]');
+            const partnerApi = '/api/knowledge/external/partner-policy-grant';
+            const partnerUrl = 'https://docs.partner.android.com/gms/policies/domains/reqs';
+            let editing = null;
+            let busy = false;
+            let partnerEnabled = null;
+
             function reset() {
                 form.reset();
-                editing = '';
+                editing = null;
+                controls.namedItem('url').readOnly = false;
+                submitButton.textContent = '添加';
+                resetButton.hidden = true;
+                resetButton.style.display = 'none';
             }
             function edit(source) {
-                editing = source.id;
-                for (const key of ['name', 'url', 'kind', 'android_version', 'license']) {
-                    controls.namedItem(key).value = source[key] ?? '';
-                }
-                controls.namedItem('enabled').checked = Boolean(source.enabled);
+                editing = source;
+                controls.namedItem('name').value = source.name || '';
+                controls.namedItem('url').value = source.url;
+                controls.namedItem('url').readOnly = true;
+                submitButton.textContent = '保存';
+                resetButton.hidden = false;
+                resetButton.style.display = '';
+                controls.namedItem('name').focus();
             }
             function button(label, action) {
                 const b = document.createElement('button');
@@ -108,54 +100,81 @@
                 b.addEventListener('click', action);
                 return b;
             }
+            async function grantPartner(enabled) {
+                if (enabled && !await window.showConfirmDialog('授权 Google Partner 政策分析', '确认当前账号有权访问 Google Partner 文档，并允许当前已启用的 AI 模型处理相关政策片段。模型目录改变后须重新授权。')) return;
+                await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
+            }
+            function sourceRequest(source, enabled) {
+                return kbFetch(api + '/' + encodeURIComponent(source.id), {
+                    method: 'PUT', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({url: source.url, name: source.name || '', enabled})
+                });
+            }
             async function load() {
                 const data = await kbFetch(api);
-                await loadGrant();
-                list.replaceChildren();
+                try {
+                    const grant = await kbFetch(partnerApi);
+                    partnerEnabled = Boolean(grant.enabled);
+                } catch (error) {
+                    partnerEnabled = null;
+                    showToast(error.message, 'warning');
+                }
                 const table = document.createElement('table');
                 table.className = 'list-table';
                 const header = table.createTHead().insertRow();
-                for (const title of ['名称', '网址', '版本', '状态', '同步时间', '操作']) {
+                for (const title of ['知识源名称', '网址', '版本', '索引条目', '状态', '操作']) {
                     const th = document.createElement('th');
                     th.textContent = title;
                     header.append(th);
                 }
                 const body = table.createTBody();
-                const sources = data.sources || [];
-                if (!sources.length) {
-                    const cell = body.insertRow().insertCell();
-                    cell.colSpan = 6;
-                    cell.className = 'table-placeholder';
-                    cell.textContent = '暂无外部知识源';
-                }
-                for (const source of sources) {
+                for (const source of data.sources || []) {
                     const row = body.insertRow();
-                    for (const value of [source.name, source.url, source.android_version ?? '未指定',
-                        !source.enabled ? '已禁用' : source.error ? (source.revision ? '同步失败，保留旧索引' : '同步失败') : source.revision ? '已索引' : '未同步',
-                        source.synced_at || '—']) {
-                        row.insertCell().textContent = String(value);
+                    for (const value of [source.name || source.url, source.url, source.android_version ?? '通用',
+                        source.indexed_count ?? '—',
+                        !source.enabled ? '已禁用' : source.error ? (source.revision ? '同步失败，保留旧索引' : '同步失败') : source.revision ? '已同步' : '待同步']) {
+                        const cell = row.insertCell();
+                        cell.textContent = String(value);
+                        cell.title = String(value);
                     }
                     const actions = row.insertCell();
                     actions.append(button('编辑', () => edit(source)),
                         button('同步', () => run(async () => {
                             showToast('正在同步知识源…', 'info');
-                            await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
+                            const result = await kbFetch(api + '/' + encodeURIComponent(source.id) + '/sync', {method: 'POST'});
+                            showToast(result.status === 'in_progress' ? '知识源正在同步' : '知识源同步完成', 'info');
                         })),
+                        button(source.enabled ? '禁用' : '启用', () => run(() => sourceRequest(source, !source.enabled))),
                         button('删除', async () => {
                             if (await window.showConfirmDialog('删除外部知识源', '删除此知识源及其索引和历史修订？')) {
                                 run(async () => {
                                     await kbFetch(api + '/' + encodeURIComponent(source.id), {method: 'DELETE'});
-                                    if (editing === source.id) reset();
+                                    if (editing?.id === source.id) reset();
                                 });
                             }
                         }));
                 }
-                list.append(table);
+                const partner = body.insertRow();
+                for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
+                    partnerEnabled === null ? '授权状态未知' : partnerEnabled ? '已授权' : '待授权']) {
+                    const cell = partner.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const actions = partner.insertCell();
+                actions.append(button(partnerEnabled ? '撤销授权' : '授权', () => run(() => grantPartner(!partnerEnabled))),
+                    button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
+                    button('导入授权文档', async () => {
+                        if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
+                    }));
+                list.replaceChildren(table);
             }
             async function run(action) {
                 if (busy) return;
                 busy = true;
                 refreshButton.disabled = true;
+                submitButton.disabled = true;
                 panel.setAttribute('aria-busy', 'true');
                 try {
                     await action();
@@ -165,25 +184,47 @@
                 } finally {
                     busy = false;
                     refreshButton.disabled = false;
+                    submitButton.disabled = false;
                     panel.setAttribute('aria-busy', 'false');
                 }
             }
             form.addEventListener('submit', event => {
                 event.preventDefault();
-                const values = new FormData(form);
-                const payload = Object.fromEntries(values);
-                payload.android_version = values.get('android_version') ? Number(values.get('android_version')) : null;
-                payload.enabled = controls.namedItem('enabled').checked;
                 run(async () => {
-                    await kbFetch(api + (editing ? '/' + encodeURIComponent(editing) : ''), {
+                    const values = new FormData(form);
+                    const url = String(values.get('url') || '').trim();
+                    const name = String(values.get('name') || '').trim();
+                    const parsed = new URL(url);
+                    if (!editing && parsed.protocol === 'https:' && parsed.hostname === 'docs.partner.android.com'
+                            && !parsed.username && !parsed.password && !parsed.port
+                            && parsed.pathname.replace(/\/$/, '') === '/gms/policies/domains/reqs') {
+                        if (!partnerEnabled) await grantPartner(true);
+                        reset();
+                        return;
+                    }
+                    const payload = {url, name};
+                    if (!editing && !(parsed.protocol === 'https:' && parsed.hostname === 'source.android.com'
+                            && parsed.pathname.startsWith('/docs/'))) {
+                        if (!await window.showConfirmDialog('确认知识源使用权限', '请确认此公开文档允许在本系统中建立共享索引，并允许已配置的 AI 模型处理相关内容。')) return;
+                        payload.authorized_for_ai_processing = true;
+                    }
+                    if (!editing) showToast('正在获取网页并建立索引…', 'info');
+                    const result = await kbFetch(api + (editing ? '/' + encodeURIComponent(editing.id) : ''), {
                         method: editing ? 'PUT' : 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify(payload)
                     });
                     reset();
+                    if (result.sync?.status === 'error') {
+                        showToast('知识源已添加，首次同步失败，可重试同步', 'warning');
+                    } else if (result.sync?.status === 'in_progress') {
+                        showToast('知识源正在同步', 'info');
+                    } else {
+                        showToast(result.sync?.status === 'ready' ? '知识源已同步入库' : '知识源已保存', 'success');
+                    }
                 });
             });
-            panel.querySelector('[data-kb-reset]').addEventListener('click', reset);
+            resetButton.addEventListener('click', reset);
             refreshButton.addEventListener('click', () => run(async () => {}));
             const tabs = [...page.querySelectorAll('[data-kb-view]')];
             function switchView(view) {
