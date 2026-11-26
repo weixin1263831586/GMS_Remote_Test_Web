@@ -304,23 +304,8 @@ async function showGerritTrendDetail(granularity, label) {
     body.innerHTML = '<span class="error">' + esc(e.message) + '</span>';
   }
 }
-function setRefreshButtonBusy(busy) {
-  var btn = document.getElementById('refreshBtn');
-  if (!btn) return;
-  btn.disabled = busy;
-  // 忙碌文案不带省略号：与空闲态宽度尽量接近，避免按钮尺寸跳动。
-  btn.textContent = busy ? '⏳ 刷新中' : '🔄 刷新';
-}
-
-// 切换部门/统计身份、工具栏刷新共用同一忙碌语义：期间禁用并显示
-// 「⏳ 刷新中」，让切换触发的强制刷新有可见反馈。
-async function withRefreshButtonBusy(task) {
-  setRefreshButtonBusy(true);
-  try {
-    await task();
-  } finally {
-    setRefreshButtonBusy(false);
-  }
+function withRefreshButtonBusy(task) {
+  return withActionButtonBusy(document.getElementById('refreshBtn'), '刷新中', task);
 }
 
 async function refreshCurrentTab() {
@@ -451,9 +436,7 @@ async function loadChanges() {
   const panel = document.getElementById('tab-query');
   const isLatest = () => requestGeneration === gerritDashboardRequestGeneration.query;
   saveGerritProfileState();
-  button.disabled = true;
-  button.textContent = '查询中';
-  button.setAttribute('aria-busy', 'true');
+  setActionButtonBusy(button, true, '查询中');
   panel.setAttribute('aria-busy', 'true');
   try {
     const data = await api('/api/gerrit-dashboard/changes?profile_id=' + encodeURIComponent(profileId) + '&query=' + encodeURIComponent(query));
@@ -473,9 +456,7 @@ async function loadChanges() {
     if (!rows.children.length) rows.innerHTML = '<tr><td colspan="6" class="error">查询失败，请重试</td></tr>';
   } finally {
     if (isLatest()) {
-      button.disabled = false;
-      button.textContent = '查询';
-      button.setAttribute('aria-busy', 'false');
+      setActionButtonBusy(button, false);
       panel.setAttribute('aria-busy', 'false');
     }
   }
