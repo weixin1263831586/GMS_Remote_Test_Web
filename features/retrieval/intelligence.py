@@ -225,6 +225,7 @@ class IntelligentRAG:
                     "readable": source.read is not None} for source in self.sources.values()]
         claims = []
         selected = []
+        unresolved = []
         status = "insufficient_evidence"
         try:
             self._inventory()
@@ -256,14 +257,17 @@ class IntelligentRAG:
             elif self.hits:
                 draft = self._model("draft",
                     '逐项回答，返回 {"claims":[{"statement":"中文陈述，包含适用条件与不确定性",'
-                    '"citations":[{"id":"E1","quote":"完全逐字的原文引句"}]}]}。'
+                    '"citations":[{"id":"E1","quote":"完全逐字的原文引句"}]}],"unresolved":["尚无法回答的子问题"]}。'
                     '没有原文支撑的结论不得列入 claims。',
                     {"question": question, "evidence": self._rows()})
                 candidates = self._claims(draft)
+                if isinstance(draft.get("unresolved"), list):
+                    unresolved = [item.strip()[:200] for item in draft["unresolved"][:8]
+                                  if isinstance(item, str) and item.strip()]
                 if candidates:
                     verdict = self._model("review",
                         '独立检查每条陈述是否得到引用原文支持，检查条件、否定、单位、例外、'
-                        '版本、冲突及问题遗漏。返回 {"verdicts":[{"id":"C1","supported":true}]}。'
+                        '版本、冲突及问题遗漏。返回 {"verdicts":[{"id":"C1","supported":true}],"unresolved":["缺少证据的子问题"]}。'
                         '只有完整支持的陈述为 true；无法确定、部分支持或冲突均为 false。',
                         {"question": question, "claims": candidates, "evidence": self._rows()})
                     rows = verdict.get("verdicts")
@@ -272,6 +276,9 @@ class IntelligentRAG:
                     rejected = {r["id"] for r in rows if isinstance(r, dict)
                                 and isinstance(r.get("id"), str) and r.get("supported") is not True} if isinstance(rows, list) else set()
                     claims = [claim for claim in candidates if claim["id"] in accepted - rejected]
+                    if isinstance(verdict.get("unresolved"), list):
+                        unresolved.extend(item.strip()[:200] for item in verdict["unresolved"][:8]
+                                          if isinstance(item, str) and item.strip())
                     status = "model_reviewed" if claims else "insufficient_evidence"
         except PermissionError:
             self.hits.clear()
@@ -295,6 +302,7 @@ class IntelligentRAG:
             ranks = {key: index for index, key in enumerate(dict.fromkeys(selected))}
             rows.sort(key=lambda row: ranks.get(row["id"], len(ranks)))
         return {"status": status, "claims": claims, "evidence": rows,
+                "unresolved": list(dict.fromkeys(unresolved))[:8] if status != "authorization_changed" else [],
                 "steps": self.events, "model_calls": self.calls,
                 "coverage_complete": False, "independent_verification": False}
 
@@ -348,4 +356,7 @@ def understand_passages(passages, model):
         if facts:
             output[identity] = {"facts": facts, "terms": terms,
                                 "search_text": " ".join([*terms, *(fact["statement"] for fact in facts)])[:3500]}
+        elif supplied == []:
+            # Explicit absence is different from omitted or malformed model output.
+            output[identity] = {"facts": [], "terms": [], "search_text": ""}
     return output
