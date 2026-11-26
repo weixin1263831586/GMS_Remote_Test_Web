@@ -29,9 +29,11 @@ class AgentTool:
     executor_ref: str               # "features.devices.api:function_name"
     response_type: str              # list / detail / status / file / stream
 
+    label: str = ""
+
     @property
     def display_name(self) -> str:
-        return self.description.split("（")[0].split("(")[0].strip()
+        return self.label or self.description.split("（")[0].split("(")[0].strip()
 
 
 @dataclass
@@ -518,16 +520,19 @@ def knowledge_agent_tools() -> list[AgentTool]:
         AgentTool(
             name="android_internals_search",
             category="knowledge",
+            label="搜索外部知识源",
             description=(
                 "搜索外部知识源：Android CDD 等公开规范及 android-internals-wiki 系统机制。"
                 "规范问题引用具体条款、适用版本和原文；机制问题引用 chapter/适用版本/last_verified。"
                 "区分规范要求与背景解释，检查 sources_status 和适用条件；"
-                "背景知识不得作为已证实根因"
+                "背景知识不得作为已证实根因。"
+                "若命中 POL- 引用但仅返回片段，使用该完整引用作为 query 单独读取原条款；"
+                "保留目标 Android 版本，不能将其他版本或过期修订用于当前结论。"
             ),
             api_path="/api/knowledge/external/search",
             method="POST",
             params=[
-                {"name": "query", "type": "string", "required": True, "desc": "规范条款或机制关键词，如 Android 16 RAM、LMKD、Binder 超时"},
+                {"name": "query", "type": "string", "required": True, "desc": "规范或机制关键词；完整 POL- 引用可读取对应条款原文；compare:章节|条款编号可比较当前版本条款"},
                 {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源：web_documents（公开网页规范）、android_internals（机制 Wiki）；默认全部"},
                 {"name": "limit", "type": "integer", "required": False, "desc": "返回数量（1-10）"},
                 {"name": "android_api_level", "type": "integer", "required": False,

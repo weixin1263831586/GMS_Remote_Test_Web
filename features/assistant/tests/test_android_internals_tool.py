@@ -23,6 +23,20 @@ def _tool():
 
 
 class AndroidInternalsToolSchemaTests(unittest.TestCase):
+    def test_short_display_name_keeps_full_retrieval_contract(self):
+        tool = _tool()
+        self.assertEqual(tool.display_name, "搜索外部知识源")
+        self.assertIn("POL-", tool.description)
+        self.assertIn("原条款", tool.description)
+        query = next(param for param in tool.params if param["name"] == "query")
+        self.assertIn("compare:", query["desc"])
+
+    def test_policy_prompt_separates_go_from_low_ram(self):
+        from features.assistant.project_agent import _PROTOCOL
+
+        self.assertIn("query 使用该完整 POL- 引用", _PROTOCOL)
+        self.assertIn("不能仅凭 isLowRamDevice()", _PROTOCOL)
+
     def test_schema_exposes_android_api_level(self):
         params = {p["name"]: p for p in _tool().params}
         self.assertIn("android_api_level", params)
