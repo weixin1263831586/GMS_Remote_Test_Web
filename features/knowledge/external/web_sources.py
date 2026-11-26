@@ -387,17 +387,37 @@ class WebKnowledgeProvider:
         return outcomes
 
     def sync_due_semantic(self, *, now=None, max_sources=1, batch_size=128):
-        """Resume public CDD vectors on each scheduler tick, with durable source rotation."""
-        from features.retrieval import embedding_configuration_issue
+        """Resume explicitly enabled CDD and approved Wiki indexes on controller ticks."""
+        from features.retrieval import embedding_configuration_issue, run_scheduled_index_batches
 
         config = (config_manager.load_config() or {}).get("retrieval")
-        if not isinstance(config, dict) or config.get("auto_index_public_cdd") is not True:
+        if not isinstance(config, dict) or max_sources < 1:
             return []
-        if embedding_configuration_issue() is not None or max_sources < 1:
-            return []
-        sources = [row for row in self.list_sources()
-                   if row["enabled"] and row["kind"] == "cdd" and row["revision"] and not row["error"]]
-        if not sources:
+        jobs = {}
+        if config.get("auto_index_public_cdd") is True and embedding_configuration_issue() is None:
+            for row in self.list_sources():
+                if row["enabled"] and row["kind"] == "cdd" and row["revision"] and not row["error"]:
+                    source_id = row["id"]
+                    jobs[source_id] = (
+                        lambda source_id=source_id: self.semantic_status(source_id),
+                        lambda source_id=source_id, **kwargs: self.sync_semantic(source_id, **kwargs),
+                    )
+        if (config.get("auto_index_approved_wiki") is True
+                and embedding_configuration_issue("android_internals") is None):
+            from .federation import federated_service
+
+            wiki = federated_service().provider("android_internals")
+            if wiki is not None:
+                def inspect_wiki():
+                    state = wiki.status()
+                    if (state.status != "ready" or not state.source_revision
+                            or state.source_revision != state.approved_revision
+                            or state.available_revision != state.approved_revision):
+                        return {"status": "stale", "coverage_complete": False}
+                    return wiki.semantic_status()
+
+                jobs["android_internals"] = (inspect_wiki, wiki.sync_semantic)
+        if not jobs:
             return []
         descriptor = try_acquire_sync_lock(self._path().parent / "sync-locks" / "semantic-scheduler.lock")
         if descriptor is None:
@@ -406,27 +426,33 @@ class WebKnowledgeProvider:
             now = now or datetime.now(timezone.utc)
             with self._db(write=True) as db:
                 attempts = dict(db.execute("SELECT source_id,attempted_at FROM semantic_sync_attempts").fetchall())
-            outcomes = []
-            for source in sorted(sources, key=lambda row: (attempts.get(row["id"], ""), row["id"])):
-                source_id = source["id"]
-                status = self.semantic_status(source_id)
-                if status.get("coverage_complete") is True:
-                    continue
-                # Persist the attempt before inference. A crash resumes from committed vectors
-                # and does not starve other sources on the next controller tick.
+
+            def mark_attempt(source_id):
+                # Persist before inference; committed vectors are the resume cursor.
                 with self._db(write=True) as db:
-                    db.execute("INSERT OR REPLACE INTO semantic_sync_attempts SELECT id,? FROM sources WHERE id=?",
-                               (now.isoformat(), source_id))
-                try:
-                    status = self.sync_semantic(source_id, batch_size=max(1, min(batch_size, 128)))
-                except Exception as exc:
-                    status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
-                outcomes.append({**status, "source_id": source_id, "operation": "semantic_index"})
-                if len(outcomes) >= min(max_sources, 4):
-                    break
-            return outcomes
+                    db.execute("INSERT OR REPLACE INTO semantic_sync_attempts VALUES (?,?)",
+                               (source_id, now.isoformat()))
+
+            return run_scheduled_index_batches(jobs, attempts, mark_attempt,
+                                               max_sources=max_sources, batch_size=batch_size)
         finally:
             release_sync_lock(descriptor)
+
+    def semantic_schedule_status(self, source_id, *, wiki=False):
+        """Read scheduling metadata without creating a database or loading models."""
+        config = (config_manager.load_config() or {}).get("retrieval")
+        flag = "auto_index_approved_wiki" if wiki else "auto_index_public_cdd"
+        enabled = isinstance(config, dict) and config.get(flag) is True
+        attempted_at = ""
+        if self._path().is_file():
+            try:
+                with self._db() as db:
+                    row = db.execute("SELECT attempted_at FROM semantic_sync_attempts WHERE source_id=?",
+                                     (source_id,)).fetchone()
+                    attempted_at = row[0] if row else ""
+            except (sqlite3.Error, OSError):
+                pass
+        return {"auto_index_enabled": enabled, "last_auto_index_attempt": attempted_at}
 
     def read_requirement(self, token):
         """Read the full retained clause and its original revision, never a new revision."""
