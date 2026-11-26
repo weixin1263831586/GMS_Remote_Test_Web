@@ -1022,7 +1022,7 @@ function dailyBriefPolicyEvidence(result) {
   var labels = {web_documents: '公开 CDD / 技术规范', gms_requirements: 'Google GMS 政策', owner_policy_imports: '账号授权导入规范'};
   var statusLabels = {matched: '已召回候选条款', no_match: '未检索到候选', unavailable: '来源不可用', not_applicable: '未执行'};
   return '<div class="daily-brief-section"><div class="daily-brief-section-body">'
-    + '<b>Google 官方规范论证</b><div class="muted">规范候选不是已验证根因，需结合设备版本及实际证据判断。</div>'
+    + '<b>规范参考</b><div class="muted">核对条款的适用版本、设备类别和工单证据。</div>'
     + keys.map(function (key) {
       var source = sources[key];
       var refs = (source.references || []).filter(function (ref) {

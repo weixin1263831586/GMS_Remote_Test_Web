@@ -843,9 +843,8 @@ gms-rt-sdk-read() {
 }
 
 gms-rt-knowledge-search() {
-    # ADR 0014: 外部 Android 知识源只读检索（android-internals-wiki）。
-    # 命中一律是 background 背景知识：解释系统机制，不得当作 verified
-    # root cause 证据，也不能替代 gms-rt-sdk-* 的源码取证。
+    # ADR 0014: 只读检索外部 Wiki、公开 CDD 和网页文档。
+    # 命中属于背景知识，源码级取证使用 gms-rt-sdk-*。
     local query="" limit=5 android_api_level=""
     if [ $# -ge 1 ]; then
         case "$1" in
@@ -857,7 +856,7 @@ gms-rt-knowledge-search() {
         case "$1" in
             -h|--help)
                 echo "Usage: gms-rt-knowledge-search QUERY [--limit N] [--android-api-level N]"
-                echo "  Query: mechanism keywords, e.g. 'LMKD PRESSURE_AFTER_KILL', 'Binder timeout'"
+                echo "  Query: Android keywords, a POL- citation, or compare:SECTION|ID"
                 return 0
                 ;;
             --query) shift; [ $# -gt 0 ] || { error "--query requires a value"; return "$GMS_RT_EXIT_USAGE"; }; query="$1" ;;

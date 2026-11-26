@@ -15,11 +15,10 @@ from .external import (
 )
 from .external.web_sources import (
     WebKnowledgeProvider,
-    partner_policy_allowed,
-    policy_search_terms,
+    model_catalog_fingerprint,
     recall_web_references,
 )
-from .policy_imports import recall_owner_policy_imports
+from .policy_imports import owner_policy_imports_current, recall_owner_policy_imports
 
 
 __all__ = [
@@ -32,9 +31,9 @@ __all__ = [
     "federated_reindex",
     "federated_search",
     "federated_status",
+    "model_catalog_fingerprint",
+    "owner_policy_imports_current",
     "page_router",
-    "partner_policy_allowed",
-    "policy_search_terms",
     "recall_owner_policy_imports",
     "recall_web_references",
     "router",

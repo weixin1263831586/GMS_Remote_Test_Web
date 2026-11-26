@@ -21,6 +21,7 @@ from .web_fetch import fetch_html, validate_url
 
 SOURCE = "web_documents"
 API_TO_ANDROID = {35: 15, 36: 16, 37: 17}
+MAX_REVISIONS_PER_SOURCE = 8
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS sources (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT NOT NULL UNIQUE, kind TEXT NOT NULL,
@@ -40,6 +41,9 @@ CREATE TABLE IF NOT EXISTS revisions (
  source_id TEXT NOT NULL, revision TEXT NOT NULL, fetched_at TEXT NOT NULL,
  PRIMARY KEY(source_id, revision)
 );
+CREATE TABLE IF NOT EXISTS sync_attempts (
+ source_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
  source_id UNINDEXED, revision UNINDEXED, section, requirement_id, level UNINDEXED,
  condition, original, url UNINDEXED, token UNINDEXED, tokenize='unicode61'
@@ -47,9 +51,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
 """
 
 
-def model_catalog_fingerprint():
+def model_catalog_fingerprint(config=None):
     """Bind approval to the enabled model routes without retaining credentials."""
-    config = config_manager.get_ai_config()
+    if config is None:
+        config = config_manager.get_ai_config()
     if not config.get('enabled'):
         return ''
     routes = {
@@ -87,47 +92,61 @@ class WebKnowledgeProvider:
             conn.row_factory = sqlite3.Row
             if write:
                 conn.executescript(_SCHEMA)
+                self._migrate_citations(conn)
             yield conn
 
-    def set_partner_grant(self, owner_id: str, enabled: bool):
-        if not owner_id:
-            raise ValueError('Owner identity required')
-        fingerprint = model_catalog_fingerprint() if enabled else ''
-        if enabled and not fingerprint:
-            raise ValueError('No verifiable model catalog')
-        with self._db(write=True) as db:
-            if enabled:
-                db.execute('INSERT OR REPLACE INTO partner_model_grants VALUES (?,?,?)',
-                           (owner_id, fingerprint, datetime.now(timezone.utc).isoformat()))
-            else:
+    @staticmethod
+    def _migrate_citations(conn):
+        if conn.execute('PRAGMA user_version').fetchone()[0] >= 1:
+            return
+        with conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if conn.execute('PRAGMA user_version').fetchone()[0] >= 1:
+                return
+            collisions = conn.execute(
+                'SELECT token FROM clauses GROUP BY token HAVING count(*) > 1'
+            ).fetchall()
+            for (token,) in collisions:
+                rows = conn.execute(
+                    'SELECT rowid,source_id,revision,section,requirement_id,condition,original,url '
+                    'FROM clauses WHERE token=?', (token,),
+                ).fetchall()
+                if len({tuple(row)[1:] for row in rows}) > 1:
+                    conn.executemany('UPDATE clauses SET token=? WHERE rowid=?', [
+                        (_clause_token(*tuple(row)[1:]), row['rowid']) for row in rows
+                    ])
+            conn.execute('PRAGMA user_version=1')
+
+    def revoke_partner_grant(self, owner_id):
+        if self._path().is_file():
+            with self._db(write=True) as db:
                 db.execute('DELETE FROM partner_model_grants WHERE owner_id=?', (owner_id,))
 
-    def has_partner_grant(self, owner_id: str):
-        if not owner_id or not self._path().is_file():
-            return False
-        try:
-            fingerprint = model_catalog_fingerprint()
-            if not fingerprint:
-                return False
-            with self._db() as db:
-                return db.execute('SELECT 1 FROM partner_model_grants WHERE owner_id=? AND model_catalog_hash=?',
-                                  (owner_id, fingerprint)).fetchone() is not None
-        except (sqlite3.Error, OSError, ValueError, TypeError):
-            return False
+    def registered_imports(self, owner_id):
+        if not self._path().is_file():
+            return set()
+        with self._db() as db:
+            return {row['doc_id'] for row in db.execute(
+                'SELECT doc_id FROM owner_import_grants WHERE owner_id=?', (owner_id,),
+            )}
 
-    def approve_import(self, owner_id, doc_id, content_hash):
+    def approve_import(self, owner_id, doc_id, content_hash, *, model_catalog_hash=None):
         fingerprint = model_catalog_fingerprint()
+        if model_catalog_hash is not None and fingerprint != model_catalog_hash:
+            raise ValueError('The model catalog changed during import')
         if not owner_id or not doc_id or not fingerprint:
             raise ValueError('Owner, document and configured model catalog required')
         with self._db(write=True) as db:
             db.execute('INSERT OR REPLACE INTO owner_import_grants VALUES (?,?,?,?,?)',
                        (owner_id, doc_id, content_hash, fingerprint, datetime.now(timezone.utc).isoformat()))
 
-    def approved_imports(self, owner_id):
+    def approved_imports(self, owner_id, *, model_catalog_hash=None):
         if not owner_id or not self._path().is_file():
             return {}
         try:
             fingerprint = model_catalog_fingerprint()
+            if model_catalog_hash is not None and fingerprint != model_catalog_hash:
+                return {}
             if not fingerprint:
                 return {}
             with self._db() as db:
@@ -216,6 +235,7 @@ class WebKnowledgeProvider:
             db.execute("BEGIN IMMEDIATE")
             db.execute("DELETE FROM clauses WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM revisions WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM sync_attempts WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     def sync(self, source_id):
@@ -235,6 +255,11 @@ class WebKnowledgeProvider:
             row = db.execute("SELECT * FROM sources WHERE id=? AND enabled=1", (source_id,)).fetchone()
         if row is None:
             raise ValueError("Source not found or disabled")
+        with self._db(write=True) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO sync_attempts SELECT id,? FROM sources WHERE id=?",
+                (datetime.now(timezone.utc).isoformat(), source_id),
+            )
         try:
             body, etag, modified = fetch_html(row["url"], etag=row["etag"], modified=row["modified"])
             revision = document_revision(body) if body is not None else row["revision"]
@@ -255,13 +280,21 @@ class WebKnowledgeProvider:
                         raise ValueError("Cached revision missing")
                     db.execute("INSERT INTO revisions VALUES (?,?,?)", (source_id, revision, stamp))
                     for section, req, level, condition, original, url in clauses:
-                        token = "POL-" + hashlib.sha256(
-                            "\0".join((source_id, revision, section, req, original)).encode()).hexdigest()[:24]
+                        token = _clause_token(source_id, revision, section, req, condition, original, url)
                         db.execute("INSERT INTO clauses VALUES (?,?,?,?,?,?,?,?,?)",
                                    (source_id, revision, section, req, level, condition, original, url, token))
                 db.execute("UPDATE sources SET name=CASE WHEN name='' AND ?<>'' THEN ? ELSE name END, "
                            "revision=?,synced_at=?,etag=?,modified=?,error='' WHERE id=?",
                            (title, title, revision, stamp, etag, modified, source_id))
+                old_revisions = db.execute(
+                    "SELECT revision FROM revisions WHERE source_id=? AND revision<>? "
+                    "ORDER BY fetched_at DESC, revision LIMIT -1 OFFSET ?",
+                    (source_id, revision, MAX_REVISIONS_PER_SOURCE - 1),
+                ).fetchall()
+                db.executemany("DELETE FROM clauses WHERE source_id=? AND revision=?",
+                               [(source_id, item['revision']) for item in old_revisions])
+                db.executemany("DELETE FROM revisions WHERE source_id=? AND revision=?",
+                               [(source_id, item['revision']) for item in old_revisions])
             return {"source_id": source_id, "revision": revision, "status": "ready", "unchanged": body is None}
         except Exception as exc:
             with self._db(write=True) as db:
@@ -273,7 +306,12 @@ class WebKnowledgeProvider:
         """Refresh enabled public sources at most daily; failures retry on the next tick."""
         now = now or datetime.now(timezone.utc)
         outcomes = []
-        for source in self.list_sources():
+        sources = self.list_sources()
+        if not sources or max_sources < 1:
+            return outcomes
+        with self._db(write=True) as db:
+            attempts = dict(db.execute("SELECT source_id,attempted_at FROM sync_attempts").fetchall())
+        for source in sorted(sources, key=lambda row: (attempts.get(row["id"], ""), row["id"])):
             if not source['enabled']:
                 continue
             stamp = source['synced_at']
@@ -296,26 +334,28 @@ class WebKnowledgeProvider:
         if not re.fullmatch(r'POL-[0-9a-f]{24}', token) or not self._path().is_file():
             return None
         with self._db() as db:
-            row = db.execute(
-                """SELECT c.*,s.name,s.android_version,s.kind,s.license,
+            rows = db.execute(
+                """SELECT DISTINCT c.*,s.name,s.android_version,s.kind,s.license,s.error,
                           s.revision AS current_revision,r.fetched_at
                    FROM clauses c JOIN sources s ON c.source_id=s.id
                    JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
-                   WHERE c.token=? AND s.enabled=1 LIMIT 1""", (token,),
-            ).fetchone()
-        return dict(row) if row else None
+                   WHERE c.token=? AND s.enabled=1 LIMIT 2""", (token,),
+            ).fetchall()
+        return dict(rows[0]) if len(rows) == 1 else None
 
-    def compare_requirements(self, section, requirement_id):
+    def compare_requirements(self, section, requirement_id, *, limit=10, android_api_level=None):
         """Compare current CDD revisions by exact section and clause, never bare ID."""
         if not self._path().is_file():
             return []
+        version = API_TO_ANDROID.get(android_api_level, -1) if android_api_level is not None else None
         with self._db() as db:
             rows = db.execute(
-                """SELECT c.*,s.name,s.android_version,r.fetched_at
+                """SELECT c.*,s.name,s.android_version,s.kind,s.license,s.error,r.fetched_at
                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
                    JOIN revisions r ON c.source_id=r.source_id AND c.revision=r.revision
                    WHERE s.enabled=1 AND s.kind='cdd' AND c.section=? AND c.requirement_id=?
-                   ORDER BY s.android_version,c.token LIMIT 100""", (section, requirement_id),
+                   AND (? IS NULL OR s.android_version=?)
+                   ORDER BY s.android_version,c.token LIMIT ?""", (section, requirement_id, version, version, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -344,26 +384,35 @@ class WebKnowledgeProvider:
                    WHERE clauses MATCH ? AND s.enabled=1 AND
                      (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
                    ORDER BY rank,c.token LIMIT ?""", (match, version, version, min(max(limit, 1), 20))).fetchall()
-        return [KnowledgeHit(source=SOURCE, title=f"{r['name']} / {r['section']} {r['requirement_id']}".strip(),
-                             snippet=r["original"][:6000], source_path=r["token"], chapter=r["section"],
-                             source_revision=r["revision"], applicable_versions=str(r["android_version"] or "unspecified"),
-                             confidence="candidate; applicability unverified", last_verified=r["synced_at"],
-                             license=r["license"], score=-r["rank"],
-                             source_anchors=[SourceAnchor(url=r["url"], revision=r["revision"],
-                                                          evidence_type="official" if r["kind"] == "cdd" else "document")],
-                             extra={"section": r["section"], "requirement_id": r["requirement_id"],
-                                    "requirement_level": r["level"], "applicability_context": r["condition"][:4000],
-                                    "reference": r["token"], "source_url": r["url"],
-                                    "source_kind": r["kind"], "status": "stale" if r["error"] else "indexed"})
-                for r in rows]
+        return [_clause_hit(dict(row), score=-row["rank"]) for row in rows]
 
 
-def partner_policy_allowed(owner_id: str):
-    return WebKnowledgeProvider().has_partner_grant(owner_id)
+def _clause_hit(row, *, score=0.0):
+    return KnowledgeHit(
+        source=SOURCE, title=f"{row['name']} / {row['section']} {row['requirement_id']}".strip(),
+        snippet=row["original"][:6000], source_path=row["token"], chapter=row["section"],
+        source_revision=row["revision"], applicable_versions=str(row["android_version"] or "unspecified"),
+        confidence="candidate; applicability unverified",
+        last_verified=row.get("fetched_at") or row.get("synced_at", ""), license=row["license"], score=score,
+        source_anchors=[SourceAnchor(
+            url=row["url"], revision=row["revision"],
+            evidence_type="official" if row["kind"] == "cdd" else "document",
+        )],
+        extra={"section": row["section"], "requirement_id": row["requirement_id"],
+               "requirement_level": row["level"], "applicability_context": row["condition"][:4000],
+               "reference": row["token"], "source_url": row["url"],
+               "source_kind": row["kind"], "status": "stale" if row["error"] else "indexed"},
+    )
 
 
-def policy_search_terms(query: str):
-    return search_terms(query, limit=12)
+def serialize_clause(row):
+    """Return standard search provenance and the full retained clause fields."""
+    return {**row, **_clause_hit(row).to_dict()}
+
+
+def _clause_token(source_id, revision, section, requirement, condition, original, url):
+    value = "\0".join((source_id, revision, section, requirement, condition, original, url))
+    return "POL-" + hashlib.sha256(value.encode()).hexdigest()[:24]
 
 
 def recall_web_references(query: str, *, android_version=None):

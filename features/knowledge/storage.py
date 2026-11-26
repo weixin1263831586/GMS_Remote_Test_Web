@@ -21,6 +21,8 @@ from .versions import KnowledgeVersionMixin
 logger = logging.getLogger(__name__)
 DB_PATH: Path = settings.data_root / "knowledge/knowledge.sqlite3"
 ATTACHMENT_DIR: Path = settings.data_root / "knowledge/attachments"
+POLICY_IMPORT_SOURCE = "authorized_policy_import"
+POLICY_IMPORT_TAG = "external-policy-ai-approved"
 DEFAULT_SPACES = [
     ("gms", "GMS测试", "book-open"),
     ("devices", "设备接入", "plug"),
@@ -356,6 +358,8 @@ class KnowledgeStore(KnowledgeVersionMixin):
                     "UPDATE knowledge_nodes SET title=?, updated_at=? WHERE node_id=? AND user_id=?",
                     (str(updates["title"] or "无标题")[:200], now, current["node_id"], user_id),
                 )
+            if current["source"] == POLICY_IMPORT_SOURCE or POLICY_IMPORT_TAG in self._doc_tags(conn, doc_id):
+                updates = {**updates, "source": POLICY_IMPORT_SOURCE}
             fields = [f for f in allowed_doc if f in updates]
             if fields:
                 sets = ", ".join(f"{f}=?" for f in fields) + ", updated_at=?"
@@ -522,6 +526,7 @@ class KnowledgeStore(KnowledgeVersionMixin):
         space_id: str = "",
         limit: int = 6,
         window: int = 900,
+        exclude_document=None,
     ) -> list[dict[str, Any]]:
         """Return ranked snippets from full documents for RAG answers."""
         docs = self.search(user_id, query, space_id=space_id, limit=max(limit * 3, 12))
@@ -529,6 +534,8 @@ class KnowledgeStore(KnowledgeVersionMixin):
         terms_lower = [t.lower() for t in search_terms(query) if t]
         contexts: list[dict[str, Any]] = []
         for doc in docs:
+            if exclude_document is not None and exclude_document(doc):
+                continue
             full = str(doc.get("raw_content") or doc.get("content_md") or "")
             if not full:
                 full = str(doc.get("summary") or "")

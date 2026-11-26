@@ -175,7 +175,7 @@ def normalize_daily_brief_config(payload: dict[str, Any] | None) -> dict[str, An
 
 
 def build_brief_analyzer(config: dict[str, Any]) -> KkAgentRedmineAnalyzer:
-    """Build analysis without a hard step or duration budget."""
+    """Configure the analyzer's steps and per-read timeout through runtime defaults."""
     return KkAgentRedmineAnalyzer(
         max_turns=0,
         timeout_seconds=0,

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 from .parsers import parse_file
-from .storage import KnowledgeStore
+from .policy_imports import policy_import_filter
+from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
 # 解耦 seam（test_feature_dependency_cycles）：ask() 需要 AI 生成答案，但
@@ -101,8 +103,9 @@ class KnowledgeService:
         filename: str,
         parent_id: str = "",
         tags: Any = None,
+        policy_import: bool = False,
     ) -> dict[str, Any]:
-        parsed = parse_file(file_path, filename)
+        parsed = parse_file(file_path, filename, policy_import=policy_import)
         text = (parsed.get("text") or "").strip()
         if not text:
             return {"error": f"无法从文件 {filename} 提取文本"}
@@ -115,7 +118,7 @@ class KnowledgeService:
             raw_content=text,
             summary=_summary(text),
             tags=tags if tags is not None else _auto_tags(text),
-            source=parsed.get("source") or "upload",
+            source=POLICY_IMPORT_SOURCE if policy_import else parsed.get("source") or "upload",
             source_file=filename,
         )
         self.store.add_attachment(
@@ -131,7 +134,14 @@ class KnowledgeService:
         question = (question or "").strip()
         if not question:
             return {"answer": "请输入问题。", "contexts": []}
-        contexts = self.store.retrieve_contexts(user_id, question, space_id=space_id, limit=max(1, min(limit, 12)))
+        try:
+            exclude_document = policy_import_filter(user_id)
+        except (OSError, sqlite3.Error):
+            return {"answer": "暂时无法验证文档的模型访问权限。", "contexts": []}
+        contexts = self.store.retrieve_contexts(
+            user_id, question, space_id=space_id, limit=max(1, min(limit, 12)),
+            exclude_document=exclude_document,
+        )
         if not contexts:
             return {"answer": "没有检索到相关知识文档。", "contexts": []}
         prompt = self._build_rag_prompt(question, contexts)

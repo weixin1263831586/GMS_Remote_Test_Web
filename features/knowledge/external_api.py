@@ -1,16 +1,8 @@
 """外部知识源联邦检索 API（ADR 0014）。
 
-两组路由：
-
-- ``/api/knowledge/external/*``（登录用户会话 + assistant 工具）：
-  sources 状态、联邦检索、管理员 reindex；
-- ``/api/knowledge/android-internals/*``（Agent Service Token）：
-  ``knowledge.read`` scope 门禁，供 ``gms-rt-knowledge-search`` /
-  ``gms_rt_knowledge_search`` 消费。
-
-外部知识是 background-only：所有端点只读检索，唯一写路径是管理员显式
-reindex。Handler 全部为普通 ``def``——provider 内部是同步阻塞 I/O
-（SQLite + git 子进程），声明 async 会卡停事件循环（同 source_api.py）。
+``/api/knowledge/external/search`` 供 Web、CLI 和 MCP 检索公共背景知识。
+``/api/knowledge/android-internals/*`` 保留 Wiki 专用接口。
+索引配置、修订审批和手动同步需要管理员提权。Provider 使用同步 I/O。
 """
 
 from __future__ import annotations
@@ -36,7 +28,7 @@ from .external import (
     federated_search,
     federated_status,
 )
-from .external.web_sources import WebKnowledgeProvider
+from .external.web_sources import WebKnowledgeProvider, serialize_clause
 
 
 def _federated_provider(source_id: str):
@@ -93,13 +85,16 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         provider = WebKnowledgeProvider()
         if query.startswith('POL-'):
             item = provider.read_requirement(query)
-            return success_response(data={'results': [{**item, 'evidence_level': 'background'}] if item else [],
+            return success_response(data={'results': [serialize_clause(item)] if item else [],
                                           'sources_status': federated_status()})
         parts = query.removeprefix('compare:').rsplit('|', 1)
         if len(parts) != 2 or not all(part.strip() for part in parts):
             return error_response('对比格式：compare:章节|条款编号', 422)
-        rows = provider.compare_requirements(parts[0].strip(), parts[1].strip())
-        return success_response(data={'results': [{**row, 'evidence_level': 'background'} for row in rows],
+        rows = provider.compare_requirements(
+            parts[0].strip(), parts[1].strip(),
+            limit=payload.limit, android_api_level=payload.android_api_level,
+        )
+        return success_response(data={'results': [serialize_clause(row) for row in rows],
                                       'sources_status': federated_status(),
                                       'comparison_scope': 'current revisions; exact section and requirement ID'})
     try:
@@ -262,18 +257,15 @@ class PartnerGrantRequest(BaseModel):
 @router.get('/partner-policy-grant')
 @handle_api_errors
 def get_partner_policy_grant(request: Request):
-    user = require_elevated_admin(request)
-    return success_response(data={'enabled': WebKnowledgeProvider().has_partner_grant(user.resource_owner_id)})
+    require_elevated_admin(request)
+    return success_response(data={'enabled': False, 'available': False})
 
 
 @router.put('/partner-policy-grant')
 @handle_api_errors
 def update_partner_policy_grant(request: Request, payload: PartnerGrantRequest):
     user = require_elevated_admin(request)
-    if payload.enabled and not payload.authorized_for_ai_processing:
-        return error_response('需要确认当前账号有权访问并向配置的分析模型提供 GMS 政策内容', 422)
-    try:
-        WebKnowledgeProvider().set_partner_grant(user.resource_owner_id, payload.enabled)
-    except ValueError:
-        return error_response('当前模型目录无法验证，请先配置分析模型', 422)
-    return success_response(data={'enabled': payload.enabled})
+    if payload.enabled:
+        return error_response('当前扫描来源无法验证账号访问权限，请导入有权使用的规范文件', 409)
+    WebKnowledgeProvider().revoke_partner_grant(user.resource_owner_id)
+    return success_response(data={'enabled': False, 'available': False})

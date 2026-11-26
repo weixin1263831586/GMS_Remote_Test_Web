@@ -81,7 +81,8 @@ Worker 与 Controller 之间通过带 Token 的 HTTP(S) API 进行注册、Heart
 ## 知识与诊断边界
 
 - `features.knowledge` 提供公共联邦检索：Android Internals Wiki、CDD 与 Web 文档经 Provider 索引、RRF 排序及来源状态返回；命中为 `background`，不构成已验证根因。Wiki 的源码锚点可引导匹配版本的 SDK / CodeSearch 验证。
-- Redmine `reference_recall.py` 从证据快照解析标识符和 Android 版本，召回官方引用及 Web 规范；owner 授权 PDF / HTML 与 GMS Requirements 另行校验授权，不并入公共索引。规范引用可以说明要求和适用条件，不证明当前问题的根因。
+- Redmine 从证据快照解析标识符和 Android 版本，召回官方引用及 Web 规范。账号授权导入的 PDF / HTML 仅在工单分析启动或继续模型调用前校验账号、文档版本和实际模型目录后使用。Partner 扫描使用共享来源身份，其认证政策不进入模型；有权使用的规范可通过账号文件导入。规范引用可以说明要求和适用条件，根因仍须结合工单证据。
+- 外部网页索引每个来源保留最近八个修订（包括当前修订），版本对比使用当前修订，精确引用可查询仍在保留期内的条款。
 - 分析 Worker 使用只读证据工具、证据门禁与逐段结论复核；缺失证据须显式说明。设备验证是独立受控动作，报告或修复建议不意味着自动执行、提交 Gerrit 或回写工单。诊断状态与报告是权威结果，Web / Agent 通过读模型与 run_id 消费。
 
 ## 代码组织

@@ -17,7 +17,7 @@ def test_full_history_index_prevents_older_journal_from_disappearing():
          "notes": f"comment {i} contains history detail"}
         for i in range(1, 21)
     ]
-    exported = _Reporter()._build_issue_document({
+    exported = _Reporter().build_issue_document({
         "issue_id": 9, "subject": "Test failure", "journals_json": journals,
         "attachments_json": [], "failures_json": [], "references_json": [],
     })

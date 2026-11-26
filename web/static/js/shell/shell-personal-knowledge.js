@@ -68,11 +68,9 @@
             const controls = form.elements;
             const submitButton = panel.querySelector('[data-kb-submit]');
             const resetButton = panel.querySelector('[data-kb-reset]');
-            const partnerApi = '/api/knowledge/external/partner-policy-grant';
             const partnerUrl = 'https://docs.partner.android.com/gms/policies/domains/reqs';
             let editing = null;
             let busy = false;
-            let partnerEnabled = null;
 
             function reset() {
                 form.reset();
@@ -101,10 +99,8 @@
                 b.addEventListener('click', action);
                 return b;
             }
-            async function grantPartner(enabled) {
-                if (enabled && !await window.showConfirmDialog('授权 Google Partner 政策分析', '确认当前账号有权访问 Google Partner 文档，并允许当前已启用的 AI 模型处理相关政策片段。模型目录改变后须重新授权。')) return;
-                await kbFetch(partnerApi, {method: 'PUT', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({enabled, authorized_for_ai_processing: enabled})});
+            async function openPolicyImport() {
+                if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文件仅供本账号的工单分析使用，内容或模型配置变更后需要重新授权。')) kbOpenUpload(true);
             }
             function sourceRequest(source, enabled) {
                 return kbFetch(api + '/' + encodeURIComponent(source.id), {
@@ -114,13 +110,6 @@
             }
             async function load() {
                 const data = await kbFetch(api);
-                try {
-                    const grant = await kbFetch(partnerApi);
-                    partnerEnabled = Boolean(grant.enabled);
-                } catch (error) {
-                    partnerEnabled = null;
-                    showToast(error.message, 'warning');
-                }
                 const table = document.createElement('table');
                 table.className = 'list-table kb-source-table';
                 const columns = ['知识源名称', '网址', '版本', '索引条目', '状态', '操作'];
@@ -164,7 +153,7 @@
                 }
                 const partner = body.insertRow();
                 for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
-                    partnerEnabled === null ? '授权状态未知' : partnerEnabled ? '已授权' : '待授权']) {
+                    '支持账号文件导入']) {
                     const cell = partner.insertCell();
                     cell.textContent = value;
                     cell.title = value;
@@ -172,11 +161,8 @@
                 const actions = document.createElement('div');
                 actions.className = 'kb-source-actions';
                 partner.insertCell().append(actions);
-                actions.append(button(partnerEnabled ? '撤销授权' : '授权', () => run(() => grantPartner(!partnerEnabled))),
-                    button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
-                    button('导入授权文档', async () => {
-                        if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文档只属于当前账号，修改后需要重新授权。')) kbOpenUpload(true);
-                    }));
+                actions.append(button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
+                    button('导入授权文档', openPolicyImport));
                 list.replaceChildren(table);
             }
             async function run(action, trigger = refreshButton, label = '刷新中') {
@@ -210,7 +196,7 @@
                     if (!editing && parsed.protocol === 'https:' && parsed.hostname === 'docs.partner.android.com'
                             && !parsed.username && !parsed.password && !parsed.port
                             && parsed.pathname.replace(/\/$/, '') === '/gms/policies/domains/reqs') {
-                        if (!partnerEnabled) await grantPartner(true);
+                        await openPolicyImport();
                         reset();
                         return;
                     }

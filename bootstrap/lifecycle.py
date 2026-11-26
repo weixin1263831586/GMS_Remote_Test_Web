@@ -80,9 +80,6 @@ async def _periodic_cleanup() -> None:
         try:
             await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
             global_state.cleanup_old_user_states()
-            from features.knowledge import sync_due_web_sources
-
-            await asyncio.to_thread(sync_due_web_sources)
             # 无 job 命令（device_action/flash）的实时日志事件只在
             # delete_job 清理，终态后仍会无限累积；按保留期定期裁剪。
             try:
@@ -106,6 +103,17 @@ async def _periodic_cleanup() -> None:
         except Exception:
             logger.exception('Periodic cleanup failed')
             await asyncio.sleep(300)
+
+
+async def _periodic_knowledge_sync() -> None:
+    from features.knowledge import sync_due_web_sources
+
+    while True:
+        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
+        try:
+            await asyncio.to_thread(sync_due_web_sources)
+        except Exception:
+            logger.exception('Periodic external knowledge synchronization failed')
 
 
 async def _dispatch_usb_events(app) -> None:
@@ -265,6 +273,7 @@ def create_lifespan(services: AppServices):
             start_local_bridge(cluster.repository, cluster.config)
             event_loop = bind_event_bus_loop()
             cleanup_task = asyncio.create_task(_periodic_cleanup())
+            knowledge_sync_task = asyncio.create_task(_periodic_knowledge_sync())
             # 事件循环卡死观测：卡死 >30s 时由 C 级定时器 dump 全部线程栈
             # （见 foundation/loop_watchdog.py 的模块注释）。
             loop_watchdog_task = await start_loop_watchdog()
@@ -330,8 +339,8 @@ def create_lifespan(services: AppServices):
                         return_exceptions=True,
                     )
                 cleanup_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await cleanup_task
+                knowledge_sync_task.cancel()
+                await asyncio.gather(cleanup_task, knowledge_sync_task, return_exceptions=True)
                 if usb_dispatch_task:
                     usb_dispatch_task.cancel()
                     with suppress(asyncio.CancelledError):

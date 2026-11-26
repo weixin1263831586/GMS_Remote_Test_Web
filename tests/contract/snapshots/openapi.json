@@ -26350,7 +26350,7 @@
     },
     "/api/tools/download/{tool_id}": {
       "get": {
-        "description": "按 tool_id 下载清单中的文件",
+        "description": "Download a manifest entry by its ID or a previously published alias.",
         "parameters": [
           {
             "in": "path",

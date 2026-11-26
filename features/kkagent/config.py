@@ -225,10 +225,13 @@ def write_overlay_config(tables: dict[str, Any], directory: Path) -> tuple[Path,
 
 
 @contextmanager
-def model_config(model: str, env_extra: dict[str, str], *, context_limit: int | None = None):
+def model_config(
+    model: str, env_extra: dict[str, str], *, context_limit: int | None = None,
+    ai_config: dict[str, Any] | None = None,
+):
     """Keep config and env alive until the caller has reaped the process tree."""
     tables = build_config_tables(
-        model, _config_manager.get_ai_config(),
+        model, _config_manager.get_ai_config() if ai_config is None else ai_config,
         context_limit=context_limit, env_extra=env_extra,
     )
     with TemporaryDirectory(prefix="gms-kkagent-context-") as directory:

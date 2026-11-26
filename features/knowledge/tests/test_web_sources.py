@@ -116,19 +116,50 @@ def test_disabled_source_does_not_return_cached_content(tmp_path, monkeypatch):
     assert provider.status().status == 'disabled'
 
 
-def test_partner_grants_are_owner_bound_and_revocable(tmp_path, monkeypatch):
-    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-a')
+def test_distinct_conditions_have_distinct_citations(tmp_path, monkeypatch):
     provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
-    assert not provider.has_partner_grant('owner-a')
-    provider.set_partner_grant('owner-a', True)
-    assert provider.has_partner_grant('owner-a')
-    assert not provider.has_partner_grant('owner-b')
-    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-b')
-    assert not provider.has_partner_grant('owner-a')
-    monkeypatch.setattr(web_sources, 'model_catalog_fingerprint', lambda: 'model-a')
-    provider.set_partner_grant('owner-a', False)
-    assert not provider.has_partner_grant('owner-a')
+    source = configure(provider, 16)
+    body = cdd(16).replace(
+        b'<li>[C-SR-1] is STRONGLY RECOMMENDED to support speech.</li>',
+        b'</ul><p>If the device has a touchscreen:</p>'
+        b'<ul><li>[C-1-1] MUST support TTS framework APIs.</li>',
+    )
+    monkeypatch.setattr(web_sources, 'fetch_html', lambda *_args, **_kwargs: (body, '', ''))
+    provider.sync(source)
+    rows = provider.compare_requirements('3.11. Text-to-Speech', 'C-1-1')
+    assert len({row['token'] for row in rows}) == len(rows) == 2
+    for row in rows:
+        detail = web_sources.serialize_clause(provider.read_requirement(row['token']))
+        assert detail['condition'] == row['condition']
+        assert detail['source_path'] == row['token']
+        assert detail['source_anchors'][0]['revision'] == row['revision']
+        assert detail['evidence_level'] == 'background'
+    assert len(provider.compare_requirements('3.11. Text-to-Speech', 'C-1-1', limit=1)) == 1
+    assert not provider.compare_requirements('3.11. Text-to-Speech', 'C-1-1', android_api_level=35)
 
+
+def test_failed_sources_do_not_starve_remaining_sources(tmp_path, monkeypatch):
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source_ids = {configure(provider, version) for version in (15, 16, 17)}
+    monkeypatch.setattr(web_sources, 'fetch_html', Mock(side_effect=OSError))
+    first = {row['source_id'] for row in provider.sync_due(max_sources=2)}
+    second = {row['source_id'] for row in provider.sync_due(max_sources=2)}
+    assert first | second == source_ids
+
+
+def test_retention_preserves_current_revision_and_one_prior_revision(tmp_path, monkeypatch):
+    monkeypatch.setattr(web_sources, 'MAX_REVISIONS_PER_SOURCE', 2)
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    source = configure(provider, 16)
+    fetch = Mock(side_effect=[(cdd(16, marker), '', '') for marker in ('First', 'Second', 'Third')])
+    monkeypatch.setattr(web_sources, 'fetch_html', fetch)
+    tokens = []
+    section = '3.11. Text-to-Speech'
+    for _ in range(3):
+        provider.sync(source)
+        tokens.append(provider.compare_requirements(section, 'C-1-1')[0]['token'])
+    assert provider.read_requirement(tokens[0]) is None
+    assert all(provider.read_requirement(token) for token in tokens[1:])
 
 
 def test_nested_requirements_and_table_context():

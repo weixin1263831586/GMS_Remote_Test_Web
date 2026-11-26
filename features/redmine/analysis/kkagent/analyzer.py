@@ -28,6 +28,7 @@ from features.kkagent import (
     settle_reader_future,
     terminate_process_tree,
 )
+from foundation.config import config_manager
 
 from ...daily_brief.prompt import issue_result_schema_json, prompt_template_for
 from .claim_review import (
@@ -48,6 +49,7 @@ KKAGENT_BINARY = "kkagent"
 DAILY_BRIEF_MCP_TOOLSETS = "evidence"
 
 logger = logging.getLogger(__name__)
+_POLICY_GRANT_CHECK = contextvars.ContextVar("redmine_policy_grant_check", default=None)
 
 # 晨报与单号分析使用同一诊断输出契约，报告结构按工单性质区分。
 # 图片附件先读取平台派生的 OCR 证据，未尝试读取不得声称截图不可读。
@@ -353,7 +355,7 @@ class KkAgentRedmineAnalyzer:
                 "Mainline release inclusion is official release evidence, not proof that this "
                 "device/build contains the fix. Keep exemptions and Critical Fix applicability "
                 "conditional on matching module, test, Android version and release. "
-                "For matched web_documents, gms_requirements or owner_policy_imports, include a separate Google official policy section, "
+                "For matched web_documents or owner_policy_imports, include a separate policy reference section, "
                 "citing the exact POL-, ref:gms-policy or ref:owner-policy token for each relevant requirement. "
                 "CDD and web documents are normative or explanatory candidates only; verify Android version, "
                 "device category and each condition against issue evidence. Never infer actual root cause from a policy alone. "
@@ -424,7 +426,18 @@ class KkAgentRedmineAnalyzer:
         active_entry = dict(entry)
         context_retried = False
         budgeted_limit = None
+        policy_config = None
         with ExitStack() as resources:
+            if active_entry.get("_policy_query") and "_resume_trace" not in active_entry:
+                from ...reference_recall import bind_owner_policy_context
+
+                config = config_manager.get_ai_config()
+                grant_check = await asyncio.to_thread(bind_owner_policy_context, active_entry, config)
+                if grant_check is not None:
+                    policy_config = config
+                    token = _POLICY_GRANT_CHECK.set(grant_check)
+                    resources.callback(_POLICY_GRANT_CHECK.reset, token)
+            config_ready = False
             while True:
                 deadline = _ANALYSIS_DEADLINE.get()
                 if deadline is not None and time.monotonic() >= deadline:
@@ -435,10 +448,13 @@ class KkAgentRedmineAnalyzer:
                         session_id=(outcome.session_id if outcome else ""),
                     )
                 limit = self._observed_context_limit
-                if limit is not None and budgeted_limit != limit:
+                if (limit is not None or policy_config is not None) and (
+                    not config_ready or budgeted_limit != limit
+                ):
                     try:
                         path, config_env = resources.enter_context(model_config(
-                            self.model, self.env_extra, context_limit=limit
+                            self.model, self.env_extra, context_limit=limit,
+                            **({"ai_config": policy_config} if policy_config is not None else {}),
                         ))
                     except ContextBudgetError as error:
                         if outcome is not None:
@@ -450,6 +466,7 @@ class KkAgentRedmineAnalyzer:
                     active_entry["_kkagent_config_path"] = str(path)
                     active_entry["_kkagent_config_env"] = config_env
                     budgeted_limit = limit
+                    config_ready = True
                 outcome = await self._analyze_once(active_entry)
                 if outcome.error_type == "context_limit_exceeded":
                     limit = context_length_limit(outcome.error)
@@ -514,6 +531,11 @@ class KkAgentRedmineAnalyzer:
         raw = _StreamFallback()
         tap = ProgressTap(progress)
         try:
+            grant_check = _POLICY_GRANT_CHECK.get()
+            if grant_check is not None and not await asyncio.to_thread(grant_check):
+                trace.status = trace.error_type = "policy_authorization_changed"
+                trace.error = "规范文件或模型授权已变更，请重新发起分析"
+                return trace, raw, False
             process = await asyncio.create_subprocess_exec(
                 *command,
                 cwd=self.cwd,
@@ -587,7 +609,7 @@ class KkAgentRedmineAnalyzer:
                 raw.feed_stdout(line)
                 if not consume_line(trace, line, on_event=tap.on_event):
                     continue
-                if progress is not None and hasattr(progress, "checkpoint"):
+                if grant_check is None and progress is not None and hasattr(progress, "checkpoint"):
                     state = (
                         trace.session_id,
                         tuple((call.tool_call_id, call.status) for call in trace.tool_calls),
@@ -690,7 +712,7 @@ class KkAgentRedmineAnalyzer:
             if not health.skipped:
                 trace.tool_calls.insert(0, health.tool_trace())
 
-        if trace.error_type == "kkagent_unavailable":
+        if trace.error_type in {"kkagent_unavailable", "policy_authorization_changed"}:
             return self._failure(trace, raw)
         if trace.error_type == "oversized_output":
             return self._failure(trace, raw)
@@ -898,7 +920,7 @@ class KkAgentRedmineAnalyzer:
                 return None, merged
             merged = _merge_traces(merged, repair_trace)
             if repair_trace.error_type:
-                if repair_trace.error_type == "context_limit_exceeded":
+                if repair_trace.error_type in {"context_limit_exceeded", "policy_authorization_changed"}:
                     return self._failure(merged, raw), merged
                 findings = [repair_trace.error or repair_trace.error_type]
                 continue

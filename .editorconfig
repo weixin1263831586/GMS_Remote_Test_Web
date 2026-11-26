@@ -23,4 +23,3 @@ trim_trailing_whitespace = false
 [Makefile]
 # Makefile: 必须用 tab
 indent_style = tab
-

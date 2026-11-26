@@ -380,9 +380,9 @@ def _enrich_issue_for_display(
     if fact:
         raw_analysis = issue.get("error_analysis") or ai.get("root_cause_guess", "")
         raw_solution = issue.get("solution") or ai.get("solution", "")
-        if not IssueReporting._meaningful_field(raw_analysis) and fact.get("root_cause"):
+        if not IssueReporting.meaningful_field(raw_analysis) and fact.get("root_cause"):
             enriched["error_analysis"] = fact["root_cause"]
-        if not IssueReporting._meaningful_field(raw_solution) and fact.get("solution"):
+        if not IssueReporting.meaningful_field(raw_solution) and fact.get("solution"):
             enriched["solution"] = fact["solution"]
         if fact.get("verification"):
             current = str(enriched.get("solution") or "")

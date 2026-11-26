@@ -71,6 +71,7 @@
     height: var(--ui-table-header-height);
     padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
     vertical-align: middle;
+    white-space: nowrap;
 }
 :is(table.ui-table, table.list-table, table:has(> thead), table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
     > tbody > tr:not(:where(.group-row:not(.device-group-row))) > :is(td, th),

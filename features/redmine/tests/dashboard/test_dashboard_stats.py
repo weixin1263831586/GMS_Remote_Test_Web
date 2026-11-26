@@ -507,8 +507,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_personal_workload_refresh_updates_existing_local_snapshot(self):
         import asyncio
 
-        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
+        from features.redmine import statistics_api as stats_api
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -575,8 +575,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
     def test_personal_workload_refresh_excludes_reassigned_pending_issue(self):
         import asyncio
 
-        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
+        from features.redmine import statistics_api as stats_api
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -658,8 +658,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         like 黄超群 sees the same full history Gerrit shows."""
         import asyncio
 
-        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
+        from features.redmine import statistics_api as stats_api
 
         live_trends = {
             "resolved_daily": [{"date": "2026-06-04", "count": 10}, {"date": "2026-05-18", "count": 9}],
@@ -725,8 +725,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         showing the local-DB trends instead of going blank."""
         import asyncio
 
-        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
+        from features.redmine import statistics_api as stats_api
 
         class Client:
             async def count_issues_by_assignee(self, user_id):
@@ -780,8 +780,8 @@ class RedmineDashboardStatsTests(unittest.TestCase):
         """
         import asyncio
 
-        from features.redmine import statistics_api as stats_api
         from features.auth import CurrentUser
+        from features.redmine import statistics_api as stats_api
 
         class CurrentRedmineUser:
             id = 77

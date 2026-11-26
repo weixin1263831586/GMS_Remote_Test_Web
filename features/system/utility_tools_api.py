@@ -116,7 +116,13 @@ async def browse_utility_tools(
 @router.get('/api/tools/download/{tool_id:path}')
 @handle_api_errors
 async def download_utility_tool(tool_id: str):
-    """按 tool_id 下载清单中的文件"""
+    """Download a manifest entry by its ID or a previously published alias."""
+    if tool_id not in UTILITY_TOOL_MANIFEST:
+        tool_id = next(
+            (key for key, entry in UTILITY_TOOL_MANIFEST.items()
+             if tool_id in (entry['download_name'], entry['path'])),
+            tool_id,
+        )
     full_path = _resolve_allowed_utility_tool(tool_id)
     return FileResponse(
         path=str(full_path),

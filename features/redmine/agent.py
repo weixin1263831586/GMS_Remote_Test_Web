@@ -422,7 +422,7 @@ class RedmineAgent:
                                           analysis_status="failed", error=str(exc))
                     self.db.upsert_issue(failed_payload)
 
-            report = self._reporting._build_run_report(run_id, issue_results)
+            report = self._reporting.build_run_report(run_id, issue_results)
             report_path = self.db.write_run_report(run_id, report)
             summary = {
                 "assigned_to": assigned_to,
@@ -474,10 +474,10 @@ class RedmineAgent:
 
         ai_result = await self._model_analysis.summarize_issue(issue_payload, failures, references)
 
-        structured = self._reporting._extract_structured_fields(ai_result, issue_payload, failures, references)
+        structured = self._reporting.extract_structured_fields(ai_result, issue_payload, failures, references)
         issue_payload.update(structured)
 
-        document = self._reporting._build_issue_document(issue_payload)
+        document = self._reporting.build_issue_document(issue_payload)
         doc_path = self.db.write_issue_doc(issue_id, document)
         issue_payload["doc_path"] = doc_path
         issue_payload["doc_content"] = document

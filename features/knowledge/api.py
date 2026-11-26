@@ -3,11 +3,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sqlite3
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from features.auth import require_elevated_admin, require_human_principal_when_auth_required
@@ -16,11 +17,11 @@ from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
+from .external.web_sources import model_catalog_fingerprint
 from .policy_imports import (
     IMPORT_SUFFIXES,
     MAX_IMPORT_BYTES,
     approve_policy_import,
-    import_model_available,
     is_policy_import,
 )
 from .service import KnowledgeService
@@ -64,14 +65,19 @@ async def _json_object_body(request: Request) -> dict | None:
 
 
 @contextlib.asynccontextmanager
-async def _stage_upload(file: UploadFile, user_id: str):
+async def _stage_upload(file: UploadFile, user_id: str, *, limit: int = MAX_UPLOAD_SIZE):
     """把上传文件落到一个临时路径，用完即删；供附件/文档入库两个端点复用。"""
     tmp_dir = Path(ATTACHMENT_DIR) / "_tmp" / user_id
     tmp_dir.mkdir(parents=True, exist_ok=True)
     safe_name = os.path.basename(file.filename)
     tmp_path = tmp_dir / f"{uuid.uuid4().hex[:12]}_{safe_name}"
     try:
-        await save_upload_to_path(file, str(tmp_path), MAX_UPLOAD_SIZE)
+        try:
+            await save_upload_to_path(file, str(tmp_path), limit)
+        except ValueError as exc:
+            if limit == MAX_IMPORT_BYTES:
+                raise HTTPException(413, "授权规范文件超过 12 MB") from exc
+            raise
         yield tmp_path, safe_name
     finally:
         with contextlib.suppress(Exception):
@@ -410,15 +416,16 @@ async def upload_doc_file(
         return error_response("未提供文件", 400)
     user_id = _user(request)
     policy_import = is_policy_import(tags)
+    model_catalog_hash = ''
     if policy_import:
         require_elevated_admin(request)
         if Path(file.filename).suffix.lower() not in IMPORT_SUFFIXES:
             return error_response('授权规范导入仅支持 PDF、HTML', 422)
-        if not import_model_available():
+        model_catalog_hash = model_catalog_fingerprint()
+        if not model_catalog_hash:
             return error_response('当前模型目录无法验证', 422)
-    async with _stage_upload(file, user_id) as (tmp_path, safe_name):
-        if policy_import and tmp_path.stat().st_size > MAX_IMPORT_BYTES:
-            return error_response('授权规范文件超过 12 MB', 413)
+    limit = MAX_IMPORT_BYTES if policy_import else MAX_UPLOAD_SIZE
+    async with _stage_upload(file, user_id, limit=limit) as (tmp_path, safe_name):
         doc = await asyncio.to_thread(
             _service.create_doc_from_file,
             user_id,
@@ -427,14 +434,15 @@ async def upload_doc_file(
             file_path=str(tmp_path),
             filename=safe_name,
             tags=tags,
+            policy_import=policy_import,
         )
     if doc.get("error"):
         return error_response(doc["error"], 400)
     if policy_import:
         try:
-            await asyncio.to_thread(approve_policy_import, user_id, doc)
-        except ValueError:
-            return error_response("文档已保存，但模型授权未生效", 409)
+            await asyncio.to_thread(approve_policy_import, user_id, doc, model_catalog_hash=model_catalog_hash)
+        except (OSError, sqlite3.Error, ValueError):
+            return error_response("文档已保存，但模型授权未生效", 409, data={"doc_id": doc["doc_id"]})
     return success_response(data=doc, message="文件已入库")
 
 

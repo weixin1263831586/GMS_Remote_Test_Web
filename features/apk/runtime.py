@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, TypedDict
 from typing_extensions import Unpack
 
 from foundation.config import ConfigManager
-from foundation.runtime_contracts import ClientIdResolver, ControllerStateContract
+from foundation.runtime_contracts import ApkStateContract, ClientIdResolver
 
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 @dataclass
 class ApkRuntime:
     config_manager: ConfigManager | None = None
-    global_state: ControllerStateContract | None = None
+    global_state: ApkStateContract | None = None
     get_client_id_from_request: ClientIdResolver | None = None
     project_root: Path | None = None
     apk_upload_dir: Path | None = None
@@ -33,7 +33,7 @@ class ApkRuntime:
 
 class ApkRuntimeBindings(TypedDict, total=False):
     config_manager: ConfigManager | None
-    global_state: ControllerStateContract | None
+    global_state: ApkStateContract | None
     get_client_id_from_request: ClientIdResolver | None
     project_root: str | Path | None
     apk_upload_dir: str | Path | None

@@ -195,7 +195,7 @@ def update_usbip_source_records(
     remove: Iterable[str] = (),
 ) -> bool:
     """Merge source records under the shared persistence lock."""
-    with usbip_assignment_lock:
+    with usbip_assignment_lock, runtime.config_manager.runtime_config_transaction():
         runtime_config = runtime.config_manager.get_runtime_config() or {}
         current = runtime_config.get("usbip_devices_source") or {}
         sources = dict(current) if isinstance(current, dict) else {}
@@ -224,7 +224,7 @@ def persist_local_usbip_sources(
     timestamp = time.time()
     updates: dict[str, dict[str, object]] = {}
     try:
-        with usbip_assignment_lock:
+        with usbip_assignment_lock, runtime.config_manager.runtime_config_transaction():
             runtime_config = runtime.config_manager.get_runtime_config() or {}
             persisted = runtime_config.get("usbip_devices_source") or {}
             if not isinstance(persisted, dict):
@@ -249,12 +249,12 @@ def persist_local_usbip_sources(
                     record["source_os"] = resolved_os
                 updates[serial] = record
             if updates:
-                saved = update_usbip_source_records(updates=updates)
-                if not saved:
+                persisted.update(updates)
+                if not runtime.config_manager.update_runtime_config({"usbip_devices_source": persisted}):
                     raise RuntimeError("无法保存USB/IP设备来源")
     except Exception as exc:
         logger.warning("[USB/IP] Failed to persist local device sources: %s", exc)
-
+        return
     if not updates:
         return
     with runtime.global_state.usbip_devices_source_lock:

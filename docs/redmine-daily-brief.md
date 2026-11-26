@@ -96,9 +96,8 @@ display id 比对 `run.owner_id`。schema v5 迁移会把存量库里的 legacy
   owner 独立设置，且只有已启用每日晨报的 owner 才会
   进入 delta 调度。
 - `model` 为空时使用 kkagent 当前默认模型；
-- 分析和同会话修复不设步数、耗时或 Token 预算，以证据充分、结论可用为
-  目标，不提供预算配置项。可随时在晨报页面手动停止；外部模型/工具的
-  连接故障仍按执行异常记录。
+- 分析、重试和同会话修复共享执行器总时长预算，批量分析默认 20 分钟，
+  深度诊断默认 45 分钟。晨报设置不提供预算配置项，页面支持手动停止。
 - `analysis_backend` 仅支持 `kkagent`；历史上可配置 `direct` 但从未实现，
   已从枚举移除（旧配置值会被规范化回 `kkagent`）。
 - `max_parallel_issues` 默认 1：同机多个 headless kkagent 会话可能互相中断；

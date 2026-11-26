@@ -8,14 +8,17 @@ import json
 import re
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 
-from features.gms import extract_reference_identifiers, recall_gms_requirements, recall_mainline_references
+from features.auth import auth_service
+from features.gms import extract_reference_identifiers, recall_mainline_references
 from features.knowledge import (
-    partner_policy_allowed,
-    policy_search_terms,
+    model_catalog_fingerprint,
+    owner_policy_imports_current,
     recall_owner_policy_imports,
     recall_web_references,
 )
+from foundation.config_paths import sanitize_owner_id
 from foundation.error_model import ApiError
 
 from .users import owner_redmine_root
@@ -28,7 +31,7 @@ _BUILD_RELEASE = re.compile(r'ro\.build\.version\.release\s*[:=\]]\s*\[?(1[5-9]|
 _BUILD_SDK = re.compile(r'ro\.build\.version\.sdk\s*[:=\]]\s*\[?(35|36|37)\b', re.I)
 
 
-def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None, allow_partner=False):
+def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None, include_policy_query=False):
     root = owner_redmine_root(owner_id)
     db = root / "evidence.sqlite3"
     if not db.is_file():
@@ -125,14 +128,8 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
         policy["target_android_version"] = version
         policy["version_resolution"] = "matched" if version is not None else "conflicting" if versions else "unknown"
         result.setdefault("sources", {})["web_documents"] = policy
-    if allow_partner:
-        imported = recall_owner_policy_imports(str(owner_id), policy_query)
-        if imported is not None:
-            result.setdefault('sources', {})['owner_policy_imports'] = imported
-    if allow_partner and partner_policy_allowed(str(owner_id)):
-        result.setdefault('sources', {})['gms_requirements'] = recall_gms_requirements(
-            policy_search_terms(policy_query), data_root=data_root
-        )
+    if include_policy_query:
+        result["_policy_query"] = policy_query
     if exhausted:
         warnings.append("标识符扫描达到资源预算，未扫描部分不能视为无匹配")
     return {"snapshot_id": snapshot_id, "issue_id": snapshot["issue_id"],
@@ -154,9 +151,12 @@ async def append_reference_preflight(owner_id, entry, preflight, progress=None):
     trace = ToolTrace(tool_call_id="preflight:" + tool, tool_name=tool, tool_input=arguments,
                       snapshot_ids=[preflight.snapshot_id])
     try:
-        data = await asyncio.to_thread(collect_snapshot_references, owner_id, preflight.snapshot_id, allow_partner=True)
+        data = await asyncio.to_thread(
+            collect_snapshot_references, owner_id, preflight.snapshot_id, include_policy_query=True,
+        )
         if entry.get("issue_id") and str(data["issue_id"]) != str(entry["issue_id"]):
             raise ApiError.not_found("当前工单的证据快照不存在。")
+        entry["_policy_query"] = data.pop("_policy_query", "")
         trace.status = "succeeded"
         trace.reference_lookup = reference_check_summary(data)
         trace.evidence_issue_ids = [data["issue_id"]]
@@ -173,6 +173,44 @@ async def append_reference_preflight(owner_id, entry, preflight, progress=None):
     preflight.traces.append(trace)
     if progress is not None:
         progress.tool_finished(tool, None, ok=trace.succeeded, stage="preflight")
+
+
+def _policy_owner(canonical_owner):
+    """Resolve a directory identity to exactly one enabled platform account."""
+    try:
+        matches = [user for user in auth_service.list_users()
+                   if sanitize_owner_id(user["id"]) == canonical_owner]
+    except (OSError, sqlite3.Error, ValueError):
+        return None
+    return matches[0]["id"] if len(matches) == 1 and not matches[0]["disabled"] else None
+
+
+def bind_owner_policy_context(entry, ai_config):
+    """Prepare owner imports for a fresh session using its frozen model catalog."""
+    fingerprint = model_catalog_fingerprint(ai_config)
+    if not fingerprint:
+        return None
+    owner = _policy_owner(entry.get("_reference_owner_id"))
+    if not owner:
+        return None
+    imported = recall_owner_policy_imports(owner, entry["_policy_query"], model_catalog_hash=fingerprint)
+    if not imported or not imported.get("items"):
+        return None
+
+    context = entry["_official_reference_context"]
+    entry["_official_reference_context"] = {
+        **context, "sources": {**context.get("sources", {}), "owner_policy_imports": imported},
+    }
+    references = entry["_official_reference_context"]
+    encoded = json.dumps(references, ensure_ascii=False, sort_keys=True).encode()
+    entry["_precollected_tool_traces"] = [
+        replace(call, reference_lookup=reference_check_summary(references),
+                output_sha256=hashlib.sha256(encoded).hexdigest(), output_bytes=len(encoded))
+        if call.tool_name == "gms_rt_redmine_references" and call.succeeded else call
+        for call in entry.get("_precollected_tool_traces", [])
+    ]
+    return lambda: (_policy_owner(entry.get("_reference_owner_id")) == owner
+                    and owner_policy_imports_current(owner, imported["items"], fingerprint))
 
 
 async def recover_reference_preflight(entry, trace):

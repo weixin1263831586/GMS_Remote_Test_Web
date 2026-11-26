@@ -49,6 +49,23 @@ async def get_workload_statistics(
     return await implementation(request, stale_days=stale_days, list_limit=list_limit, name=name, refresh=refresh)
 
 
+async def get_department_overdue_statistics(
+    request: Request,
+    *,
+    stale_days: int | None = None,
+    list_limit: int | None = None,
+    issue_limit: int | None = None,
+    profile_id: str = "",
+    refresh: bool = False,
+) -> dict[str, Any] | JSONResponse:
+    from .statistics_api import get_department_overdue_statistics as implementation
+
+    return await implementation(
+        request, stale_days=stale_days, list_limit=list_limit, issue_limit=issue_limit,
+        profile_id=profile_id, refresh=refresh,
+    )
+
+
 async def analyze_issue_for_assistant(
     request: Request, issue_ref: str, analysis_mode: str = "incremental", analysis_hint: str = "",
 ) -> dict[str, Any] | JSONResponse:
@@ -97,6 +114,7 @@ __all__ = [
     "find_user_mapping",
     "get_analysis_events_for_assistant",
     "get_analysis_for_assistant",
+    "get_department_overdue_statistics",
     "get_redmine_config_for_request",
     "get_redmine_service_for_owner",
     "get_redmine_service_for_request",

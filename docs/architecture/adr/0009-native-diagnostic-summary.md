@@ -9,9 +9,9 @@ answer directly. It does not require JSON fields or fixed report chapters.
 Routine batch triage retains the schema defined in ADR 0008.
 
 Only a successful final result envelope is accepted. Intermediate messages,
-reasoning and tool output are never promoted to a final answer. Analysis and
-schema/evidence repair have no step, elapsed-time or token budget. Evidence
-gathering continues until the agent returns an answer, fails, or the user stops it.
+reasoning and tool output are never promoted to a final answer. Analysis,
+schema/evidence repair and retries share the analyzer's elapsed-time budget.
+Evidence gathering stops on completion, failure, cancellation or budget expiry.
 Cancellation still terminates the process tree. Live durable jobs are never
 classified as interrupted based on their age; lease renewal remains independent
 of analysis duration. Failures to finish remain failures.

@@ -49,7 +49,10 @@ def normalize_usbip_vid_pids(value: str | Iterable[str] | None) -> tuple[str, ..
 
 def configured_usbip_vid_pids(config: dict[str, Any]) -> tuple[str, ...]:
     """Resolve the configured Android USB modes or use the built-in defaults."""
-    return normalize_usbip_vid_pids(config.get('usbip_vid_pids')) or DEFAULT_ANDROID_USBIP_VID_PIDS
+    if 'usbip_vid_pids' in config:
+        return normalize_usbip_vid_pids(config['usbip_vid_pids']) or DEFAULT_ANDROID_USBIP_VID_PIDS
+    legacy = normalize_usbip_vid_pids(config.get('usbip_vid_pid'))
+    return tuple(dict.fromkeys((*DEFAULT_ANDROID_USBIP_VID_PIDS, *legacy)))
 
 
 def _strip_ansi(text: str) -> str:

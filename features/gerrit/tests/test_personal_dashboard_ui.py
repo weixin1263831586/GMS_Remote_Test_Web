@@ -25,6 +25,7 @@ def dashboard():
             "requests": [],
             "errors": [],
             "fail_statistics": False,
+            "changes_status": 200,
         }
         page.on("pageerror", lambda error: state["errors"].append(str(error)))
 
@@ -44,7 +45,7 @@ def dashboard():
                 ),
                 **{
                     f"/static/js/{name}": (ROOT / "web/static/js" / name, "text/javascript")
-                    for name in ("workspace-tabs.js", "dialog-prompts.js", "dialog-frame.js")
+                    for name in ("workspace-tabs.js", "dialog-prompts.js", "dialog-frame.js", "password-controls.js")
                 },
                 "/static/js/utils.js": (
                     ROOT / "web/static/js/utils.js", "text/javascript",
@@ -82,6 +83,11 @@ def dashboard():
             data = {}
             if url.path.endswith("/config"):
                 data = state["config"]
+            elif url.path.endswith("/changes"):
+                if state["changes_status"] != 200:
+                    route.fulfill(status=state["changes_status"], json={"success": False, "error": "Access denied"})
+                    return
+                data = {"items": []}
             elif url.path.endswith("/statistics/personal"):
                 if state["fail_statistics"]:
                     route.fulfill(
@@ -295,3 +301,15 @@ def test_query_latest_response_owns_busy_state(dashboard):
     playwright_api.expect(button).to_have_text('查询')
     playwright_api.expect(button).to_be_enabled()
     playwright_api.expect(page.locator('#rows')).to_contain_text('无记录')
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_denied_same_scope_query_clears_previous_rows(dashboard, status):
+    page, state = dashboard
+    open_dashboard(page)
+    page.locator('[data-tab="query"]').click()
+    rows = page.locator("#rows")
+    playwright_api.expect(rows).to_contain_text("无记录")
+    state["changes_status"] = status
+    page.locator("#refreshBtn").click()
+    playwright_api.expect(rows).to_contain_text("查询失败，请重试")

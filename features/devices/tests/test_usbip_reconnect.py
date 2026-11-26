@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1425,6 +1426,8 @@ BUSID  VID:PID    DEVICE                                                        
         runtime_config = {}
 
         class FakeConfigManager:
+            runtime_config_transaction = staticmethod(nullcontext)
+
             def load_config(self):
                 return {"device_pswd": "secret", "client_ssh_credentials": []}
 

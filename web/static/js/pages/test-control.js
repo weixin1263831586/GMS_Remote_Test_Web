@@ -321,7 +321,7 @@ async function showConfig() {
     }
     const usbipVidPids = Array.isArray(config.usbip_vid_pids)
         ? config.usbip_vid_pids.join(', ')
-        : '';
+        : String(config.usbip_vid_pid || '');
 
     // ADR：结构用 HTML、数据用 DOM property —— 模板不插入任何配置数据，
     // 避免 " < > & 破坏属性 / DOM 注入 / 字段消失类 UI 完整性问题。

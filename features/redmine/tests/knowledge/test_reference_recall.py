@@ -342,14 +342,23 @@ def test_public_policy_version_uses_retained_build_properties(references, monkey
     assert data['sources']['web_documents']['version_resolution'] == 'matched'
 
 
-def test_policy_grant_does_not_authorize_generic_snapshot_api(references, monkeypatch):
+def test_snapshot_recall_keeps_policy_import_query_internal(references):
     _root, _store, snapshot = references
-    monkeypatch.setattr(reference_recall, 'partner_policy_allowed', lambda _owner: True)
-    restricted = Mock(return_value={'status': 'matched', 'items': [], 'coverage_complete': False})
-    monkeypatch.setattr(reference_recall, 'recall_gms_requirements', restricted)
-    data = reference_recall.collect_snapshot_references('owner-a', snapshot)
-    assert 'gms_requirements' not in data['sources']
-    restricted.assert_not_called()
-    data = reference_recall.collect_snapshot_references('owner-a', snapshot, allow_partner=True)
-    assert 'gms_requirements' in data['sources']
-    restricted.assert_called_once()
+    public = reference_recall.collect_snapshot_references('owner-a', snapshot)
+    assert '_policy_query' not in public
+    assert 'owner_policy_imports' not in public['sources']
+    assert 'gms_requirements' not in public['sources']
+    internal = reference_recall.collect_snapshot_references('owner-a', snapshot, include_policy_query=True)
+    assert internal.pop('_policy_query').strip()
+    assert internal['sources'] == public['sources']
+
+
+def test_policy_owner_refuses_ambiguous_redmine_directory(monkeypatch):
+    users = [
+        {'id': 'owner.a', 'disabled': False},
+        {'id': 'owner_a', 'disabled': False},
+    ]
+    monkeypatch.setattr(reference_recall.auth_service, 'list_users', lambda: users)
+    assert reference_recall._policy_owner('owner_a') is None
+    users.pop()
+    assert reference_recall._policy_owner('owner_a') == 'owner.a'

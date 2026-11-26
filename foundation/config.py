@@ -11,7 +11,7 @@ import socket
 import threading
 import time
 from collections.abc import Callable
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -504,6 +504,12 @@ class ConfigManager:
     def get_runtime_config(self) -> dict[str, Any]:
         """Public read-only access to the runtime configuration."""
         return self._load_runtime_config() or {}
+
+    @contextmanager
+    def runtime_config_transaction(self):
+        """Hold the runtime store lock across a caller's read and section update."""
+        with self._runtime_write_lock, self._runtime_transaction():
+            yield
 
     def configure_section_normalizer(
         self,

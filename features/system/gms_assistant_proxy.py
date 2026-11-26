@@ -261,7 +261,7 @@ async def _proxy_gms_assistant_path(path: str, request: Request, proxy_base: str
         if path.startswith("public/agents/") and path.endswith("/chat"):
             return HTMLResponse(
                 """<!doctype html><html lang='zh-CN' data-ui-type-root='assistant-unconfigured'><meta charset='utf-8'>
-<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261120-unified-page-edge-8"><link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2"><style>
+<title>GMS助手未配置</title><link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces"><link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261126-table-headers"><link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2"><style>
 body{margin:0;color:var(--text-primary);background:var(--page-background)}
 main{max-width:640px;margin:8vh auto;padding:28px;background:var(--card-bg);border:1px solid var(--border-color);border-radius:12px}
 code{background:var(--lighter-bg);padding:3px 6px;border-radius:4px}

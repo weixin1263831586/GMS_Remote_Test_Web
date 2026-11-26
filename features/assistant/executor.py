@@ -760,9 +760,11 @@ class ActionExecutor:
 
     async def _query_redmine_department_stats(self, session, request, params) -> ToolResult:
         result, payload = await self._fetch_router_json(
-            "features.redmine.statistics_api", "get_department_overdue_statistics",
+            "features.redmine", "get_department_overdue_statistics",
             tool_name_for_error="redmine_department_stats",
             request=request,
+            api_path="/api/redmine-agent/statistics/department-overdue",
+            method="GET",
             stale_days=params.get("stale_days"),
             list_limit=None,
             issue_limit=None,

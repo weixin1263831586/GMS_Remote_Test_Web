@@ -13,7 +13,6 @@ from ..users import (
     _now,
     name_keys,
 )
-
 from ..utils import build_search_fts_query, search_query_tokens
 
 

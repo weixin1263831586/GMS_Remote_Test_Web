@@ -29,7 +29,20 @@ FileCleanup = Callable[[list[str]], None]
 DeviceLockRelease = Callable[[str, list[str]], Awaitable[None]]
 
 
-class ControllerStateContract(Protocol):
+class UserStateContract(Protocol):
+    user_states: dict[str, dict[str, Any]]
+    user_states_lock: AbstractContextManager[bool]
+
+
+class ApkStateContract(Protocol):
+    apk_analysis_tasks: dict[str, dict[str, Any]]
+    apk_analysis_tasks_lock: AbstractContextManager[bool]
+    apk_upload_locks: dict[str, Lock]
+    apk_upload_locks_lock: AbstractContextManager[bool]
+    background_tasks: set[Task[Any]]
+
+
+class ControllerStateContract(UserStateContract, ApkStateContract, Protocol):
     """Mutable Controller process state shared by configured features."""
 
     test_logs: dict[str, list[Any]]
@@ -45,13 +58,6 @@ class ControllerStateContract(Protocol):
     usbip_states_lock: AbstractContextManager[bool]
     usbip_devices_source: dict[str, dict[str, Any]]
     usbip_devices_source_lock: AbstractContextManager[bool]
-    user_states: dict[str, dict[str, Any]]
-    user_states_lock: AbstractContextManager[bool]
-    apk_analysis_tasks: dict[str, dict[str, Any]]
-    apk_analysis_tasks_lock: AbstractContextManager[bool]
-    apk_upload_locks: dict[str, Lock]
-    apk_upload_locks_lock: AbstractContextManager[bool]
-    background_tasks: set[Task[Any]]
 
     def device_ssh_pool_get(
         self, pool_key: str, config: dict[str, Any], pool_size: int = 3,

@@ -34,6 +34,33 @@ def test_html_import_strips_active_content(tmp_path):
     path = tmp_path / 'policy.html'
     path.write_text('<html><body><script>hidden script</script><h2>Policy</h2>'
                     '<p>Bluetooth MUST support the requirement.</p></body></html>', encoding='utf-8')
-    result = parse_file(str(path))
+    result = parse_file(str(path), policy_import=True)
     assert 'Bluetooth MUST support' in result['text']
     assert 'hidden script' not in result['text']
+
+
+def test_general_ask_skips_restricted_imports(tmp_path, monkeypatch):
+    from features.knowledge.service import KnowledgeService
+    from features.knowledge.storage import KnowledgeStore
+
+    monkeypatch.setattr(web_sources, 'index_path', lambda: tmp_path / 'external.sqlite3')
+    store = KnowledgeStore(db_path=tmp_path / 'knowledge.sqlite3', attachment_dir=tmp_path / 'files')
+    for title, source in [('Ordinary document', 'manual'), ('Restricted document', 'authorized_policy_import')]:
+        store.create_doc('owner-a', space_id='gms', title=title, content_md='Bluetooth', source=source)
+    analyzer = Mock()
+    analyzer.generate.return_value = {'success': True, 'content': 'answer'}
+    monkeypatch.setattr('features.knowledge.service._ask_analyzer_factory', lambda: analyzer)
+    result = KnowledgeService(store).ask('owner-a', 'Bluetooth')
+    assert result['mode'] == 'ai'
+    assert 'Ordinary document' in analyzer.generate.call_args.args[0]
+    assert 'Restricted document' not in analyzer.generate.call_args.args[0]
+
+
+def test_partner_grant_requires_upstream_account_verification(monkeypatch):
+    from types import SimpleNamespace
+
+    from features.knowledge import external_api
+
+    monkeypatch.setattr(external_api, 'require_elevated_admin', lambda _request: SimpleNamespace(resource_owner_id='owner-a'))
+    payload = external_api.PartnerGrantRequest(enabled=True, authorized_for_ai_processing=True)
+    assert external_api.update_partner_policy_grant(None, payload).status_code == 409

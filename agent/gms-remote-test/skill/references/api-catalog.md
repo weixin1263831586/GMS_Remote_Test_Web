@@ -209,13 +209,15 @@ gms-rt-sdk-read --result-id RID --json --non-interactive
 gms-rt-redmine-history-search 'camera bind failure' --limit 20 --json --non-interactive
 gms-rt-redmine-history-search 'mediaserver crash' --exclude-issue-id 648526 --resolved-only --json --non-interactive
 
-# 10. Optional: background Android system-mechanism knowledge from the
-#     external android-internals wiki (ADR 0014). Background only: explains
-#     how a mechanism (LMKD, Binder, Choreographer, ...) works; NEVER root-
-#     cause evidence and never a substitute for sdk/apk forensics.
+# 10. Optional: Android system-mechanism and public policy background (ADR 0014).
 gms-rt-knowledge-search 'LMKD PRESSURE_AFTER_KILL' --limit 5 \
   --android-api-level 34 --json --non-interactive
 ```
+
+Use a returned `POL-` citation to read a retained revision, or
+`compare:SECTION|ID` to compare current CDD revisions. Validate the device's
+version and applicability with issue evidence and use SDK/APK tools for
+source-level diagnosis.
 
 Citation format for analysis output:
 
@@ -228,7 +230,7 @@ Citation format for analysis output:
 ```
 
 Agent scopes: `redmine.read`, `artifacts.read_own`, `apk.analyze_own`,
-`sdk.read`, `knowledge.read` (background wiki search only). Missing
+`sdk.read`, `knowledge.read` (public background knowledge). Missing
 credentials, private issues, partial downloads, or
 unknown SDK revisions surface as explicit errors — never as
 `complete=true`.

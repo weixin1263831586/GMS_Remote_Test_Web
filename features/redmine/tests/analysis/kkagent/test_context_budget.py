@@ -102,6 +102,28 @@ def test_input_ceiling_does_not_invent_an_output_budget(tmp_path, monkeypatch):
         assert 'max_output_size' not in tomllib.loads(path.read_text())['models']['test']
 
 
+async def test_policy_session_rechecks_grant_before_starting_frozen_model(tmp_path, monkeypatch):
+    config_home(tmp_path)
+    spawned = AsyncMock(side_effect=AssertionError("unexpected subprocess start"))
+    monkeypatch.setattr("features.redmine.analysis.kkagent.analyzer.asyncio.create_subprocess_exec", spawned)
+    get_config = iter([AI_CONFIG])
+    monkeypatch.setattr(kkagent_config._config_manager, "get_ai_config", lambda: next(get_config))
+    monkeypatch.setattr(
+        "features.redmine.analysis.kkagent.analyzer.probe_kkagent_mcp_health",
+        AsyncMock(return_value=McpHealthProbe(ok=True, skipped=True)),
+    )
+
+    def bind(_entry, config):
+        assert config is AI_CONFIG
+        return lambda: False
+
+    monkeypatch.setattr("features.redmine.reference_recall.bind_owner_policy_context", bind)
+    analyzer = KkAgentRedmineAnalyzer(model="test", env_extra={"HOME": str(tmp_path)})
+    result = await analyzer.analyze({**ENTRY, "_policy_query": "sample"})
+    assert result.error_type == "policy_authorization_changed"
+    spawned.assert_not_called()
+
+
 @pytest.mark.parametrize("second_failure", [False, True])
 def test_context_recovery_resumes_once_and_preserves_prior_evidence(tmp_path, second_failure, monkeypatch):
     original = config_home(tmp_path)

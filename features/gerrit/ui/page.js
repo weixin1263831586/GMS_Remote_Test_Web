@@ -27,11 +27,11 @@ async function api(url, options) {
   try {
     data = text ? JSON.parse(text) : {};
   } catch (e) {
-    throw new Error((r.status ? 'HTTP ' + r.status + ': ' : '') + (text || e.message).slice(0, 180));
+    throw Object.assign(new Error((r.status ? 'HTTP ' + r.status + ': ' : '') + (text || e.message).slice(0, 180)), {status: r.status});
   }
   if (!r.ok) {
     const detail = data.error || data.detail || ('HTTP ' + r.status);
-    throw new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail);
+    throw Object.assign(new Error(r.status === 401 ? '登录状态已失效，请刷新后重新登录' : detail), {status: r.status});
   }
   if (!data.success) throw new Error(data.error || data.detail || '请求失败');
   return data.data || data;

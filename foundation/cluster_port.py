@@ -204,19 +204,19 @@ _release_local_firmware_recovery: FirmwareRecoveryCheck | None = None
 
 def configure_cluster_access(
     *,
-    service_provider: ClusterServiceProvider | None | _RegistrationUnset = _UNSET,
-    cancel_job: CancelJob | None | _RegistrationUnset = _UNSET,
-    worker_tokens: WorkerTokens | None | _RegistrationUnset = _UNSET,
-    run_worker_command: RunWorkerCommand | None | _RegistrationUnset = _UNSET,
-    require_worker_session: RequireWorkerSession | None | _RegistrationUnset = _UNSET,
-    require_cluster_enabled: RequireClusterEnabled | None | _RegistrationUnset = _UNSET,
-    authenticate_worker: AuthenticateWorker | None | _RegistrationUnset = _UNSET,
-    device_action_request: DeviceActionRequest | None | _RegistrationUnset = _UNSET,
-    aoa_playback_control: AoaPlaybackControl | None | _RegistrationUnset = _UNSET,
-    prepare_local_firmware_recovery: PrepareFirmwareRecovery | None | _RegistrationUnset = _UNSET,
-    run_local_firmware_recovery: RunFirmwareRecovery | None | _RegistrationUnset = _UNSET,
-    validate_local_firmware_recovery: FirmwareRecoveryCheck | None | _RegistrationUnset = _UNSET,
-    release_local_firmware_recovery: FirmwareRecoveryCheck | None | _RegistrationUnset = _UNSET,
+    service_provider: ClusterServiceProvider | _RegistrationUnset | None = _UNSET,
+    cancel_job: CancelJob | _RegistrationUnset | None = _UNSET,
+    worker_tokens: WorkerTokens | _RegistrationUnset | None = _UNSET,
+    run_worker_command: RunWorkerCommand | _RegistrationUnset | None = _UNSET,
+    require_worker_session: RequireWorkerSession | _RegistrationUnset | None = _UNSET,
+    require_cluster_enabled: RequireClusterEnabled | _RegistrationUnset | None = _UNSET,
+    authenticate_worker: AuthenticateWorker | _RegistrationUnset | None = _UNSET,
+    device_action_request: DeviceActionRequest | _RegistrationUnset | None = _UNSET,
+    aoa_playback_control: AoaPlaybackControl | _RegistrationUnset | None = _UNSET,
+    prepare_local_firmware_recovery: PrepareFirmwareRecovery | _RegistrationUnset | None = _UNSET,
+    run_local_firmware_recovery: RunFirmwareRecovery | _RegistrationUnset | None = _UNSET,
+    validate_local_firmware_recovery: FirmwareRecoveryCheck | _RegistrationUnset | None = _UNSET,
+    release_local_firmware_recovery: FirmwareRecoveryCheck | _RegistrationUnset | None = _UNSET,
 ) -> None:
     """Register or clear the cluster access callables.
 

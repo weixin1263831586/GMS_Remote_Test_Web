@@ -75,7 +75,7 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
 
         self.assertEqual(device_groups.load_device_groups('alice'), [])
 
-    def test_only_canonical_owner_groups_are_loaded(self):
+    def test_legacy_owner_groups_remain_visible_until_canonical_save(self):
         old_owner = 'account.1'
         digest = hashlib.sha256(old_owner.encode()).hexdigest()[:12]
         legacy_dir = Path(self.runtime_dir.name) / 'user_prefs' / f'account_1_{digest}'
@@ -87,7 +87,7 @@ class DeviceGroupPersistenceTests(unittest.TestCase):
         )
 
         account_path = device_groups._device_groups_path(old_owner)
-        self.assertEqual(device_groups.load_device_groups(old_owner), [])
+        self.assertEqual(device_groups.load_device_groups(old_owner)[0]['device_ids'], ['SERIAL1'])
         self.assertFalse(account_path.exists())
 
         current_groups = [{'id': 'current', 'name': 'Current', 'color': '#000000',

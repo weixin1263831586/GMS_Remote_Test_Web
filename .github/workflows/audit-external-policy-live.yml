@@ -5,7 +5,7 @@ on:
     paths:
       - 'features/knowledge/**'
       - 'features/redmine/analysis/kkagent/**'
-      - 'features/redmine/tests/test_reference_recall.py'
+      - 'features/redmine/tests/knowledge/test_reference_recall.py'
       - 'features/reports/diagnosis_recalls.py'
       - 'features/redmine/ui/**'
       - 'web/shell/pages/notes.html'
@@ -27,12 +27,16 @@ concurrency:
 jobs:
   public-cdd:
     if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
-    runs-on: [self-hosted, linux, x64]
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.10'
+      - run: python -m pip install -r requirements-dev.txt
       - name: Test isolated indexes against public CDD
         shell: bash
         env:
@@ -46,23 +50,22 @@ jobs:
           export GMS_DATA_ROOT="$scratch/data"
           python3 -m pytest -q -s \
             features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py \
-            features/knowledge/tests/test_policy_imports.py features/redmine/tests/test_reference_recall.py \
+            features/knowledge/tests/test_policy_imports.py \
             features/reports/tests/test_diagnosis_system_background.py \
             --basetemp="$scratch/pytest"
 
-      - name: Replay existing Redmine snapshots without changing production data
-        shell: bash
+  snapshot-replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.10'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Replay isolated synthetic Redmine snapshots
         env:
-          PYTHONDONTWRITEBYTECODE: '1'
-          GMS_PARTNER_ANDROID_AUTO_LOGIN: '0'
-        run: |
-          set -euo pipefail
-          test "$RUNNER_NAME" = "ats-041055-64g"
-          test "$(id -un)" = "hcq"
-          umask 077
-          scratch=$(mktemp -d "$RUNNER_TEMP/external-replay.XXXXXXXX")
-          trap 'rm -rf -- "$scratch"' EXIT
-          export GMS_DATA_ROOT="$scratch/data"
-          python3 -m tools.scripts.testing.audit_external_policy_live \
-            --data-root "$HOME/GMS_Remote_Test_Web/data" --scratch "$scratch" \
-            2>"$scratch/errors" | grep --line-buffered '^EXTERNAL_POLICY_REPLAY='
+          GMS_DATA_ROOT: ${{ runner.temp }}/external-policy-replay
+        run: python -m pytest -q features/redmine/tests/knowledge/test_reference_recall.py

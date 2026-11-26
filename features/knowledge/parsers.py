@@ -13,7 +13,6 @@ TEXT_SUFFIXES = {
     ".yml",
     ".xml",
     ".html",
-    ".htm",
     ".css",
     ".js",
     ".ts",
@@ -27,10 +26,10 @@ TEXT_SUFFIXES = {
 }
 
 
-def parse_file(path: str, filename: str = "") -> dict[str, str]:
+def parse_file(path: str, filename: str = "", *, policy_import: bool = False) -> dict[str, str]:
     file_path = Path(path)
     suffix = (file_path.suffix or Path(filename).suffix).lower()
-    if suffix in {'.html', '.htm'}:
+    if policy_import and suffix in {'.html', '.htm'}:
         from lxml import etree, html
 
         try:
@@ -49,14 +48,14 @@ def parse_file(path: str, filename: str = "") -> dict[str, str]:
             from pypdf import PdfReader
 
             reader = PdfReader(str(file_path))
-            if reader.is_encrypted or len(reader.pages) > 500:
+            if policy_import and (reader.is_encrypted or len(reader.pages) > 500):
                 return {"text": "", "source": "pdf"}
             parts = []
             total = 0
             for page in reader.pages:
                 text = page.extract_text() or ""
                 total += len(text)
-                if total > 5_000_000:
+                if policy_import and total > 5_000_000:
                     return {"text": "", "source": "pdf"}
                 parts.append(text)
             text = "\n".join(parts)

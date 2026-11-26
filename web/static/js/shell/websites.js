@@ -3,6 +3,7 @@
 let categorizedTools = {};
 let currentCategory = 'all';
 const CATEGORIES_STORAGE_KEY = 'gms_tools_categories';
+const TOOLS_STORAGE_KEY = 'gms_tools_list';
 
 // 默认分类
 const DEFAULT_CATEGORIES = {
@@ -42,11 +43,41 @@ function continueLoadingLocalData() {
     if (categorizedStored) {
         try {
             categorizedTools = JSON.parse(categorizedStored);
+            if (Array.isArray(categorizedTools['其他']) && COMPANY_CATEGORY !== '其他') {
+                categorizedTools[COMPANY_CATEGORY] = [
+                    ...(categorizedTools[COMPANY_CATEGORY] || []),
+                    ...categorizedTools['其他'],
+                ];
+                delete categorizedTools['其他'];
+                saveCategories({ sync: false });
+            }
             renderToolsGrid();
             return;
         } catch (e) {
             console.error('加载分类数据失败:', e);
         }
+    }
+
+    try {
+        const legacy = JSON.parse(localStorage.getItem(TOOLS_STORAGE_KEY));
+        if (Array.isArray(legacy)) {
+            categorizedTools = {};
+            for (const tool of legacy) {
+                if (typeof tool?.url !== 'string' || !tool.url) continue;
+                const text = `${tool.url} ${tool.title || ''}`.toLowerCase();
+                let category = COMPANY_CATEGORY;
+                if (!COMPANY_KEYWORDS.some(keyword => text.includes(keyword))) {
+                    if (/google|gmail|youtube/.test(text)) category = 'Google';
+                    else if (/github|gitlab|stackoverflow/.test(text)) category = '开发工具';
+                }
+                (categorizedTools[category] ||= []).push(tool);
+            }
+            saveCategories({ sync: false });
+            renderToolsGrid();
+            return;
+        }
+    } catch (error) {
+        console.error('加载旧书签失败:', error);
     }
 
     // 使用默认数据

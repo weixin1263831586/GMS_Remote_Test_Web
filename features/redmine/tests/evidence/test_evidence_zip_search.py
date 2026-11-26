@@ -21,8 +21,8 @@ from features.redmine.tests.evidence.test_evidence_pipeline import (
 
 class ZipDerivedTextTests(EvidencePipelineFixture, unittest.TestCase):
     def test_zip_attachment_gets_searchable_derived_text(self):
-        from features.redmine.evidence.search_api import _collect_zip_member_matches
         from features.redmine.evidence.fetch import EvidenceFetcher
+        from features.redmine.evidence.search_api import _collect_zip_member_matches
         from features.redmine.evidence.service import split_zip_derived_text
         from features.redmine.evidence.store import owner_evidence_store
 

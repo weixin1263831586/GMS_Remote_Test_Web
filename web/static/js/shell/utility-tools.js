@@ -139,6 +139,16 @@ function ut_loadToolsList() {
     if (stored) {
         try {
             ut_categorizedTools = JSON.parse(stored);
+            let migrated = false;
+            for (const tools of Object.values(ut_categorizedTools)) {
+                for (const tool of tools) {
+                    if (tool && !tool.tool_id && tool.file_path) {
+                        tool.tool_id = tool.file_path;
+                        migrated = true;
+                    }
+                }
+            }
+            if (migrated) ut_saveCategories();
             ut_ensureBuiltInTools();
             ut_renderToolsGrid();
             return;

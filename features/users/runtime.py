@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, TypedDict
 
 from typing_extensions import Unpack
 
-from foundation.runtime_contracts import ControllerStateContract, SSHAsyncManagerContract, UserStateProvider
+from foundation.runtime_contracts import SSHAsyncManagerContract, UserStateContract, UserStateProvider
 
 
 if TYPE_CHECKING:
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 class UserRuntime:
     config_manager: ConfigManager | None = None
     data_root: Path | None = None
-    global_state: ControllerStateContract | None = None
+    global_state: UserStateContract | None = None
     ssh_async_manager: SSHAsyncManagerContract | None = None
     get_or_create_user_state: UserStateProvider | None = None
 
@@ -27,7 +27,7 @@ class UserRuntime:
 class UserRuntimeBindings(TypedDict, total=False):
     config_manager: ConfigManager | None
     data_root: str | Path | None
-    global_state: ControllerStateContract | None
+    global_state: UserStateContract | None
     ssh_async_manager: SSHAsyncManagerContract | None
     get_or_create_user_state: UserStateProvider | None
 
@@ -62,7 +62,7 @@ def configure_user_dependencies(
     *,
     config_manager: ConfigManager,
     data_root: Path,
-    global_state: ControllerStateContract,
+    global_state: UserStateContract,
     ssh_async_manager: SSHAsyncManagerContract,
     get_or_create_user_state: UserStateProvider,
 ) -> None:

@@ -12,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from features.auth import get_authenticated_user
+from features.auth import auth_service, get_authenticated_user
 from foundation.cluster_port import ClusterServiceContract
 from foundation.private_config import atomic_write_json
 from foundation.responses import error_response, success_response
@@ -217,6 +217,27 @@ def _device_groups_path(username: str) -> Path:
     return owner_preferences_dir(runtime.data_root, username) / 'device_groups.json'
 
 
+def _legacy_group_paths(username: str, target: Path) -> list[Path]:
+    try:
+        tokens = auth_service.list_agent_tokens()
+    except Exception:
+        tokens = []
+    identities = [username]
+    identities.extend(
+        f"agent:{record['id']}" for record in tokens
+        if record.get('id') and record.get('owner_user_id') == username
+    )
+    paths = []
+    for identity in identities:
+        key = ''.join(c if c.isalnum() or c in '-_' else '_' for c in identity)
+        if key != identity:
+            key += '_' + hashlib.sha256(identity.encode()).hexdigest()[:12]
+        path = target.parent.parent / key / target.name
+        if path != target and path.is_file():
+            paths.append(path)
+    return sorted(paths, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
 def load_device_groups(username: str | None) -> list[dict[str, Any]]:
     """Load groups for one immutable authenticated owner id."""
     if not username:
@@ -225,12 +246,18 @@ def load_device_groups(username: str | None) -> list[dict[str, Any]]:
     path = _device_groups_path(username)
     with _storage_lock:
         try:
-            data = json.loads(path.read_text(encoding='utf-8'))
-            return normalize_device_groups(
-                data.get('groups', []) if isinstance(data, dict) else data
-            )
-        except (OSError, json.JSONDecodeError, HTTPException):
-            return []
+            paths = [path] if path.exists() else _legacy_group_paths(username, path)
+        except OSError:
+            paths = []
+        for candidate in paths:
+            try:
+                data = json.loads(candidate.read_text(encoding='utf-8'))
+                return normalize_device_groups(
+                    data.get('groups', []) if isinstance(data, dict) else data
+                )
+            except (OSError, json.JSONDecodeError, HTTPException):
+                continue
+    return []
 
 
 def save_device_groups(

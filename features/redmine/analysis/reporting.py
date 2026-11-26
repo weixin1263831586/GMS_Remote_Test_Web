@@ -64,7 +64,7 @@ class IssueReporting:
             return f"<pre><code{cls}>\n{code}</code></pre>"
         return re.sub(r"```(\w*)\n([\s\S]*?)```", _replace, str(text or ""))
 
-    def _build_issue_document(self, item: dict[str, Any]) -> str:
+    def build_issue_document(self, item: dict[str, Any]) -> str:
         failures = item.get("failures_json") or []
         references = item.get("references_json") or []
         attachments = item.get("attachments_json") or []
@@ -191,7 +191,7 @@ class IssueReporting:
         # Coerce every item to a single str so the document always builds.
         return "\n".join(_doc_line(x) for x in lines).strip() + "\n"
 
-    def _build_run_report(self, run_id: str, issues: list[dict[str, Any]]) -> str:
+    def build_run_report(self, run_id: str, issues: list[dict[str, Any]]) -> str:
         lines = [
             f"# RedmineAgent 日报 {run_id}",
             "",
@@ -378,7 +378,7 @@ class IssueReporting:
             return ""
         return "\n\n".join(f'<pre><code class="diff">{jp["patch"]}</code></pre>' for jp in patches)
 
-    def _extract_structured_fields(
+    def extract_structured_fields(
         self,
         ai_result: dict[str, Any],
         issue_payload: dict[str, Any],
@@ -473,17 +473,17 @@ class IssueReporting:
         # 错误证据只提取一次并复用于各规则。
         extracted_evidence = cls._extract_error_from_issue_evidence(issue)
 
-        if not cls._meaningful_field(issue.get("problem_description")):
+        if not cls.meaningful_field(issue.get("problem_description")):
             issue["problem_description"] = _truncate(issue.get("description") or issue.get("subject") or "", 500)
-        if not cls._meaningful_field(issue.get("error_info")):
+        if not cls.meaningful_field(issue.get("error_info")):
             error_info = ""
             if failures:
                 error_info = cls.extract_error_from_failures(failures)
             error_info = error_info or extracted_evidence
             issue["error_info"] = cls._ensure_code_block(error_info, "") if error_info else ""
-        if not cls._meaningful_field(issue.get("error_analysis")):
+        if not cls.meaningful_field(issue.get("error_analysis")):
             issue["error_analysis"] = cls._rule_error_analysis(issue, failures, references, extracted_evidence)
-        if not cls._meaningful_field(issue.get("solution")):
+        if not cls.meaningful_field(issue.get("solution")):
             if resolution["has_resolution"]:
                 parts = [resolution["summary"]]
                 if resolution.get("solution_text"):
@@ -491,7 +491,7 @@ class IssueReporting:
                 issue["solution"] = "\n".join(parts)
             else:
                 issue["solution"] = cls._rule_solution(issue, failures, references, extracted_evidence)
-        if not cls._meaningful_field(issue.get("patch_direction")):
+        if not cls.meaningful_field(issue.get("patch_direction")):
             patch = cls._format_journal_patches(resolution.get("patches") or [])
             issue["patch_direction"] = patch or cls._rule_patch_direction(issue, failures, references, extracted_evidence)
         return issue
@@ -503,7 +503,7 @@ class IssueReporting:
         return _truncate(issue_payload.get("description") or issue_payload.get("subject") or "未提取到描述", 240)
 
     @staticmethod
-    def _meaningful_field(value: Any) -> bool:
+    def meaningful_field(value: Any) -> bool:
         text = str(value or "").strip()
         if not text or text == "-":
             return False

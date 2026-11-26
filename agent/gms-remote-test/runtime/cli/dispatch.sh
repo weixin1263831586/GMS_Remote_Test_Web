@@ -231,7 +231,7 @@ _gms_rt_command_summary() {
         gms-rt-artifact-search-batch) printf '%s' 'Multi-keyword one-pass search across description/journals/artifact text; per-query totals and truncation with coverage report; same --artifact/--member/--context/--collapse filters' ;;
         gms-rt-apk-analyze-attachment) printf '%s' 'Import a Redmine .apk artifact into the JADX analysis pipeline (owner-scoped)' ;;
         gms-rt-apk-source-read) printf '%s' 'Read a window of one decompiled source file by task-relative path' ;;
-        gms-rt-knowledge-search) printf '%s' 'Search background Android system-mechanism knowledge from the external wiki (read-only, ADR 0014)' ;;
+        gms-rt-knowledge-search) printf '%s' 'Search Android Wiki and public policy documents, or read retained POL- citations (read-only, ADR 0014)' ;;
         gms-rt-sdk-sources) printf '%s' 'List admin-configured SDK source providers and default revisions' ;;
         gms-rt-sdk-search) printf '%s' 'Search an SDK source at a pinned revision; matches carry commit-bound result ids' ;;
         gms-rt-sdk-read) printf '%s' 'Read a commit-pinned SDK source window by signed result id (returns commit and blob sha256)' ;;
@@ -606,7 +606,7 @@ ${YELLOW}Redmine Evidence (read-only analysis chain):${NC}
   gms-rt-artifact-search-batch   - Multi-keyword one-pass search with coverage
   gms-rt-apk-analyze-attachment  - Import a Redmine .apk artifact into JADX
   gms-rt-apk-source-read         - Read a window of one decompiled file
-  gms-rt-knowledge-search        - Search background Android system-mechanism knowledge (ADR 0014)
+  gms-rt-knowledge-search        - Search Android Wiki and public policy documents (ADR 0014)
   gms-rt-sdk-sources             - List configured SDK source providers
   gms-rt-sdk-search              - Search SDK source pinned to a revision
   gms-rt-sdk-read                - Read commit-pinned SDK source by result id

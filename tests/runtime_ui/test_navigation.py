@@ -35,9 +35,6 @@ class RuntimeNavigationTests(RuntimeUiHarness):
                     }]}})
 
             page.route('**/api/knowledge/external/web-sources', sources)
-            page.route('**/api/knowledge/external/partner-policy-grant', lambda route: route.fulfill(
-                json={'success': True, 'data': {'enabled': False}}
-            ))
             page.evaluate("switchPage('notes', null)")
             page.wait_for_function('kbState.initialized')
             root = page.locator('#page-notes')
@@ -477,18 +474,19 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             else None,
         )
         try:
-            # Seed current categorized storage.
+            page.route('**/api/websites/load', lambda route: route.fulfill(json={'success': True, 'tools': {}}))
             page.add_init_script(
                 """
-                localStorage.setItem('gms_tools_categories', JSON.stringify({
-                    '其他': [{ icon: '🧪', title: 'My Tool', url: 'https://example.test' }]
-                }));
+                localStorage.removeItem('gms_tools_categories');
+                localStorage.setItem('gms_tools_list', JSON.stringify([
+                    { icon: '🧪', title: 'My Tool', url: 'https://example.test' }
+                ]));
                 """
             )
             self.goto_shell(page)
             page.evaluate("(name) => window.switchPage(name, null)", "websites")
             expect(page.locator("#page-websites")).to_have_class(re.compile(r"active"))
-            page.wait_for_timeout(500)
+            expect(page.locator('#tools-grid')).to_contain_text('My Tool')
             self.assertEqual(
                 save_requests,
                 [],

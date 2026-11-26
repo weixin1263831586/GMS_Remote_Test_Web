@@ -43,7 +43,7 @@ def audit(data_root, scratch):
                         reference_recall, 'owner_redmine_root', return_value=db.parent
                     ):
                         result = reference_recall.collect_snapshot_references(
-                            db.parent.name, snapshot, data_root=data_root, allow_partner=False
+                            db.parent.name, snapshot, data_root=data_root
                         )
                     policy = result.get('sources', {}).get('web_documents') or {}
                     counts['matched' if policy.get('items') else 'no_candidate'] += 1

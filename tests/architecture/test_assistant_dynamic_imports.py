@@ -236,7 +236,8 @@ class AssistantDynamicImportGateTests(unittest.TestCase):
             if violation:
                 offenders.append(violation)
                 continue
-            module_path = ROOT / pathlib.Path(*module.split(".")).with_suffix(".py")
+            module_path = ROOT / pathlib.Path(*module.split("."))
+            module_path = module_path / "__init__.py" if module_path.is_dir() else module_path.with_suffix(".py")
             if not module_path.exists():
                 offenders.append(f"{module}:{symbol} -> module missing")
                 continue
