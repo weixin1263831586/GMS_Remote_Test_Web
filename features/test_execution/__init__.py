@@ -1,7 +1,6 @@
 """Test execution feature package."""
 
 from .models import (
-    ACTIVE_JOB_STATUSES,
     SuiteApkAnalyzeRequest,
     TestParseArgsRequest,
     TradefedListResultsRequest,
@@ -39,7 +38,6 @@ def __getattr__(name: str):
 
 
 __all__ = [
-    "ACTIVE_JOB_STATUSES",
     "SuiteApkAnalyzeRequest",
     "TestParseArgsRequest",
     "TradefedListResultsRequest",

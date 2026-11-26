@@ -1012,7 +1012,7 @@ def record_aoa_input(serial: str, raw_action: dict) -> dict[str, Any]:
     """Execute one allow-listed ADB input and return its AOAv2 command."""
     action = aoa_profile.parse_record_input_action(raw_action)
     if action["action"] == "verify_direct":
-        from .aoa_certification import verify_direct_reference
+        from .aoa_calibration import verify_direct_reference
 
         return verify_direct_reference(serial, action.get("display_id", 0))
     if action["action"] == "observe_frame":

@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from foundation.cluster_port import ACTIVE_JOB_STATUSES
-
-
 __all__ = [
-    "ACTIVE_JOB_STATUSES",
     "SuiteApkAnalyzeRequest",
     "TestParseArgsRequest",
     "TradefedListResultsRequest",

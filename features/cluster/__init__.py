@@ -29,7 +29,6 @@ from .models import ClusterDeviceAction
 from .report_index import index_cluster_report
 from .repository import ClusterRepository
 from .service import ClusterService
-from .state_machine import ACTIVE_CLUSTER_JOB_STATUSES
 from .worker_auth import authenticate_worker, worker_tokens
 
 
@@ -143,7 +142,6 @@ def register_cluster_port() -> None:
 
 
 __all__ = [
-    "ACTIVE_CLUSTER_JOB_STATUSES",
     "ClusterConfig",
     "ClusterDeviceAction",
     "ClusterRepository",

@@ -41,11 +41,9 @@ from features.assistant.session_registry import (
     save_session_anchor as _save_session_anchor,
 )
 from features.assistant.workspace import _is_local_worker_id, _local_worker_id
-from features.cluster import (
-    ACTIVE_CLUSTER_JOB_STATUSES as _ACTIVE_CLUSTER_JOB_STATUSES,
-)
 from features.devices import get_or_create_user_state
 from features.users import owner_id_from_request
+from foundation.cluster_port import ACTIVE_JOB_STATUSES
 from foundation.error_model import record_internal_error
 from foundation.runtime_contracts import TestStartRequest
 
@@ -201,7 +199,7 @@ async def _monitor_agent_run(
                 if job:
                     # Presence of the background job proves tracking, not completion.
                     confirm_recovery_step(session, session.get("active_run") or {})
-                while job and job.get("status") in _ACTIVE_CLUSTER_JOB_STATUSES:
+                while job and job.get("status") in ACTIVE_JOB_STATUSES:
                     await asyncio.sleep(3)
                     job = repository.get_job(cluster_job_id)
                 if not _monitor_run_is_current(session, monitor_token):

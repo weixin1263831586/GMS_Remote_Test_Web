@@ -9,9 +9,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from features.auth import get_authenticated_user
 from features.devices import get_or_create_user_state, get_usb_monitor
+from foundation.cluster_port import ACTIVE_JOB_STATUSES
 from foundation.responses import error_response
 
-from . import models, runtime
+from . import runtime
 
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,6 @@ MODULE_LOG_PATTERNS = (
     re.compile(r"\b(?:PASSED|FAILED)\b"),
     re.compile(r"\[[0-9]+/[0-9]+\]\s+\S+\s+\S+#\S+"),
 )
-
-ACTIVE_JOB_STATUSES = models.ACTIVE_JOB_STATUSES
 
 
 def _active_durable_jobs(owner_id: str) -> list[dict]:
