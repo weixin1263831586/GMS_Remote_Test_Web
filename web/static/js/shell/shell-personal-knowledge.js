@@ -187,6 +187,19 @@
                     semanticIndex('/api/knowledge/external/wiki-semantic-index',
                         event.currentTarget).catch(error => showToast(error.message, 'warning'));
                 }));
+                const personal = body.insertRow();
+                for (const value of ['个人知识库', '本账号普通文档', '当前修订', '—', '支持混合检索']) {
+                    const cell = personal.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const personalActions = document.createElement('div');
+                personalActions.className = 'kb-source-actions';
+                personal.insertCell().append(personalActions);
+                personalActions.append(button('语义索引', event => {
+                    semanticIndex('/api/knowledge/semantic-index', event.currentTarget)
+                        .catch(error => showToast(error.message, 'warning'));
+                }));
                 const partner = body.insertRow();
                 for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
                     '支持账号文件导入']) {

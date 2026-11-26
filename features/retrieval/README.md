@@ -57,3 +57,15 @@ live device data are included in these indexes.
 ### Android Internals Wiki
 
 Add `android_internals` to `retrieval.enabled_sources` to opt in. Approve and reindex the Wiki using the existing workflow first. The external knowledge page provides a semantic-index action (also available through GET/POST `/api/knowledge/external/wiki-semantic-index`). Build bounded batches until coverage is complete. Semantic tokens are tied to the approved revision and section content; changed policy requires reindex. Existing lexical search remains available when semantic retrieval is disabled or unavailable.
+
+### Personal knowledge
+
+Add `personal_knowledge` to `retrieval.enabled_sources` to opt in. GET/POST
+`/api/knowledge/semantic-index` is scoped to the current human owner. The
+ordinary personal knowledge Q&A route fuses document FTS with semantic
+chunk recall; original text and offsets are resolved from the current owner
+repository. Restricted imports, including registered documents whose tags
+change, are excluded before indexing and again before recall. Long documents
+and total corpus size are bounded, and the returned coverage flag reflects
+these bounds. Deleted or modified documents are not returned by stale vectors;
+index synchronization removes obsolete derived rows.

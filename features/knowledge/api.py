@@ -18,6 +18,7 @@ from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
 from .external.web_sources import model_catalog_fingerprint
+from .personal_semantic import PersonalSemantic
 from .policy_imports import (
     IMPORT_SUFFIXES,
     MAX_IMPORT_BYTES,
@@ -352,6 +353,29 @@ async def search_docs(
 ):
     docs = _service.store.search(_user(request), q, space_id=space_id, tag=tag, limit=limit)
     return success_response(data={"items": [_preview(d) for d in docs], "count": len(docs)})
+
+
+@personal_router.get("/semantic-index")
+@handle_api_errors
+async def personal_semantic_status(request: Request):
+    owner = _user(request)
+    try:
+        result = await asyncio.to_thread(lambda: PersonalSemantic(_service.store, owner).status())
+    except Exception as exc:
+        result = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+    return success_response(data=result)
+
+
+@personal_router.post("/semantic-index")
+@handle_api_errors
+async def sync_personal_semantic(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    owner = _user(request)
+    try:
+        result = await asyncio.to_thread(
+            lambda: PersonalSemantic(_service.store, owner).sync(batch_size=batch_size))
+    except Exception:
+        return error_response("个人知识库语义索引未完成，请检查本地模型配置", 502)
+    return success_response(data=result)
 
 
 @personal_router.get("/tags")
