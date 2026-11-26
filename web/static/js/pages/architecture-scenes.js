@@ -171,7 +171,7 @@
       const symbol=type==='risk'?'warning':type==='worker'?'server':'workflow';
       return '<article class="arch-v2-info-panel arch-v2-mini arch-scene-bottom-card arch-scene-bottom-card--'+type+'">'
         +'<h2>'+icon(symbol)+esc(card[0])+'</h2><div class="arch-scene-tablewrap">'
-        +'<table><tbody>'+rows+'</tbody></table></div></article>';
+        +'<table class="ui-detail-table"><tbody>'+rows+'</tbody></table></div></article>';
     }).join('');
   }
   function mount() {

@@ -517,14 +517,12 @@ const RESULT_COLUMN_RENDERERS = {
         const v = String(r.device_serial ?? '-');
         return {
             text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
-            style: 'padding: 4px 6px;',
         };
     },
     'build id': r => {
         const v = String(r.build_id ?? '-');
         return {
             text: `<span title="${escapeHtml(v)}" style="display: inline-block; max-width: 120px; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom;">${escapeHtml(v)}</span>`,
-            style: 'padding: 4px 6px;',
         };
     },
     'product': r => ({ text: escapeHtml(String(r.product ?? '-')) }),

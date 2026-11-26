@@ -79,6 +79,12 @@
 .suite-file-table-head { min-height: var(--ui-table-header-height); }
 .suite-file-row { min-height: var(--ui-table-row-height); }
 
+/* Key/value descriptions have no header row and grow with their text. */
+table.ui-detail-table > tbody > tr > :is(th, td) {
+    padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
+    vertical-align: top;
+}
+
 /* Shared page perimeter for the Shell template and independent workspaces.
    Page CSS defines internal component spacing, never perimeter overrides. */
 .ui-page-edge,

@@ -201,8 +201,8 @@
 }
 .architecture-v2 .arch-scene-bottom-card td,
 .architecture-v2 .arch-scene-bottom-card th{
-  padding:var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);border-bottom:1px solid #363247;
-  text-align:left;vertical-align:top;
+  border-bottom:1px solid #363247;
+  text-align:left;line-height:1.4;
 }
 .architecture-v2 .arch-scene-bottom-card th{
   background:rgba(60,48,88,.18);color:#d4c6f6;
@@ -321,6 +321,7 @@
   min-height:31px;padding:7px 10px;line-height:1.3
 }
 .architecture-v2 .arch-scene-bottom-card th{width:32%}
+.architecture-v2 .arch-scene-platform-bottom .arch-v2-info-panel :is(th,td){line-height:1.3}
 .architecture-v2 .arch-scene-tablewrap{max-height:none;overflow-x:hidden;overflow-y:visible}
 .architecture-v2 .arch-v2-timeline{padding:3px 10px}
 .architecture-v2 .arch-v2-timeline li{padding:4px 2px;line-height:1.35}

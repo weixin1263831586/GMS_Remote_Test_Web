@@ -239,6 +239,32 @@ class UiSizingContractTests(unittest.TestCase):
                 self.assertNotIn("var(--ui-table-row-height", local)
 
 
+    def test_no_local_geometry_in_remaining_data_table_renderers(self):
+        paths = (
+            "web/static/js/pages/test-reports.js",
+            "web/static/js/pages/security-audit.js",
+            "web/static/js/shell/shell-device-management.js",
+            "web/static/js/pages/test-suite-browser-reports.js",
+        )
+        for path in paths:
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                self.assertNotRegex(
+                    source, r"""<(?:th|td|tr)\b[^>]*style=["'][^"']*(?:height|padding|vertical-align)\s*:"""
+                )
+        suite = (ROOT / paths[-1]).read_text(encoding="utf-8")
+        self.assertNotIn("style: 'padding:", suite)
+        notes = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
+        rule = notes.split(".kb-source-table :is(th, td) {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("vertical-align", rule)
+        proxy = (CSS / "vpn-proxy-panel.css").read_text(encoding="utf-8")
+        rule = proxy.split(".tech-dialog--vpn-proxy th, .tech-dialog--vpn-proxy td {", 1)[1].split("}", 1)[0]
+        self.assertNotIn("padding:", rule)
+        architecture = (CSS / "architecture-scenes.css").read_text(encoding="utf-8")
+        self.assertNotIn("height:34px;padding:7px 9px", architecture)
+        scene = (ROOT / "web/static/js/pages/architecture-scenes.js").read_text(encoding="utf-8")
+        self.assertIn('class="ui-detail-table"', scene)
+
     def test_existing_single_line_layouts_not_replaced_by_wrapping(self):
         cases = {
             "common.css": ("white-space: nowrap;", ".page-header-actions"),
