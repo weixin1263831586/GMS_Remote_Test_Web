@@ -575,7 +575,7 @@ def recall_web_references(query: str, *, android_version=None):
         if android_version is not None and api is None:
             return {"status": "unavailable", "coverage_complete": False, "items": [],
                     "reason": "Android version mapping not configured"}
-        hits = provider.search(query[:512], limit=5, android_api_level=api)
+        hits, retrieval = provider.search_with_status(query[:512], limit=5, android_api_level=api)
         items = [{"reference": h.source_path, "source_url": h.extra["source_url"],
                   "source_revision": h.source_revision, "title": h.title,
                   "requirement_id": h.extra["requirement_id"], "requirement_level": h.extra["requirement_level"],
@@ -584,7 +584,7 @@ def recall_web_references(query: str, *, android_version=None):
                   "source_kind": h.extra["source_kind"], "status": h.extra["status"],
                   "fetched_at": h.last_verified, "license": h.license} for h in hits]
         return {"status": "matched" if items else "unavailable" if any(not r["revision"] or r["error"] for r in selected) else "no_match",
-                "coverage_complete": False, "items": items,
+                "coverage_complete": False, "items": items, "retrieval": retrieval,
                 "reason": "Ranked local candidates only; verify applicability and current revision"}
     except (OSError, sqlite3.Error, ValueError):
         return {"status": "unavailable", "coverage_complete": False, "items": [],
