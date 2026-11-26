@@ -379,7 +379,12 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
             data = {'status': 'matched', 'requested_android_version': 17, 'lookup_scope': 'low_ram_declaration',
                     'sections': [{'title': 'Declare Low RAM devices', 'context_limited': True,
                                   'clauses': [{'requirement_id': 'GMS-10.0-001', 'original_text': 'Example rule'}],
-                                  'table_rows': [current, old], 'version_rows': [current]}]}
+                                  'table_rows': [current, old], 'version_rows': [current]}],
+                    'related_ram': {'scanned_sections': 5, 'section_matches': 1, 'clause_matches': 1,
+                                    'sections': [{'title': 'Example page size', 'clause_matches': 1,
+                                                  'clauses': [{'requirement_id': 'GMS-VSR-3.14-003',
+                                                               'context_text': 'Example RAM condition',
+                                                               'original_text': 'Example feature requirement'}]}]}}
             page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
                 status=200, content_type='application/json',
                 body=json.dumps({'success': True, 'data': data})))
@@ -414,9 +419,13 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
                 });
             }""")
             self.assertEqual(alignment, [True] * 4)
-            expect(evidence.locator('details')).not_to_have_attribute('open', '')
-            evidence.locator('summary').click()
+            expect(evidence).to_contain_text('其他 RAM 相关政策')
+            expect(evidence).to_contain_text('不能将功能触发门槛当作统一 GMS 准入门槛')
+            expect(evidence.locator('details').first).not_to_have_attribute('open', '')
+            evidence.locator('summary').first.click()
             expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
+            evidence.locator('summary').last.click()
+            expect(evidence.get_by_text('Example feature requirement', exact=True)).to_be_visible()
         finally:
             page.close()
 

@@ -264,3 +264,38 @@ def test_semantic_heading_creates_section_and_table_text_is_not_duplicated():
     assert parsed.requirement_table_rows[0].section_key == first.section_key
     assert 'Unique cell value' not in next(s.text_excerpt for s in parsed.requirement_sections
                                            if s.section_key == first.section_key)
+
+
+
+def test_versioned_ram_lookup_retrieves_other_sections_without_merging_thresholds(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections, policy_lookup_target
+
+    body = """<article class="devsite-article">
+    <h3 id="low-ram">Declare Low RAM devices</h3>
+    <p>[GMS-10.0-001] Example RAM declaration.</p>
+    <table><tr><th>OS Version</th><th>Must be Low RAM</th><th>Optionally Low RAM</th>
+    <th>Not qualified for GMS</th></tr>
+    <tr><td>Android 16 or higher</td><td>A</td><td>B</td><td>C</td></tr></table>
+    <h3 id="page">Page size</h3><p>Devices with 8 GB of RAM:</p>
+    <p>[GMS-VSR-3.14-003] STRONGLY RECOMMENDED to enable an example option.</p>
+    <p>Note: an additional RAM condition applies.</p>
+    <h3 id="feature">Feature preload</h3>
+    <p>[GMS-7.21-002] MUST preload an example APK if they have 4 GB of RAM.</p>
+    <h3 id="notes">Other notes</h3><p>Note: RAM has a separate condition.</p>
+    <h3 id="unrelated">Unrelated</h3><p>[GMS-2-001] Example program.</p>
+    </article>"""
+    with closing(connect(tmp_path / 'ram-overview.sqlite3')) as conn, conn:
+        sync_source(conn, 1, fetched(body), force=True, timestamp='2026-01-01')
+        result = lookup_requirement_sections(
+            conn, policy_lookup_target('GMS Android16设备RAM要求，Go版和非Go版'))
+        assert [s['source_url'].split('#')[-1] for s in result['sections']] == ['low-ram']
+        related = result['related_ram']
+        assert related['section_matches'] == 3
+        assert related['clause_matches'] == 2
+        assert not related['applicability_verified'] and not related['coverage_complete']
+        by_anchor = {s['source_url'].split('#')[-1]: s for s in related['sections']}
+        assert set(by_anchor) == {'page', 'feature', 'notes'}
+        assert '8 GB of RAM' in by_anchor['page']['clauses'][0]['context_text']
+        assert '4 GB of RAM' in by_anchor['feature']['clauses'][0]['original_text']
+        assert by_anchor['notes']['fragments']
+        assert lookup_requirement_sections(conn, 'section:GMS-10.0-001')['related_ram'] is None

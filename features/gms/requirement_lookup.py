@@ -15,6 +15,11 @@ SOURCE_URL = next(source.url for source in SOURCES if source.key == SOURCE)
 MAX_SECTIONS = 5
 MAX_ROWS = 200
 MAX_TEXT = 32000
+MAX_RELATED_SECTIONS = 40
+MAX_RELATED_CLAUSES = 20
+MAX_RELATED_FRAGMENTS = 5
+MAX_RELATED_TABLE_ROWS = 20
+RAM_TERM = re.compile(r'\bRAM\b|\b(?:advertised|physical|available|system|device|total|usable)\s+memory\b', re.I)
 CLAUSE_ID = re.compile(r"(?<![A-Za-z0-9])(?:GMS(?:X|-VSR)?|VSR)-[0-9][A-Z0-9_.-]*", re.I)
 
 
@@ -61,6 +66,92 @@ def _matches_android(label, version):
         return False
     minimum = int(match.group(1))
     return version >= minimum if match.group(2) else version == minimum
+
+
+def _related_ram_evidence(conn, revision, coverage, excluded_keys):
+    """Search the retained revision across sections, not just the declaration rule.
+
+    A RAM mention is a candidate, not an applicable certification threshold.
+    Keep the indexed conditions and nearby text for human review.
+    """
+    sections = {}
+    anchors = coverage.get("section_anchors") or {}
+    for row in conn.execute(
+        "SELECT section_key,path,text_excerpt FROM gms_update_requirement_sections "
+        "WHERE source_key=? ORDER BY rowid", (SOURCE,),
+    ):
+        key = row["section_key"]
+        if key in excluded_keys:
+            continue
+        anchor = anchors.get(key)
+        sections[key] = {
+            "title": row["path"], "section_key": key, "source_revision": revision,
+            "source_url": SOURCE_URL + "#" + quote(anchor, safe="-_.:") if anchor else "",
+            "clauses": [], "table_rows": [], "fragments": [],
+            "clause_matches": 0, "table_row_matches": 0, "fragment_matches": 0,
+        }
+        text = row["text_excerpt"]
+        # Merge nearby matches so a long condition/list is not represented as
+        # several near-identical snippets. These are explicitly excerpts.
+        ranges = []
+        for match in RAM_TERM.finditer(text):
+            start, end = max(0, match.start() - 260), min(len(text), match.end() + 360)
+            if ranges and start <= ranges[-1][1] and end - ranges[-1][0] <= 1400:
+                ranges[-1] = (ranges[-1][0], end)
+            else:
+                ranges.append((start, end))
+        item = sections[key]
+        item["fragment_matches"] = len(ranges)
+        item["fragments"] = [
+            {"text": text[start:end], "start": start, "end": end,
+             "excerpt": start != 0 or end != len(text)}
+            for start, end in ranges[:MAX_RELATED_FRAGMENTS]
+        ]
+    for row in conn.execute(
+        "SELECT * FROM gms_update_requirement_clauses WHERE source_key=? AND source_revision=? "
+        "ORDER BY rowid", (SOURCE, revision),
+    ):
+        item = sections.get(row["section_key"])
+        if item is None or not RAM_TERM.search(row["original_text"] + "\n" + row["context_text"]):
+            continue
+        item["clause_matches"] += 1
+        if len(item["clauses"]) < MAX_RELATED_CLAUSES:
+            item["clauses"].append({k: row[k] for k in (
+                "requirement_id", "original_text", "context_text", "source_url", "content_hash",
+                "change_version", "change_kind", "scope_json",
+            )})
+    for row in conn.execute(
+        "SELECT * FROM gms_update_requirement_table_rows WHERE source_key=? "
+        "ORDER BY table_index,row_index", (SOURCE,),
+    ):
+        item = sections.get(row["section_key"])
+        if item is None:
+            continue
+        headers, values = json.loads(row["headers_json"]), json.loads(row["values_json"])
+        if not RAM_TERM.search(" ".join(map(str, headers + values))):
+            continue
+        item["table_row_matches"] += 1
+        if len(item["table_rows"]) < MAX_RELATED_TABLE_ROWS:
+            item["table_rows"].append({"headers": headers, "values": values,
+                                       "content_hash": row["content_hash"]})
+    matches = [item for item in sections.values()
+               if item["clause_matches"] or item["table_row_matches"] or item["fragment_matches"]]
+    # Prefer direct clause evidence, but retain section-only notes and tables.
+    matches.sort(key=lambda item: (not item["clause_matches"], not item["table_row_matches"]))
+    selected = matches[:MAX_RELATED_SECTIONS]
+    return {
+        "sections": selected, "section_matches": len(matches),
+        "clause_matches": sum(item["clause_matches"] for item in matches),
+        "table_row_matches": sum(item["table_row_matches"] for item in matches),
+        "scanned_sections": len(sections),
+        "truncated": len(matches) > len(selected) or any(
+            item["clause_matches"] > len(item["clauses"])
+            or item["table_row_matches"] > len(item["table_rows"])
+            or item["fragment_matches"] > len(item["fragments"]) for item in selected
+        ),
+        "coverage_complete": False, "applicability_verified": False,
+        "scope": "retained_revision_ram_mentions",
+    }
 
 
 def lookup_requirement_sections(conn, query):
@@ -131,10 +222,7 @@ def lookup_requirement_sections(conn, query):
         ):
             if hit[0] not in keys:
                 keys.append(hit[0])
-        if not keys:
-            return {"status": "no_match", "sections": [], "coverage_complete": False,
-                    "lookup_scope": "low_ram_declaration"}
-        predicate = "section_key IN (" + ",".join("?" for _ in keys) + ")"
+        predicate = "section_key IN (" + ",".join("?" for _ in keys) + ")" if keys else "0=1"
         params.extend(keys)
     elif CLAUSE_ID.fullmatch(query.removeprefix("section:")):
         predicate = ("section_key IN (SELECT section_key FROM gms_update_requirement_clauses "
@@ -210,7 +298,10 @@ def lookup_requirement_sections(conn, query):
                                                  if item.get("section_key") == key][:MAX_ROWS],
             "truncated": (len(text) > MAX_TEXT or bounded),
         })
-    return {"status": "matched" if result else "no_match", "sections": result,
+    related_ram = (_related_ram_evidence(conn, revision, coverage, set(keys))
+                   if version_match else None)
+    return {"status": "matched" if result or (related_ram and related_ram["sections"]) else "no_match",
+            "sections": result, "related_ram": related_ram,
             "requested_android_version": android_version,
             "lookup_scope": "low_ram_declaration" if ram_scope else "section",
             "source_revision": revision, "indexed_at": row["indexed_at"],

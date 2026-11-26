@@ -509,7 +509,7 @@ function renderAgentMessages(session) {
                                 }
                             }
                             addText(block, 'strong', 'Go / 非 Go 设备 RAM 要求解读');
-                            addText(block, 'p', 'Go 设备：必须声明 Low RAM 的容量以及可选声明的容量见上表；是否符合 Go 产品认证还需核验独立适用条件。');
+                            addText(block, 'p', 'Low RAM 设备：必须声明或可选声明的容量见上表；Go 产品认证要求不能仅凭此表确认。');
                             const optionalValues = new Set(matchedRows.map(row => {
                                 const index = row.headers.findIndex(value =>
                                     String(value).trim().toLowerCase().replace(/\s+/g, ' ') === 'optionally low ram');
@@ -577,6 +577,48 @@ function renderAgentMessages(session) {
                     else if (section.context_limited) addText(details, 'p', '原始上下文边界不明确，请查看官方章节。');
                     if (section.media?.length) addText(details, 'p', '包含图片引用，图片内容尚未核验。');
                     block.append(details);
+                }
+                if (result.related_ram) {
+                    const related = result.related_ram;
+                    addText(block, 'strong', '其他 RAM 相关政策（功能及适用条件）');
+                    addText(block, 'p', '已检索本地规范其他章节：' + related.scanned_sections + ' 个，命中 '
+                        + related.section_matches + ' 个章节、' + related.clause_matches + ' 个候选条款。');
+                    addText(block, 'p', '以下是跨版本候选原文，需核验目标 Android 版本、首发/升级、设备及芯片条件；不能将功能触发门槛当作统一 GMS 准入门槛。');
+                    if (related.truncated) addText(block, 'p', '返回范围受限：部分候选或上下文未展示，请按章节或条款编号进一步读取。');
+                    for (const section of related.sections || []) {
+                        const details = document.createElement('details');
+                        addText(details, 'summary', section.title + '（' + section.clause_matches + ' 条候选）');
+                        for (const clause of section.clauses || []) {
+                            addText(details, 'strong', [clause.requirement_id, clause.change_version,
+                                clause.change_kind].filter(Boolean).join(' · '));
+                            if (clause.context_text) addText(details, 'p', '索引适用条件：' + clause.context_text);
+                            addText(details, 'p', clause.original_text);
+                            if (clause.scope_json && clause.scope_json !== '[]') {
+                                addText(details, 'p', '索引范围：' + clause.scope_json);
+                            }
+                        }
+                        for (const row of section.table_rows || []) {
+                            addText(details, 'p', row.headers.map((header, i) =>
+                                header + '：' + (row.values[i] || '')).join(' | '));
+                        }
+                        for (const fragment of section.fragments || []) {
+                            addText(details, 'p', '章节上下文' + (fragment.excerpt ? '（节选）' : '') + '：' + fragment.text);
+                        }
+                        if (section.source_url) {
+                            try {
+                                const url = new URL(section.source_url);
+                                if (url.origin === 'https://docs.partner.android.com'
+                                    && url.pathname === '/gms/policies/domains/reqs') {
+                                    const link = addText(details, 'a', '查看政策原文');
+                                    link.href = url.href;
+                                    link.target = '_blank';
+                                    link.rel = 'noopener noreferrer';
+                                }
+                            } catch (_) { /* Ignore invalid retained URLs. */ }
+                        }
+                        addText(details, 'p', '文档修订：' + (section.source_revision || '未知'));
+                        block.append(details);
+                    }
                 }
                 const meta = addText(block, 'p', lines.join('\n'));
                 meta.className = 'agent-message-body';
