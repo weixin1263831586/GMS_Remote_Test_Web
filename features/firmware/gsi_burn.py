@@ -16,11 +16,11 @@ from pydantic import BaseModel, Field
 
 from features.auth import require_elevated_admin_when_auth_required
 from features.test_execution import get_default_suites_path
+from foundation.command_result import CommandResult
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
 from foundation.ssh_executor import ssh_executor
 from worker.fastboot_workflow import (
-    CommandResult,
     FastbootPreparer,
     vendor_partition,
 )
