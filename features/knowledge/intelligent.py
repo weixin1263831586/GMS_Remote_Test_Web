@@ -183,7 +183,7 @@ def web_source(*, android_api_level=None, cdd_only=False):
                              search, current, read)
 
 
-def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferred=None, catalog_hash=""):
+def local_document_model(analyzer_factory, *, preferred=None, catalog_hash=""):
     """Select the local route once and reject mid-run catalog changes."""
     try:
         config = (config_manager.load_config() or {}).get("retrieval") or {}
@@ -208,6 +208,11 @@ def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferre
             raise PermissionError("Model route changed")
         return fresh.generate_local_rag(prompt, provider_name=name, **kwargs)
 
+    return invoke, name, fingerprint
+
+
+def local_document_rag(question, sources, analyzer_factory, *, limit=8, preferred=None, catalog_hash=""):
+    invoke, name, _ = local_document_model(analyzer_factory, preferred=preferred, catalog_hash=catalog_hash)
     result = IntelligentRAG(sources, invoke, limit=limit).run(redact_sensitive_text(question))
     result["provider"] = name or ""
     return result
