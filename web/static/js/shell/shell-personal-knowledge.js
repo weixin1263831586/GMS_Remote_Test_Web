@@ -69,6 +69,7 @@
             const submitButton = panel.querySelector('[data-kb-submit]');
             const resetButton = panel.querySelector('[data-kb-reset]');
             const partnerUrl = 'https://docs.partner.android.com/gms/policies/domains/reqs';
+            const partnerApi = '/api/gms-update-center';
             let editing = null;
             let busy = false;
 
@@ -126,7 +127,11 @@
                 }, trigger, '索引中');
             }
             async function load() {
-                const data = await kbFetch(api);
+                const [data, partnerIndex, partnerScan] = await Promise.all([
+                    kbFetch(api),
+                    kbFetch(partnerApi + '/requirements/coverage', {cache: 'no-store'}).catch(() => null),
+                    kbFetch(partnerApi + '/scan/status', {cache: 'no-store'}).catch(() => null)
+                ]);
                 const table = document.createElement('table');
                 table.className = 'list-table kb-source-table';
                 const columns = ['知识源名称', '网址', '版本', '索引条目', '状态', '操作'];
@@ -201,16 +206,45 @@
                         .catch(error => showToast(error.message, 'warning'));
                 }));
                 const partner = body.insertRow();
-                for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
-                    '支持账号文件导入']) {
+                partner.dataset.kbSource = 'gms_requirements';
+                const scan = partnerScan?.status;
+                const coverage = partnerIndex?.coverage;
+                const latest = partnerIndex?.latest_scan;
+                const indexed = partnerIndex?.index_consistent === true;
+                const scanning = scan?.running && (scan.source || []).includes('gms_requirements');
+                const failed = ['failed', 'interrupted', 'partial'].includes(latest?.state)
+                    || (!scan?.running && ['failed', 'interrupted', 'partial'].includes(scan?.state)
+                        && (scan.source || []).includes('gms_requirements'));
+                const pending = ['pending', 'running'].includes(latest?.state);
+                const count = partnerIndex === null ? '—' : indexed ? String(coverage.clause_candidates)
+                    : coverage ? '—' : '0';
+                const status = scanning ? '同步中' : !partnerIndex ? '状态不可用'
+                    : pending && scan?.running ? '同步中'
+                    : failed || (pending && scan && !scan.running) ? (indexed ? '同步失败，保留旧索引' : '同步失败')
+                    : partnerIndex.latest_confirmed ? '已同步（待核验）'
+                    : indexed ? '索引待更新' : coverage ? '索引异常' : '待同步';
+                for (const value of ['GMS Certification Requirements', partnerUrl, '多版本', count, status]) {
                     const cell = partner.insertCell();
                     cell.textContent = value;
                     cell.title = value;
                 }
+                partner.cells[3].title = indexed
+                    ? `条款候选：${coverage.clause_candidates}；章节：${coverage.sections ?? 0}；表格行：${coverage.table_rows ?? 0}`
+                    : count;
+                partner.cells[4].title = status + (partnerIndex?.indexed_at ? '；索引时间：' + partnerIndex.indexed_at : '');
                 const actions = document.createElement('div');
                 actions.className = 'kb-source-actions';
                 partner.insertCell().append(actions);
-                actions.append(button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
+                const sync = button('同步', event => {
+                    run(async () => {
+                        const result = await kbFetch(partnerApi + '/scan?mode=full&source=gms_requirements', {method: 'POST'});
+                        showToast(result.status?.running ? 'GMS Requirements 同步已启动，完成后刷新状态'
+                            : '已提交同步请求，请刷新核查结果', 'info');
+                    }, event.currentTarget, '同步中');
+                });
+                sync.disabled = Boolean(scan?.running);
+                sync.title = scan?.running ? '已有 GMS 更新扫描运行中' : '使用现有授权来源重新扫描 GMS Requirements';
+                actions.append(sync, button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
                     button('导入授权文档', openPolicyImport));
                 list.replaceChildren(table);
             }
