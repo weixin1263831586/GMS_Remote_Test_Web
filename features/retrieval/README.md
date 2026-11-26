@@ -259,3 +259,82 @@ Redmine archive; synthetic fixtures do not establish real quality gains.
 - 公共 CDD 文档理解：自动任务每轮最多四条当前原文，使用本地模型提取有逐字引句支持的定义、条件、例外和术语；派生索引绑定原文版本及模型配置，缺失或无效输出可重试，派生结果只用于召回，不替代原文。语义索引状态接口分别返回文档理解覆盖情况。
 - 单次完整问答最多五次模型调用、八次检索、六次主动阅读，限制证据数量和字符数。超预算、模型故障、授权变化或缺少可靠引句均不得伪造结论。
 - 尚未实现所有私有语料的持久化 LLM 文档理解、图片专用视觉模型的版面理解及 SDK/Gerrit 全部资料的智能阅读适配。受限 Partner 扫描继续使用原有授权边界。
+
+
+### Expanded local RAG sources and document understanding
+
+The existing model gateway remains the sole LLM transport. Opt in to each additional local
+content-processing scope independently in the Controller's retrieval configuration:
+
+```json
+{
+  "retrieval": {
+    "llm_provider": "glm_local",
+    "allow_local_wiki_llm": true,
+    "auto_understand_approved_wiki": true,
+    "allow_local_personal_llm_understanding": true,
+    "allow_local_redmine_llm": true
+  }
+}
+```
+
+Enable Wiki processing only when the applicable upstream license permits this use. Wiki
+analysis checks the current clone, approved and indexed revision and policy hash, and
+returns background evidence only. Use external search with `query=analyze:<question>`
+and explicit `sources=["android_internals"]` or the CDD source for public requirements.
+The Controller tick resumes up to four Wiki passages per enabled batch.
+
+Personal understanding uses the existing human-only knowledge semantic-index endpoint
+with `kind=understanding`, optionally `approved_only=true`; GET returns coverage, POST
+processes up to four passages. Owner and protected import scope use distinct 0600 indexes.
+The UI provides the corresponding action. These hints never replace raw passages and are
+invalidated on content or model changes. Current manifests cap ordinary/import documents
+at 32 IDs and 512 passages, Wiki at 4096 passages; truncated scopes remain bounded.
+No autonomous private-source background processing is enabled.
+
+Redmine local analysis uses the existing scoped evidence reference endpoint and MCP/CLI:
+`gms-rt-redmine-references <snapshot_id> --query 'analyze:focused question'`.
+It reads the same owner's retained ready snapshot, description, replies and available
+attachment text, without network fetch or changes to the evidence DB. Its bounded view
+(up to 24 attachments, 2 MiB per file, 8 MiB total text budget) is not full log coverage.
+Normal reference lookup remains unchanged. Reviewed claims are candidates, not confirmed
+root cause; the existing evidence gates and authorized source tools still apply.
+
+### Real Controller evaluation
+
+The self-hosted workflow `onprem-rag-live.yml` runs isolated regression tests and a
+structured-output probe against the configured **actual local LLM**. Real case replay
+requires an owner-only local authorization manifest at
+`configs/local/rag-evaluation.json` (never commit it). Example shape:
+
+```json
+{
+  "authorized_for_local_llm": true,
+  "owner_id": "actual-owner-id",
+  "cases": [
+    {
+      "case_id": "blind-case-01",
+      "snapshot_id": "actual-retained-snapshot-id",
+      "question": "Analyze the observed test failure based on the available evidence.",
+      "pre_resolution_snapshot_confirmed": true,
+      "required_evidence_quotes": []
+    }
+  ]
+}
+```
+
+Set mode 0600. Select genuinely pre-resolution snapshots, including attachments, and
+questions without the known answer. The runner excludes journals during blinded replay.
+It compares a single-retrieval/single-generation baseline and IntelligentRAG using the
+same local model and snapshot; evidence labels are consulted only after both runs.
+This is a controlled snapshot-only baseline, not a replay of the entire legacy Redmine
+analysis pipeline. An empty label list yields no evidence recall measurement.
+Only aggregate counts go to Actions logs; private output remains in the Controller
+`data/rag-evaluation/` directory. A missing manifest or unavailable local model is
+a blocked evaluation, not a pass. Model-reviewed claims are not accuracy labels.
+
+After a human reviews both answers independently, save a separate 0600 JSON file:
+`{"reviews":[{"case_id":"blind-case-01","baseline_sha256":"...","candidate_sha256":"...","baseline":"correct","candidate":"incorrect"}]}`.
+Use the exact hashes from the local report; verdicts are correct/incorrect/abstained/
+unreviewed. Run `python -m tools.scripts.testing.audit_rag_live --report <report> --reviews <reviews>`
+to calculate paired root-cause accuracy. No model is used as ground truth.
