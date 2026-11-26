@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from collections.abc import Callable, Hashable, Sequence
+from typing import Any, Generic, Protocol, TypeVar
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,66 @@ def fuse_rankings(rankings, *, limit, exact_keys=(), k=60, tie_key=None):
                                           tie_key(key) if tie_key else first[key]))[:limit]
 
 
+_Hit = TypeVar("_Hit")
+
+
+@dataclass(frozen=True)
+class RankedBatch(Generic[_Hit]):
+    """An authorized source's ordered candidates and independently reported health."""
+
+    hits: Sequence[_Hit]
+    status: dict[str, Any]
+
+
+def collect_ranked_sources(
+    sources: Sequence[tuple[str, Callable[[], RankedBatch[_Hit]]]],
+    *,
+    limit: int,
+    identity: Callable[[_Hit], Hashable],
+    tie_key: Callable[[_Hit], Any] | None = None,
+) -> tuple[list[_Hit], list[dict[str, Any]]]:
+    """Shared fan-out, failure isolation and rank fusion; never load a business provider."""
+    if not 1 <= limit <= 100 or len(sources) > 16:
+        raise ValueError("Invalid retrieval budget")
+    if len({source for source, _ in sources}) != len(sources):
+        raise ValueError("Duplicate retrieval source")
+    representatives = {}
+    representative_ranks = {}
+    rankings = []
+    statuses = []
+    for source, fetch in sources:
+        try:
+            batch = fetch()
+            if not isinstance(batch, RankedBatch):
+                raise TypeError("Invalid ranked batch")
+            # Validate the whole bounded source result before merging any of it.
+            candidates = [(identity(hit), hit) for hit in batch.hits[:limit]]
+            ranking = list(dict.fromkeys(key for key, _ in candidates))
+            first_hits = {}
+            for key, hit in candidates:
+                first_hits.setdefault(key, hit)
+            status = {**batch.status, "source": source}
+            if len(batch.hits) > limit:
+                status["coverage_complete"] = False
+                status["limited"] = True
+            for rank, key in enumerate(ranking):
+                if key not in representative_ranks or rank < representative_ranks[key]:
+                    representatives[key] = first_hits[key]
+                    representative_ranks[key] = rank
+            rankings.append(ranking)
+            statuses.append(status)
+        except Exception as exc:
+            statuses.append({"source": source, "status": "error", "coverage_complete": False,
+                             "detail": type(exc).__name__})
+    keys = fuse_rankings(rankings, limit=limit,
+                         tie_key=(lambda key: tie_key(representatives[key])) if tie_key else None)
+    if len(representatives) > limit:
+        for status in statuses:
+            status["coverage_complete"] = False
+            status["result_limit_reached"] = True
+    return [representatives[key] for key in keys], statuses
+
+
 class RetrievalService:
     """Fan out bounded requests to injected providers; isolate failures."""
 
@@ -75,33 +136,32 @@ class RetrievalService:
         self.sources = tuple(sources)
 
     def search(self, query: RetrievalQuery):
-        representatives = {}
-        rankings = []
-        statuses = []
-        for provider in self.sources:
-            try:
-                result = provider.search(query)
-                if not isinstance(result, RetrievalResult):
-                    raise TypeError("Invalid provider result")
-                hits = []
-                rejected = 0
-                for hit in result.hits[:query.limit]:
-                    if (hit.source != provider.source_id or not hit.reference or not hit.revision
-                            or (query.revision and hit.revision != query.revision)):
-                        rejected += 1
-                        continue
-                    representatives.setdefault(hit.identity, hit)
-                    hits.append(hit.identity)
-                rankings.append(hits)
-                statuses.append({"source": provider.source_id, "status": result.status,
-                                 "coverage_complete": (result.coverage_complete and not rejected
-                                                       and result.status == "ready" and len(result.hits) <= query.limit),
-                                 "detail": result.detail, "rejected_hits": rejected})
-            except Exception as exc:
-                statuses.append({"source": provider.source_id, "status": "error",
-                                 "coverage_complete": False, "detail": type(exc).__name__})
-        keys = fuse_rankings(rankings, limit=query.limit)
-        return {"results": [representatives[key] for key in keys], "sources_status": statuses,
+        def search_provider(provider):
+            result = provider.search(query)
+            if not isinstance(result, RetrievalResult):
+                raise TypeError("Invalid provider result")
+            hits = []
+            rejected = 0
+            for hit in result.hits[:query.limit]:
+                if (not isinstance(hit, RetrievalHit) or hit.source != provider.source_id
+                        or not hit.reference or not hit.revision
+                        or (query.revision and hit.revision != query.revision)):
+                    rejected += 1
+                    continue
+                hits.append(hit)
+            return RankedBatch(hits, {
+                "status": result.status,
+                "coverage_complete": (result.coverage_complete and not rejected
+                                      and result.status == "ready" and len(result.hits) <= query.limit),
+                "detail": result.detail, "rejected_hits": rejected,
+            })
+
+        results, statuses = collect_ranked_sources(
+            [(provider.source_id, lambda provider=provider: search_provider(provider))
+             for provider in self.sources],
+            limit=query.limit, identity=lambda hit: hit.identity,
+        )
+        return {"results": results, "sources_status": statuses,
                 "coverage_complete": bool(statuses) and all(row["coverage_complete"] for row in statuses)}
 
 

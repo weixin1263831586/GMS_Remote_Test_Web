@@ -162,3 +162,14 @@ The existing external knowledge UI can build multiple bounded semantic batches
 in one confirmed operation. It stops on completion, no progress, busy or error,
 and can resume committed batches later. It is not a persistent background
 scheduler; closing the page stops further client-side requests.
+
+## Module boundary
+
+The standalone retrieval module owns bounded fan-out, failure isolation and rank
+fusion via `collect_ranked_sources`. Both the typed RetrievalService and the
+external knowledge federation use that implementation. Domain adapters return
+ordered RankedBatch objects and retain their authorization, source identity and
+revision checks. The public feature exports are the only cross-feature entry;
+architecture tests prohibit retrieval from importing any other business feature
+or bootstrap. Do not move credentials, business persistence, model grants or
+feature-specific query rules into retrieval.

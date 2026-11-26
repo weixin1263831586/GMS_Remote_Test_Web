@@ -254,3 +254,18 @@ def test_hybrid_provider_order_and_version_identity_are_preserved():
     ]
     result = FederatedKnowledgeService([Hybrid("a", hits=hits)]).search("q")
     assert [item["source_revision"] for item in result["results"]] == ["v2", "v1"]
+
+
+def test_provider_cannot_impersonate_another_source():
+    result = FederatedKnowledgeService([
+        _FakeProvider("a", hits=[_hit("other", 1.0), _hit("a", 0.1)]),
+    ]).search("query")
+    assert [hit["source"] for hit in result["results"]] == ["a"]
+    assert not result["coverage_complete"]
+
+
+def test_external_search_does_not_mutate_provider_hits():
+    hit = _hit("a", 0.5, evidence_level="candidate")
+    service = FederatedKnowledgeService([_FakeProvider("a", hits=[hit])])
+    assert service.search("query")["results"][0]["evidence_level"] == "background"
+    assert hit.evidence_level == "candidate"

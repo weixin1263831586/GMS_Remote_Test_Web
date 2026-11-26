@@ -3,11 +3,13 @@ import json
 import pytest
 
 from features.retrieval import (
+    RankedBatch,
     RetrievalHit,
     RetrievalQuery,
     RetrievalResult,
     RetrievalService,
     VectorIndex,
+    collect_ranked_sources,
     compact_observation,
     evaluate_ranking,
     fuse_rankings,
@@ -135,3 +137,17 @@ def test_vector_sync_lock_is_namespace_scoped_and_released(tmp_path):
             assert independent
     with second.sync_lock("owner-a") as acquired:
         assert acquired
+
+
+def test_shared_fanout_keeps_source_failure_and_total_result_bound():
+    def fail():
+        raise OSError("do not expose provider details")
+
+    hits, statuses = collect_ranked_sources([
+        ("first", lambda: RankedBatch(["a", "b"], {"status": "ready", "coverage_complete": True})),
+        ("broken", fail),
+        ("second", lambda: RankedBatch(["c", "a"], {"status": "ready", "coverage_complete": True})),
+    ], limit=2, identity=lambda hit: hit)
+    assert hits == ["a", "c"]
+    assert statuses[1]["detail"] == "OSError"
+    assert all(not status["coverage_complete"] for status in statuses)

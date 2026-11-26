@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import threading
+from dataclasses import replace
 from typing import Any
 
-from features.retrieval import fuse_rankings
+from features.retrieval import RankedBatch, collect_ranked_sources
 
 from .base import (
     KNOWN_SOURCES,
@@ -23,11 +24,6 @@ from .base import (
 
 
 logger = logging.getLogger(__name__)
-
-#: RRF 平滑常数（文献标准值）：rank 越靠前贡献 1/(k+rank) 越大，跨 source
-#: 的命中在各自通道内的名次可直接比较，无需校准原始分数。
-RRF_K = 60
-
 
 def _rrf_document_key(hit: KnowledgeHit) -> tuple[str, ...]:
     """Stable logical-document key for cross-provider fusion and deduplication."""
@@ -122,8 +118,6 @@ class FederatedKnowledgeService:
                 p for sid, p in sorted(self._providers.items())
                 if wanted is None or sid in wanted
             ]
-        results: list[KnowledgeHit] = []
-        hybrid_sources = set()
         status_rows: list[dict[str, Any]] = []
         if not query:
             return {"results": [], "sources_status": self.status()}
@@ -141,66 +135,48 @@ class FederatedKnowledgeService:
                     status="not_configured",
                     detail="未配置（fail-closed 禁用）",
                 ).to_dict())
-        for provider in providers:
+        limit = max(1, min(limit, 100))
+
+        def search_provider(provider: ExternalKnowledgeProvider) -> RankedBatch[KnowledgeHit]:
             retrieval_status = None
-            try:
-                search_options: dict[str, Any] = {"limit": limit}
-                if android_api_level is not None:
-                    search_options["android_api_level"] = android_api_level
-                hybrid_search = getattr(type(provider), "search_with_status", None)
-                if callable(hybrid_search):
-                    hits, retrieval_status = hybrid_search(provider, query, **search_options)
-                    hybrid_sources.add(provider.source_id)
-                else:
-                    hits = provider.search(query, **search_options)
-            except Exception as exc:
-                logger.warning("external knowledge search failed for %s: %s", provider.source_id, exc)
-                status_rows.append(ProviderStatus(
-                    source=provider.source_id, enabled=True, status="error", detail=str(exc)
-                ).to_dict())
-                continue
+            search_options: dict[str, Any] = {"limit": limit}
+            if android_api_level is not None:
+                search_options["android_api_level"] = android_api_level
+            hybrid_search = getattr(type(provider), "search_with_status", None)
+            if callable(hybrid_search):
+                hits, retrieval_status = hybrid_search(provider, query, **search_options)
+            else:
+                hits = sorted(provider.search(query, **search_options), key=lambda item: item.score, reverse=True)
             try:
                 row = provider.status().to_dict()
                 if retrieval_status is not None:
                     row["retrieval"] = retrieval_status
-                status_rows.append(row)
             except Exception as exc:
-                # 状态读取失败也必须留行：结果存在但状态行缺失更难排查。
-                logger.warning("external knowledge status failed for %s: %s", provider.source_id, exc)
-                status_rows.append(ProviderStatus(
-                    source=provider.source_id, enabled=True, status="error", detail=str(exc)
-                ).to_dict())
-            for hit in hits:
-                if hit.evidence_level != "background":
-                    hit.evidence_level = "background"
-                results.append(hit)
-        by_source: dict[str, list[KnowledgeHit]] = {}
-        for hit in results:
-            by_source.setdefault(hit.source, []).append(hit)
-        rankings = []
-        representatives: dict[tuple[str, ...], KnowledgeHit] = {}
-        representative_ranks = {}
-        for source in sorted(by_source):
-            ranking = []
-            ordered = by_source[source] if source in hybrid_sources else sorted(
-                by_source[source], key=lambda item: item.score, reverse=True)
-            for rank, hit in enumerate(ordered):
-                key = _rrf_document_key(hit)
-                ranking.append(key)
-                if key not in representative_ranks or rank < representative_ranks[key]:
-                    representatives[key] = hit
-                    representative_ranks[key] = rank
-            rankings.append(ranking)
-        merged_keys = fuse_rankings(
-            rankings, limit=max(1, limit), k=RRF_K,
-            tie_key=lambda key: (representatives[key].source, representatives[key].source_path,
-                                 representatives[key].title),
+                logger.warning("external knowledge status failed for %s: %s", provider.source_id,
+                               type(exc).__name__)
+                row = ProviderStatus(source=provider.source_id, enabled=True, status="error",
+                                     detail=type(exc).__name__).to_dict()
+            accepted = [replace(hit, evidence_level="background") for hit in hits
+                        if isinstance(hit, KnowledgeHit) and hit.source == provider.source_id]
+            if row.get("enabled") is False:
+                accepted = []
+            # A lexical/dense candidate list cannot prove complete upstream coverage.
+            row["coverage_complete"] = False
+            return RankedBatch(accepted, row)
+
+        merged, rows = collect_ranked_sources(
+            [(provider.source_id, lambda provider=provider: search_provider(provider))
+             for provider in providers],
+            limit=limit, identity=_rrf_document_key,
+            tie_key=lambda hit: (hit.source, hit.source_path, hit.title),
         )
-        merged = [representatives[key] for key in merged_keys]
-        return {
-            "results": [hit.to_dict() for hit in merged],
-            "sources_status": status_rows,
-        }
+        for row in rows:
+            if "enabled" not in row:
+                row = {**ProviderStatus(source=row["source"], enabled=True, status="error",
+                                        detail=row["detail"]).to_dict(), "coverage_complete": False}
+            status_rows.append(row)
+        return {"results": [hit.to_dict() for hit in merged], "sources_status": status_rows,
+                "coverage_complete": False}
 
 
 def federated_search(

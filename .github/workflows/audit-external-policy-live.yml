@@ -4,6 +4,8 @@ on:
     branches: ['audit/**']
     paths:
       - 'features/knowledge/**'
+      - 'features/retrieval/**'
+      - 'tests/architecture/test_dependency_rules.py'
       - 'features/redmine/analysis/kkagent/**'
       - 'features/redmine/tests/knowledge/test_reference_recall.py'
       - 'features/reports/diagnosis_recalls.py'
@@ -51,6 +53,9 @@ jobs:
           python3 -m pytest -q -s \
             features/knowledge/tests/test_web_sources.py features/knowledge/tests/test_web_sources_live.py \
             features/knowledge/tests/test_policy_imports.py \
+            features/retrieval/tests features/knowledge/tests/test_external_federation.py \
+            features/knowledge/tests/test_cdd_semantic.py features/knowledge/tests/test_personal_semantic.py \
+            tests/architecture/test_dependency_rules.py \
             features/reports/tests/test_diagnosis_system_background.py \
             --basetemp="$scratch/pytest"
 

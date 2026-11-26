@@ -47,6 +47,19 @@ def imported_symbols(path: Path) -> list[tuple[str, str]]:
 
 
 class DependencyRuleTests(unittest.TestCase):
+    def test_retrieval_is_independent_of_business_features(self):
+        offenders = []
+        for path in (ROOT / 'features' / 'retrieval').rglob('*.py'):
+            if 'tests' in path.relative_to(ROOT).parts:
+                continue
+            for name in imports(path):
+                if name == 'features' or (name.startswith('features.')
+                                          and name.split('.')[1] != 'retrieval'):
+                    offenders.append((str(path.relative_to(ROOT)), name))
+                elif name == 'bootstrap' or name.startswith('bootstrap.'):
+                    offenders.append((str(path.relative_to(ROOT)), name))
+        self.assertEqual(offenders, [])
+
     def test_foundation_never_imports_features(self):
         offenders = []
         for path in (ROOT / 'foundation').rglob('*.py'):
