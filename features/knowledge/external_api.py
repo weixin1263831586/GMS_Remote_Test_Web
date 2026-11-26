@@ -261,5 +261,8 @@ def update_partner_policy_grant(request: Request, payload: PartnerGrantRequest):
     user = require_elevated_admin(request)
     if payload.enabled and not payload.authorized_for_ai_processing:
         return error_response('需要确认当前账号有权访问并向配置的分析模型提供 GMS 政策内容', 422)
-    WebKnowledgeProvider().set_partner_grant(user.resource_owner_id, payload.enabled)
+    try:
+        WebKnowledgeProvider().set_partner_grant(user.resource_owner_id, payload.enabled)
+    except ValueError:
+        return error_response('当前模型目录无法验证，请先配置分析模型', 422)
     return success_response(data={'enabled': payload.enabled})
