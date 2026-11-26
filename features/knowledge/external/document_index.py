@@ -132,5 +132,15 @@ def coverage_report(body, url, kind, android_version):
     }
 
 
+def document_title(body: bytes):
+    root = html.fromstring(body, parser=html.HTMLParser(encoding='utf-8', no_network=True))
+    for query in ('//h1', '//title'):
+        for node in root.xpath(query):
+            title = _text(node)
+            if title:
+                return title[:160]
+    return ''
+
+
 def document_revision(body: bytes):
     return hashlib.sha256(body).hexdigest()
