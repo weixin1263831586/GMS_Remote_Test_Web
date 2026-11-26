@@ -95,3 +95,30 @@ def test_embedding_configuration_diagnostics(tmp_path, monkeypatch):
     assert embedding_configuration_issue() is None
     config["retrieval"]["enabled_sources"] = "cdd"
     assert embedding_configuration_issue() == "invalid_config"
+
+
+def test_rejected_hits_prevent_complete_coverage():
+    class Provider:
+        source_id = "test"
+
+        def search(self, query):
+            return RetrievalResult([RetrievalHit("test", "ok", "v1", "text"),
+                                    RetrievalHit("other", "invalid", "v1", "text")], "ready", True)
+
+    result = RetrievalService([Provider()]).search(RetrievalQuery("q"))
+    assert not result["coverage_complete"]
+    assert result["sources_status"][0]["rejected_hits"] == 1
+
+
+def test_vector_dimensions_are_stable_across_batches(tmp_path):
+    index = VectorIndex(tmp_path / "index.sqlite3")
+    index.upsert("source", "model", {"old": "memory"}, Encoder())
+
+    class WrongDimension:
+        def encode(self, texts):
+            return [[1, 0, 0] for _ in texts]
+
+    with pytest.raises(ValueError, match="model_revision"):
+        index.upsert("source", "model", {"new": "test"}, WrongDimension())
+    assert index.indexed("source", "model", ["old", "new"]) == {"old"}
+    assert index.upsert("source", "model-v2", {"new": "test"}, WrongDimension()) == 1

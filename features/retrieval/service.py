@@ -84,15 +84,19 @@ class RetrievalService:
                 if not isinstance(result, RetrievalResult):
                     raise TypeError("Invalid provider result")
                 hits = []
+                rejected = 0
                 for hit in result.hits[:query.limit]:
                     if (hit.source != provider.source_id or not hit.reference or not hit.revision
                             or (query.revision and hit.revision != query.revision)):
+                        rejected += 1
                         continue
                     representatives.setdefault(hit.identity, hit)
                     hits.append(hit.identity)
                 rankings.append(hits)
                 statuses.append({"source": provider.source_id, "status": result.status,
-                                 "coverage_complete": result.coverage_complete, "detail": result.detail})
+                                 "coverage_complete": (result.coverage_complete and not rejected
+                                                       and result.status == "ready" and len(result.hits) <= query.limit),
+                                 "detail": result.detail, "rejected_hits": rejected})
             except Exception as exc:
                 statuses.append({"source": provider.source_id, "status": "error",
                                  "coverage_complete": False, "detail": type(exc).__name__})
@@ -115,7 +119,8 @@ def compact_observation(payload: dict[str, Any], *, max_bytes: int = 8000) -> st
         return encode(payload)
 
     priority = ("success", "tool_name", "error", "status", "status_code", "code",
-                "coverage_complete", "next_query", "next_offset", "total", "offset", "page_complete",
+                "coverage_complete", "source_coverage_complete", "index_complete",
+                "latest_confirmed", "next_query", "next_offset", "total", "offset", "page_complete",
                 "sources_status", "retrieval", "source", "reference",
                 "source_revision", "source_path", "source_anchors", "requirement_id",
                 "original", "condition", "scope", "run_id", "items", "results", "data", "extra")

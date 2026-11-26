@@ -29,14 +29,16 @@ logger = logging.getLogger(__name__)
 RRF_K = 60
 
 
-def _rrf_document_key(hit: KnowledgeHit) -> tuple[str, str, str]:
+def _rrf_document_key(hit: KnowledgeHit) -> tuple[str, ...]:
     """Stable logical-document key for cross-provider fusion and deduplication."""
-    path = str(hit.source_path or "").strip().replace("\\", "/").casefold()
+    path = str(hit.source_path or "").strip().replace("\\", "/")
     title = " ".join(str(hit.title or "").split()).casefold()
+    revision = str(hit.source_revision or "")
+    versions = str(hit.applicable_versions or "")
     if path:
-        return ("path", path, title)
-    snippet = " ".join(str(hit.snippet or "").split()).casefold()
-    return ("text", title, snippet[:240])
+        return ("path", path, title, revision, versions)
+    snippet = " ".join(str(hit.snippet or "").split())
+    return ("text", title, snippet, revision, versions, hit.source)
 
 
 class FederatedKnowledgeService:
@@ -121,6 +123,7 @@ class FederatedKnowledgeService:
                 if wanted is None or sid in wanted
             ]
         results: list[KnowledgeHit] = []
+        hybrid_sources = set()
         status_rows: list[dict[str, Any]] = []
         if not query:
             return {"results": [], "sources_status": self.status()}
@@ -147,6 +150,7 @@ class FederatedKnowledgeService:
                 hybrid_search = getattr(type(provider), "search_with_status", None)
                 if callable(hybrid_search):
                     hits, retrieval_status = hybrid_search(provider, query, **search_options)
+                    hybrid_sources.add(provider.source_id)
                 else:
                     hits = provider.search(query, **search_options)
             except Exception as exc:
@@ -174,17 +178,18 @@ class FederatedKnowledgeService:
         for hit in results:
             by_source.setdefault(hit.source, []).append(hit)
         rankings = []
-        representatives: dict[tuple[str, str, str], KnowledgeHit] = {}
+        representatives: dict[tuple[str, ...], KnowledgeHit] = {}
+        representative_ranks = {}
         for source in sorted(by_source):
             ranking = []
-            for hit in sorted(by_source[source], key=lambda item: item.score, reverse=True):
+            ordered = by_source[source] if source in hybrid_sources else sorted(
+                by_source[source], key=lambda item: item.score, reverse=True)
+            for rank, hit in enumerate(ordered):
                 key = _rrf_document_key(hit)
                 ranking.append(key)
-                current = representatives.get(key)
-                if current is None or (hit.score, hit.source, hit.source_path) > (
-                    current.score, current.source, current.source_path
-                ):
+                if key not in representative_ranks or rank < representative_ranks[key]:
                     representatives[key] = hit
+                    representative_ranks[key] = rank
             rankings.append(ranking)
         merged_keys = fuse_rankings(
             rankings, limit=max(1, limit), k=RRF_K,

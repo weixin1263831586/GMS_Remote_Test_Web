@@ -82,6 +82,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
             for key in ("source_revision", "approved_revision", "available_revision"):
                 if row.get(key):
                     source[key] = str(row[key])[:128]
+            if row.get("coverage_complete") is False:
+                gaps.append("source_coverage:" + source["source"])
             if state in _SOURCE_FAILURES or state == "unknown":
                 gaps.append("source:" + source["source"] + ":" + state)
             if row.get("available_revision") and row.get("source_revision") != row["available_revision"]:
@@ -123,7 +125,8 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     return {"tool": tool, "returned": len(records) if records is not None else None,
             "coverage_complete": (data.get("coverage_complete") is True
                                   and data.get("source_coverage_complete") is not False
-                                  and data.get("index_complete") is not False),
+                                  and data.get("index_complete") is not False
+                                  and not gaps),
             "sources": sources, "references": references[:16],
             "gaps": list(dict.fromkeys(gaps))[:24]}
 
@@ -142,13 +145,12 @@ def evidence_followup_required(observations: list) -> bool:
     """Request at most one extra planning round for an explicit unresolved retrieval gap."""
     if any(isinstance(item, dict) and item.get("evidence_followup") for item in observations):
         return False
-    evidence = next((item["evidence"] for item in reversed(observations)
-                     if isinstance(item, dict) and isinstance(item.get("evidence"), dict)), None)
-    if not evidence:
-        return False
+    evidence = [item["evidence"] for item in observations
+                if isinstance(item, dict) and isinstance(item.get("evidence"), dict)]
     actionable = {"incomplete_coverage", "incomplete_source_scope", "incomplete_evidence_index",
                   "remote_search_failed", "more_result_pages", "batch_query_without_match",
                   "no_match_in_returned_scope", "bounded_or_unconfirmed",
-                  "selected_sdk_scope_only", "sdk_revision_unpinned"}
-    return any(gap in actionable or gap.startswith(("source:", "semantic:", "source_revision_not_current:"))
-               for gap in evidence.get("gaps", []) if isinstance(gap, str))
+                  "selected_sdk_scope_only", "sdk_revision_unpinned", "tool_failed", "stale_candidate"}
+    return any(gap in actionable or gap.startswith(("source:", "semantic:", "source_revision_not_current:",
+                                                    "source_coverage:"))
+               for item in evidence for gap in item.get("gaps", []) if isinstance(gap, str))

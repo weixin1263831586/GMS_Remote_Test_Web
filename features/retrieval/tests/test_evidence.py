@@ -71,3 +71,21 @@ def test_existing_history_reference_reaches_common_evidence_plan():
         "coverage_complete": False}})
     assert evidence["references"] == [{"source": "redmine_journals",
                                        "reference": "journal-token", "revision": "rev"}]
+
+
+def test_earlier_gap_survives_later_success():
+    observations = [
+        {"evidence": {"gaps": ["source:policy:unavailable"]}},
+        {"evidence": {"gaps": [], "coverage_complete": True}},
+    ]
+    assert evidence_followup_required(observations)
+    assert not evidence_followup_required(observations + [{"evidence_followup": True}])
+
+
+def test_source_gap_prevents_complete_coverage_claim():
+    result = summarize_evidence("knowledge_search", {"data": {
+        "coverage_complete": True, "results": [],
+        "sources_status": [{"source": "policy", "status": "ready", "coverage_complete": False}],
+    }})
+    assert not result["coverage_complete"]
+    assert "source_coverage:policy" in result["gaps"]

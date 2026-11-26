@@ -143,3 +143,11 @@ or operational tool execution is allowed. Raw images are validated, stripped
 of metadata and used only for the current analysis; the persisted transcript
 contains the text, image count and resulting answer, not the image bytes.
 Text-only questions continue through the original Agent planning path.
+
+## Shared-layer invariants
+
+Hybrid providers own their within-source ranking. Federation preserves that order,
+compares ranks rather than unrelated scores, and retains revision and applicability
+in evidence identity. Earlier unresolved retrieval gaps remain visible when a
+later lookup succeeds. A vector model revision must maintain the same embedding
+dimension across batches; changing dimensions requires a new revision.

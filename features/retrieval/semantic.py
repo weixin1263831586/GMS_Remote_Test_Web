@@ -186,7 +186,9 @@ class VectorIndex:
             return set()
         with closing(self._connect()) as db:
             return {row[0] for row in db.execute(
-                "SELECT token FROM vectors WHERE namespace=? AND model=?", (namespace, model)
+                """SELECT token FROM vectors WHERE namespace=? AND model=?
+                   AND dimensions BETWEEN 1 AND ? AND length(vector)=dimensions*4""",
+                (namespace, model, MAX_DIMENSION)
             ) if row[0] in manifest}
 
     def upsert(self, namespace, model, documents, embedder):
@@ -199,10 +201,21 @@ class VectorIndex:
         if len(vectors) != len(documents):
             raise ValueError("Embedding count mismatch")
         rows = []
+        dimensions = None
         for token, vector in zip(documents, vectors, strict=True):
             values = _unit(vector)
+            if dimensions is not None and len(values) != dimensions:
+                raise ValueError("Inconsistent embedding dimensions")
+            dimensions = len(values)
             rows.append((namespace, model, token, len(values), struct.pack(f"<{len(values)}f", *values)))
         with closing(self._connect()) as db, db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = db.execute(
+                "SELECT DISTINCT dimensions FROM vectors WHERE namespace=? AND model=?",
+                (namespace, model),
+            ).fetchall()
+            if any(row[0] != dimensions for row in existing):
+                raise ValueError("Embedding dimensions changed; update model_revision")
             db.executemany("INSERT OR REPLACE INTO vectors VALUES(?,?,?,?,?)", rows)
         return len(rows)
 
