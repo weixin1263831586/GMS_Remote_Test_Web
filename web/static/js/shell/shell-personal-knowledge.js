@@ -125,6 +125,11 @@
             async function semanticIndex(endpoint, trigger) {
                 const status = await kbFetch(endpoint);
                 const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
+                const scheduling = status.auto_index_enabled === true
+                    ? 'Controller 自动索引已配置' + (status.last_auto_index_attempt
+                        ? '；最近调度：' + status.last_auto_index_attempt : '；尚无调度记录')
+                    : '手动索引';
+                trigger.title = '语义索引覆盖：' + counts(status) + '；' + scheduling;
                 const reasons = {
                     disabled: 'Controller 尚未启用 retrieval.enabled，请配置本地语义检索。',
                     source_disabled: '当前知识源未加入 retrieval.enabled_sources。',
@@ -146,17 +151,17 @@
                     return;
                 }
                 if (status.coverage_complete) {
-                    showToast('语义索引已完整：' + counts(status), 'success');
+                    showToast('语义索引已完整：' + counts(status) + '；' + scheduling, 'success');
                     return;
                 }
-                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '。连续构建剩余批次？')) return;
+                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '；' + scheduling + '。连续构建剩余批次？')) return;
                 run(async () => {
                     let current = status;
                     // Keep each server request bounded; committed batches can be resumed.
                     for (let batch = 0; batch < 256; batch++) {
                         if (!trigger.isConnected || panel.hidden) break;
                         const result = await kbFetch(endpoint + '?batch_size=128', {method: 'POST'});
-                        trigger.title = '语义索引覆盖：' + counts(result);
+                        trigger.title = '语义索引覆盖：' + counts(result) + '；' + scheduling;
                         if (result.coverage_complete) {
                             showToast('语义索引覆盖：' + counts(result), 'success');
                             return;
