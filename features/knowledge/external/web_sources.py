@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS revisions (
 CREATE TABLE IF NOT EXISTS sync_attempts (
  source_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS semantic_sync_attempts (
+ source_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL
+);
 CREATE VIRTUAL TABLE IF NOT EXISTS clauses USING fts5(
  source_id UNINDEXED, revision UNINDEXED, section, requirement_id, level UNINDEXED,
  condition, original, url UNINDEXED, token UNINDEXED, tokenize='unicode61'
@@ -256,6 +259,7 @@ class WebKnowledgeProvider:
             db.execute("DELETE FROM clauses WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM revisions WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sync_attempts WHERE source_id=?", (source_id,))
+            db.execute("DELETE FROM semantic_sync_attempts WHERE source_id=?", (source_id,))
             db.execute("DELETE FROM sources WHERE id=?", (source_id,))
 
     def sync(self, source_id):
@@ -348,6 +352,48 @@ class WebKnowledgeProvider:
             if len(outcomes) >= max_sources:
                 break
         return outcomes
+
+    def sync_due_semantic(self, *, now=None, max_sources=1, batch_size=128):
+        """Resume public CDD vectors on each scheduler tick, with durable source rotation."""
+        from features.retrieval import embedding_configuration_issue
+
+        config = (config_manager.load_config() or {}).get("retrieval")
+        if not isinstance(config, dict) or config.get("auto_index_public_cdd") is not True:
+            return []
+        if embedding_configuration_issue() is not None or max_sources < 1:
+            return []
+        sources = [row for row in self.list_sources()
+                   if row["enabled"] and row["kind"] == "cdd" and row["revision"] and not row["error"]]
+        if not sources:
+            return []
+        descriptor = try_acquire_sync_lock(self._path().parent / "sync-locks" / "semantic-scheduler.lock")
+        if descriptor is None:
+            return []
+        try:
+            now = now or datetime.now(timezone.utc)
+            with self._db(write=True) as db:
+                attempts = dict(db.execute("SELECT source_id,attempted_at FROM semantic_sync_attempts").fetchall())
+            outcomes = []
+            for source in sorted(sources, key=lambda row: (attempts.get(row["id"], ""), row["id"])):
+                source_id = source["id"]
+                status = self.semantic_status(source_id)
+                if status.get("coverage_complete") is True:
+                    continue
+                # Persist the attempt before inference. A crash resumes from committed vectors
+                # and does not starve other sources on the next controller tick.
+                with self._db(write=True) as db:
+                    db.execute("INSERT OR REPLACE INTO semantic_sync_attempts SELECT id,? FROM sources WHERE id=?",
+                               (now.isoformat(), source_id))
+                try:
+                    status = self.sync_semantic(source_id, batch_size=max(1, min(batch_size, 128)))
+                except Exception as exc:
+                    status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+                outcomes.append({**status, "source_id": source_id, "operation": "semantic_index"})
+                if len(outcomes) >= min(max_sources, 4):
+                    break
+            return outcomes
+        finally:
+            release_sync_lock(descriptor)
 
     def read_requirement(self, token):
         """Read the full retained clause and its original revision, never a new revision."""
