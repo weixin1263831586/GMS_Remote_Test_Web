@@ -258,32 +258,39 @@ def wiki_source(*, android_api_level=None):
             return None, ""
         return provider, rev
 
-    def passage(provider, rev, path, start):
-        import json
+    def valid_policy(db, provider, rev):
+        meta = dict(db.execute("SELECT key,value FROM wiki_meta").fetchall())
+        policy = provider.load_policy()
+        if (policy.degraded or meta.get("source_revision") != rev
+                or meta.get("approved_revision") != rev
+                or json.loads(meta.get("policy_state") or "{}").get("content_hash") != policy.content_hash):
+            return None
+        return policy
 
+    def page_hits(provider, rev, policy, row, starts):
+        path = row["path"]
+        fm = provider._load_frontmatter(row["frontmatter"])
+        if not policy.is_eligible(path, fm.get("tags") or []):
+            return
+        body = redact_sensitive_text(row["content"])
+        for start in starts:
+            if not 0 <= start < len(body):
+                continue
+            yield RetrievalHit("android_internals", f"{path}:{start}", rev, body[start:start + PAGE_SIZE],
+                               "background", {"path": path, "start": start, "total_chars": len(body),
+                               "title": redact_sensitive_text(row["title"])[:200],
+                               "applicable_versions": _scalarize(fm.get("applicable_versions")),
+                               "license": policy.license_expression,
+                               "applicability_verified": False, "offset_basis": "redacted_indexed_document"})
+
+    def passage(provider, rev, path, start):
         with provider._connect() as db:
             db.execute("BEGIN")
-            meta = dict(db.execute("SELECT key,value FROM wiki_meta").fetchall())
-            policy = provider.load_policy()
-            if (policy.degraded or meta.get("source_revision") != rev
-                    or meta.get("approved_revision") != rev
-                    or json.loads(meta.get("policy_state") or "{}").get("content_hash") != policy.content_hash):
+            policy = valid_policy(db, provider, rev)
+            if not policy:
                 return None
             row = db.execute("SELECT path,title,content,frontmatter FROM wiki_pages WHERE path=?", (path,)).fetchone()
-            if row is None:
-                return None
-            fm = provider._load_frontmatter(row["frontmatter"])
-            if not policy.is_eligible(path, fm.get("tags") or []):
-                return None
-            body = redact_sensitive_text(row["content"])
-            if not 0 <= start < len(body):
-                return None
-            return RetrievalHit("android_internals", f"{path}:{start}", rev, body[start:start + PAGE_SIZE],
-                                "background", {"path": path, "start": start, "total_chars": len(body),
-                                "title": redact_sensitive_text(row["title"])[:200],
-                                "applicable_versions": _scalarize(fm.get("applicable_versions")),
-                                "license": policy.license_expression,
-                                "applicability_verified": False, "offset_basis": "redacted_indexed_document"})
+            return next(page_hits(provider, rev, policy, row, [start]), None) if row else None
 
     def current(hit):
         provider, rev = state()
@@ -315,7 +322,10 @@ def wiki_source(*, android_api_level=None):
             item = passage(provider, rev, hit.source_path, max(0, pos - 200))
             if item:
                 rows.append(item)
-        return RetrievalResult(rows, "matched" if rows else "no_match")
+        hints = wiki_insight_index().search(re.findall(r"[\w.-]{2,}", query), resolve, limit=limit)
+        pool = {hit.identity: hit for hit in [*hints, *rows]}
+        ranked = fuse_rankings([[hit.identity for hit in rows], [hit.identity for hit in hints]], limit=limit)
+        return RetrievalResult([pool[key] for key in ranked], "matched" if ranked else "no_match")
 
     def read(hit, page):
         provider, rev = state()
@@ -325,8 +335,48 @@ def wiki_source(*, android_api_level=None):
         fresh = passage(provider, rev, hit.metadata["path"], start)
         return RetrievalResult([fresh] if fresh else [], "matched" if fresh else "no_match")
 
+    def resolve(reference, revision):
+        try:
+            path, offset = reference.rsplit(":", 1)
+            provider, rev = state()
+            return passage(provider, rev, path, int(offset)) if provider and rev == revision else None
+        except (ValueError, KeyError):
+            return None
+
+    def manifest():
+        provider, rev = state()
+        if not provider:
+            return {}, False
+        rows = {}
+        complete = True
+        with provider._connect() as db:
+            db.execute("BEGIN")
+            policy = valid_policy(db, provider, rev)
+            if not policy:
+                return {}, False
+            cursor = db.execute("SELECT path,title,content,frontmatter FROM wiki_pages ORDER BY path")
+            for row in cursor:
+                # A bounded manifest is not the complete upstream corpus.
+                complete &= len(row["content"]) <= 128000
+                for hit in page_hits(provider, rev, policy, row, range(0, min(len(row["content"]), 128000), 2400)):
+                    if len(rows) >= 4096:
+                        return rows, False
+                    rows[passage_token(hit)] = hit
+        return rows, complete
+
     return IntelligentSource("android_internals", "已批准版本且获本地模型处理授权的 Android 机制 Wiki（背景证据）",
-                             search, current, read)
+                             search, current, read, None, manifest, resolve)
+
+
+def wiki_insight_index():
+    from .external.android_internals import index_db_path
+
+    key = understanding_model_key("auto_understand_approved_wiki")
+    config = (config_manager.load_config() or {}).get("retrieval") or {}
+    if not isinstance(config, dict) or config.get("allow_local_wiki_llm") is not True:
+        key = ""
+    return PassageInsightIndex(index_db_path().parent / "wiki-understanding.sqlite3", key)
+
 
 
 def local_document_model(analyzer_factory, *, preferred=None, catalog_hash=""):
