@@ -59,7 +59,7 @@ def _model(path, revision):
 
 def _source_config(source):
     config = (config_manager.load_config() or {}).get("retrieval") or {}
-    if not config.get("enabled"):
+    if not isinstance(config, dict) or config.get("enabled") is not True:
         return {}
     allowed = config.get("enabled_sources", ["cdd"])
     if not isinstance(allowed, list) or source not in allowed:
@@ -73,7 +73,10 @@ def embedding_configuration_issue(source="cdd"):
         config = (config_manager.load_config() or {}).get("retrieval", {})
         if not isinstance(config, dict):
             return "invalid_config"
-        if not config.get("enabled"):
+        enabled = config.get("enabled", False)
+        if not isinstance(enabled, bool):
+            return "invalid_config"
+        if not enabled:
             return "disabled"
         allowed = config.get("enabled_sources", ["cdd"])
         if not isinstance(allowed, list):
@@ -99,7 +102,10 @@ def local_embedding(source="cdd"):
     config = _source_config(source)
     if not config:
         return None
-    return _model(str(config["model_path"]), str(config["model_revision"]))
+    path, revision = config.get("model_path"), config.get("model_revision")
+    if not isinstance(path, str) or not path.strip() or not isinstance(revision, str) or not revision.strip():
+        raise ValueError("Local embedding path and revision are required")
+    return _model(path, revision)
 
 
 class LocalReranker:
@@ -141,9 +147,12 @@ def _reranker(path, revision):
 
 def local_reranker(source="cdd"):
     config = _source_config(source)
-    if not config.get("reranker_path"):
+    path, revision = config.get("reranker_path"), config.get("reranker_revision")
+    if not path:
         return None
-    return _reranker(str(config["reranker_path"]), str(config["reranker_revision"]))
+    if not isinstance(path, str) or not path.strip() or not isinstance(revision, str) or not revision.strip():
+        raise ValueError("Local reranker path and revision are required")
+    return _reranker(path, revision)
 
 
 def _unit(vector):
