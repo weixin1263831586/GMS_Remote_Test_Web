@@ -43,7 +43,7 @@ class ClusterRepository(
         db_path: str | Path,
         claim_db_path: str | Path | None = None,
         claim_lease_ttl_seconds: int = 90,
-    ):
+    ) -> None:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         if claim_db_path is None:

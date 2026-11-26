@@ -9,6 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 
+from foundation.config import ConfigManager
 from worker.adb_proxy import ADB_PROXY_VERSION
 
 from .proxy_security import create_pair_grant
@@ -27,7 +28,7 @@ class ADBProxyService:
     """Coordinate adbproxy-rs without changing canonical device ownership."""
 
     def __init__(self) -> None:
-        self.config_manager: Any = None
+        self.config_manager: ConfigManager | None = None
         self._lock = threading.RLock()
         # adb-hub and the persisted assignment map are shared resources.
         # Serialize connect/add/disconnect workflows so concurrent requests

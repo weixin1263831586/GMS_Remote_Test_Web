@@ -25,6 +25,7 @@ from foundation.networking import is_local_host
 from foundation.private_config import write_private_json
 from foundation.runtime_config_store import RuntimeConfigStore
 from foundation.runtime_settings import RuntimeSettings
+from foundation.ssh import find_device_host_password
 
 
 logger = logging.getLogger(__name__)
@@ -630,41 +631,9 @@ class ConfigManager:
         username, hostname = device_host.split('@', 1)
         return username.strip(), hostname.strip()
 
-    def find_device_host_password(self, device_host: str, config: dict[str, Any] = None) -> str | None:
+    def find_device_host_password(self, device_host: str, config: dict[str, Any] | None = None) -> str | None:
         """Return an exact host-scoped SSH secret decrypted at use time."""
-        if config is None:
-            config = self.load_config()
-
-        if '@' not in device_host:
-            return None
-
-        username, hostname = self._split_device_host(device_host)
-
-        from foundation.secrets import decrypt_secret
-
-        for cred in config.get('client_ssh_credentials', []):
-            cred_device_host = str(cred.get('device_host') or '').strip()
-            cred_host = str(cred.get('host') or cred.get('hostname') or '').strip()
-            cred_username = str(cred.get('username') or '').strip()
-            if cred_device_host and cred_device_host == device_host:
-                matched = True
-            else:
-                matched = cred_username == username and cred_host == hostname
-            if not matched:
-                continue
-            encrypted = str(cred.get("encrypted_password") or "")
-            if encrypted:
-                try:
-                    return decrypt_secret(encrypted)
-                except RuntimeError:
-                    logger.warning("SSH credential for %s cannot be decrypted; rotate it", device_host)
-                    return None
-            if cred.get("password"):
-                logger.warning("Ignoring plaintext SSH credential for %s; rotate it", device_host)
-            return None
-
-        logger.debug(f"[Config] No SSH credential found for {device_host}")
-        return None
+        return find_device_host_password(device_host, self.load_config() if config is None else config)
 
     def upsert_device_host_password(self, device_host: str, password: str) -> bool:
         """Insert or update one Windows client SSH password in runtime config."""

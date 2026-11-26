@@ -32,7 +32,7 @@ from .service import ClusterService
 from .worker_auth import authenticate_worker, worker_tokens
 
 
-def run_artifact_retention():
+def run_artifact_retention() -> None:
     from .artifact_retention import run_enabled_retention
 
     return run_enabled_retention(get_cluster_service().repository)

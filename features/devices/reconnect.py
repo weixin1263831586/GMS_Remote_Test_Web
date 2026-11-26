@@ -8,10 +8,12 @@ import time
 from collections.abc import Iterable
 from typing import Any
 
+from foundation.ssh import find_device_host_password
+
 from . import runtime
 from .manager import device_manager, has_blocked_adb_process
 from .usbip.flash import resolve_usbip_flash_routes
-from .usbip.manager import find_device_host_password, usbip_manager
+from .usbip.manager import usbip_manager
 from .usbip.operations import usbip_operation_gate
 from .usbip.persistence import migrate_local_usbip_busid, update_usbip_source_records
 from .usbip.support import (

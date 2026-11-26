@@ -1,3 +1,5 @@
+from starlette.responses import Response
+
 from features.automation.artifacts import artifact_download_progress
 from features.automation.models import TERMINAL_STATUSES as AUTOMATION_TERMINAL_STATUSES
 from features.automation.models import AutomationRunCreateRequest
@@ -14,14 +16,14 @@ def get_worker_status() -> AutomationWorkerStatus:
     return _status()
 
 
-def automation_ui_asset(ui_asset: str):
+def automation_ui_asset(ui_asset: str) -> Response:
     """Serve an automation page JS chunk (public surface for tests/tools)."""
     from features.automation.api import automation_ui_asset as _serve
 
     return _serve(ui_asset)
 
 
-def get_automation_service():
+def get_automation_service() -> AutomationService:
     """Return the module-level AutomationService singleton.
 
     Public surface for cross-feature consumers (ops alert sweep); importing

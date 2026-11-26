@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from features.auth import require_elevated_admin
 from foundation.error_model import record_internal_error
 from foundation.responses import error_response
+from foundation.ssh import find_device_host_password
 
 from .. import runtime
 from ..adb.api import (
@@ -52,7 +53,7 @@ from .assignments import (
     usbip_assignment_key as _usbip_assignment_key,
 )
 from .linux_source import stop_ubuntu_usbip_server
-from .manager import detach_ubuntu_usbip_ports, find_device_host_password, usbip_manager
+from .manager import detach_ubuntu_usbip_ports, usbip_manager
 from .operations import (
     has_remaining_usbip_assignments,
     selected_usbip_serials,

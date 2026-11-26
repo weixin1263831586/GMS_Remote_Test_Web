@@ -202,7 +202,7 @@ def validate_local_firmware_recovery(prepared: PreparedFirmwareRecovery | None) 
         validate_local_firmware_identity(prepared["device_id"], prepared["snapshot"]["usb_port_path"])
 
 
-def refresh_post_burn_inventory(repository, worker_id: str) -> None:
+def refresh_post_burn_inventory(repository: ClusterRepositoryContract, worker_id: str) -> None:
     """烧写恢复完成后立即把本机设备清单写入库存（best-effort）。
 
     真实 agent 守护进程的下一个周期心跳（默认 15s）之前，库存还停留在

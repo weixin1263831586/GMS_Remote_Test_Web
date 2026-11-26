@@ -11,6 +11,7 @@ from features.auth import require_elevated_admin
 from features.users import get_client_display_id_from_request
 from foundation.error_model import ApiError, record_internal_error
 from foundation.responses import error_response
+from foundation.ssh import find_device_host_password
 
 from .. import runtime
 from ..support import DeviceSSHConnection
@@ -18,7 +19,6 @@ from .access import enforce_usbip_host_access
 from .manager import (
     USBIPD_INSTALL_CMD,
     USBIPD_INSTALL_GUIDE,
-    find_device_host_password,
     usbip_manager,
 )
 

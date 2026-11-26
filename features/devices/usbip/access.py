@@ -1,11 +1,11 @@
 """Authorization helpers for user-owned USB/IP client hosts."""
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
-from features.auth import get_authenticated_user, is_elevated
+from features.auth import CurrentUser, get_authenticated_user, is_elevated
 
 
-def usbip_request_user(request):
+def usbip_request_user(request: Request) -> CurrentUser | None:
     try:
         return get_authenticated_user(request)
     except AttributeError:
@@ -13,7 +13,7 @@ def usbip_request_user(request):
 
 
 def enforce_usbip_host_access(
-    request,
+    request: Request,
     explicit_host: str | None,
     request_host: str,
 ) -> None:

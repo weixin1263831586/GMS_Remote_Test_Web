@@ -26,7 +26,6 @@ from typing import Any
 
 from foundation.networking import parse_host_address, probe_tcp_quality, split_host_port
 
-from ..ssh_credentials import find_device_host_password
 from ..usb import (
     ANDROID_USBIP_MARKERS,
     configured_usbip_vid_pids,
@@ -109,7 +108,6 @@ __all__ = [
     "USBIPD_INSTALL_GUIDE",
     "USBIPManager",
     "detach_ubuntu_usbip_ports",
-    "find_device_host_password",
     "parse_adb_device_states",
     "parse_fastboot_devices",
     "parse_usbip_port_entries",
