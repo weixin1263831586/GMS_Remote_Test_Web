@@ -31,10 +31,11 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
     source_groups = data.get("sources")
     grouped_records = []
     group_limited = False
-    if isinstance(source_groups, dict) and any(
+    has_groups = isinstance(source_groups, dict) and any(
         isinstance(row, dict) and isinstance(row.get("items"), list)
         for row in source_groups.values()
-    ):
+    )
+    if has_groups:
         if source_status is None:
             source_status = []
         if isinstance(source_status, list):
@@ -51,7 +52,7 @@ def summarize_evidence(tool: str, payload: Any) -> dict | None:
                 grouped_records.extend({**item, "source": str(name)} for item in row["items"][:30]
                                        if isinstance(item, dict))
     records = next((data[key] for key in _RESULT_KEYS if isinstance(data.get(key), list)), None)
-    if records is None and isinstance(source_groups, dict) and isinstance(source_status, list):
+    if records is None and has_groups and isinstance(source_status, list):
         records = grouped_records
     batches = data.get("queries")
     batch_rows = [row for row in batches[:16] if isinstance(row, dict)] if isinstance(batches, list) else []
