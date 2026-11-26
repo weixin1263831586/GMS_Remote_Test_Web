@@ -109,7 +109,7 @@ def test_low_ram_section_lookup_preserves_table_note_and_real_anchor(tmp_path):
         sync_source(conn, 1, fetched(body), force=True, timestamp='2026-01-01')
         url = SOURCE.url + '#low-ram'
         assert policy_lookup_target(url) == url
-        assert policy_lookup_target('过GMS认证，Android17设备RAM要求，Go和非Go') == 'section:Low RAM'
+        assert policy_lookup_target('过GMS认证，Android17设备RAM要求，Go和非Go') == 'section:Low RAM;android=17'
         assert policy_lookup_target('Android CDD RAM') == ''
         for query in (url, 'section:GMS-10.0-001', 'section:Low RAM'):
             data = lookup_requirement_sections(conn, query)
@@ -221,3 +221,46 @@ def test_low_ram_declaration_excludes_preload_and_other_memory_sections(tmp_path
         coverage['section_anchors'] = {k: v for k, v in coverage['section_anchors'].items() if v != 'low-ram'}
         conn.execute('UPDATE gms_update_requirement_coverage SET coverage_json=?', (json.dumps(coverage),))
         assert lookup_requirement_sections(conn, 'section:Low RAM')['status'] == 'no_match'
+
+
+def test_ram_lookup_isolates_legacy_mixed_section_and_selects_version(tmp_path):
+    from features.gms.requirement_lookup import lookup_requirement_sections
+
+    doc = fetched("""<article class="devsite-article">
+        <h3 id="low-ram">Declare Low RAM devices</h3>
+        <p>[GMS-10.0-001] Example declaration.</p>
+        <table><tr><th>OS Version</th><th>Must be Low RAM</th><th>Optionally Low RAM</th>
+        <th>Not qualified for GMS</th></tr>
+        <tr><td>Android 16 or higher</td><td>Example A</td><td>Example B</td><td>Example C</td></tr>
+        <tr><td>Android 15</td><td>Old A</td><td>Old B</td><td>Old C</td></tr></table>
+        <p>Note: Example note.</p>
+        <p>[GMS-10.4-001] Example storage.</p>
+        <table><tr><th>OS Version</th><th>Flash storage size</th></tr>
+        <tr><td>Android 15 or higher</td><td>Example storage value</td></tr></table></article>""")
+    with closing(connect(tmp_path / 'mixed.sqlite3')) as conn, conn:
+        sync_source(conn, 1, doc, force=True, timestamp='2026-01-01')
+        for query in ('section:Low RAM;android=17', 'section:GMS-10.0-001', SOURCE.url + '#low-ram'):
+            result = lookup_requirement_sections(conn, query)
+            section = result['sections'][0]
+            assert section['context_limited']
+            assert [clause['requirement_id'] for clause in section['clauses']] == ['GMS-10.0-001']
+            assert len(section['table_rows']) == 2
+            assert 'Example storage' not in str(section)
+            assert not section['text']
+            if result['requested_android_version'] == 17:
+                assert len(section['version_rows']) == 1
+                assert section['version_rows'][0]['values'][1] == 'Example A'
+
+
+def test_semantic_heading_creates_section_and_table_text_is_not_duplicated():
+    parsed = parse_gms_requirements(fetched("""<article class="devsite-article">
+        <h3 id="low-ram">Declare Low RAM devices</h3>
+        <p>[GMS-10.0-001] Example declaration.</p>
+        <table><tr><th>Limit</th></tr><tr><td>Unique cell value</td></tr></table>
+        <div role="heading" aria-level="3" id="storage">10.4. Storage</div>
+        <p>[GMS-10.4-001] Example storage.</p></article>"""))
+    first, second = parsed.requirement_clauses
+    assert first.section_key != second.section_key
+    assert parsed.requirement_table_rows[0].section_key == first.section_key
+    assert 'Unique cell value' not in next(s.text_excerpt for s in parsed.requirement_sections
+                                           if s.section_key == first.section_key)

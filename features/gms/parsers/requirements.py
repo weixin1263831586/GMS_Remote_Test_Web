@@ -73,15 +73,27 @@ def _media(node, base):
     return result
 
 
+def _policy_heading_level(node):
+    level = heading_level(node)
+    if level:
+        return level
+    if node.get('role') == 'heading':
+        value = node.get('aria-level', '')
+        if value in ('2', '3', '4', '5', '6'):
+            return int(value)
+    return 0
+
+
 def _events(node):
     """Walk document order across containers without duplicating nested text."""
     if not isinstance(node.tag, str) or node.tag in _SKIP:
         return
-    if heading_level(node):
+    if _policy_heading_level(node):
         yield 'heading', node, text_content(node)
         return
     if node.tag == 'table':
         yield 'table', node, ''
+        return
     if node.tag == 'img':
         yield 'image', node, ''
         return
@@ -94,7 +106,7 @@ def _events(node):
         if not isinstance(child.tag, str):
             pieces.append(child.tail or '')
             continue
-        structural = child.tag in _BLOCKS or heading_level(child) or child.tag == 'img'
+        structural = child.tag in _BLOCKS or _policy_heading_level(child) or child.tag == 'img'
         if structural:
             value = flush()
             if value:
@@ -103,7 +115,7 @@ def _events(node):
             yield from _events(child)
         elif child.tag not in _SKIP:
             # Inline wrappers can themselves contain block nodes.
-            if any(isinstance(desc.tag, str) and (desc.tag in _BLOCKS or heading_level(desc)
+            if any(isinstance(desc.tag, str) and (desc.tag in _BLOCKS or _policy_heading_level(desc)
                    or desc.tag == 'img') for desc in child.iterdescendants()):
                 value = flush()
                 if value:
@@ -179,7 +191,7 @@ def parse_gms_requirements(fetched: FetchedDocument, session=None) -> ParsedSour
 
     for event, node, value in _events(article):
         if event == 'heading':
-            level = heading_level(node)
+            level = _policy_heading_level(node)
             if level >= 2 and meaningful_requirement_heading(value, level):
                 select_section(node, level, value)
                 continue

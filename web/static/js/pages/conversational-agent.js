@@ -489,8 +489,34 @@ function renderAgentMessages(session) {
                             clause.change_kind].filter(Boolean).join(' · '));
                         if (clause.original_text) addText(block, 'p', clause.original_text);
                     }
+                    const requested = result.requested_android_version;
+                    const matchedRows = section.version_rows || [];
+                    if (requested && result.lookup_scope === 'low_ram_declaration') {
+                        addText(block, 'strong', 'Android ' + requested + '：政策表格对应要求');
+                        if (!matchedRows.length) {
+                            addText(block, 'p', '未找到明确适用的版本行，不推断 RAM 准入数值。');
+                        } else {
+                            for (const row of matchedRows) {
+                                const headers = row.headers.map(value => String(value).trim().toLowerCase());
+                                for (const [header, label] of [
+                                    ['must be low ram', '必须声明 Low RAM'],
+                                    ['optionally low ram', '可选声明 Low RAM'],
+                                    ['not qualified for gms', '不符合 GMS 资格']
+                                ]) {
+                                    const index = headers.indexOf(header);
+                                    if (index >= 0) addText(block, 'p', label + '：' + (row.values[index] || '未列明'));
+                                }
+                            }
+                            addText(block, 'p', 'Low RAM 声明不等同于 Android Go 产品认证；仍需核验产品适用条件。');
+                        }
+                    }
+                    if (section.context_limited) {
+                        addText(block, 'p', '索引存在相邻政策混入，已排除无关条款和表格；章节附注待重新同步核验。');
+                    }
                     const grouped = new Map();
-                    for (const row of section.table_rows || []) {
+                    const displayRows = requested && result.lookup_scope === 'low_ram_declaration'
+                        ? matchedRows : (section.table_rows || []);
+                    for (const row of displayRows) {
                         const key = row.table_index;
                         if (!grouped.has(key)) grouped.set(key, []);
                         grouped.get(key).push(row);
@@ -525,7 +551,14 @@ function renderAgentMessages(session) {
                     const details = document.createElement('details');
                     addText(details, 'summary', '展开章节原文、Note、脚注及版本信息');
                     addText(details, 'p', '文档修订：' + (section.source_revision || '未知'));
-                    addText(details, 'p', section.text || '');
+                    if (requested && result.lookup_scope === 'low_ram_declaration') {
+                        for (const row of section.table_rows || []) {
+                            addText(details, 'p', (row.headers || []).map((header, i) =>
+                                header + '：' + (row.values[i] || '')).join(' | '));
+                        }
+                    }
+                    if (section.text) addText(details, 'p', section.text);
+                    else if (section.context_limited) addText(details, 'p', '原始上下文边界不明确，请查看官方章节。');
                     if (section.media?.length) addText(details, 'p', '包含图片引用，图片内容尚未核验。');
                     block.append(details);
                 }

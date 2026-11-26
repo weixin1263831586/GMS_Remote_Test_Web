@@ -38,12 +38,29 @@ def policy_lookup_target(message: str) -> str:
         # A qualified subtopic must not be rewritten to the declaration rule.
         if re.search(r"preload|预装|模块|module|APEX", message, re.I):
             return "section:Module preload requirements for low RAM devices"
-        return "section:Low RAM"
+        versions = set(re.findall(r"Android\s*(\d{2})(?!\d)", message, re.I))
+        suffix = ";android=" + next(iter(versions)) if len(versions) == 1 else ""
+        return "section:Low RAM" + suffix
     return ""
 
 
 def _like(text):
     return "%" + escape_like(text) + "%"
+
+
+def _ram_table(headers):
+    """Recognize the declaration table by all four column meanings."""
+    fields = {" ".join(str(value).casefold().split()) for value in headers}
+    return {"os version", "must be low ram", "optionally low ram", "not qualified for gms"} <= fields
+
+
+def _matches_android(label, version):
+    match = re.fullmatch(r"Android\s+(\d{2})(?:\s+(or higher|and higher|or later|and later))?",
+                         str(label).strip(), re.I)
+    if not match:
+        return False
+    minimum = int(match.group(1))
+    return version >= minimum if match.group(2) else version == minimum
 
 
 def lookup_requirement_sections(conn, query):
@@ -70,6 +87,11 @@ def lookup_requirement_sections(conn, query):
     ).fetchone()
     params = [SOURCE]
     keys = []
+    version_match = re.fullmatch(r"section:low ram;android=(\d{2})", query.strip(), re.I)
+    android_version = int(version_match.group(1)) if version_match else None
+    if version_match:
+        query = "section:Low RAM"
+    ram_scope = query.strip().casefold() in {"section:low ram", "section:gms-10.0-001"}
     try:
         parsed = urlsplit(query) if query.startswith(("https://", "http://")) else None
     except ValueError:
@@ -81,6 +103,7 @@ def lookup_requirement_sections(conn, query):
                 or parsed.path.rstrip("/") != urlsplit(SOURCE_URL).path or not parsed.fragment):
             return {"status": "anchor_required", "sections": [], "coverage_complete": False}
         anchor = unquote(parsed.fragment)
+        ram_scope = anchor in {"low-ram", "GMS-10.0-001"}
         keys = [key for key, value in (coverage.get("section_anchors") or {}).items()
                 if value == anchor][:MAX_ROWS]
         # Previously indexed revisions may still have exact clause URLs.
@@ -142,26 +165,53 @@ def lookup_requirement_sections(conn, query):
             "ORDER BY table_index,row_index LIMIT ?", (SOURCE, key, MAX_ROWS + 1)
         ).fetchall()
         text = section["text_excerpt"]
+        context_limited = False
+        if ram_scope:
+            # Older indexes may attach neighboring storage policy to this heading.
+            # Only display the exact clause and a table with the declaration schema.
+            filtered_clauses = [item for item in clauses if item["requirement_id"] == "GMS-10.0-001"]
+            filtered_rows = [item for item in rows if _ram_table(json.loads(item["headers_json"]))]
+            context_limited = (len(filtered_clauses) != len(clauses) or len(filtered_rows) != len(rows)
+                               or len(clauses) > MAX_ROWS or len(rows) > MAX_ROWS)
+            clauses, rows = filtered_clauses, filtered_rows
+            if context_limited:
+                # The flattened legacy excerpt cannot reliably separate notes and
+                # adjacent policy; do not present it as an exact original section.
+                text = ""
         anchor = (coverage.get("section_anchors") or {}).get(key)
         url = SOURCE_URL + "#" + quote(anchor, safe="-_.:") if anchor else ""
         if not url:
             urls = {item["source_url"] for item in clauses if item["anchor_kind"] == "section"}
             if len(urls) == 1:
                 url = urls.pop()
+        if ram_scope and not clauses:
+            continue
+        table_rows = [{"headers": json.loads(item["headers_json"]),
+                       "values": json.loads(item["values_json"]),
+                       "table_index": item["table_index"], "row_index": item["row_index"],
+                       "content_hash": item["content_hash"]} for item in rows[:MAX_ROWS]]
+        version_rows = []
+        if android_version is not None:
+            for item in table_rows:
+                headers = [" ".join(str(value).casefold().split()) for value in item["headers"]]
+                index = headers.index("os version")
+                if index < len(item["values"]) and _matches_android(item["values"][index], android_version):
+                    version_rows.append(item)
         result.append({
+            "context_limited": context_limited, "version_rows": version_rows,
             "section_key": key, "title": section["path"], "source_url": url,
             "source_revision": revision, "text": text[:MAX_TEXT],
             "clauses": [{k: item[k] for k in ("requirement_id", "change_version", "change_kind",
                          "source_url", "content_hash", "original_text", "context_text")}
                         for item in clauses[:MAX_ROWS]],
-            "table_rows": [{"headers": json.loads(item["headers_json"]),
-                            "values": json.loads(item["values_json"]),
-                            "table_index": item["table_index"], "row_index": item["row_index"],
-                            "content_hash": item["content_hash"]} for item in rows[:MAX_ROWS]],
-            "media": [item for item in coverage.get("media", []) if item.get("section_key") == key][:MAX_ROWS],
+            "table_rows": table_rows,
+            "media": [] if context_limited else [item for item in coverage.get("media", [])
+                                                 if item.get("section_key") == key][:MAX_ROWS],
             "truncated": (len(text) > MAX_TEXT or len(rows) > MAX_ROWS or len(clauses) > MAX_ROWS),
         })
     return {"status": "matched" if result else "no_match", "sections": result,
+            "requested_android_version": android_version,
+            "lookup_scope": "low_ram_declaration" if ram_scope else "section",
             "source_revision": revision, "indexed_at": row["indexed_at"],
             "latest_scan_confirmed": bool(latest and latest["run_id"] == row["run_id"]
                                           and latest["state"] == "ready"),
