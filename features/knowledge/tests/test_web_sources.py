@@ -184,3 +184,79 @@ def test_sync_coalesces_and_revision_read(tmp_path, monkeypatch):
     assert provider.sync_due() == []
     provider.delete(source16)
     assert provider.read_requirement(token) is None
+
+
+
+def test_url_only_create_and_manual_name(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from features.knowledge import external_api
+
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    fetch = Mock(side_effect=[(cdd(16), 'e16', ''), (cdd(17), 'e17', ''), (cdd(17, 'NewSpeech'), 'new', '')])
+    monkeypatch.setattr(web_sources, 'fetch_html', fetch)
+    monkeypatch.setattr(external_api, 'WebKnowledgeProvider', lambda: provider)
+    monkeypatch.setattr(external_api, 'require_elevated_admin', lambda _request: None)
+    app = FastAPI()
+    app.include_router(external_api.router)
+    client = TestClient(app)
+    url16 = 'https://source.android.com/docs/compatibility/16/android-16-cdd'
+    url17 = 'https://source.android.com/docs/compatibility/17/android-17-cdd'
+    response = client.post('/external/web-sources', json={'url': url16})
+    assert response.status_code == 200
+    assert response.json()['data']['sync']['status'] == 'ready'
+    auto_id = response.json()['data']['id']
+    rows = provider.list_sources()
+    assert rows[0]['name'] == 'Android 16 Compatibility Definition'
+    assert rows[0]['android_version'] == 16
+    assert rows[0]['indexed_count'] > 50
+    assert provider.search('TTS', android_api_level=36)
+    assert not provider.search('TTS', android_api_level=37)
+    response = client.post('/external/web-sources', json={'url': url17, 'name': '手写名称'})
+    assert response.status_code == 200
+    manual_id = response.json()['data']['id']
+    provider.sync(manual_id)
+    row = next(r for r in provider.list_sources() if r['id'] == manual_id)
+    assert row['name'] == '手写名称'
+    assert row['android_version'] == 17
+    old_revision = row['revision']
+    response = client.put('/external/web-sources/' + manual_id, json={'url': url17, 'name': '新名称'})
+    assert response.status_code == 200
+    row = next(r for r in provider.list_sources() if r['id'] == manual_id)
+    assert row['name'] == '新名称'
+    assert row['revision'] == old_revision
+    response = client.put('/external/web-sources/' + auto_id, json={'url': url16, 'enabled': False})
+    assert response.status_code == 200
+    assert not provider.search('TTS', android_api_level=36)
+    assert fetch.call_count == 3
+
+
+def test_unknown_source_requires_approval_and_failed_initial_sync_is_retryable(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from features.knowledge import external_api
+
+    provider = WebKnowledgeProvider(tmp_path / 'web.sqlite3')
+    fetch = Mock(side_effect=OSError('network down'))
+    monkeypatch.setattr(web_sources, 'fetch_html', fetch)
+    monkeypatch.setattr(external_api, 'WebKnowledgeProvider', lambda: provider)
+    monkeypatch.setattr(external_api, 'require_elevated_admin', lambda _request: None)
+    app = FastAPI()
+    app.include_router(external_api.router)
+    client = TestClient(app)
+    url = 'https://example.com/document'
+    assert client.post('/external/web-sources', json={'url': url}).status_code == 422
+    fetch.assert_not_called()
+    response = client.post('/external/web-sources', json={'url': url, 'authorized_for_ai_processing': True})
+    assert response.status_code == 200
+    assert response.json()['data']['sync']['status'] == 'error'
+    source_id = response.json()['data']['id']
+    assert provider.list_sources()[0]['error']
+    fetch.side_effect = None
+    fetch.return_value = (b'<article><h1>Example policy</h1><p>Public content.</p></article>', '', '')
+    assert client.post('/external/web-sources/' + source_id + '/sync').status_code == 200
+    assert provider.list_sources()[0]['name'] == 'Example policy'
+    assert provider.list_sources()[0]['indexed_count'] == 1
+    assert not provider.list_sources()[0]['error']
