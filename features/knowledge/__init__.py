@@ -18,6 +18,7 @@ from .external.web_sources import (
     model_catalog_fingerprint,
     recall_web_references,
 )
+from .model_context import public_cdd_context, retrieve_public_cdd_context
 from .policy_imports import owner_policy_imports_current, recall_owner_policy_imports
 
 
@@ -34,6 +35,8 @@ __all__ = [
     "model_catalog_fingerprint",
     "owner_policy_imports_current",
     "page_router",
+    "public_cdd_context",
+    "retrieve_public_cdd_context",
     "recall_owner_policy_imports",
     "recall_web_references",
     "router",
