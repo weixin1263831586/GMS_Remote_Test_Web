@@ -19,9 +19,10 @@ class CddSemantic:
         self.index = VectorIndex(path.parent / "cdd_vectors.sqlite3")
         self.namespace = hashlib.sha256(str(path.resolve()).encode()).hexdigest()
 
-    def _sources(self, source_id=None, version=None):
+    def _sources(self, source_id=None, version=None, *, fresh_only=False):
         return [row for row in self.provider.list_sources()
                 if row["enabled"] and row["kind"] == "cdd" and row["revision"]
+                and (not fresh_only or not row["error"])
                 and (source_id is None or row["id"] == source_id)
                 and (version is None or row["android_version"] == version)]
 
@@ -93,10 +94,10 @@ class CddSemantic:
             self.index.prune(scope, model, tokens)
         return self.status(source_id)
 
-    def search(self, query, *, version=None, limit=20):
+    def search(self, query, *, version=None, limit=20, fresh_only=False):
         if self.embedder is None:
             return [], self.status()
-        sources = self._sources(version=version)
+        sources = self._sources(version=version, fresh_only=fresh_only)
         manifest = [(source, self._manifest(source)) for source in sources]
         total = sum(len(tokens) for _, tokens in manifest)
         if total > MAX_CORPUS:
@@ -119,10 +120,11 @@ class CddSemantic:
                 row = db.execute("""SELECT c.*,s.name,s.android_version,s.license,s.kind,s.synced_at,s.error
                     FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
                     WHERE c.token=? AND s.enabled=1 AND s.kind='cdd'
-                    AND (? IS NULL OR s.android_version=?)""", (token, version, version)).fetchone()
+                    AND (? IS NULL OR s.android_version=?) AND (?=0 OR s.error=\'\')""",
+                                 (token, version, version, int(fresh_only))).fetchone()
                 if row:
                     hits.append((dict(row), score))
-        current = [(source, self._manifest(source)) for source in self._sources(version=version)]
+        current = [(source, self._manifest(source)) for source in self._sources(version=version, fresh_only=fresh_only)]
         if ([(source["id"], source["revision"], tokens) for source, tokens in current] !=
                 [(source["id"], source["revision"], tokens) for source, tokens in manifest]):
             # A revision changed during recall. Retry against a fresh authorized manifest.
