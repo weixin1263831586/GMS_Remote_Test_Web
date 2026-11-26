@@ -95,7 +95,7 @@ async def analyze_image_turn(session: dict, message: str, values: list[str]):
                 return error_response("图片分析已取消", 409)
             analyzer = UniversalAIAnalyzer(users_runtime.config_manager.get_ai_config())
             if not analyzer.image_provider():
-                return error_response("未配置支持视觉的本地模型（capabilities: vision），图片尚未发送", 503)
+                return error_response("未配置支持图片输入的本地模型（capabilities: image_in 或 vision），图片尚未发送", 503)
             _append_step(session, "图片分析", "running", f"正在分析 {len(images)} 张图片")
             step_id = session["steps"][-1]["id"]
             result = await asyncio.to_thread(analyzer.generate_image_analysis, message, images)

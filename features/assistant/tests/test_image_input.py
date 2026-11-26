@@ -31,10 +31,11 @@ def test_clipboard_image_validates_real_content():
 
 
 @pytest.mark.parametrize("fmt", ["openai", "anthropic"])
-def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt):
+@pytest.mark.parametrize("capability", ["vision", "image_in"])
+def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt, capability):
     config = {"enabled": True, "primary_provider": "remote", "providers": {
-        "remote": {"enabled": True, "capabilities": ["vision"], "base_url": "https://example.test", "model": "remote"},
-        "local": {"enabled": True, "capabilities": ["vision"], "base_url": "http://127.0.0.1:8000",
+        "remote": {"enabled": True, "capabilities": [capability], "base_url": "https://example.test", "model": "remote"},
+        "local": {"enabled": True, "capabilities": [capability], "base_url": "http://127.0.0.1:8000",
                   "model": "vision", "api_format": fmt, "auth_required": False},
     }}
     analyzer = UniversalAIAnalyzer(config)
@@ -54,6 +55,11 @@ def test_visual_gateway_uses_only_enabled_local_vision_provider(fmt):
     assert analyzer.image_provider() is None
     assert not analyzer.generate_image_analysis("Analyze", [image_data()])["success"]
     assert analyzer._post_chat.call_count == 1
+    config["providers"]["local"]["capabilities"] = "image_in"
+    assert analyzer.image_provider() is None
+    config["providers"]["local"]["capabilities"] = ["thinking", "tool_use", "image_in"]
+    config["providers"]["local"]["enabled"] = False
+    assert analyzer.image_provider() is None
 
 
 @pytest.mark.asyncio

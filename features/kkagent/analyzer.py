@@ -116,9 +116,14 @@ class UniversalAIAnalyzer:
         names.extend(name for name in providers if name != primary)
         for name in names:
             provider = providers[name]
-            if (isinstance(provider, dict) and provider.get('enabled') and
-                    _is_local_provider(name, provider) and
-                    'vision' in {str(value).lower() for value in provider.get('capabilities') or []}
+            if not isinstance(provider, dict) or not provider.get('enabled'):
+                continue
+            capabilities = provider.get('capabilities')
+            if not isinstance(capabilities, list):
+                continue
+            # The model catalog uses image_in; vision is also an explicit image capability.
+            accepts_images = bool({'image_in', 'vision'} & {str(value).strip().lower() for value in capabilities})
+            if (accepts_images and _is_local_provider(name, provider)
                     and provider.get('base_url') and provider.get('model')):
                 return name
         return None
