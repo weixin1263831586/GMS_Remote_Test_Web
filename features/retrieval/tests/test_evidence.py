@@ -101,3 +101,39 @@ def test_omitted_earlier_gap_and_nested_semantic_status():
     observations = [{"evidence": failed}] + [{"evidence": {"coverage_complete": True}}] * 10
     assert evidence_plan_context(observations)["has_unresolved_scope"]
     assert evidence_followup_required(observations)
+
+
+def test_nested_source_coverage_and_pagination_require_followup():
+    evidence = summarize_evidence("knowledge_search", {"data": {
+        "coverage_complete": True, "results": [{"reference": "r", "source_revision": "v"}],
+        "sources_status": [{"source": "cdd", "status": "ready",
+                            "retrieval": {"status": "ready", "coverage_complete": False}}],
+        "page_complete": False,
+    }})
+    assert not evidence["coverage_complete"]
+    assert {"incomplete_evidence_index", "more_result_pages"} <= set(evidence["gaps"])
+    assert evidence_followup_required([{"evidence": evidence}])
+
+
+def test_batch_scope_and_invalid_matches_do_not_hide_gaps():
+    evidence = summarize_evidence("redmine_evidence_search", {"data": {
+        "coverage_complete": True,
+        "queries": [{"matches": [{"reference": "r", "source_revision": "v"}],
+                     "source_coverage_complete": False, "index_complete": False},
+                    {"matches": 42, "page_complete": False}],
+    }})
+    assert evidence["returned"] == 1
+    assert not evidence["coverage_complete"]
+    assert {"incomplete_source_scope", "incomplete_evidence_index", "bounded_or_unconfirmed",
+            "more_result_pages"} <= set(evidence["gaps"])
+
+
+def test_summary_limits_cannot_claim_complete_coverage():
+    evidence = summarize_evidence("knowledge_search", {"data": {
+        "coverage_complete": True,
+        "results": [{"reference": str(i), "source_revision": "v"} for i in range(31)],
+    }})
+    assert evidence["returned"] == 31
+    assert len(evidence["references"]) == 16
+    assert not evidence["coverage_complete"]
+    assert "bounded_or_unconfirmed" in evidence["gaps"]
