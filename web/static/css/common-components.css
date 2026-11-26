@@ -812,6 +812,9 @@ select option {
     text-align: left;
 }
 
+#device-config-modal .dcfg-tab table:not(:has(> thead)) th { padding: 5px 8px; }
+#device-config-modal .dcfg-tab table:not(:has(> thead)) td { padding: 4px 8px; }
+
 #device-config-modal .dcfg-tab table td .dcell {
 
 
