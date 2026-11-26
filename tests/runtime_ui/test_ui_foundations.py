@@ -73,7 +73,17 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                     }
                                 }
                                 host.append(test);
+                                let groupHeight = null;
+                                if (selector === '.device-management-table') {
+                                    const group = body.insertRow(0);
+                                    group.className = 'device-group-row';
+                                    const cell = group.insertCell();
+                                    cell.colSpan = row.cells.length;
+                                    cell.innerHTML = '<div class="device-group-header">Worker</div>';
+                                    groupHeight = group.getBoundingClientRect().height;
+                                }
                                 results.push({
+                                    groupHeight,
                                     name: selector,
                                     header: head.rows[0].getBoundingClientRect().height,
                                     row: row.getBoundingClientRect().height,
@@ -117,10 +127,12 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 self.assertEqual(len(samples), 11, samples)
                 for item in samples:
                     with self.subTest(width=width, table=item['name']):
-                        self.assertAlmostEqual(item['header'], 42, delta=1, msg=str(item))
+                        self.assertAlmostEqual(item['header'], 38, delta=1, msg=str(item))
                         self.assertAlmostEqual(item['row'], 36, delta=1, msg=str(item))
                         self.assertTrue(item['middle'], item)
                         self.assertTrue(item['padding'], item)
+                        if item.get('groupHeight') is not None:
+                            self.assertAlmostEqual(item['groupHeight'], 36, delta=1, msg=str(item))
         finally:
             page.close()
 
@@ -146,7 +158,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                             };
                         } finally { table.remove(); }
                     }""")
-                    self.assertAlmostEqual(result['header'], 42, delta=1, msg=str(result))
+                    self.assertAlmostEqual(result['header'], 38, delta=1, msg=str(result))
                     self.assertAlmostEqual(result['row'], 36, delta=1, msg=str(result))
                     self.assertEqual(result['align'], 'middle')
         finally:

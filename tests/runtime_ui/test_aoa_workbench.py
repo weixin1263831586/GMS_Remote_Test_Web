@@ -23,6 +23,68 @@ def json_response(route, payload):
 
 
 class RuntimeAoaWorkbenchTests(RuntimeUiHarness):
+    def test_command_grid_keeps_labels_comments_and_actions_on_one_line(self):
+        page = self.new_page()
+        try:
+            page.route('**/api/devices/aoa/**', lambda route: json_response(
+                route, {'success': True, 'profiles': []}))
+            self.goto_shell(page)
+            page.evaluate("switchPage('devices')")
+            page.wait_for_function("typeof aoaViewToggle === 'function'")
+            page.evaluate("aoaViewToggle(true)")
+            expect(page.locator('#aoa-panel')).to_be_visible()
+            page.evaluate("""() => {
+                aoaPanelState.commands = ['wake', 'sleep 5000', 'click 180 525'];
+                aoaPanelState.profileMetadata.command_comments = ['', '', 'Set up using another device -> Skip'];
+                aoaRenderCommands();
+            }""")
+            for width in (1912, 1440, 960, 390):
+                with self.subTest(width=width):
+                    page.set_viewport_size({'width': width, 'height': 914})
+                    expect(page.locator('.aoa-command-row')).to_have_count(3)
+                    result = page.evaluate("""() => {
+                        const table = document.querySelector('.aoa-command-table');
+                        const center = el => {
+                            const r = el.getBoundingClientRect();
+                            return r.top + r.height / 2;
+                        };
+                        const singleLine = nodes => {
+                            const values = [...nodes].map(center);
+                            return Math.max(...values) - Math.min(...values) <= 2;
+                        };
+                        const rows = [...table.querySelectorAll('.aoa-command-row')];
+                        return {
+                            header: singleLine(table.querySelector('.aoa-command-list-header').children),
+                            rows: rows.every(row => singleLine(row.children)),
+                            actions: rows.every(row => {
+                                const actions = row.querySelector('.aoa-command-actions');
+                                return actions.children.length === 4 && singleLine(actions.children)
+                                    && actions.getBoundingClientRect().right <= row.getBoundingClientRect().right + 1;
+                            }),
+                            comments: rows.every(row => {
+                                const comment = row.querySelector('.aoa-command-comment');
+                                const state = row.querySelector('.aoa-command-state');
+                                return comment.getBoundingClientRect().right <= state.getBoundingClientRect().left + 1;
+                            }),
+                            scrollable: table.scrollWidth <= table.clientWidth + 1
+                                || getComputedStyle(table).overflowX === 'auto',
+                        };
+                    }""")
+                    self.assertTrue(all(result.values()), result)
+                    page.evaluate('aoaCommandEditStart(2)')
+                    expect(page.locator('.aoa-command-editor')).to_have_count(1)
+                    self.assertTrue(page.locator('.aoa-command-row').nth(2).evaluate("""row => {
+                        const actions = row.querySelector('.aoa-command-actions');
+                        const input = row.querySelector('.aoa-command-editor').getBoundingClientRect();
+                        const box = actions.getBoundingClientRect();
+                        return actions.children.length === 5
+                            && Math.abs(box.top + box.height / 2 - input.top - input.height / 2) <= 2
+                            && box.right <= row.getBoundingClientRect().right + 1;
+                    }"""))
+                    page.evaluate('aoaCommandEditFinish(false)')
+        finally:
+            page.close()
+
     def test_screen_action_records_command_saves_and_replays_to_target(self):
         page = self.new_page()
         page_errors = []

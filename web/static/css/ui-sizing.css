@@ -26,7 +26,7 @@
     --ui-modal-header-height: 54px;
     --ui-modal-header-height-roomy: 56px;
     --ui-modal-close-size: 30px;
-    --ui-table-header-height: 42px;
+    --ui-table-header-height: 38px;
     --ui-table-row-height: 36px;
     --ui-table-cell-padding-inline: 10px;
     --ui-table-cell-padding-block: 2px;
@@ -68,7 +68,7 @@
     vertical-align: middle;
 }
 :is(table.ui-table, table.list-table, table:has(> thead), table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
-    > tbody > tr:not(:where(.device-group-row, .group-row)) > :is(td, th),
+    > tbody > tr:not(:where(.group-row:not(.device-group-row))) > :is(td, th),
 .suite-file-row {
     box-sizing: border-box;
     height: var(--ui-table-row-height);

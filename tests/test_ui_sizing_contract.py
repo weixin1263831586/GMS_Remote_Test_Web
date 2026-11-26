@@ -79,7 +79,7 @@ class UiSizingContractTests(unittest.TestCase):
             "control-height-dense": 28,
             "control-height-small": 26,
             "segmented-inner-height": 24,
-            "table-header-height": 42,
+            "table-header-height": 38,
             "table-row-height": 36,
             "table-cell-padding-block": 2,
             "table-cell-padding-inline": 10,
@@ -221,7 +221,7 @@ class UiSizingContractTests(unittest.TestCase):
         source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for selector, role in (
             ("> thead > tr > :is(th, td)", "table-header-height"),
-            ("> tbody > tr:not(:where(.device-group-row, .group-row)) > :is(td, th)", "table-row-height"),
+            ("> tbody > tr:not(:where(.group-row:not(.device-group-row))) > :is(td, th)", "table-row-height"),
             (".suite-file-table-head", "table-header-height"),
             (".suite-file-row", "table-row-height"),
         ):
