@@ -165,3 +165,24 @@ def test_nested_failure_is_not_hidden_by_outer_success():
     }})
     assert "tool_failed" in result["gaps"]
     assert not result["coverage_complete"]
+
+
+def test_sdk_gerrit_relation_requires_exact_project_and_current_commit():
+    commit = "a" * 40
+    sdk = summarize_evidence("sdk_search", {"data": {
+        "source_id": "sdk", "commit": commit, "reproducible": True,
+        "repo_scope": "frameworks/base", "matches": [{"path": "Test.java", "line": 12}],
+    }})
+    gerrit = summarize_evidence("gerrit_dashboard_changes", {"data": {
+        "configured": True, "items": [
+            {"project": "frameworks/base", "_number": 1, "current_revision": commit},
+            {"project": "other", "number": 2, "currentPatchSet": {"revision": commit}},
+            {"project": "frameworks/base", "_number": 3, "current_revision": "b" * 40,
+             "revisions": {commit: {}}},
+        ],
+    }})
+    links = evidence_plan_context([{"evidence": sdk}, {"evidence": gerrit}])["sdk_gerrit_links"]
+    assert links == [{"project": "frameworks/base", "revision": commit,
+                      "sdk_reference": "frameworks/base/Test.java:12",
+                      "gerrit_reference": "gerrit:frameworks/base:1",
+                      "relation": "same_project_and_commit", "applicability_verified": False}]
