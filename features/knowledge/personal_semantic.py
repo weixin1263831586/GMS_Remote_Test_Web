@@ -24,8 +24,12 @@ def _body(doc):
     return str(doc.get("raw_content") or doc.get("content_md") or doc.get("summary") or "")
 
 
+def _redacted_body(doc):
+    return redact_sensitive_text(_body(doc))
+
+
 def _revision(doc):
-    return hashlib.sha256(json.dumps([doc.get("title"), doc.get("space_id"), _body(doc)],
+    return hashlib.sha256(json.dumps(["redacted-v1", doc.get("title"), doc.get("space_id"), _body(doc)],
                                      ensure_ascii=False).encode()).hexdigest()
 
 
@@ -52,8 +56,8 @@ class PersonalSemantic:
         for doc in docs[:MAX_DOCS]:
             if exclude(doc):
                 continue
-            full = _body(doc)
-            if len(full) > MAX_DOC_CHARS:
+            full = _redacted_body(doc)
+            if len(_body(doc)) > MAX_DOC_CHARS or len(full) > MAX_DOC_CHARS:
                 complete = False
             revision = _revision(doc)
             for start in range(0, min(len(full), MAX_DOC_CHARS), CHUNK_STEP):
@@ -94,8 +98,9 @@ class PersonalSemantic:
                     cache[doc_id] = self.store.get_doc(self.owner, doc_id)
                 doc = cache[doc_id]
                 if doc and not exclude(doc) and _revision(doc) == revision:
-                    text = str(doc.get("title") or "") + "\n" + _body(doc)[start:start + CHUNK_SIZE]
-                    documents[token] = redact_sensitive_text(text)
+                    # Redact before slicing; credentials may cross chunk boundaries.
+                    text = redact_sensitive_text(str(doc.get("title") or "")) + "\n"
+                    documents[token] = text + _redacted_body(doc)[start:start + CHUNK_SIZE]
                 if len(documents) >= max(1, min(batch_size, 128)):
                     break
             self.index.upsert(self.namespace, self.embedder.identity, documents, self.embedder)
@@ -128,13 +133,14 @@ class PersonalSemantic:
             if not doc or exclude(doc) or _revision(doc) != revision or (space_id and doc["space_id"] != space_id):
                 continue
             seen.add(doc_id)
-            snippet = _body(doc)[start:start + CHUNK_SIZE]
+            snippet = _redacted_body(doc)[start:start + CHUNK_SIZE]
             results.append({"doc_id": doc_id, "title": doc["title"], "space_id": doc["space_id"],
                             "summary": doc.get("summary") or "", "snippet": snippet,
                             "matched_terms": [term for term in search_terms(query) if term.lower() in snippet.lower()],
                             "tags": doc.get("tags") or [], "updated_at": doc.get("updated_at") or "",
                             "source_revision": revision, "reference": token,
                             "start_char": start, "end_char": start + len(snippet),
+                            "offset_basis": "redacted_document",
                             "retrieval_channels": ["semantic"]})
             if len(results) >= limit:
                 break
@@ -163,13 +169,15 @@ def retrieve_personal_contexts(store, owner, query, *, space_id="", limit=8, exc
     contexts = []
     for key in ordered:
         doc = store.get_doc(owner, key)
-        if not doc or exclude(doc) or exclude_document(doc):
+        if (not doc or exclude(doc) or exclude_document(doc)
+                or (space_id and doc["space_id"] != space_id)):
             continue
         hit = pool[key]
         revision = _revision(doc)
         if hit.get("source_revision") and hit["source_revision"] != revision:
             continue
-        if hit["snippet"] not in _body(doc):
+        body = _redacted_body(doc) if hit.get("offset_basis") == "redacted_document" else _body(doc)
+        if hit["snippet"] not in body:
             continue
         contexts.append({**hit, "source_revision": revision,
                          "reference": hit.get("reference") or f"{key}:{revision}"})

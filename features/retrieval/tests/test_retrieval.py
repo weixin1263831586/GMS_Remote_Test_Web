@@ -122,3 +122,16 @@ def test_vector_dimensions_are_stable_across_batches(tmp_path):
         index.upsert("source", "model", {"new": "test"}, WrongDimension())
     assert index.indexed("source", "model", ["old", "new"]) == {"old"}
     assert index.upsert("source", "model-v2", {"new": "test"}, WrongDimension()) == 1
+
+
+def test_vector_sync_lock_is_namespace_scoped_and_released(tmp_path):
+    first = VectorIndex(tmp_path / "vectors.sqlite3")
+    second = VectorIndex(first.path)
+    with first.sync_lock("owner-a") as acquired:
+        assert acquired
+        with second.sync_lock("owner-a") as duplicate:
+            assert not duplicate
+        with second.sync_lock("owner-b") as independent:
+            assert independent
+    with second.sync_lock("owner-a") as acquired:
+        assert acquired

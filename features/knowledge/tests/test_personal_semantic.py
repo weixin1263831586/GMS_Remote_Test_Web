@@ -49,3 +49,24 @@ def test_registered_policy_exclusion_rechecked(tmp_path, monkeypatch):
     excluded.add(doc["doc_id"])
     assert provider.search("散热")[0] == []
     assert provider.sync()["indexed"] == 0
+
+
+def test_personal_embedding_redacts_before_splitting(tmp_path, monkeypatch):
+    store = KnowledgeStore(tmp_path / "kb.sqlite3", tmp_path / "attachments")
+    monkeypatch.setattr(personal_semantic, "policy_import_filter", lambda owner: lambda doc: False)
+    secret = "SECRETEXAMPLE" + "x" * 350
+    body = "a " * 495 + "password=" + secret + "\nthermal"
+    doc = store.create_doc("u1", space_id=store.default_space_id("u1"),
+                           title="Example", content_md=body)
+
+    class RecordingEncoder(Encoder):
+        def encode(self, texts):
+            assert all("SECRETEXAMPLE" not in text and "x" * 50 not in text for text in texts)
+            return super().encode(texts)
+
+    index = PersonalSemantic(store, "u1", embedder=RecordingEncoder())
+    assert index.sync()["coverage_complete"]
+    hits, _ = index.search("散热")
+    assert hits and hits[0]["doc_id"] == doc["doc_id"]
+    assert hits[0]["offset_basis"] == "redacted_document"
+    assert secret not in hits[0]["snippet"]

@@ -151,3 +151,9 @@ compares ranks rather than unrelated scores, and retains revision and applicabil
 in evidence identity. Earlier unresolved retrieval gaps remain visible when a
 later lookup succeeds. A vector model revision must maintain the same embedding
 dimension across batches; changing dimensions requires a new revision.
+
+CDD and Wiki batch synchronization use a shared namespace lock. Private corpus
+locks retain their existing reset coordination. Personal semantic chunks redact
+the entire document before slicing, with offsets relative to redacted text.
+The token revision changes so old vectors are not recalled after this change;
+rebuild the personal semantic index through its existing sync endpoint.

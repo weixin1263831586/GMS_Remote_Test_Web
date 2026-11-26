@@ -69,6 +69,12 @@ class WikiSemantic:
     def sync(self, *, batch_size=MAX_BATCH):
         if self.embedder is None or self.provider.validate():
             raise ValueError("Local Wiki embedding or source not configured")
+        with self.index.sync_lock(self.namespace) as acquired:
+            if not acquired:
+                return {"status": "busy", "coverage_complete": False}
+            return self._sync_current(batch_size=batch_size)
+
+    def _sync_current(self, *, batch_size):
         with self.provider._connect() as conn:
             conn.execute("BEGIN")
             _, manifest = self._manifest(conn)

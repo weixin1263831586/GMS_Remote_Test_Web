@@ -70,6 +70,16 @@ class CddSemantic:
         if len(sources) != 1:
             raise ValueError("Enabled public CDD source required")
         source = sources[0]
+        with self.index.sync_lock(self._scope(source)) as acquired:
+            if not acquired:
+                return {"status": "busy", "coverage_complete": False}
+            current = self._sources(source_id)
+            if not current:
+                return {"status": "unavailable", "coverage_complete": False}
+            return self._sync_current(current[0], batch_size=batch_size)
+
+    def _sync_current(self, source, *, batch_size):
+        source_id = source["id"]
         tokens = self._manifest(source)
         scope, model = self._scope(source), self.embedder.identity
         indexed = self.index.indexed(scope, model, tokens)

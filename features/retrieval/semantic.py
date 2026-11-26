@@ -9,11 +9,12 @@ import os
 import sqlite3
 import struct
 import threading
-from contextlib import closing
+from contextlib import closing, contextmanager
 from functools import lru_cache
 from pathlib import Path
 
 from foundation.config import config_manager
+from foundation.process_sync import release_sync_lock, try_acquire_sync_lock
 
 
 MAX_CORPUS = 30000
@@ -160,6 +161,17 @@ class VectorIndex:
 
     def __init__(self, path: Path):
         self.path = Path(path)
+
+    @contextmanager
+    def sync_lock(self, namespace):
+        """Serialize batch build and pruning per namespace across processes."""
+        key = hashlib.sha256(namespace.encode()).hexdigest()
+        descriptor = try_acquire_sync_lock(self.path.with_suffix("." + key + ".lock"))
+        try:
+            yield descriptor is not None
+        finally:
+            if descriptor is not None:
+                release_sync_lock(descriptor)
 
     def _connect(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
