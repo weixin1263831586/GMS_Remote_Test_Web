@@ -204,11 +204,6 @@
 /* 主机桌面/终端：不干预 noVNC、xterm 节点尺寸与连接逻辑。 */
 #page-desktop.page-ui-rework .host-workspace-grid,
 #page-terminal.page-ui-rework .host-workspace-grid { gap: 10px; }
-#page-desktop.page-ui-rework .host-workspace-pane,
-#page-terminal.page-ui-rework .host-workspace-pane {
-    border: 1px solid var(--border-color);
-    border-radius: 8px; background: var(--card-bg); overflow: hidden;
-}
 #page-desktop.page-ui-rework .host-workspace-title-state,
 #page-terminal.page-ui-rework .host-workspace-title-state {
     color: var(--text-secondary);
