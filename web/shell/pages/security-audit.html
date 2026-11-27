@@ -36,7 +36,7 @@
                     </div>
                 </div>
 
-                <div class="audit-filter-bar audit-log-filters" role="search" aria-label="筛选审计日志">
+                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-log-filters" role="search" aria-label="筛选审计日志">
                     <select id="audit-source-filter" class="combo-box" aria-label="来源" data-change="loadSecurityAudit" data-a0="true">
                         <option value="">全部来源</option>
                         <option value="web">Web</option>
@@ -59,7 +59,7 @@
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>安全审计日志</strong></div>
                             <span class="audit-panel-caption">点击记录查看详情与关联日志</span>
                         </div>
-                        <div class="audit-table-wrap list-table-wrap" role="region" aria-label="审计日志表格" tabindex="0">
+                        <div class="audit-table-wrap list-table-wrap ui-panel-unframed" role="region" aria-label="审计日志表格" tabindex="0">
                             <table class="list-table audit-log-table">
                                 <thead><tr>
                                     <th style="width: 156px;">时间</th>
@@ -134,7 +134,7 @@
                         <span class="workbench-stat-copy"><span class="page-stat-label">最近记录</span><strong class="page-stat-value audit-mail-recent-value" id="audit-mail-latest">-</strong><span class="audit-stat-note">当前筛选最新记录（UTC）</span></span>
                     </div>
                 </div>
-                <div class="audit-filter-bar audit-mail-filters" role="search" aria-label="筛选历史邮件">
+                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-mail-filters" role="search" aria-label="筛选历史邮件">
                     <select id="email-outbox-channel-filter" class="combo-box" aria-label="邮件通道" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
@@ -162,7 +162,7 @@
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg><strong>历史邮件台账</strong></div>
                             <div class="audit-mail-meta"><span class="audit-mail-scope">默认仅显示本人记录</span><strong class="audit-mail-count" aria-live="polite">加载中...</strong></div>
                         </div>
-                        <div class="audit-table-wrap list-table-wrap audit-mail-table-wrap" role="region" aria-label="邮件台账表格" tabindex="0">
+                        <div class="audit-table-wrap list-table-wrap ui-panel-unframed audit-mail-table-wrap" role="region" aria-label="邮件台账表格" tabindex="0">
                             <table class="list-table audit-mail-table">
                                 <thead><tr>
                                     <th style="width: 160px;">时间 (UTC)</th>
@@ -232,7 +232,7 @@
                         <span class="workbench-stat-copy"><span class="page-stat-label">参考超龄大小</span><strong class="page-stat-value" id="audit-disk-aged">-</strong><span class="audit-stat-note">非可删除空间预估</span></span>
                     </div>
                 </div>
-                <div class="audit-filter-bar audit-disk-filters" role="search" aria-label="筛选磁盘产物">
+                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-disk-filters" role="search" aria-label="筛选磁盘产物">
                     <select id="audit-disk-group" class="combo-box" aria-label="产物类别" data-change="filterDiskArtifactsByControls">
                         <option value="">全部类别</option>
                         <option value="固件">固件</option>
@@ -258,7 +258,7 @@
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>运行产物分类</strong></div>
                             <div class="audit-mail-meta"><span id="audit-disk-scanned-at" role="status" aria-live="polite">等待扫描</span><strong class="audit-mail-count" id="audit-disk-count">-</strong></div>
                         </div>
-                        <div class="audit-table-wrap list-table-wrap" role="region" aria-label="磁盘产物明细" tabindex="0">
+                        <div class="audit-table-wrap list-table-wrap ui-panel-unframed" role="region" aria-label="磁盘产物明细" tabindex="0">
                             <table class="list-table audit-disk-table">
                                 <thead><tr>
                                     <th style="width: 220px;">产物类别</th>
