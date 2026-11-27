@@ -28,21 +28,11 @@
     vertical-align: 1px;
 }
 
-#page-desktop.page-ui-rework .host-desktop-icon-button:hover:not(:disabled) {
-    color: var(--primary-light);
-    border-color: var(--primary-color);
-    background: color-mix(in srgb, var(--primary-color) 10%, var(--card-bg));
-}
 #page-desktop.page-ui-rework .host-desktop-icon-button.host-desktop-close:hover {
     color: var(--danger-color);
     border-color: var(--danger-color);
 }
-#page-desktop.page-ui-rework .host-workspace-pane-body iframe {
-    display: block;
-    width: 100%;
-    height: 100%;
-    border: 0;
-}
+#page-desktop.page-ui-rework .host-workspace-pane-body iframe { display: block; }
 /* Empty pane is a first-class state, not a plain text in an enormous blank area. */
 #page-desktop.page-ui-rework .host-desktop-placeholder {
     position: absolute;
@@ -54,14 +44,6 @@
         color-mix(in srgb, var(--primary-color) 8%, var(--darker-bg)),
         var(--darker-bg) 68%);
 }
-#page-desktop.page-ui-rework .host-desktop-placeholder-icon {
-    width: 58px;
-    height: 58px;
-}
-
-#page-desktop.page-ui-rework .host-desktop-placeholder-icon .ui-icon {
-    width: 29px; height: 29px;
-}
 #page-desktop.page-ui-rework .host-desktop-placeholder-connecting .host-desktop-placeholder-icon .ui-icon {
     animation: host-desktop-rotate 1.4s linear infinite;
 }
@@ -71,8 +53,6 @@
 
 @media (max-width: 760px) {
     #page-desktop.page-ui-rework .host-desktop-status { max-width: 108px; }
-    #page-desktop.page-ui-rework .host-desktop-identity { gap: 5px; }
-    #page-desktop.page-ui-rework .host-desktop-pane-header { gap: 5px; }
 }
 @media (prefers-reduced-motion: reduce) {
     #page-desktop.page-ui-rework .host-desktop-placeholder-connecting .ui-icon {
