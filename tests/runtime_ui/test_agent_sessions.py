@@ -117,11 +117,17 @@ class AgentSessionDirectoryTests(RuntimeUiHarness):
             self.goto_shell(page)
             page.evaluate("switchPage('agent', null)")
             page.wait_for_timeout(400)
-            heights = page.evaluate(
-                "() => ['.agent-sessions-heading', '.agent-conversation-heading', "
-                "'.agent-run-header'].map(s => "
-                "document.querySelector(s).getBoundingClientRect().height)")
-            self.assertEqual([round(h) for h in heights], [48, 48, 48])
+            geometry = page.evaluate("""() => {
+                const selectors = ['.agent-sessions-heading', '.agent-conversation-heading', '.agent-run-header'];
+                const rows = selectors.map(s => document.querySelector(s).getBoundingClientRect());
+                return {heights: rows.map(r => r.height), bottoms: rows.map(r => r.bottom),
+                    controls: ['#agent-session-search', '#agent-model-check'].map(
+                        s => document.querySelector(s).getBoundingClientRect().height)};
+            }""")
+            self.assertEqual([round(h) for h in geometry["heights"]], [36, 36, 36])
+            self.assertLessEqual(max(geometry["bottoms"]) - min(geometry["bottoms"]), 1)
+            self.assertEqual([round(h) for h in geometry["controls"]], [28, 28])
+            expect(page.locator(".agent-sessions-heading")).to_have_text("会话列表")
         finally:
             page.close()
 
