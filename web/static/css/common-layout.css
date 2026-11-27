@@ -1042,29 +1042,40 @@
     }
 }
 
+/* Shared stacked workspace: framed toolbar, content and optional subpanels. */
+.ui-workspace-stack:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    gap: var(--ui-spacing-sm);
+}
+.ui-workspace-panel {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-card);
+    background: var(--card-bg);
+    overflow: hidden;
+}
+.ui-workspace-toolbar-panel { flex: 0 0 auto; }
+.ui-workspace-toolbar-panel > .ui-workspace-toolbar {
+    min-height: calc(var(--ui-workspace-toolbar-height) - 2px);
+    gap: var(--ui-spacing-sm);
+}
+.ui-workspace-content { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.ui-workspace-panel--scroll { overflow: auto; }
+
 /* ==================== Test Suite Browser ==================== */
 .suite-browser-layout {
     display: grid;
     grid-template-columns: minmax(20px, 320px) minmax(0, 1fr);
     gap: 12px;
-    flex: 1 1 auto;
-    height: auto;
-    min-height: 0;
     overflow: hidden;
-}
-.suite-browser-sidebar,
-.suite-browser-main {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    height: 100%;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-}
-.suite-browser-sidebar {
-    display: flex;
-    flex-direction: column;
 }
 .suite-browser-toolbar,
 .suite-browser-header {
@@ -1152,10 +1163,6 @@
 
     margin-top: 2px;
     word-break: break-all;
-}
-.suite-browser-main {
-    display: flex;
-    flex-direction: column;
 }
 .suite-browser-breadcrumb {
     padding: 8px 10px;
@@ -1966,14 +1973,6 @@
         height: auto;
         min-height: 0;
         overflow: hidden;
-    }
-    .suite-browser-sidebar {
-        height: auto;
-        min-height: 0;
-    }
-    .suite-browser-main {
-        height: auto;
-        min-height: 0;
     }
 }
 
