@@ -238,7 +238,7 @@
                 return `<section class="host-workspace-pane ui-workspace-panel${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}" aria-label="终端 ${i+1}">
                     <div class="host-workspace-pane-header host-terminal-pane-header">
                         <div class="host-terminal-identity host-pane-identity">
-                            <span class="host-terminal-label" data-terminal-pane-mode-label>🐧 终端</span>
+                            <span class="host-pane-label" data-terminal-pane-mode-label><span class="host-pane-label-icon" aria-hidden="true">🐧</span> <span>终端</span></span>
                             <span class="host-terminal-single-name host-pane-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
                             <select class="host-terminal-select host-pane-select" data-multi-host-control aria-label="主机" data-change="changeTerminalWorkspaceHost" data-a0="${i}" data-r1="value">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
                         </div>
