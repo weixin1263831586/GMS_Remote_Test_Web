@@ -283,13 +283,33 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertIn("--workspace-tab-width: 110px;", tabs)
         self.assertNotIn("--workspace-header-inset:", tabs)
 
+    def test_shared_kpi_and_pagination_roles(self):
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        self.assertIn(".ui-kpi-card--icon", foundation)
+        self.assertIn(".ui-dashboard .stat-card", foundation)
+        self.assertIn(".ui-kpi-stack .stat-card", foundation)
+        self.assertIn(".ui-pagination button", foundation)
+        self.assertIn(".ui-table-actions", foundation)
+        for name in ("redmine", "gerrit"):
+            page = (ROOT / "features" / name / "ui/page.html").read_text(encoding="utf-8")
+            self.assertIn("ui-dashboard", page)
+            self.assertIn("/static/css/ui-foundations.css", page)
+            self.assertIn("/static/css/form-controls.css", page)
+        for name in ("devices.html", "api-docs.html"):
+            markup = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
+            self.assertIn("ui-pagination-footer", markup)
+        for path in ("features/cluster/ui/page.html", "features/cluster/ui/dash-render.js"):
+            source = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn("ui-kpi-card--icon", source)
+            self.assertIn("ui-kpi-icon", source)
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
             "common-components.css": ("--ui-control-height-dense", "--ui-control-height-large"),
-            "other-workspaces.css": ("--ui-stat-height",),
+            "ui-foundations.css": ("--ui-stat-height", "--ui-control-height-dense"),
             "device-inventory.css": ("--ui-control-height",),
-            "api-docs-workbench.css": ("--ui-stat-height",),
+            "form-controls.css": ("--ui-control-height", "--ui-control-height-dense"),
             "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
             "data-table-page.css": ("--ui-control-height",),
