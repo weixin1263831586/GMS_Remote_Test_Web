@@ -10,27 +10,15 @@
     html.modal-open body > header { position:fixed; left:0; right:0; top:0; }
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted);  line-height:1.6; }
-    button { height:var(--ui-control-height); border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary-gradient);  cursor:pointer;  }
-    button.secondary { background:var(--lighter-bg); }
     button.warn { background:#b45309; }
     button.danger { background:#b91c1c; }
     button.danger:hover { background:#991b1b; }
-    button:disabled { opacity:.55; cursor:not-allowed; }
-    .btn-group { display:flex; gap:6px; flex-wrap:wrap; }
     /* 工具栏与 Tabs 同行，整体靠右；控件略微缩小，筛选区与按钮区以细分隔线区分。 */
-    .header-toolbar { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex:1 1 auto; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:1px; scrollbar-width:thin; }
-    header .filter-bar { flex:0 1 auto; min-width:0; justify-content:flex-start; flex-wrap:nowrap; gap:6px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; }
-    header .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
-    header .filter-bar input, header .filter-bar select, header .btn-group > button { height:var(--ui-control-height-dense);  border-radius:6px; white-space:nowrap; }
-    header .filter-bar input::placeholder { color:var(--text-muted); }
-    header .filter-bar input:focus, header .filter-bar select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color) 18%, transparent); }
     header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
     header .filter-bar select { width:86px; min-width:86px; }
     header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
 
     @media (max-width:1199px) {
-
-        .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
     }
 
     /* Modal chrome lives in /static/css/modal.css. Keep field layout only. */
@@ -49,11 +37,8 @@
         .modal-buttons button, .modal-footer button { width:100%; }
         /* 触摸目标（Responsive E2E 以 360/390 宽为支持对象）：
            手机 breakpoint 下普通控件 ≥40px，destructive ≥44px。 */
-        button { min-height:var(--ui-touch-target-height); }
-        button.danger { min-height:var(--ui-touch-target-danger-height); }
 
         .modal-close { width:var(--ui-touch-target-height); height:var(--ui-touch-target-height); min-width:var(--ui-touch-target-height); min-height:var(--ui-touch-target-height); }
-        header .filter-bar select { height:var(--ui-touch-target-height); }
     }
     @media (max-height:560px) {
         .modal { align-items:stretch; }
@@ -89,8 +74,6 @@
     #tab-cases .two-col, #tab-runs .two-col { flex:1 1 auto; min-height:0; }
 
     /* Filter bar */
-    .filter-bar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
-    .filter-bar input, .filter-bar select { height:var(--ui-control-height-dense); background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px;  }
     .filter-bar input { width:240px; }
     .filter-bar select { width:100px; }
     .redmine-advanced-sync { margin:0 0 12px; border:1px solid var(--border); border-radius:7px; background:var(--panel); }
@@ -259,10 +242,7 @@
     pre { white-space:pre-wrap; word-break:break-word; background:var(--darker-bg); border:1px solid var(--border); border-radius:6px; padding:10px; color:#d7e1f5;  }
 
     @media (max-width:900px) {
-
-        .header-toolbar { flex:1 1 100%; justify-content:flex-start; }
         header .filter-bar, header .btn-group { flex-wrap:nowrap; }
-        header .btn-group { border-left:0; padding-left:0; margin-left:0; }
         header .filter-bar input#searchInput { width:150px; min-width:150px; }
         .two-col { grid-template-columns:1fr; }
         .issue-mini { grid-template-columns:1fr; gap:6px; align-items:start; }
@@ -552,10 +532,6 @@
 :where(.panel, .issue-card, .trend-panel) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: none;
-}
-:where(.filter-bar input, .filter-bar select) {
-    border-color: var(--border); border-radius: 6px;
-    background: var(--panel2); color: var(--text);
 }
 :where(table) th { position: sticky; top: 0; z-index: 1; background: var(--panel2); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
