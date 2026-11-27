@@ -156,7 +156,23 @@ class AgentSessionDirectoryTests(RuntimeUiHarness):
                     bottoms = [row["bottom"] for row in metrics]
                     self.assertLessEqual(max(bottoms) - min(bottoms), 1, metrics)
 
+            def shared_layout(root):
+                return page.locator(root).evaluate("""stack => {
+                    const [toolbar, content] = stack.children;
+                    const panels = content.matches('.ui-workspace-panel')
+                        ? [toolbar, content] : [toolbar, ...content.children];
+                    const a = toolbar.getBoundingClientRect();
+                    const b = content.getBoundingClientRect();
+                    return {gap: b.top - a.bottom, toolbarHeight: a.height,
+                        left: b.left - a.left, right: b.right - a.right,
+                        panels: panels.map(panel => {
+                            const css = getComputedStyle(panel);
+                            return {border: css.border, radius: css.borderRadius, background: css.backgroundColor};
+                        })};
+                }""")
+
             page.evaluate("switchPage('notes', null)")
+            page.locator('#page-notes [data-kb-view="personal"]').click()
             expect(page.locator("#page-notes .kb-layout")).to_be_visible()
             check("#page-notes", [".kb-layout > .pane:nth-child(1) > .pane-bar",
                                   ".kb-layout > .pane:nth-child(2) > .pane-bar",
@@ -164,10 +180,20 @@ class AgentSessionDirectoryTests(RuntimeUiHarness):
             check("#page-notes", [".kb-editor-tags"])
             page.locator('#page-notes [data-kb-view="external"]').click()
             expect(page.locator("#page-notes [data-kb-source-form]")).to_be_visible()
-            check("#page-notes", ["[data-kb-source-form]"])
+            check("#page-notes", [".ui-workspace-toolbar-panel"])
+            external = shared_layout("#page-notes [data-kb-external]")
             page.evaluate("switchPage('test-suites', null)")
             expect(page.locator("#page-test-suites .suite-download-row")).to_be_visible()
-            check("#page-test-suites", [".suite-download-row"])
+            check("#page-test-suites", [".ui-workspace-toolbar-panel"])
+            suites = shared_layout("#page-test-suites .ui-workspace-stack")
+            for layout in (external, suites):
+                self.assertAlmostEqual(layout["gap"], 8, delta=0.5)
+                self.assertAlmostEqual(layout["toolbarHeight"], 36, delta=0.5)
+                self.assertAlmostEqual(layout["left"], 0, delta=0.5)
+                self.assertAlmostEqual(layout["right"], 0, delta=0.5)
+                for panel in layout["panels"]:
+                    self.assertEqual(panel, external["panels"][0])
+                self.assertEqual(layout["panels"][0]["radius"], "8px")
             check("#page-test-suites", [".suite-browser-toolbar", ".suite-browser-header"], aligned=True)
             check("#page-test-suites", [".suite-sidebar-filter", ".suite-search-bar"], aligned=True)
         finally:
