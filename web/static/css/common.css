@@ -1197,7 +1197,7 @@ td.table-placeholder {
 
 /* 知识库、对话 Agent 等分栏页共用的面板。列宽由 .kb-layout / .agent-layout 决定。 */
 
-.kb-layout { grid-template-columns: 220px 300px minmax(0, 1fr); }
+.kb-layout { grid-template-columns: var(--ui-workspace-navigation-width) 300px minmax(0, 1fr); }
 
 .pane-bar.spread { justify-content: space-between; }
 .pane-bar.end { align-items: flex-end; }
