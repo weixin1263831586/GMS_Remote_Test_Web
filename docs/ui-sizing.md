@@ -33,6 +33,10 @@
 
 普通数据表格（包含 `thead` 的 HTML 表格及公共 `.ui-table` / `.list-table`）和测试套件文件网格统一由 `ui-sizing.css` 管理 38px 表头、36px 数据行和垂直居中。业务样式只负责列宽、对齐、内容省略及交互，不重复声明行高或单元格内边距。空数据、加载和失败占位行沿用公共行尺寸；含授权按钮等多行内容时自然扩展。设备分组行也沿用 36px 数据行。AOA 命令列表保持紧凑单行网格，窄屏允许横向滚动；AOA 回放、表单布局、架构及工单键值说明（公共 `.ui-detail-table`）、正文表格和展开详情允许内容自适应，不能裁掉有效信息。
 
+## 公共工作区布局
+
+外部知识源和测试套件复用 `common-layout.css` 的 `.ui-workspace-stack`、`.ui-workspace-panel`、`.ui-workspace-toolbar-panel`、`.ui-workspace-content`。区块间距使用 `--ui-spacing-sm`（8px），面板使用统一边框、背景和 `--ui-radius-card`（8px）。单行工具栏外框总高 36px（包含上下边框），内部控件 28px；可选进度或多行内容自然扩展。需要独立滚动的面板使用 `.ui-workspace-panel--scroll`。各业务页面仅定义列宽、内容布局和交互，不重复声明面板边框或纵向区块间距。
+
 ## 设计边界
 
 1. **保持单行**：单行标题、表格单元格及按钮标签不得折行。
