@@ -227,8 +227,7 @@
                 <section class="host-workspace-pane ui-workspace-panel${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}" aria-label="桌面 ${index + 1}">
                     <div class="host-workspace-pane-header">
                         <div class="host-desktop-identity host-pane-identity">
-                            <span class="host-desktop-screen-label" aria-hidden="true">🖥️</span>
-                            <span class="host-desktop-type-label">桌面</span>
+                            <span class="host-pane-label"><span class="host-desktop-screen-label host-pane-label-icon" aria-hidden="true">🖥️</span><span class="host-desktop-type-label">桌面</span></span>
                             <span class="host-desktop-single-name host-pane-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
                             <select class="host-desktop-select host-pane-select" data-multi-host-control aria-label="主机" data-change="changeHostWorkspacePaneHost" data-a0="${index}" data-r1="value"${pane.type === 'empty' ? ' disabled' : ''}>
                                 ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
