@@ -248,8 +248,7 @@ select option {
 
     background: var(--light-bg);
     color: #fff;
-    transition: var(--transition-fast);
-    box-shadow: var(--shadow-sm);
+    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -264,7 +263,8 @@ select option {
 }
 
 .btn-xs {
-    padding: 6px 12px;
+    padding: 4px 10px;
+    color: var(--text-primary);
     min-height: var(--ui-control-height-dense);
 }
 
@@ -275,8 +275,6 @@ select option {
 .btn-xxs:hover, .btn-xs:hover, .btn-small:hover {
     background: var(--lighter-bg);
     border-color: var(--primary-light);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
 }
 
 /* 共享固件操作列：收窄 .btn-xxs（默认 min-width:80px），作用域限定。 */
@@ -284,10 +282,6 @@ select option {
     min-width: 0;
     padding: 4px 8px;
 
-}
-
-.btn-xxs:active {
-    transform: translateY(0);
 }
 
 .btn-xxs:disabled {
@@ -298,6 +292,7 @@ select option {
 
 .btn-primary, .btn-danger {
     border-radius: var(--ui-radius-control);
+    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
     color: var(--text-on-accent);
     border: none;
     display: inline-flex;
