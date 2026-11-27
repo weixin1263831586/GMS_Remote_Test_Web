@@ -7,7 +7,7 @@
     --analysis-pane-heading-height: 39px;
     --analysis-pane-radius: var(--ui-radius-card);
     --analysis-pane-gap: var(--ui-spacing-sm);
-
+    background: var(--page-background);
 }
 
 /* Align the empty-state upload border with the common page body-frame top.
@@ -76,6 +76,17 @@
     grid-column: 2;
     min-width: 0;
     color: var(--success-color);
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.analysis-status-text::before {
+    content: "";
+    flex: 0 0 7px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
 }
 .analysis-status-progress { margin-left: 46px; }
 .analysis-status-track {
@@ -172,11 +183,14 @@
     text-align: left;
 }
 .analysis-upload-row .analysis-upload-title {
+    height: 22px;
+    line-height: 22px;
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
+.analysis-upload-copy .upload-instructions { margin-top: 4px; color: var(--text-secondary); line-height: 1.6; }
 .analysis-upload-surface:not(.upload-empty) .upload-instructions { display: none; }
 .analysis-upload-surface.upload-empty .analysis-upload-row {
     gap: 14px;
