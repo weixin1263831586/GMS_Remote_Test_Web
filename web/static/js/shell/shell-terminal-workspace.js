@@ -160,7 +160,7 @@
             const action = view.button
                 ? `<button type="button" class="btn-xs host-terminal-connect-button host-pane-connect-button" data-click="refreshTerminalWorkspacePane" data-a0="${index}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg>${view.button}</button>`
                 : '';
-            return `<div class="host-workspace-empty host-terminal-placeholder host-terminal-placeholder-${kind}">
+            return `<div class="host-workspace-empty host-pane-placeholder host-terminal-placeholder host-terminal-placeholder-${kind}${['connecting', 'adb'].includes(kind) ? ' host-pane-placeholder-busy' : ''}">
                 <div class="host-terminal-placeholder-content host-pane-placeholder-content">
                     <span class="host-terminal-placeholder-icon host-pane-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
                     <strong class="host-terminal-placeholder-title host-pane-placeholder-title">${view.title}</strong>
@@ -235,7 +235,7 @@
             grid.innerHTML=terminalWorkspace.panes.map((p,i)=>{
                 const host=desktopHosts.find(item=>item.id===p.hostId);
                 const hostName=host?.name||'请选择主机';
-                return `<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}" aria-label="终端 ${i+1}">
+                return `<section class="host-workspace-pane ui-workspace-panel${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}" aria-label="终端 ${i+1}">
                     <div class="host-workspace-pane-header host-terminal-pane-header">
                         <div class="host-terminal-identity host-pane-identity">
                             <span class="host-terminal-label" data-terminal-pane-mode-label>🐧 终端</span>
