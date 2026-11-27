@@ -818,7 +818,7 @@ function renderApiDocsPager(total) {
     footer.innerHTML = '<div class="api-page-info"><span>共 '+total.toLocaleString('zh-CN')+' 条 · '+start+'–'+end+' 条</span>'
         +'<label for="api-docs-page-size">每页</label><select id="api-docs-page-size" aria-label="每页显示条数">'
         +[20,50,100].map(n=>'<option value="'+n+'"'+(n===apiDocsPageSize?' selected':'')+'>'+n+'</option>').join('')
-        +'</select></div><nav class="api-page-actions" aria-label="接口分页">'
+        +'</select></div><nav class="api-page-actions ui-pagination" aria-label="接口分页">'
         +'<button type="button" data-api-page="1" aria-label="首页"'+(apiDocsPage===1?' disabled':'')+'>«</button>'
         +'<button type="button" data-api-page="'+(apiDocsPage-1)+'" aria-label="上一页"'+(apiDocsPage===1?' disabled':'')+'>‹</button>'
         +nav.join('')
