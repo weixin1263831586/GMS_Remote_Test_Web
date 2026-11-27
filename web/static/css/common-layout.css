@@ -1069,12 +1069,29 @@
 }
 .ui-workspace-content { flex: 1 1 auto; min-width: 0; min-height: 0; }
 .ui-workspace-panel--scroll { overflow: auto; }
+.ui-workspace-grid {
+    display: grid;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    gap: var(--ui-spacing-sm);
+}
+.ui-workspace-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+}
+.ui-workspace-divider {
+    border-bottom: 1px solid var(--border-color);
+}
+.ui-workspace-heading {
+    background: var(--light-bg);
+}
 
 /* ==================== Test Suite Browser ==================== */
 .suite-browser-layout {
-    display: grid;
     grid-template-columns: minmax(20px, 320px) minmax(0, 1fr);
-    gap: 12px;
     overflow: hidden;
 }
 .suite-browser-toolbar,
