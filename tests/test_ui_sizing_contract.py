@@ -336,6 +336,31 @@ class UiSizingContractTests(unittest.TestCase):
             self.assertIn("ui-kpi-card--icon", source)
             self.assertIn("ui-kpi-icon", source)
 
+    def test_common_form_kpi_and_log_component_geometry(self):
+        controls = (CSS / "common-components.css").read_text(encoding="utf-8")
+        for selector, prop, token in (
+            (".form-row", "min-height", "control-height"),
+            (".entry-field", "height", "control-height"),
+            (".combo-box", "height", "control-height"),
+            (".input-with-btn .entry-field", "height", "control-height-dense"),
+            (".input-with-btn .btn-small", "height", "control-height-dense"),
+        ):
+            with self.subTest(selector=selector):
+                rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", controls)
+                self.assertIsNotNone(rule)
+                self.assertIn(f"{prop}: var(--ui-{token});", rule[1])
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        for role in (".ui-kpi-card--compact", ".ui-kpi-grid", ".ui-empty-state", ".ui-log-toolbar"):
+            self.assertIn(role, foundation)
+        redmine = (ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(redmine, r"\.daily-brief-metric\s*\{")
+        renderer = (ROOT / "features/redmine/ui/daily-brief.js").read_text(encoding="utf-8")
+        self.assertEqual(renderer.count('daily-brief-metric ui-kpi-card--compact'), 6)
+        self.assertIn('daily-brief-status ui-status', renderer)
+        workspace = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
+        self.assertNotRegex(workspace, r"\.page-ui-rework\s+\.page-stat-row\s*\{[^}]*gap:")
+        self.assertNotRegex(workspace, r"\.page-ui-rework\s+\.suite-empty\s*\{")
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),
