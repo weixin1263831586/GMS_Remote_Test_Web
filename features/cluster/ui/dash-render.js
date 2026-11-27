@@ -25,7 +25,7 @@ function renderDashboard(){
  const jobsFailed=state.jobs.filter(j=>j.status==='failed').length;
  const suitesAvailable=state.suites.filter(s=>s.available).length;
 
- const makeStat=(item)=>`<div class="dash-stat-card"><span class="stat-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#${item.icon}"></use></svg></span><span class="stat-text"><span class="label">${item.label}</span><span class="num">${item.num}</span><span class="sub">${item.sub}</span></span></div>`;
+ const makeStat=(item)=>`<div class="dash-stat-card ui-kpi-card--icon"><span class="stat-icon ui-kpi-icon"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#${item.icon}"></use></svg></span><span class="stat-text ui-kpi-copy"><span class="label">${item.label}</span><span class="num">${item.num}</span><span class="sub">${item.sub}</span></span></div>`;
  statsEl.innerHTML=[
   {icon:'server',num:state.workers.length,label:'主机总数',sub:`${workersOnline} 在线${workersOffline?` · <span class="bad">${workersOffline} 离线</span>`:''}`},
   {icon:'device',num:`${devAvailable} / ${dashboardDevices.length}`,label:'设备可用 / 总量',sub:`<span class="warn">${devBusy} 已占用</span>`},
