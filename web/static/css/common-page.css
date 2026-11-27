@@ -1164,9 +1164,6 @@ body.apk-resizing {
     flex-direction: column;
     min-height: 0;
 }
-#kb-doc-title { height: var(--ui-control-height);   }
-#kb-doc-tags,
-#kb-search-input { height: var(--ui-control-height-dense);  }
 #kb-doc-content {
     flex: 1;
     min-height: 0;
