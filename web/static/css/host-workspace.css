@@ -1,0 +1,193 @@
+/* Shared host workspace controls. Each viewer owns only its renderer and width exceptions. */
+.host-workspace-pane {
+    min-width: 0; min-height: 0; display: flex; flex-direction: column;
+    overflow: hidden; background: var(--card-bg);
+    border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
+}
+.host-workspace-pane:focus-within {
+    border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
+}
+body.workspace-scope-single .host-workspace-surface .host-workspace-pane {
+    border: 0; border-radius: 0;
+}
+.host-workspace-surface .host-workspace-pane-header {
+    display: flex; flex: 0 0 34px; box-sizing: border-box; align-items: center;
+    height: 34px; padding: 2px var(--ui-spacing-sm); gap: 7px;
+    border-bottom: 1px solid var(--border-color); background: var(--card-bg);
+}
+.host-workspace-surface .host-workspace-pane-body {
+    position: relative; flex: 1; min-height: 0; overflow: hidden; background: var(--darker-bg);
+}
+.host-workspace-surface .host-pane-identity {
+    display: flex;
+    align-items: center;
+    flex: 1 1 auto;
+    gap: 6px;
+    min-width: 0;
+    white-space: nowrap;
+}
+
+.host-workspace-surface .host-pane-single-name {
+    display: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+
+body.workspace-scope-single .host-workspace-surface .host-pane-single-name {
+    display: block;
+}
+
+body.workspace-scope-cluster .host-workspace-surface .host-workspace-pane-header .host-pane-select, .host-workspace-surface .host-workspace-pane-header .host-pane-select {
+    box-sizing: border-box;
+    flex: 0 1 210px;
+    min-width: 105px;
+    max-width: 210px;
+    height: var(--ui-control-height-dense);
+    padding: 2px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border-color);
+    background: var(--light-bg);
+    color: var(--text-primary);
+}
+
+.host-workspace-surface .host-pane-status {
+    margin-left: 0;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    height: var(--ui-control-height-small);
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--text-secondary) 10%, var(--card-bg));
+    border: 1px solid color-mix(in srgb, var(--text-secondary) 22%, transparent);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.host-workspace-surface .host-pane-status::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 7px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.host-workspace-surface .host-pane-status.is-connected {
+    background: color-mix(in srgb, var(--success-color) 12%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--success-color) 26%, var(--border-color));
+}
+
+.host-workspace-surface .host-pane-status.is-pending {
+    background: color-mix(in srgb, var(--primary-color) 12%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--primary-color) 25%, var(--border-color));
+}
+
+.host-workspace-surface .host-pane-status.is-error {
+    color: var(--danger-color) !important;
+    background: color-mix(in srgb, var(--danger-color) 10%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--danger-color) 25%, var(--border-color));
+}
+
+.host-workspace-surface .host-pane-pane-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+body.workspace-scope-cluster .host-workspace-surface .host-workspace-pane-header .host-pane-icon-button, .host-workspace-surface .host-workspace-pane-header .host-pane-icon-button, body.workspace-scope-cluster .host-workspace-surface .host-workspace-pane-header .host-workspace-refresh-btn {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    flex: 0 0 28px;
+    box-sizing: border-box;
+    width: 28px;
+    min-width: 28px;
+    height: var(--ui-control-height-dense);
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--light-bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.host-workspace-surface .host-pane-icon-button .ui-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.host-workspace-surface .host-pane-placeholder-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    max-width: 360px;
+    min-width: 0;
+    text-align: center;
+}
+
+.host-workspace-surface .host-pane-placeholder-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--primary-color) 11%, var(--light-bg));
+    color: var(--primary-light);
+}
+
+.host-workspace-surface .host-pane-placeholder-title {
+    color: var(--text-primary);
+}
+
+.host-workspace-surface .host-pane-placeholder-hint {
+    color: var(--text-secondary);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.host-workspace-surface .host-pane-connect-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 6px 16px;
+    border: 1px solid var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 22%, var(--card-bg));
+    border-radius: 7px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.host-workspace-surface .host-pane-connect-button .ui-icon {
+    width: 15px;
+    height: 15px;
+}
+
+.host-workspace-surface .host-pane-connect-button:hover {
+    background: color-mix(in srgb, var(--primary-color) 36%, var(--card-bg));
+}
+
+.host-workspace-surface .layout-quad .host-pane-placeholder-content {
+    gap: 7px;
+}
+
+.host-workspace-surface .layout-quad .host-pane-placeholder-icon {
+    width: 44px;
+    height: 44px;
+}
+
+.host-workspace-surface .layout-quad .host-pane-placeholder-icon .ui-icon {
+    width: 23px;
+    height: 23px;
+}
