@@ -1,6 +1,6 @@
 .agent-layout { grid-template-columns: minmax(0, 4fr) minmax(0, 1fr); }
 /* 会话、对话和执行步骤三栏。 */
-.agent-layout.agent-layout-with-sessions { grid-template-columns: 200px minmax(0, 4fr) minmax(0, 1fr); }
+.agent-layout.agent-layout-with-sessions { grid-template-columns: var(--ui-workspace-navigation-width) minmax(0, 4fr) minmax(0, 1fr); }
 
 /* 状态文字单行溢出省略。 */
 .agent-heading-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px 12px; }
