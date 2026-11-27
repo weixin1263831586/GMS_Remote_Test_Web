@@ -168,7 +168,11 @@ class UiSizingContractTests(unittest.TestCase):
                     self.assertNotIn(alias, source)
         page = (CSS / "common-page.css").read_text(encoding="utf-8")
         self.assertNotIn("#kb-doc-tags { height: 26px; }", page)
-        self.assertIn("#suite-download-url { width: 100%; height: var(--ui-control-height); }", page)
+        self.assertIn("#suite-download-url { width: 100%; }", page)
+        for name in ("agent.html", "notes.html", "test-suites.html"):
+            markup = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
+            self.assertIn("ui-workspace-toolbar", markup)
+            self.assertIn("ui-workspace-control", markup)
         layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
         self.assertIn(".btn-act { min-height: var(--ui-control-height-dense);", layout)
 
@@ -178,6 +182,7 @@ class UiSizingContractTests(unittest.TestCase):
             "page-edge": 8,
             "control-height": 32,
             "control-height-dense": 28,
+            "workspace-toolbar-height": 36,
             "control-height-small": 26,
             "segmented-inner-height": 24,
             "table-header-height": 38,
