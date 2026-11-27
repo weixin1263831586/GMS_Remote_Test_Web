@@ -13,21 +13,10 @@
     html { scroll-padding-top:86px; }
 
     .header-title {   white-space:nowrap; margin:0; }
-    select,input { height:var(--ui-control-height); background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px;  }
     input { min-width:260px; }
-    button { height:var(--ui-control-height); border:0; border-radius:6px; padding:0 10px; color:white; background:var(--primary-gradient);  cursor:pointer;  }
-    button.secondary { background:var(--lighter-bg); }
-
-    .btn-group { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end; }
     /* Redmine 同构：筛选与操作按钮整体右对齐聚在 Tab 行右侧，按钮组
        以左边框分隔。查询工具行是静态搬移（#profile 选项由 init 填充），
        个人/部门控件随数据渲染重建，值保留链在各自构造函数里。 */
-    .header-toolbar { flex:1 1 auto; display:flex; align-items:center; justify-content:flex-end; gap:8px; min-width:0; overflow-x:auto; overflow-y:hidden; padding-bottom:1px; scrollbar-width:thin; }
-    .header-toolbar .filter-bar { flex:0 1 auto; display:flex; align-items:center; justify-content:flex-start; gap:6px; overflow-x:auto; overflow-y:hidden; scrollbar-width:thin; min-width:0; flex-wrap:nowrap; }
-    .header-toolbar .filter-bar > div { display:flex; align-items:center; gap:6px; min-width:0; }
-    .header-toolbar .filter-bar > div[hidden] { display:none; }
-    .header-toolbar .filter-bar[hidden] { display:none; }
-    .header-toolbar .btn-group { flex:0 0 auto; flex-wrap:nowrap; justify-content:flex-end; gap:5px; padding-left:9px; margin-left:1px; border-left:1px solid var(--border); }
     /* 右对齐聚簇内的输入限宽，避免把 Tab 行挤爆（Redmine searchInput 同款）。 */
     #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
     #queryBtn:disabled { cursor:wait; opacity:.7; }
@@ -102,8 +91,8 @@
     .field.full { grid-column:1 / -1; }
     #routeCheckModal .modal-body { display:block; }
     #routeCheckModal .modal-header h3 { margin:0;   }
-    @media (max-width:800px) {  input { min-width:180px; width:100%; } .header-toolbar { flex:1 1 100%; justify-content:flex-start; flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; border-left:0; padding-left:0; margin-left:0; } }
-    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  button { min-height:40px; } .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
+    @media (max-width:800px) {  input { min-width:180px; width:100%; } .header-toolbar { flex-wrap:wrap; } .header-toolbar .filter-bar { flex-wrap:wrap; } .header-toolbar .btn-group { flex-wrap:wrap; } }
+    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
 
 /* Agent/Device Inventory design alignment for isolated iframe documents.
