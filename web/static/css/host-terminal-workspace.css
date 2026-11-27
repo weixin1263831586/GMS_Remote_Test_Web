@@ -25,7 +25,6 @@ body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-single
     flex: 0 0 6px;
 }
 
-#page-terminal.page-ui-rework .host-terminal-icon-button:hover:not(:disabled),
 #page-terminal.page-ui-rework .host-terminal-return-button:hover:not(:disabled) {
     color: var(--primary-light);
     border-color: var(--primary-color);
@@ -52,10 +51,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     width: 14px;
     height: 14px;
 }
-#page-terminal.page-ui-rework .host-workspace-terminal {
-    width: 100%;
-    height: 100%;
-}
 /* Only terminal placeholders use the subtle desktop-style empty state.
    xterm itself remains untouched and gets the complete body dimensions. */
 #page-terminal.page-ui-rework .host-terminal-placeholder {
@@ -67,15 +62,7 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
         color-mix(in srgb, var(--primary-color) 8%, var(--darker-bg)),
         var(--darker-bg) 68%);
 }
-#page-terminal.page-ui-rework .host-terminal-placeholder-icon {
-    width: 54px;
-    height: 54px;
-}
-
-#page-terminal.page-ui-rework .host-terminal-placeholder-icon .ui-icon {
-    width: 27px;
-    height: 27px;
-}
+#page-terminal.host-workspace-surface { --host-placeholder-icon-size: 54px; --host-placeholder-glyph-size: 27px; }
 #page-terminal.page-ui-rework .host-terminal-placeholder-connecting .host-terminal-placeholder-icon .ui-icon,
 #page-terminal.page-ui-rework .host-terminal-placeholder-adb .host-terminal-placeholder-icon .ui-icon {
     animation: host-desktop-rotate 1.4s linear infinite;
@@ -86,8 +73,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     }
 }
 @media (max-width: 760px) {
-    #page-terminal.page-ui-rework .host-terminal-pane-header { gap: 5px; }
-    #page-terminal.page-ui-rework .host-terminal-identity { gap: 5px; }
     #page-terminal.page-ui-rework .host-terminal-status { max-width: 90px; }
     #page-terminal.page-ui-rework .host-terminal-return-button { padding: 2px 5px; }
 }
