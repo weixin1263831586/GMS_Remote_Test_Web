@@ -270,6 +270,69 @@ button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }
     .ui-workspace-grid--aside { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Standard panel heading and distribution chart geometry. */
+.ui-panel-heading {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    min-height: var(--ui-card-heading-height);
+    gap: var(--ui-spacing-sm);
+    padding: 0 var(--ui-spacing-md);
+    border-bottom: 1px solid var(--border-color);
+    background: var(--light-bg);
+}
+.ui-panel-heading strong { color: var(--text-primary); }
+.ui-panel-heading .ui-icon { width: 18px; height: 18px; color: var(--primary-light); }
+.ui-distribution-chart {
+    --ui-distribution-diameter: 145px;
+    --ui-distribution-center: 105px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: var(--ui-spacing-md);
+    padding: var(--ui-spacing-md) 10px;
+    min-width: 0;
+}
+.ui-distribution-ring {
+    display: grid;
+    place-items: center;
+    flex: 0 0 var(--ui-distribution-diameter);
+    width: var(--ui-distribution-diameter);
+    height: var(--ui-distribution-diameter);
+    border-radius: 50%;
+}
+.ui-distribution-ring[data-empty="true"] { background: var(--lighter-bg); }
+.ui-distribution-center {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    width: var(--ui-distribution-center);
+    height: var(--ui-distribution-center);
+    border-radius: 50%;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+}
+.ui-distribution-center strong { color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ui-distribution-center span { color: var(--text-secondary); }
+.ui-distribution-legend {
+    display: flex;
+    flex: 1 1 100px;
+    flex-direction: column;
+    gap: var(--ui-spacing-sm);
+    min-width: 0;
+}
+@media (max-width: 1350px) {
+    .ui-distribution-chart {
+        --ui-distribution-diameter: 124px;
+        --ui-distribution-center: 88px;
+        gap: var(--ui-spacing-sm);
+    }
+}
+
 /* KPI roles: common frame, icon-led inventory cards, and centered dashboard counters. */
 .page-stat-card:is(.inventory-stat, .workbench-stat),
 .ui-dashboard .stat-card,

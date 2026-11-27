@@ -23,9 +23,6 @@
 #page-api-docs .api-category-toolbar .api-action-install { background:color-mix(in srgb,var(--success-color) 12%,var(--card-bg));color:var(--success-color); }
 #page-api-docs .api-category-chips { display:flex;flex:1 1 auto;align-items:center;flex-wrap:wrap;gap:5px;min-width:0; }
 #page-api-docs .api-category-actions { display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px;padding-left:8px;border-left:1px solid var(--border-color); }
-#page-api-docs .api-side-heading { display:flex;align-items:center;gap:8px;height:var(--ui-card-heading-height);min-height:var(--ui-card-heading-height);box-sizing:border-box;padding:6px 12px;border-bottom:1px solid var(--border-color);background:var(--light-bg); }
-#page-api-docs .api-side-heading strong { color:var(--text-primary); }
-#page-api-docs .api-side-heading .ui-icon { width:18px;height:18px;color:var(--primary-light); }
 #page-api-docs.page-ui-rework .api-table-scroll.list-table-wrap { flex:1 1 auto;min-height:0;height:0;max-height:none;overflow:auto!important; }
 #page-api-docs .api-docs-table { table-layout:fixed;min-width:880px; }
 #page-api-docs .api-docs-table thead th { position:sticky;top:0;z-index:2;text-align:left;background:var(--light-bg);color:var(--text-secondary);border-bottom:1px solid var(--border-color); }
@@ -51,13 +48,7 @@
 #page-api-docs .api-side-panels { display:flex;flex-direction:column;gap:8px;min-height:0;min-width:0; }
 #page-api-docs .api-side-card { flex:0 0 auto; }
 #page-api-docs .api-side-notes { flex:1 1 auto; }
-#page-api-docs .api-chart-body { display:flex;justify-content:center;align-items:center;gap:12px;padding:12px 10px; }
-#page-api-docs .api-method-donut { --api-get-end:0deg;--api-post-end:0deg;--api-delete-end:0deg;display:grid;place-items:center;flex:0 0 145px;width:145px;height:145px;border-radius:50%;background:conic-gradient(var(--api-get) 0deg var(--api-get-end),var(--api-post) var(--api-get-end) var(--api-post-end),var(--api-delete) var(--api-post-end) var(--api-delete-end),var(--api-other) var(--api-delete-end) 360deg); }
-#page-api-docs .api-method-donut[data-empty="true"] { background:var(--lighter-bg); }
-#page-api-docs .api-donut-center { width:105px;height:105px;display:flex;flex-direction:column;align-items:center;justify-content:center;border-radius:50%;background:var(--card-bg);border:1px solid var(--border-color); }
-#page-api-docs .api-donut-center strong { color:var(--text-primary); }
-#page-api-docs .api-donut-center span { color:var(--text-secondary); }
-#page-api-docs .api-method-legend { display:flex;flex:1 1 auto;flex-direction:column;gap:10px;min-width:0; }
+#page-api-docs .api-method-donut:not([data-empty="true"]) { --api-get-end:0deg;--api-post-end:0deg;--api-delete-end:0deg;background:conic-gradient(var(--api-get) 0deg var(--api-get-end),var(--api-post) var(--api-get-end) var(--api-post-end),var(--api-delete) var(--api-post-end) var(--api-delete-end),var(--api-other) var(--api-delete-end) 360deg); }
 #page-api-docs .api-method-legend>div { display:grid;grid-template-columns:8px 44px minmax(0,1fr);align-items:center;gap:7px;color:var(--text-secondary); }
 #page-api-docs .api-method-legend strong { text-align:right;white-space:nowrap;color:var(--text-primary); }
 #page-api-docs .api-dot { width:8px;height:8px;border-radius:50%; }
@@ -69,6 +60,5 @@
 #page-api-docs .api-notes { margin:0;padding:8px 16px 9px 26px; }
 #page-api-docs .api-notes li { padding:3px 1px;color:var(--text-secondary);line-height:1.5; }
 #page-api-docs .api-notes li::marker { color:var(--primary-light); }
-@media (max-width:1350px) { #page-api-docs .api-chart-body { flex-wrap:wrap; } }
 @media (max-width:1150px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } #page-api-docs .api-side-panels { display:grid;grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-search-toolbar,#page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-search-box { flex-basis:100%; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }

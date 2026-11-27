@@ -283,6 +283,20 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertIn("--workspace-tab-width: 110px;", tabs)
         self.assertNotIn("--workspace-header-inset:", tabs)
 
+    def test_distribution_charts_use_shared_component_geometry(self):
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        for role in ("ui-panel-heading", "ui-distribution-chart", "ui-distribution-ring",
+                     "ui-distribution-center", "ui-distribution-legend"):
+            self.assertIn(f".{role}", foundation)
+            for page in ("api-docs.html", "security-audit.html"):
+                self.assertIn(role, (ROOT / "web/shell/pages" / page).read_text(encoding="utf-8"))
+        for filename, selector in (("api-docs-workbench.css", "api-method-donut"),
+                                   ("other-workspaces.css", "audit-source-donut")):
+            source = (CSS / filename).read_text(encoding="utf-8")
+            for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", source):
+                if selector in rule[1]:
+                    self.assertNotRegex(rule[2], r"(?:^|[;\s])(?:width|height|flex(?:-basis)?)\s*:")
+
     def test_shared_kpi_and_pagination_roles(self):
         foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
         self.assertIn(".ui-kpi-card--icon", foundation)

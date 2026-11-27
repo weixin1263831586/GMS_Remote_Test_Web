@@ -79,12 +79,12 @@
       </section>
       <aside class="api-side-panels" aria-label="接口统计与说明">
         <section class="api-side-card ui-panel-frame">
-          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> <strong>请求方法分布</strong></div>
-          <div class="api-chart-body">
-            <div class="api-method-donut" id="api-docs-method-donut" data-empty="true" role="img" aria-label="等待接口统计">
-              <div class="api-donut-center"><strong id="api-docs-donut-total">-</strong><span>API 总数</span></div>
+          <div class="api-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg> <strong>请求方法分布</strong></div>
+          <div class="api-chart-body ui-distribution-chart">
+            <div class="api-method-donut ui-distribution-ring" id="api-docs-method-donut" data-empty="true" role="img" aria-label="等待接口统计">
+              <div class="api-donut-center ui-distribution-center"><strong id="api-docs-donut-total">-</strong><span>API 总数</span></div>
             </div>
-            <div class="api-method-legend">
+            <div class="api-method-legend ui-distribution-legend">
               <div><span class="api-dot api-dot-get"></span><span>GET</span><strong id="api-docs-legend-get">-</strong></div>
               <div><span class="api-dot api-dot-post"></span><span>POST</span><strong id="api-docs-legend-post">-</strong></div>
               <div><span class="api-dot api-dot-delete"></span><span>DELETE</span><strong id="api-docs-legend-delete">-</strong></div>
@@ -94,7 +94,7 @@
           <div class="api-side-footnote">按完整清单统计，不随筛选变化</div>
         </section>
         <section class="api-side-card ui-panel-frame">
-          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> <strong>快捷筛选</strong></div>
+          <div class="api-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#bolt"></use></svg> <strong>快捷筛选</strong></div>
           <div class="api-method-buttons" id="api-docs-method-actions">
             <button class="btn-xs active" type="button" data-method="all" data-click="filterApiDocsMethod" data-a0="all" aria-pressed="true">全部方法</button>
             <button class="btn-xs" type="button" data-method="GET" data-click="filterApiDocsMethod" data-a0="GET" aria-pressed="false">GET</button>
@@ -103,7 +103,7 @@
           </div>
         </section>
         <section class="api-side-card ui-panel-frame api-side-notes">
-          <div class="api-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> <strong>接口说明</strong></div>
+          <div class="api-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> <strong>接口说明</strong></div>
           <ul class="api-notes">
             <li>接口列表来自 Controller OpenAPI 元数据</li>
             <li>分类、请求方法和关键词可组合筛选</li>

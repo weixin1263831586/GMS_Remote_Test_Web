@@ -55,7 +55,7 @@
 
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
                     <section class="audit-log-panel" aria-label="安全审计日志">
-                        <div class="audit-panel-header">
+                        <div class="audit-panel-header ui-panel-heading">
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>安全审计日志</strong></div>
                             <span class="audit-panel-caption">点击记录查看详情与关联日志</span>
                         </div>
@@ -77,12 +77,12 @@
 
                     <aside class="audit-side-panels" aria-label="审计摘要与完整性">
                         <section class="audit-side-card audit-source-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>访问来源分布</strong></div>
-                            <div class="audit-source-body">
-                                <div class="audit-source-donut" data-empty="true" role="img" aria-label="等待审计统计数据">
-                                    <div class="audit-donut-center"><strong class="audit-donut-total">-</strong><span>审计记录</span></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>访问来源分布</strong></div>
+                            <div class="audit-source-body ui-distribution-chart">
+                                <div class="audit-source-donut ui-distribution-ring" data-empty="true" role="img" aria-label="等待审计统计数据">
+                                    <div class="audit-donut-center ui-distribution-center"><strong class="audit-donut-total">-</strong><span>审计记录</span></div>
                                 </div>
-                                <div class="audit-source-legend">
+                                <div class="audit-source-legend ui-distribution-legend">
                                     <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-web"></span><span>Web</span><strong class="audit-web-legend">-</strong></div>
                                     <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-cli"></span><span>CLI</span><strong class="audit-cli-legend">-</strong></div>
                                     <div class="audit-legend-row audit-other-row" hidden><span class="audit-legend-dot audit-legend-other"></span><span>其他</span><strong class="audit-other-legend">-</strong></div>
@@ -91,7 +91,7 @@
                             <div class="audit-side-footnote">来源分类与统计按当前保留日志计算，不随筛选变化</div>
                         </section>
                         <section class="audit-side-card audit-integrity-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>日志完整性</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>日志完整性</strong></div>
                             <div class="audit-integrity-content">
                                 <div class="audit-integrity-copy">
                                     <div class="audit-integrity-state" data-state="idle" aria-live="polite"><span class="audit-integrity-mark" aria-hidden="true"></span><strong class="audit-integrity-label">尚未校验</strong></div>
@@ -102,7 +102,7 @@
                             <div class="audit-integrity-count" aria-live="polite">校验结果仅代表执行时的日志状态</div>
                         </section>
                         <section class="audit-side-card audit-notes-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg><strong>审计说明</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#warning"></use></svg><strong>审计说明</strong></div>
                             <ul class="audit-notes-list">
                                 <li>记录 Web、CLI 来源的页面访问与接口操作</li>
                                 <li>查看详情和导出需具备管理员临时授权</li>
@@ -158,7 +158,7 @@
                 </div>
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
                     <section class="audit-log-panel audit-mail-panel" aria-label="历史邮件台账">
-                        <div class="audit-panel-header">
+                        <div class="audit-panel-header ui-panel-heading">
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg><strong>历史邮件台账</strong></div>
                             <div class="audit-mail-meta"><span class="audit-mail-scope">默认仅显示本人记录</span><strong class="audit-mail-count" aria-live="polite">加载中...</strong></div>
                         </div>
@@ -178,12 +178,12 @@
                     </section>
                     <aside class="audit-side-panels" aria-label="邮件台账摘要与说明">
                         <section class="audit-side-card audit-source-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>邮件结果分布</strong></div>
-                            <div class="audit-source-body">
-                                <div class="audit-source-donut audit-mail-donut" data-empty="true" role="img" aria-label="等待邮件统计数据">
-                                    <div class="audit-donut-center"><strong id="audit-mail-donut-total">-</strong><span>邮件总数</span></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>邮件结果分布</strong></div>
+                            <div class="audit-source-body ui-distribution-chart">
+                                <div class="audit-source-donut ui-distribution-ring audit-mail-donut" data-empty="true" role="img" aria-label="等待邮件统计数据">
+                                    <div class="audit-donut-center ui-distribution-center"><strong id="audit-mail-donut-total">-</strong><span>邮件总数</span></div>
                                 </div>
-                                <div class="audit-source-legend">
+                                <div class="audit-source-legend ui-distribution-legend">
                                     <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-web"></span><span>成功</span><strong id="audit-mail-success-legend">-</strong></div>
                                     <div class="audit-legend-row"><span class="audit-legend-dot audit-legend-cli"></span><span>失败</span><strong id="audit-mail-failed-legend">-</strong></div>
                                 </div>
@@ -191,7 +191,7 @@
                             <div class="audit-side-footnote">统计范围：当前筛选条件下的全部邮件记录</div>
                         </section>
                         <section class="audit-side-card audit-integrity-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg><strong>台账状态</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg><strong>台账状态</strong></div>
                             <div class="audit-mail-facts">
                                 <div><span>最新记录（UTC）</span><strong id="audit-mail-status-latest">-</strong></div>
                                 <div><span>数据来源</span><strong>本地发件台账</strong></div>
@@ -200,7 +200,7 @@
                             <div class="audit-integrity-count">刷新仅重新读取台账，不会重发邮件</div>
                         </section>
                         <section class="audit-side-card audit-notes-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>邮件说明</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>邮件说明</strong></div>
                             <ul class="audit-notes-list">
                                 <li>记录系统发送邮件的通道、收件人、主题及结果</li>
                                 <li>筛选、统计和导出均按当前用户可见范围生效</li>
@@ -254,7 +254,7 @@
                 </div>
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
                     <section class="audit-log-panel audit-disk-table-panel" aria-label="运行产物分类扫描结果">
-                        <div class="audit-panel-header">
+                        <div class="audit-panel-header ui-panel-heading">
                             <div class="audit-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg><strong>运行产物分类</strong></div>
                             <div class="audit-mail-meta"><span id="audit-disk-scanned-at" role="status" aria-live="polite">等待扫描</span><strong class="audit-mail-count" id="audit-disk-count">-</strong></div>
                         </div>
@@ -274,14 +274,14 @@
                     </section>
                     <aside class="audit-side-panels" aria-label="产物范围和审计说明">
                         <section class="audit-side-card audit-integrity-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>分类详情</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg><strong>分类详情</strong></div>
                             <div class="audit-mail-facts" id="audit-disk-detail" aria-live="polite">
                                 <div><span>提示</span><strong>选择左侧分类查看详情</strong></div>
                             </div>
                             <div class="audit-side-footnote">参考超龄文件不能直接判定为垃圾文件</div>
                         </section>
                         <section class="audit-side-card audit-source-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>扫描范围</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#monitor"></use></svg><strong>扫描范围</strong></div>
                             <div class="audit-mail-facts">
                                 <div><span>已接入</span><strong>Controller 数据目录 + 本机 Worker jobs</strong></div>
                                 <div><span>Controller 数据</span><strong id="audit-disk-controller-bytes">-</strong></div>
@@ -296,7 +296,7 @@
                             <div class="audit-side-footnote">系统盘已用空间包含 SDK、固件、套件及系统数据，不等于已统计产物；远端套件未接入</div>
                         </section>
                         <section class="audit-side-card audit-notes-card">
-                            <div class="audit-side-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>只读审计说明</strong></div>
+                            <div class="audit-side-heading ui-panel-heading"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#shield"></use></svg><strong>只读审计说明</strong></div>
                             <ul class="audit-notes-list">
                                 <li>仅扫描服务端预定义目录，不支持输入任意服务器路径</li>
                                 <li>刷新、筛选和查看详情不会修改或删除任何文件</li>

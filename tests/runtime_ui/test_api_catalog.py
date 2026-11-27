@@ -77,6 +77,28 @@ class ApiCatalogBrowserTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_distribution_geometry_is_shared_with_security_audit(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for width, diameter, center in ((1440, 145, 105), (1280, 124, 88)):
+                page.set_viewport_size({"width": width, "height": 900})
+                for route in ("api-docs", "security-audit"):
+                    page.evaluate("(name) => switchPage(name)", route)
+                    chart = page.locator(f"#page-{route} .ui-distribution-chart:visible").first
+                    chart.wait_for(state="visible")
+                    geometry = chart.evaluate("""element => {
+                        const ring = element.querySelector('.ui-distribution-ring').getBoundingClientRect();
+                        const center = element.querySelector('.ui-distribution-center').getBoundingClientRect();
+                        const heading = element.parentElement.querySelector('.ui-panel-heading').getBoundingClientRect();
+                        return [ring.width, ring.height, center.width, center.height, heading.height];
+                    }""")
+                    with self.subTest(width=width, route=route):
+                        for actual, expected in zip(geometry, (diameter, diameter, center, center, 42)):
+                            self.assertAlmostEqual(actual, expected, delta=1, msg=str(geometry))
+        finally:
+            page.close()
+
     def test_dashboard_filters_and_page_controls(self):
         page = self.new_page()
         try:
