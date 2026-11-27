@@ -44,10 +44,6 @@
 
 /* 上传区状态/进度条规则统一在 common-page.css，此处仅保留外框几何。 */
 
-.analysis-upload-frame {
-    padding: 0;
-    margin-bottom: 10px;
-}
 #report-summary > div {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
