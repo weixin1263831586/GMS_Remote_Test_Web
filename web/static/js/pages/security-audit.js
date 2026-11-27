@@ -292,14 +292,14 @@ function bindAuditIntegrityCheck() {
 function getAuditSourceLabel(source) {
     const tone = source === 'web' ? 'web' : source === 'cli' ? 'cli' : 'other';
     const label = source === 'web' ? 'Web' : source === 'cli' ? 'CLI' : source || '-';
-    return `<span class="audit-source-badge audit-source-${tone}">${escapeHtml(label)}</span>`;
+    return `<span class="audit-source-badge audit-source-${tone} ui-status ${tone === 'web' ? 'is-info' : tone === 'cli' ? 'is-accent' : ''}">${escapeHtml(label)}</span>`;
 }
 
 function getAuditStatusLabel(statusCode) {
     const code = Number(statusCode || 0);
-    if (!code) return '<span class="audit-status-badge audit-status-unknown">-</span>';
+    if (!code) return '<span class="audit-status-badge audit-status-unknown ui-status">-</span>';
     const tone = code >= 500 ? 'error' : code >= 400 ? 'warning' : code >= 200 && code < 400 ? 'success' : 'unknown';
-    return `<span class="audit-status-badge audit-status-${tone}">${code}</span>`;
+    return `<span class="audit-status-badge audit-status-${tone} ui-status ${tone === 'error' ? 'is-danger' : tone === 'warning' ? 'is-warning' : tone === 'success' ? 'is-success' : ''}">${code}</span>`;
 }
 
 function formatAuditTime(timestamp) {
