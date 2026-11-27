@@ -50,13 +50,20 @@ def test_dynamic_build_prompt_uses_same_password_markup():
 
 
 def test_shared_password_assets_loaded_by_every_password_workspace():
-    version = '20261125-unified-password-control'
     shell = ROOT / 'web/shell/components/head.html'
-    assert f'/static/js/password-controls.js?v={version}' in shell.read_text(encoding='utf-8')
-    assert f'/static/css/form-controls.css?v={version}' in (
-        ROOT / 'web/static/css/common.css'
-    ).read_text(encoding='utf-8')
-    for page in ('cluster', 'gerrit', 'redmine', 'automation'):
-        markup = (ROOT / f'features/{page}/ui/page.html').read_text(encoding='utf-8')
-        assert markup.count(f'/static/js/password-controls.js?v={version}') == 1
-        assert markup.count(f'/static/css/form-controls.css?v={version}') == 1
+    css = ROOT / 'web/static/css/common.css'
+
+    def asset_version(source, asset):
+        matches = re.findall(rf'/static/(?:js|css)/{re.escape(asset)}\?v=([\w.-]+)',
+                             source.read_text(encoding='utf-8'))
+        assert len(matches) == 1, (source, asset, matches)
+        return matches[0]
+
+    js_version = asset_version(shell, 'password-controls.js')
+    css_version = asset_version(css, 'form-controls.css')
+    for relative in ('cluster/ui/page.html', 'gerrit/ui/page.html',
+                     'redmine/ui/page.html', 'redmine/ui/settings.html',
+                     'automation/ui/page.html'):
+        source = ROOT / 'features' / relative
+        assert asset_version(source, 'password-controls.js') == js_version
+        assert asset_version(source, 'form-controls.css') == css_version

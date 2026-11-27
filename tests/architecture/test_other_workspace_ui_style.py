@@ -22,7 +22,11 @@ PAGES = (
 def test_only_other_pages_opt_in() -> None:
     for page in PAGES:
         source = (SHELL / "pages" / f"{page}.html").read_text(encoding="utf-8")
-        assert 'class="container page-content page-ui-rework"' in source, page
+        root = re.search(r'<div\b[^>]*\bid="page-' + re.escape(page) + r'"[^>]*>', source)
+        assert root is not None, page
+        classes = re.search(r'\bclass="([^"]+)"', root.group())
+        assert classes is not None, page
+        assert {"container", "page-content", "page-ui-rework"} <= set(classes[1].split()), page
     for page in ("agent", "devices"):
         source = (SHELL / "pages" / f"{page}.html").read_text(encoding="utf-8")
         assert "page-ui-rework" not in source, page
