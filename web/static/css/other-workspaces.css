@@ -212,10 +212,7 @@
 }
 #page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
 #page-notes .kb-source-table :is(th, td):last-child { text-align: right; }
-#page-notes .kb-source-actions {
-    display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 4px;
-}
-#page-notes .kb-source-actions > button { flex-shrink: 0; white-space: nowrap; }
+#page-notes .kb-source-actions > button { flex-shrink: 0; }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
 #page-notes.page-ui-rework #kb-doc-content {
