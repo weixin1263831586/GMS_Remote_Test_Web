@@ -150,7 +150,7 @@ function renderDailyBriefIssueStatistics(statistics) {
 function renderDailyBriefInner(data) {
   var controls = document.getElementById('dailyBriefRunControls');
   if (data && data.account_available === false) {
-    if (controls) controls.innerHTML = '<span class="daily-brief-status unavailable">当前账号不可用</span>';
+    if (controls) controls.innerHTML = '<span class="daily-brief-status ui-status is-danger unavailable">当前账号不可用</span>';
     return '<div class="daily-brief-warning daily-brief-error"><span>⚠️ '
       + esc(data.message || '当前账号不可用于每日晨报，请切换账号后重试。') + '</span></div>';
   }
@@ -170,7 +170,8 @@ function renderDailyBriefInner(data) {
   var profileRequiredError = profileMissing
     && /(?:未绑定.*agent[ _]profile|agent_profile)/i.test(String(run.error || ''));
   var statusText = ({ completed: '完成', partial: '部分完成', failed: '失败', cancelled: '已停止', analyzing: '分析中…', pending: '排队中', snapshotting: '生成快照中…' })[run.status] || run.status;
-  var statusBadge = '<span class="daily-brief-status ' + esc(run.status) + '">' + esc(statusText) + '</span>';
+  var statusTone = ({completed:'is-success', partial:'is-warning', analyzing:'is-warning', running:'is-warning', pending:'is-warning', snapshotting:'is-warning', failed:'is-danger', unavailable:'is-danger'})[run.status] || '';
+  var statusBadge = '<span class="daily-brief-status ui-status ' + statusTone + ' ' + esc(run.status) + '">' + esc(statusText) + '</span>';
   var inflight = (run.status === 'pending' || run.status === 'snapshotting' || run.status === 'analyzing');
   var stopping = inflight && dailyBriefStoppingRunId === String(run.run_id || run.brief_date || '');
   if (!inflight && dailyBriefStoppingRunId === String(run.run_id || run.brief_date || '')) {
@@ -195,13 +196,13 @@ function renderDailyBriefInner(data) {
   if (controls) controls.innerHTML = statusBadge
     + actionBtn;
   var head = '<div class="daily-brief-head">'
-    + '<div class="daily-brief-metrics">'
-    + '<div class="daily-brief-metric"><span>今日待处理</span><b>' + esc(counts.total != null ? counts.total : run.issue_count || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>待回复</span><b>' + esc(run.waiting_my_reply_count || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>超 3 天未回复</span><b>' + esc(run.no_reply_3_days_count || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>需人工确认</span><b>' + esc(reviewCount) + '</b></div>'
-    + '<div class="daily-brief-metric" title="资料证据通过门禁；实机取证状态单独显示"><span>证据已验证</span><b>' + esc(counts.evidence_verified || 0) + '</b></div>'
-    + '<div class="daily-brief-metric"><span>证据部分闭环</span><b>' + esc(counts.evidence_partial || 0) + '</b></div>'
+    + '<div class="daily-brief-metrics ui-kpi-grid">'
+    + '<div class="daily-brief-metric ui-kpi-card--compact"><span>今日待处理</span><b>' + esc(counts.total != null ? counts.total : run.issue_count || 0) + '</b></div>'
+    + '<div class="daily-brief-metric ui-kpi-card--compact"><span>待回复</span><b>' + esc(run.waiting_my_reply_count || 0) + '</b></div>'
+    + '<div class="daily-brief-metric ui-kpi-card--compact"><span>超 3 天未回复</span><b>' + esc(run.no_reply_3_days_count || 0) + '</b></div>'
+    + '<div class="daily-brief-metric ui-kpi-card--compact"><span>需人工确认</span><b>' + esc(reviewCount) + '</b></div>'
+    + '<div class="daily-brief-metric ui-kpi-card--compact" title="资料证据通过门禁；实机取证状态单独显示"><span>证据已验证</span><b>' + esc(counts.evidence_verified || 0) + '</b></div>'
+    + '<div class="daily-brief-metric ui-kpi-card--compact"><span>证据部分闭环</span><b>' + esc(counts.evidence_partial || 0) + '</b></div>'
     + '</div></div>';
   if (run.status === 'failed' && run.error) {
     head += '<div class="daily-brief-warning daily-brief-error"><span>❌ ' + esc(run.error) + '</span>'
