@@ -1045,9 +1045,6 @@ body.apk-resizing {
    （与用户列表/设备/审计页同源），本页无专属统计卡规则。 */
 
 .users-table-wrap {
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--light-bg);
 }
 
 .users-table {
