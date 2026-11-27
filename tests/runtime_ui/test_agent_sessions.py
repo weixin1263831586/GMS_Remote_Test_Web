@@ -174,8 +174,8 @@ class AgentSessionDirectoryTests(RuntimeUiHarness):
             page.evaluate("switchPage('notes', null)")
             page.locator('#page-notes [data-kb-view="personal"]').click()
             expect(page.locator("#page-notes .kb-layout")).to_be_visible()
-            check("#page-notes", [".kb-layout > .pane:nth-child(1) > .pane-bar",
-                                  ".kb-layout > .pane:nth-child(2) > .pane-bar",
+            check("#page-notes", [".kb-layout > .ui-workspace-panel:nth-child(1) > .pane-bar",
+                                  ".kb-layout > .ui-workspace-panel:nth-child(2) > .pane-bar",
                                   ".kb-editor-toolbar"], aligned=True)
             check("#page-notes", [".kb-editor-tags"])
             page.locator('#page-notes [data-kb-view="external"]').click()
