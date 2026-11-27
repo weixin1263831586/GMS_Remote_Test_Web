@@ -1,15 +1,12 @@
-.agent-layout { grid-template-columns: minmax(0, 4fr) minmax(0, 1fr); gap: 12px; }
+.agent-layout { grid-template-columns: minmax(0, 4fr) minmax(0, 1fr); }
 /* 会话、对话和执行步骤三栏。 */
 .agent-layout.agent-layout-with-sessions { grid-template-columns: 200px minmax(0, 4fr) minmax(0, 1fr); }
-.agent-sessions-heading,
-.agent-conversation-heading,
-.agent-run-header { gap: 8px 12px; border-bottom: 1px solid var(--border-color); }
+
 /* 状态文字单行溢出省略。 */
 .agent-heading-status { flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: 8px 12px; }
 .agent-conversation-heading .ui-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
-.agent-session-search { border-bottom: 1px solid var(--border-color); }
 .agent-session-search .entry-field { width: 100%; min-width: 0; }
-#agent-session-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 8px; }
+#agent-session-list { display: flex; flex-direction: column; gap: 6px; padding: var(--ui-spacing-sm); }
 .agent-session-empty { margin: auto; padding: 16px 10px; color: var(--text-muted);  text-align: center; }
 .agent-session-item { display: flex; align-items: stretch; flex: none; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); overflow: hidden; }
 .agent-session-item.active { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color)); background: color-mix(in srgb, var(--primary-color) 8%, var(--card-bg)); }
