@@ -430,7 +430,7 @@
                         ${GmsDeviceInventory.selectionCell(device)}
                         ${GmsDevicePresentation.cells(device, GmsDeviceInventory.groupsFor(device))}
                         <td>
-                            <div class="device-row-actions">
+                            <div class="device-row-actions ui-table-actions">
                                 ${deviceInfoButton}
                                 ${uiControlButton}
                                 ${shellButton}
