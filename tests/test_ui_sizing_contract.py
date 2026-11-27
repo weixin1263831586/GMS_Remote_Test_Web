@@ -176,6 +176,20 @@ class UiSizingContractTests(unittest.TestCase):
         layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
         self.assertIn(".btn-act { min-height: var(--ui-control-height-dense);", layout)
 
+    def test_stacked_workspace_uses_one_panel_template(self):
+        layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
+        self.assertRegex(layout, r"\.ui-workspace-stack:not\(\[hidden\]\)\s*\{[^}]*gap:\s*var\(--ui-spacing-sm\)")
+        self.assertRegex(layout, r"\.ui-workspace-panel\s*\{[^}]*border-radius:\s*var\(--ui-radius-card\)")
+        for name in ("notes.html", "test-suites.html"):
+            markup = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
+            for role in ("ui-workspace-stack", "ui-workspace-toolbar-panel", "ui-workspace-content",
+                         "ui-workspace-panel", "ui-workspace-toolbar", "ui-workspace-control"):
+                self.assertIn(role, markup, (name, role))
+        for name in ("common-page.css", "other-workspaces.css"):
+            source = (CSS / name).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"\.suite-download-section\s*\{")
+            self.assertNotIn(".kb-external-layout", source)
+
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {
