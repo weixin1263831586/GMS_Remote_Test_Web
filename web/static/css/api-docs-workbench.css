@@ -1,7 +1,7 @@
 /* System API workbench: restrained audit-style shared components. */
 #page-api-docs { --api-edge:color-mix(in srgb,var(--primary-color) 14%,var(--border-color)); --api-get:#6da9fa; --api-post:#9d7eea; --api-delete:#e8aa6a; --api-other:#848c9e; }
 #page-api-docs .api-dashboard { display:flex;flex:1 1 auto;flex-direction:column;gap:8px;min-height:0;min-width:0; }
-#page-api-docs .api-stat-grid.page-stat-row { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;margin:0;flex:0 0 auto; }
+#page-api-docs .api-stat-grid.page-stat-row { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));margin:0;flex:0 0 auto; }
 #page-api-docs .api-stat { --api-accent:var(--primary-light); }
 #page-api-docs .api-stat-get { --api-accent:#69d5aa!important; } #page-api-docs .api-stat-post { --api-accent:#f0bf70!important; }
 #page-api-docs .api-stat-filtered { --api-accent:#73b0ff!important; } #page-api-docs .api-stat-skill { --api-accent:#bb98f0!important; }
