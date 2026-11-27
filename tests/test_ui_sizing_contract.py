@@ -214,6 +214,8 @@ class UiSizingContractTests(unittest.TestCase):
             "control-height": 32,
             "control-height-dense": 28,
             "workspace-toolbar-height": 36,
+            "tab-height": 42,
+            "tab-height-narrow": 38,
             "workspace-navigation-width": 250,
             "workspace-aside-min": 305,
             "workspace-aside-max": 350,
@@ -278,6 +280,7 @@ class UiSizingContractTests(unittest.TestCase):
         # Standalone page headers use the same horizontal perimeter token.
         tabs = (CSS / "workspace-tabs.css").read_text(encoding="utf-8")
         self.assertIn("padding: 0 var(--ui-page-edge);", tabs)
+        self.assertIn("--workspace-tab-width: 110px;", tabs)
         self.assertNotIn("--workspace-header-inset:", tabs)
 
     def test_shared_templates_consume_tokens(self):
