@@ -9,9 +9,9 @@
             {% include 'components/page-header-end.html' %}
             <div class="kb-layout split-layout">
                 <div class="pane">
-                    <div class="pane-bar spread">
+                    <div class="pane-bar spread ui-workspace-toolbar">
                         <span class="pane-title">知识库</span>
-                        <button class="btn-xs pane-icon-btn" data-click="kbNewSpace">＋</button>
+                        <button class="btn-xs pane-icon-btn ui-workspace-control" data-click="kbNewSpace">＋</button>
                     </div>
                     <div id="kb-space-list"></div>
                     <div class="pane-label">目录</div>
@@ -22,9 +22,9 @@
                     </div>
                 </div>
                 <div class="pane">
-                    <div class="pane-bar">
-                        <input type="text" id="kb-search-input" class="combo-box pane-grow" placeholder="全库搜索文档、标签、附件..." data-keydown="kbSearch" data-key="Enter" />
-                        <button class="btn-xs" data-busy-size="short" data-click="kbSearch">搜索</button>
+                    <div class="pane-bar ui-workspace-toolbar">
+                        <input type="text" id="kb-search-input" class="combo-box pane-grow ui-workspace-control" placeholder="全库搜索文档、标签、附件..." data-keydown="kbSearch" data-key="Enter" />
+                        <button class="btn-xs ui-workspace-control" data-busy-size="short" data-click="kbSearch">搜索</button>
                     </div>
                     <div id="kb-doc-list"><div class="suite-empty">加载中...</div></div>
                     <div class="pane-foot single">
@@ -33,16 +33,16 @@
                 </div>
                 <div class="pane">
                     <div id="kb-editor">
-                        <div class="kb-editor-toolbar pane-bar">
-                            <input id="kb-doc-title" class="combo-box pane-grow" placeholder="文档标题" />
-                            <button class="btn-xs" data-click="kbToggleFavorite">收藏</button>
-                            <button class="btn-xs" data-click="kbShowHistory">历史</button>
-                            <button class="btn-xs btn-primary" data-click="kbSaveDoc">保存</button>
-                            <button class="btn-xs btn-danger-quiet" data-click="kbDeleteCurrent">删除</button>
+                        <div class="kb-editor-toolbar pane-bar ui-workspace-toolbar">
+                            <input id="kb-doc-title" class="combo-box pane-grow ui-workspace-control" placeholder="文档标题" />
+                            <button class="btn-xs ui-workspace-control" data-click="kbToggleFavorite">收藏</button>
+                            <button class="btn-xs ui-workspace-control" data-click="kbShowHistory">历史</button>
+                            <button class="btn-xs btn-primary ui-workspace-control" data-click="kbSaveDoc">保存</button>
+                            <button class="btn-xs btn-danger-quiet ui-workspace-control" data-click="kbDeleteCurrent">删除</button>
                         </div>
-                        <div class="kb-editor-tags pane-bar">
-                            <input id="kb-doc-tags" class="combo-box pane-grow" placeholder="标签，逗号分隔" />
-                            <button class="btn-xs" data-click="kbAsk">问答</button>
+                        <div class="kb-editor-tags pane-bar ui-workspace-toolbar">
+                            <input id="kb-doc-tags" class="combo-box pane-grow ui-workspace-control" placeholder="标签，逗号分隔" />
+                            <button class="btn-xs ui-workspace-control" data-click="kbAsk">问答</button>
                         </div>
                         <textarea id="kb-doc-content" placeholder="记录知识、排查过程、配置、命令、结论..."></textarea>
                     </div>
@@ -50,12 +50,12 @@
                 </div>
             </div>
             <section class="pane" data-kb-external hidden>
-                <form class="pane-bar" data-kb-source-form>
-                    <input type="text" name="name" class="combo-box" placeholder="知识源名称（选填，留空自动获取）" aria-label="知识源名称（选填）" maxlength="160" />
-                    <input type="url" name="url" class="combo-box pane-grow" placeholder="请输入外部知识源 HTTPS 网址" aria-label="知识源网址" required maxlength="2048" />
-                    <button type="submit" class="btn-xs btn-primary" data-kb-submit data-busy-size="short">添加</button>
-                    <button type="button" class="btn-xs" data-kb-reset hidden style="display: none;">取消编辑</button>
-                    <button type="button" class="btn-xs" data-kb-refresh data-busy-size="short">刷新</button>
+                <form class="pane-bar ui-workspace-toolbar" data-kb-source-form>
+                    <input type="text" name="name" class="combo-box ui-workspace-control" placeholder="知识源名称（选填，留空自动获取）" aria-label="知识源名称（选填）" maxlength="160" />
+                    <input type="url" name="url" class="combo-box pane-grow ui-workspace-control" placeholder="请输入外部知识源 HTTPS 网址" aria-label="知识源网址" required maxlength="2048" />
+                    <button type="submit" class="btn-xs btn-primary ui-workspace-control" data-kb-submit data-busy-size="short">添加</button>
+                    <button type="button" class="btn-xs ui-workspace-control" data-kb-reset hidden style="display: none;">取消编辑</button>
+                    <button type="button" class="btn-xs ui-workspace-control" data-kb-refresh data-busy-size="short">刷新</button>
                 </form>
                 <div class="pane-scroll list-table-wrap" data-kb-sources></div>
             </section>
