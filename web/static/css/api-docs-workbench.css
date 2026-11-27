@@ -5,8 +5,8 @@
 #page-api-docs.page-ui-rework .api-stat.workbench-stat { --api-accent:var(--primary-light);min-height:var(--ui-stat-height);height:var(--ui-stat-height);padding:8px 12px;gap:9px;background:var(--card-bg);border:1px solid var(--api-edge); }
 #page-api-docs .api-stat-get { --api-accent:#69d5aa!important; } #page-api-docs .api-stat-post { --api-accent:#f0bf70!important; }
 #page-api-docs .api-stat-filtered { --api-accent:#73b0ff!important; } #page-api-docs .api-stat-skill { --api-accent:#bb98f0!important; }
-#page-api-docs .api-stat .workbench-stat-icon { width:36px;height:36px;color:var(--api-accent);background:color-mix(in srgb,var(--api-accent) 12%,var(--light-bg)); }
-#page-api-docs .api-stat .page-stat-value { color:var(--api-accent);line-height:1.15; }
+#page-api-docs .api-stat .workbench-stat-icon { color:var(--api-accent);background:color-mix(in srgb,var(--api-accent) 12%,var(--light-bg)); }
+#page-api-docs .api-stat .page-stat-value { color:var(--api-accent); }
 #page-api-docs .api-stat-hint { display:none;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 #page-api-docs :is(.api-search-toolbar,.api-category-toolbar) { flex:0 0 auto;padding:5px 10px; }
 #page-api-docs .api-search-box { display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;height:var(--ui-control-height);padding:0 9px;border:1px solid var(--border-color);border-radius:6px;background:var(--darker-bg); }
