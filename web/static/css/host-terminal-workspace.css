@@ -18,7 +18,6 @@ body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-single
     flex: 0 1 auto;
     min-width: 0;
     max-width: 180px;
-    color: var(--text-secondary);
 }
 
 #page-terminal.page-ui-rework .host-terminal-status::before {
@@ -53,20 +52,8 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
 }
 /* Only terminal placeholders use the subtle desktop-style empty state.
    xterm itself remains untouched and gets the complete body dimensions. */
-#page-terminal.page-ui-rework .host-terminal-placeholder {
-    box-sizing: border-box;
-    width: 100%;
-    height: 100%;
-    padding: 16px;
-    background: radial-gradient(ellipse at 50% 42%,
-        color-mix(in srgb, var(--primary-color) 8%, var(--darker-bg)),
-        var(--darker-bg) 68%);
-}
+#page-terminal.page-ui-rework .host-terminal-placeholder { width: 100%; height: 100%; }
 #page-terminal.host-workspace-surface { --host-placeholder-icon-size: 54px; --host-placeholder-glyph-size: 27px; }
-#page-terminal.page-ui-rework .host-terminal-placeholder-connecting .host-terminal-placeholder-icon .ui-icon,
-#page-terminal.page-ui-rework .host-terminal-placeholder-adb .host-terminal-placeholder-icon .ui-icon {
-    animation: host-desktop-rotate 1.4s linear infinite;
-}
 @media (max-width: 960px) {
     #page-terminal.page-ui-rework .host-terminal-status {
         max-width: 120px;
@@ -75,10 +62,4 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
 @media (max-width: 760px) {
     #page-terminal.page-ui-rework .host-terminal-status { max-width: 90px; }
     #page-terminal.page-ui-rework .host-terminal-return-button { padding: 2px 5px; }
-}
-@media (prefers-reduced-motion: reduce) {
-    #page-terminal.page-ui-rework .host-terminal-placeholder-connecting .ui-icon,
-    #page-terminal.page-ui-rework .host-terminal-placeholder-adb .ui-icon {
-        animation: none;
-    }
 }
