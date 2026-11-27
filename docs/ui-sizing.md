@@ -17,7 +17,8 @@
 | 数据表头 | `--ui-table-header-height` | 38px |
 | 数据行 | `--ui-table-row-height` | 36px |
 | 数据表格单元格内边距（垂直 / 水平） | `--ui-table-cell-padding-block` / `--ui-table-cell-padding-inline` | 2 / 10px |
-| 工作区页签（桌面/窄屏） | `--ui-tab-height` / `--ui-tab-height-narrow` | 44 / 38px |
+| 工作区页签（桌面/窄屏） | `--ui-tab-height` / `--ui-tab-height-narrow` | 42 / 38px |
+| 公共工作区页签宽度 | `--workspace-tab-width` | 110px |
 | 常规 KPI 卡片 | `--ui-stat-height` | 95px |
 | 紧凑 KPI 备选（非页头默认） | `--ui-stat-height-compact` | 70px |
 | 分段页签内部 | `--ui-segmented-inner-height` | 24px |
