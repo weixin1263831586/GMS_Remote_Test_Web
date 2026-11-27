@@ -3,11 +3,11 @@
 
     <!-- Analysis workbench: same 84px compact intake and 29px controls as APK. -->
     <div class="analysis-upload-frame report-workbench-upload">
-        <div id="report-upload-zone" class="report-upload-zone upload-empty">
+        <div id="report-upload-zone" class="report-upload-zone analysis-upload-surface upload-empty">
             <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz,.txt,.log" multiple style="display:none">
             <input type="file" id="report-folder-input" webkitdirectory directory style="display:none">
-            <div class="report-upload-content">
-                <span class="report-upload-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span>
+            <div class="report-upload-content analysis-upload-row">
+                <span class="report-upload-mark analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></span>
                 <div class="analysis-upload-copy">
                     <div class="analysis-upload-title">拖拽测试报告到此处</div>
                     <div class="upload-instructions">支持报告 ZIP / XML 与 host_log 同时上传，也支持文件夹、Redmine 附件拖拽</div>
@@ -27,12 +27,12 @@
                 </div>
                 <button type="button" class="btn-xs report-analysis-cancel" data-click="resetReportAnalysis" title="取消等待并清除当前分析（已提交服务器的处理可能继续）">取消等待</button>
             </div>
-            <div class="report-upload-progress" id="report-upload-progress">
-                <div class="report-upload-progress-bar" id="report-progress-fill" style="width:0%"></div>
+            <div class="report-upload-progress analysis-upload-progress" id="report-upload-progress">
+                <div class="report-upload-progress-bar analysis-upload-progress-fill" id="report-progress-fill" style="width:0%"></div>
             </div>
         </div>
         <div id="report-active-file" class="report-active-file" hidden>
-            <span class="report-active-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#archive"></use></svg></span>
+            <span class="report-active-icon analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#archive"></use></svg></span>
             <div class="report-active-copy">
                 <div id="report-active-name" class="report-active-name" title=""></div>
                 <div class="report-active-status"><span class="report-active-dot"></span>解析完成</div>
