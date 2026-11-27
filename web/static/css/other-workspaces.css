@@ -291,9 +291,6 @@
 #page-notes.page-ui-rework .kb-layout > .pane {
     display: flex; flex-direction: column; min-height: 0; background: var(--card-bg);
 }
-#page-notes.page-ui-rework .pane-bar {
-    min-height: 45px; padding: 8px 10px; background: var(--light-bg);
-}
 #page-notes.page-ui-rework #kb-doc-content {
     min-height: 0; border: 0; padding: 12px;
     background: var(--card-bg); color: var(--text-primary); line-height: 1.65;
@@ -596,7 +593,7 @@
     --suite-panel-bg: var(--card-bg);
 }
 #page-test-suites .suite-download-section {
-    margin-bottom: 8px; padding: 6px 10px !important;
+    margin-bottom: 8px; padding: 0;
     border: 1px solid var(--border-color); border-radius: 8px;
     background: var(--card-bg);
 }
@@ -610,7 +607,7 @@
 }
 #page-test-suites .suite-download-symbol {
     display: inline-flex; align-items: center; justify-content: center;
-    flex: 0 0 28px; height: 28px; border-radius: 6px;
+    flex: 0 0 var(--ui-control-height-dense); height: var(--ui-control-height-dense); border-radius: 6px;
     background: color-mix(in srgb, var(--info-color) 15%, var(--card-bg));
     color: var(--ui-icon-cyan);
 }
@@ -623,9 +620,8 @@
      color: var(--text-muted);
 }
 #page-test-suites .suite-download-field { flex: 1 1 auto; min-width: 0; }
-#page-test-suites #suite-download-url { height: 30px; }
 #page-test-suites :is(#btn-download-suite, #btn-extract-suite) {
-    height: 30px; min-width: 90px;
+    min-width: 90px;
 }
 #page-test-suites #btn-extract-suite {
     background: var(--lighter-bg); border: 1px solid var(--border-light);
@@ -641,11 +637,6 @@
 #page-test-suites.page-ui-rework :is(.suite-browser-toolbar, .suite-browser-header) {
     background: var(--light-bg); border-bottom: 1px solid var(--border-color);
 }
-/* Match the two pane headers to the same fixed row height. */
-#page-test-suites.page-ui-rework :is(.suite-browser-toolbar, .suite-browser-header) {
-    box-sizing: border-box;
-    height: var(--ui-control-height-large); min-height: var(--ui-control-height-large); padding: 5px 12px;
-}
 #page-test-suites .suite-sidebar-heading {
     display: inline-flex; align-items: center; gap: 7px;
     white-space: nowrap;
@@ -655,8 +646,8 @@
     background: color-mix(in srgb, var(--primary-color) 23%, transparent);
     color: var(--primary-light); text-align: center;
 }
-#page-test-suites .suite-sidebar-filter { padding: 6px 10px; border-bottom: 1px solid var(--border-color); }
-#page-test-suites .suite-browser-filter { display: block; margin: 0; width: 100%; height: var(--ui-control-height); }
+#page-test-suites .suite-sidebar-filter { border-bottom: 1px solid var(--border-color); }
+#page-test-suites .suite-browser-filter { display: block; margin: 0; width: 100%; }
 #page-test-suites .suite-browser-list { padding: 6px 8px 8px; }
 #page-test-suites.page-ui-rework .suite-suite-item {
     display: flex; min-height: 61px; gap: 10px; margin: 3px 0;
@@ -710,7 +701,7 @@
 }
 #page-test-suites .suite-browser-actions { flex: 0 0 auto; gap: 6px; white-space: nowrap; }
 #page-test-suites .suite-browser-actions .btn-xs {
-    min-height: var(--ui-control-height-dense); white-space: nowrap;
+    white-space: nowrap;
 }
 /* Keep breadcrumbs, bounded search, and contextual actions in independent
    zones. A run action is never a breadcrumb button. */
@@ -718,7 +709,6 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(330px, 480px) max-content;
     align-items: center; column-gap: 9px; row-gap: 6px;
-    padding: 6px 10px;
     background: color-mix(in srgb, var(--card-bg) 80%, var(--light-bg));
 }
 /* Explicit placement keeps search on the right even when no suite is
@@ -744,11 +734,10 @@
     width: 100%; min-width: 0;
 }
 #page-test-suites .suite-file-search {
-    display: block; flex: 1 1 auto; min-width: 0; width: 100%; min-height: var(--ui-control-height);
+    display: block; flex: 1 1 auto; min-width: 0; width: 100%;
 }
 #page-test-suites .suite-search-field > .btn-xs {
-    /* Search input and button share the same 32px row; contextual actions stay dense. */
-    flex: 0 0 auto; min-height: var(--ui-control-height); white-space: nowrap;
+    flex: 0 0 auto; white-space: nowrap;
 }
 #page-test-suites .suite-context-actions,
 #page-test-suites .suite-run-actions {
@@ -833,7 +822,7 @@
 }
 @container suite-panel (max-width: 960px) {
     #page-test-suites.page-ui-rework .suite-browser-header {
-        height: auto; min-height: 40px; flex-wrap: wrap; gap: 6px;
+        flex-wrap: wrap; gap: 6px;
     }
     #page-test-suites .suite-browser-identity { flex-basis: 100%; }
     #page-test-suites .suite-browser-actions { margin-left: auto; }
