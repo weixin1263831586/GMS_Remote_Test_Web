@@ -1613,13 +1613,6 @@ td.table-placeholder {
     gap: 2px;
 }
 
-.empty-message {
-    color: var(--text-muted);
-
-    text-align: center;
-    padding: 20px;
-}
-
 /* ==================== Button Frames ==================== */
 .adb-button-frame,
 .vnc-button-frame {
@@ -1706,7 +1699,7 @@ td.table-placeholder {
 .log-frame {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--ui-radius-card);
     padding: 6px;
     display: flex;
     flex-direction: column;
@@ -1718,10 +1711,6 @@ td.table-placeholder {
 }
 
 .log-frame-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 8px;
     margin-bottom: 6px;
 }
 
