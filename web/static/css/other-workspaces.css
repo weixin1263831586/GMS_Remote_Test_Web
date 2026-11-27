@@ -211,28 +211,10 @@
 }
 #page-reports.page-ui-rework .list-table { min-width: 1120px; }
 /* 报告分析 / APK：强化上传/结果/失败列表层级，保留原 tab 和内容容器。 */
-#page-report-analysis.page-ui-rework :is(.analysis-upload-frame, .report-result-card),
-#page-apk-analysis.page-ui-rework :is(.analysis-upload-frame, .apk-status-card, .apk-source-frame) {
-    border: 1px solid var(--border-color); border-radius: 8px;
+#page-report-analysis.page-ui-rework .report-result-card,
+#page-apk-analysis.page-ui-rework .apk-source-frame {
+    border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
     background: var(--card-bg); box-shadow: none;
-}
-/* In empty state the upload zone is the sole frame; outer 1px border shifted
-   the upload area off the 15px layout grid on both analysis pages. */
-#page-report-analysis.page-ui-rework .analysis-upload-frame:has(.upload-empty),
-#page-apk-analysis.page-ui-rework .analysis-upload-frame:has(.upload-empty) {
-    border: 0;
-}
-/* Empty-state upload surfaces use the same solid frame as other pages.
-   The result-state row remains borderless (common.css :not(.upload-empty)). */
-#page-report-analysis.page-ui-rework .report-upload-zone.upload-empty,
-#page-apk-analysis.page-ui-rework .apk-upload-zone.upload-empty {
-    border: 1px solid var(--border-color);
-    border-radius: 8px; background: var(--darker-bg);
-}
-#page-report-analysis.page-ui-rework .report-upload-zone.upload-empty:hover,
-#page-apk-analysis.page-ui-rework .apk-upload-zone.upload-empty:hover {
-    border-color: var(--primary-color);
-    background: color-mix(in srgb, var(--primary-color) 5%, var(--darker-bg));
 }
 #page-apk-analysis.page-ui-rework :is(.apk-file-tabs, .apk-section-title) {
     background: var(--light-bg); border-bottom: 1px solid var(--border-color);
