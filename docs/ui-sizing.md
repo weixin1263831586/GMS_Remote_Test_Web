@@ -35,7 +35,7 @@
 
 ## 公共工作区布局
 
-外部知识源和测试套件复用 `ui-foundations.css` 的 `.ui-workspace-stack`、`.ui-workspace-panel`、`.ui-workspace-toolbar-panel`、`.ui-workspace-content`。区块间距使用 `--ui-spacing-sm`（8px），面板使用统一边框、背景和 `--ui-radius-card`（8px）。单行工具栏外框总高 36px（包含上下边框），内部控件 28px；可选进度或多行内容自然扩展。需要独立滚动的面板使用 `.ui-workspace-panel--scroll`。各业务页面仅定义特殊列宽、内容布局和交互，不重复声明面板边框或纵向区块间距。对话 Agent、个人知识库和测试套件的导航栏共用 `--ui-workspace-navigation-width`（300px）；知识库文档栏和 Agent 执行栏比例独立保留。系统接口与安全审计共用 `.ui-workspace-grid--aside`：宽屏 305–350px，1350px 及以下 275–310px，1150px 及以下单列。
+外部知识源和测试套件复用 `ui-foundations.css` 的 `.ui-workspace-stack`、`.ui-workspace-panel`、`.ui-workspace-toolbar-panel`、`.ui-workspace-content`。区块间距使用 `--ui-spacing-sm`（8px），面板使用统一边框、背景和 `--ui-radius-card`（8px）。单行工具栏外框总高 36px（包含上下边框），内部控件 28px；可选进度或多行内容自然扩展。需要独立滚动的面板使用 `.ui-workspace-panel--scroll`。各业务页面仅定义特殊列宽、内容布局和交互，不重复声明面板边框或纵向区块间距。对话 Agent、个人知识库和测试套件的导航栏共用 `--ui-workspace-navigation-width`（250px）；知识库文档栏和 Agent 执行栏比例独立保留。系统接口与安全审计共用 `.ui-workspace-grid--aside`：宽屏 305–350px，1350px 及以下 275–310px，1150px 及以下单列。
 
 ## 设计边界
 
