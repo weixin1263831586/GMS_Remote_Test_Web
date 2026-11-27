@@ -170,7 +170,7 @@
                 : view.action === 'reopenHostWorkspacePane'
                     ? `<button class="btn-xs host-desktop-connect-button host-pane-connect-button" type="button" data-click="reopenHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
                     : '<span class="host-desktop-waiting" aria-hidden="true"></span>';
-            return `<div class="host-workspace-empty host-desktop-placeholder host-desktop-placeholder-${kind}">
+            return `<div class="host-workspace-empty host-pane-placeholder host-desktop-placeholder host-desktop-placeholder-${kind}${kind === 'connecting' ? ' host-pane-placeholder-busy' : ''}">
                 <div class="host-desktop-placeholder-content host-pane-placeholder-content">
                     <span class="host-desktop-placeholder-icon host-pane-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
                     <strong class="host-desktop-placeholder-title host-pane-placeholder-title">${view.title}</strong>
@@ -224,7 +224,7 @@
                 const host = desktopHosts.find(item => item.id === pane.hostId);
                 const hostName = pane.type === 'empty' ? '桌面未打开' : host?.name || '请选择主机';
                 return `
-                <section class="host-workspace-pane${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}" aria-label="桌面 ${index + 1}">
+                <section class="host-workspace-pane ui-workspace-panel${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}" aria-label="桌面 ${index + 1}">
                     <div class="host-workspace-pane-header">
                         <div class="host-desktop-identity host-pane-identity">
                             <span class="host-desktop-screen-label" aria-hidden="true">🖥️</span>
