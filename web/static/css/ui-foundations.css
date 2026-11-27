@@ -359,7 +359,7 @@ button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }
     display: flex;
     flex: 1 1 0;
     align-items: center;
-    gap: 12px;
+    gap: var(--ui-spacing-md);
     padding: 14px 15px;
     text-align: left;
     line-height: 1.45;
@@ -420,13 +420,13 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
 .ui-dashboard .stat-card.warn .value { color: var(--warning-color); }
 .ui-dashboard .stat-card.bad .value { color: var(--danger-color); }
 @media (max-width: 1200px) {
-    .page-stat-card:is(.inventory-stat, .workbench-stat), .ui-kpi-card--icon { padding: 10px; gap: 8px; }
+    .page-stat-card:is(.inventory-stat, .workbench-stat), .ui-kpi-card--icon { padding: 10px; gap: var(--ui-spacing-sm); }
     :is(.inventory-stat-icon, .workbench-stat-icon, .ui-kpi-icon) { width: 34px; height: 34px; }
     :is(.inventory-stat-icon, .workbench-stat-icon, .ui-kpi-icon) .ui-icon { width: 20px; height: 20px; }
 }
 
 /* Shared empty states and log toolbars; log scrolling and action order stay local. */
-:is(.ui-empty-state, .empty-message, .suite-empty, .ui-dashboard .empty-state, .event-log-empty) {
+:is(.ui-empty-state, .empty-message, .suite-empty, .ui-dashboard .empty-state, .ui-kpi-stack .empty-state, .event-log-empty) {
     color: var(--text-secondary);
     text-align: center;
     padding: var(--ui-spacing-lg) var(--ui-spacing-md);
