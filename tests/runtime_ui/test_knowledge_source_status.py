@@ -92,14 +92,15 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                         };
                     });
                     const form = document.querySelector('#page-notes [data-kb-source-form]');
-                    const toolbar = form.getBoundingClientRect();
+                    const toolbarPanel = form.closest('.ui-workspace-toolbar-panel');
+                    const toolbar = toolbarPanel.getBoundingClientRect();
                     const panel = wrap.getBoundingClientRect();
                     return {rows, scrollable: wrap.scrollWidth > wrap.clientWidth,
                         panelGap: panel.top - toolbar.bottom,
                         leftEdgeDelta: panel.left - toolbar.left,
                         rightEdgeDelta: panel.right - toolbar.right,
                         toolbarHeight: toolbar.height,
-                        toolbarBottomBorder: getComputedStyle(form).borderBottomWidth,
+                        toolbarBottomBorder: getComputedStyle(toolbarPanel).borderBottomWidth,
                         panelTopBorder: getComputedStyle(wrap).borderTopWidth,
                         inputWidth: form.elements.name.getBoundingClientRect().width,
                         urlWidth: form.elements.url.getBoundingClientRect().width,
