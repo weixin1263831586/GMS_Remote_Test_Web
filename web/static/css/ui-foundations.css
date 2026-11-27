@@ -341,3 +341,46 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     :is(.inventory-stat-icon, .workbench-stat-icon) { width: 34px; height: 34px; }
     :is(.inventory-stat-icon, .workbench-stat-icon) .ui-icon { width: 20px; height: 20px; }
 }
+
+/* Dashboard toolbar and grouped actions, shared by all opted-in dashboards. */
+:where(.ui-dashboard) .btn-group,
+.ui-action-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+:where(.ui-dashboard) .filter-bar { display: flex; align-items: center; flex-wrap: wrap; gap: var(--ui-spacing-sm); }
+.ui-dashboard .header-toolbar.workspace-actions {
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 1px;
+    scrollbar-width: thin;
+}
+.ui-dashboard .header-toolbar .filter-bar {
+    flex: 0 1 auto;
+    min-width: 0;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    gap: 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+}
+.ui-dashboard .header-toolbar .filter-bar > div { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ui-dashboard .header-toolbar :is(.filter-bar, .filter-bar > div)[hidden] { display: none; }
+.ui-dashboard .header-toolbar .btn-group {
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: 5px;
+    padding-left: 9px;
+    margin-left: 1px;
+    border-left: 1px solid var(--border-color);
+}
+@media (max-width: 1199px) {
+    .ui-dashboard .header-toolbar.workspace-actions { justify-content: flex-start; }
+}
+@media (max-width: 800px) {
+    .ui-dashboard .header-toolbar .btn-group { border-left: 0; padding-left: 0; margin-left: 0; }
+}
