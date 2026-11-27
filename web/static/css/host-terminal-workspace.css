@@ -7,13 +7,6 @@
 body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-single-bar {
     display: none !important;
 }
-#page-terminal.page-ui-rework .host-terminal-label {
-    display: inline-flex;
-    align-items: center;
-    flex: none;
-    white-space: nowrap;
-    color: var(--text-secondary);
-}
 #page-terminal.page-ui-rework .host-terminal-status {
     flex: 0 1 auto;
     min-width: 0;
