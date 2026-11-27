@@ -23,9 +23,6 @@
                     <section id="sidebar-settings-panel-system" class="sidebar-settings-panel" data-sidebar-settings-panel="system" role="tabpanel" hidden>
                         <section data-system-settings-section="runtime">
                             <div id="system-config-body" aria-live="polite"></div>
-                            <div class="modal-buttons" id="system-config-footer" hidden>
-                                <button type="submit" class="btn-xxs btn-primary" form="system-runtime-config-form">保存运行配置</button>
-                            </div>
                         </section>
                         <section data-system-settings-section="models">
                             <div class="config-section">
@@ -44,8 +41,7 @@
                         <section data-system-settings-section="external">
                             <div class="config-section">
                                 <div class="config-section-title">GMS 助手服务</div>
-                                <div class="modal-form-row"><label for="gms-assistant-url">服务地址:</label><input type="url" id="gms-assistant-url" autocomplete="off" /></div>
-                                <div class="modal-buttons"><button type="button" class="btn-xxs btn-primary" data-click="saveGmsAssistantConfig">保存</button></div>
+                                <div class="modal-form-row settings-action-row"><label for="gms-assistant-url">服务地址:</label><input type="url" id="gms-assistant-url" autocomplete="off" /><button type="button" class="btn-xxs btn-primary" data-click="saveGmsAssistantConfig">保存</button></div>
                             </div>
                         </section>
                     </section>

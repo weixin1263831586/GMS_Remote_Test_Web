@@ -153,8 +153,18 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
         if modal_id == "sidebar-visibility-modal":
             page.evaluate("openSidebarVisibilityModal('system', 'runtime')")
             expect(page.locator("#system-config-body input").first).to_be_visible()
-            expect(page.locator("#system-config-footer")).to_be_visible()
+            expect(page.locator("#system-runtime-config-form #system-config-footer")).to_be_visible()
             panel = page.locator("#sidebar-settings-panel-system")
+            expect(panel.locator(".modal-buttons")).to_have_count(0)
+            for selector in ("#system-config-footer", "#system-smtp-form .settings-action-row",
+                             ".config-section-accent-routes .settings-action-row",
+                             '[data-system-settings-section="external"] .settings-action-row'):
+                row = panel.locator(selector)
+                expect(row).to_be_visible()
+                assert row.evaluate("(el) => getComputedStyle(el).display === 'flex'")
+                assert row.evaluate("(el) => getComputedStyle(el).paddingTop === '0px' && getComputedStyle(el).paddingBottom === '0px'")
+                if page.viewport_size["width"] >= 1000:
+                    assert row.evaluate("(el) => el.clientHeight <= el.querySelector('button').offsetHeight + 12")
             expect(panel.locator("[data-system-settings-section]")).to_have_count(4)
             expect(panel.locator(".sidebar-settings-tabs")).to_have_count(0)
             page.wait_for_function("document.querySelector('#sidebar-settings-panel-system').scrollHeight > document.querySelector('#sidebar-settings-panel-system').clientHeight")

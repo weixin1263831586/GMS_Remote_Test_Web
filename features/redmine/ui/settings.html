@@ -58,19 +58,18 @@
         <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
         <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
       </div>
-<p role="status"></p>
-<div class="modal-buttons"><button type="submit">保存统计与地址</button></div>
+<div class="settings-action-row"><p role="status"></p><button type="submit">保存统计与地址</button></div>
 </fieldset>
 </form>
 <fieldset id="redmine-binding-fields" class="redmine-settings-fields" disabled>
 <legend>个人身份</legend>
       <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
         <label for="settingSelfBinding">个人身份绑定（我是谁）</label>
-        <div class="select-with-add" style="width:100%">
-          <select id="settingSelfBinding" style="width:100%"></select>
+        <div class="settings-action-row">
+          <select id="settingSelfBinding"></select>
+          <button class="secondary" type="button" data-click="submitSelfBinding">保存绑定</button>
         </div>
         <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
-        <button class="secondary" style="margin-top:6px" type="button" data-click="submitSelfBinding">保存绑定</button>
       </div>
 <p role="status"></p>
 </fieldset>
@@ -91,8 +90,7 @@
         <input type="password" class="password-input-secret" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
         <div class="setting-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
       </div>
-<p role="status"></p>
-<div class="modal-buttons"><button type="submit">保存 Redmine 凭据</button></div>
+<div class="settings-action-row"><p role="status"></p><button type="submit">保存 Redmine 凭据</button></div>
 </fieldset>
 </form>
 <form id="redmine-brief-form" autocomplete="off">
@@ -136,14 +134,12 @@
           <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
         </div>
       </div>
-<p role="status"></p>
-<div class="modal-buttons"><button type="submit" id="save-redmine-settings">保存每日晨报</button></div>
+<div class="settings-action-row"><p role="status"></p><button type="submit" id="save-redmine-settings">保存每日晨报</button></div>
 </fieldset>
 </form>
-      <div>
-        <div style="color:var(--text-secondary);margin-bottom:6px;" data-ui-type-size="small" data-ui-type-weight="semibold">邮件通知（接收方）</div>
-        <div id="emailSenderSummary" class="muted" style="margin-bottom:6px;" data-ui-type-size="small">读取发送方配置中…</div>
-        <div class="setting-help">发送方账号是系统级配置（管理员在「导航设置与使用帮助 → 系统配置」维护）；这里只决定提醒发给谁——部门逾期提醒按组织架构中各用户的邮箱逐人发送。</div>
+      <div class="redmine-settings-mail-summary">
+        <div class="setting-help"><strong>邮件通知（接收方）：</strong>部门逾期提醒按组织架构中各用户的邮箱逐人发送。</div>
+        <div id="emailSenderSummary" class="muted" data-ui-type-size="small">读取发送方配置中…</div>
       </div>
 </main>
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>

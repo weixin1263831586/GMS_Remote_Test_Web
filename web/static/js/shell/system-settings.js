@@ -16,8 +16,6 @@ function resetSystemSettings() {
     const frame = document.getElementById('system-redmine-settings-frame');
     if (frame) frame.removeAttribute('src');
     document.getElementById('system-config-body')?.replaceChildren();
-    const footer = document.getElementById('system-config-footer');
-    if (footer) footer.hidden = true;
     const input = document.getElementById('gms-assistant-url');
     if (input) { input.value = ''; delete input.dataset.loaded; }
 }
@@ -92,12 +90,10 @@ async function loadSystemModelCatalog(probeProvider = '') {
 
 async function loadSystemRuntimeConfig() {
     const modalBody = document.getElementById('system-config-body');
-    const footer = document.getElementById('system-config-footer');
-    if (!modalBody || !footer) return;
+    if (!modalBody) return;
     const generation = ++systemConfigGeneration;
     staticRoutesLoaded = false;
     emailSenderConfigLoaded = false;
-    footer.hidden = true;
     modalBody.textContent = '正在读取运行配置…';
 
     let config = {};
@@ -176,7 +172,10 @@ async function loadSystemRuntimeConfig() {
                 <label>实时日志上限:</label>
                 <input type="number" id="config-log-max-entries" min="50" max="10000" />
             </div>
-            <small>历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
+            <div class="settings-action-row" id="system-config-footer">
+                <small>历史日志：首次加载状态时显示的条数；实时日志：页面每个Tab最多保留的条数。保存后即时生效。</small>
+                <button type="submit" class="btn-xxs btn-primary">保存运行配置</button>
+            </div>
         </div>
         </form>
 
@@ -209,9 +208,11 @@ async function loadSystemRuntimeConfig() {
                 <label>授权码/密码:</label>
                 <input type="password" id="config-email-password" placeholder="留空保持不变" autocomplete="new-password" />
             </div>
-            <small id="config-email-status">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
-            <div class="modal-buttons"><button type="submit" class="btn-xxs btn-primary" disabled>保存 SMTP 配置</button></div>
-            <div style="margin-top:10px;display:flex;align-items:center;gap:8px;">
+            <div class="settings-action-row">
+                <small id="config-email-status">接收方邮箱在各业务处配置（如 Redmine 用户资料、运维告警 email_to），不在此处。</small>
+                <button type="submit" class="btn-xxs btn-primary" disabled>保存 SMTP 配置</button>
+            </div>
+            <div class="settings-filter-row">
                 <button class="btn-xxs" id="email-outbox-refresh-btn" type="button">↻ 刷新历史邮件</button>
                 <label class="email-outbox-filter-label" style="margin:0;">通道:
                     <select id="email-outbox-channel" >
@@ -231,8 +232,8 @@ async function loadSystemRuntimeConfig() {
                     </select>
                 </label>
             </div>
-            <div id="email-outbox-list" style="margin-top:6px;max-height:220px;overflow:auto;border:1px solid var(--border-color,#333);border-radius:4px;">
-                <div style="padding:14px;text-align:center;color:var(--text-muted,#888);">点击「刷新历史邮件」查看本人邮件记录</div>
+            <div id="email-outbox-list" class="settings-outbox-list">
+                <div class="settings-empty-state">点击「刷新历史邮件」查看本人邮件记录</div>
             </div>
             <small>记录每次出站邮件（含失败尝试）：时间、通道、收件人、主题与结果；正文仅存预览。自动化/运维邮件回链到对应任务/事件。</small>
         </form>
@@ -287,8 +288,10 @@ async function loadSystemRuntimeConfig() {
                 <input type="text" id="static-route-gateway" placeholder="网关，例如 192.0.2.1" autocomplete="off" style="flex:1.5;" />
                 <button class="btn-xxs btn-primary" id="static-route-add-btn" type="button">添加</button>
             </div>
-            <small>程序启动和每次保存路由时自动应用。修改路由表需要 root 或相应的 sudoers 权限。</small>
-            <div class="modal-buttons"><button type="button" id="save-static-routes" class="btn-xxs btn-primary" disabled>保存并应用路由</button></div>
+            <div class="settings-action-row">
+                <small>程序启动和每次保存路由时自动应用。修改路由表需要 root 或相应的 sudoers 权限。</small>
+                <button type="button" id="save-static-routes" class="btn-xxs btn-primary" disabled>保存并应用路由</button>
+            </div>
         </div>
     `;
 
@@ -311,7 +314,6 @@ async function loadSystemRuntimeConfig() {
         if (input) input.value = value ?? '';
     });
 
-    footer.hidden = false;
     bindSystemConfigHandlers(modalBody);
     await Promise.allSettled([
         loadClientCredentials(), loadStaticRoutes(), loadEmailSenderConfig(), loadEmailOutbox(),
@@ -334,7 +336,7 @@ async function loadEmailOutbox() {
     const request = ++emailOutboxRequest;
     const channel = document.getElementById('email-outbox-channel')?.value || '';
     const sent = document.getElementById('email-outbox-sent')?.value || '';
-    listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-muted,#888);">加载中...</div>';
+    listEl.innerHTML = '<div class="settings-empty-state">加载中...</div>';
     try {
         const params = new URLSearchParams({limit: '30'});
         if (channel) params.set('channel', channel);
@@ -344,7 +346,7 @@ async function loadEmailOutbox() {
         const data = result?.data || {};
         const items = Array.isArray(data.items) ? data.items : [];
         if (!items.length) {
-            listEl.innerHTML = '<div style="padding:14px;text-align:center;color:var(--text-muted,#888);">暂无发件记录（筛选条件下无匹配）</div>';
+            listEl.innerHTML = '<div class="settings-empty-state">暂无发件记录（筛选条件下无匹配）</div>';
             return;
         }
         const rows = items.map((item) => {
@@ -377,7 +379,7 @@ async function loadEmailOutbox() {
             <div class="history-mail-count" style="padding:4px 6px;color:var(--text-muted,#888);">共 ${Number(data.total) || 0} 条，显示最近 ${items.length} 条</div>`;
     } catch (error) {
         if (request !== emailOutboxRequest || !listEl.isConnected) return;
-        listEl.innerHTML = `<div style="padding:14px;text-align:center;color:var(--error-color,#f44336);">加载历史邮件失败: ${escapeJsAttr(error.message)}</div>`;
+        listEl.innerHTML = `<div class="settings-empty-state settings-empty-error">加载历史邮件失败: ${escapeJsAttr(error.message)}</div>`;
     }
 }
 

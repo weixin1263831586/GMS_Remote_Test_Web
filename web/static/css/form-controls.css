@@ -125,3 +125,52 @@
     :where(.ui-dashboard) button.danger { min-height: var(--ui-touch-target-danger-height); }
     :where(.ui-dashboard) .header-toolbar select { height: var(--ui-touch-target-height); }
 }
+
+
+/* Compact actions inside settings sections, not dialog footers. */
+.settings-action-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--ui-spacing-sm, 8px);
+    min-width: 0;
+    margin: var(--ui-spacing-xs, 4px) 0 0;
+}
+.settings-action-row > :is(small, [role="status"], .setting-help) {
+    flex: 1 1 220px;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+.settings-action-row > [role="status"]:empty { display: none; }
+.settings-action-row > button {
+    flex: 0 0 auto;
+    margin-inline-start: auto;
+    white-space: nowrap;
+}
+.settings-action-row > :is(input, select, .select-with-add) {
+    flex: 1 1 180px;
+    min-width: 0;
+}
+.settings-filter-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--ui-spacing-sm, 8px);
+    margin-top: var(--ui-spacing-xs, 4px);
+}
+.settings-outbox-list {
+    margin-top: var(--ui-spacing-xs, 4px);
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-control);
+}
+.settings-empty-state {
+    padding: var(--ui-spacing-xs, 4px) var(--ui-spacing-sm, 8px);
+    text-align: center;
+    color: var(--text-muted);
+}
+.settings-empty-error { color: var(--danger-color); }

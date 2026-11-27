@@ -535,13 +535,13 @@
 .redmine-settings-fields {
   min-width: 0;
   border: 1px solid var(--border);
-  margin: 0 0 12px;
-  padding: 12px;
+  margin: 0;
+  padding: var(--ui-spacing-sm, 8px);
 }
 .redmine-settings-fields legend {
   padding: 0 6px;
   font-weight: 600;
 }
-.redmine-settings-fields p[role="status"]:empty {
-  display: none;
-}
+.redmine-settings-fields p[role="status"]:empty { display: none; }
+.redmine-settings-fields .settings-action-row > select { width: auto; }
+.redmine-settings-mail-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }

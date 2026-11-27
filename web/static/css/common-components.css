@@ -984,6 +984,7 @@ select option {
 .modal-form-row input[type="password"],
 .modal-form-row input[type="number"],
 .modal-form-row input[type="search"],
+.modal-form-row input[type="url"],
 .modal-form-row select,
 .modal-form-row textarea {
     flex: 1;
@@ -1008,8 +1009,8 @@ select option {
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--accent, var(--primary-color));
     border-radius: var(--radius-surface);
-    margin-bottom: 14px;
-    padding: 0 14px 12px;
+    margin-bottom: var(--ui-spacing-sm, 8px);
+    padding: 0 14px var(--ui-spacing-sm, 8px);
     box-shadow: var(--shadow-sm);
     overflow: hidden;
 }
@@ -1023,8 +1024,8 @@ select option {
     color: var(--text-primary);
 
 
-    margin: 0 -14px 12px;
-    padding: 9px 14px;
+    margin: 0 -14px var(--ui-spacing-sm, 8px);
+    padding: 6px 14px;
 }
 .config-section-title::before {
     content: '';
