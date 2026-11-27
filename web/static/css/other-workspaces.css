@@ -3,17 +3,15 @@
     --workbench-surface: var(--card-bg);
     --workbench-subtle: var(--light-bg);
     --workbench-edge: var(--border-color);
-    --workbench-radius: 8px;
+    --workbench-radius: var(--ui-radius-card);
     min-width: 0;
 }
 .page-ui-rework .page-header-row > .section-title { color: var(--text-primary); }
 .page-ui-rework :is(.page-title-icon, .section-title .ui-icon) { color: var(--primary-light); }
 .page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small, .btn-primary, .btn-danger) {
-    border-radius: 6px; box-shadow: none;
     transition: color .15s ease, border-color .15s ease, background-color .15s ease;
 }
 .page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small):hover:not(:disabled) {
-    transform: none; box-shadow: none;
     border-color: color-mix(in srgb, var(--primary-color) 60%, var(--border-color));
 }
 .page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input) {
@@ -31,7 +29,6 @@
     color: var(--text-primary);
 }
 /* 设备管理同构 KPI：复用 page-stat-* 字段，按钮筛选交互保持原样。 */
-.page-ui-rework .page-stat-row { gap: 10px; }
 /* 表格和日志：同设备库存 42-44px 行、高亮悬浮、sticky 表头。 */
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) {
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
@@ -313,7 +310,7 @@
 }
 #page-security-audit .audit-log-panel,
 #page-security-audit .audit-side-card {
-    min-width: 0; border: 1px solid var(--audit-edge); border-radius: 9px;
+    min-width: 0; border: 1px solid var(--audit-edge); border-radius: var(--ui-radius-card);
     background: var(--card-bg); overflow: hidden;
 }
 #page-security-audit .audit-log-panel { display:flex; flex-direction:column; min-height:0; height:100%; }
@@ -463,7 +460,6 @@
     #page-security-audit .audit-mail-filters > .entry-field { min-width:0; }
 }
 @media (max-width: 560px) {
-    #page-security-audit .audit-stats.page-stat-row { gap: 8px; }
     #page-security-audit .audit-mail-scope { display:none; }
 }
 
