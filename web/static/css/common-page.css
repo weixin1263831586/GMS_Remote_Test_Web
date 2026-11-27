@@ -914,17 +914,6 @@ body.apk-resizing {
     background: var(--darker-bg);
 }
 
-/* 与左栏 .agent-conversation-heading 同构：固定 48px 单行头部（模型
-   行 24px + 上下留白），保证两个工作区标题行高严格一致。 */
-.agent-run-header {
-    height: 48px;
-    padding: 0 16px;
-    border-bottom: 1px solid var(--border-color);
-    display: flex;
-    align-items: center;
-    gap: 8px 14px;
-}
-
 .agent-run-title {
 
 
@@ -959,7 +948,6 @@ body.apk-resizing {
 
 .agent-model-line {
     flex: 0 1 auto;
-    min-height: 24px;
     min-width: 0;
     display: flex;
     align-items: center;
@@ -984,8 +972,7 @@ body.apk-resizing {
     flex: 0 0 auto;
     white-space: nowrap;
     min-width: 44px;
-    min-height: 24px;
-    padding: 2px 7px;
+    padding-inline: 7px;
 
 }
 
@@ -1171,8 +1158,6 @@ body.apk-resizing {
 #kb-space-list { padding: 6px; overflow-y: auto; }
 #kb-tree { flex: 1; padding: 4px 6px; overflow-y: auto; }
 #kb-doc-list { flex: 1; padding: 6px; overflow-y: auto; }
-.kb-editor-toolbar,
-.kb-editor-tags { padding: 8px; }
 #kb-editor {
     display: flex;
     flex: 1;
@@ -1237,9 +1222,9 @@ body.apk-resizing {
     margin-bottom: 8px;
 }
 .suite-download-row > div:first-child { flex: 1; min-width: 200px; }
-#suite-download-url { width: 100%; height: var(--ui-control-height); }
+#suite-download-url { width: 100%; }
 #btn-download-suite,
-#btn-extract-suite { height: var(--ui-control-height); min-width: 100px; white-space: nowrap; }
+#btn-extract-suite { min-width: 100px; white-space: nowrap; }
 .suite-progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .suite-progress-status { min-width: 80px; color: var(--text-muted);  }
 .suite-progress-track { flex: 1; height: 6px; overflow: hidden; border-radius: 4px; background: var(--border-color); }
