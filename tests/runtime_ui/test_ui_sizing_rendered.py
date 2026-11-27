@@ -346,7 +346,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
 
     def test_embedded_dashboard_stat_geometry_matches_across_modules(self):
         """Keep KPI height consistent and verify each workspace's panel spacing."""
-        regular_spacing = {"inset": 8, "chartGap": 16, "cardGap": 12}
+        regular_spacing = {"inset": 8, "chartGap": 16, "cardGap": 8}
         cluster_spacing = {"inset": 12, "chartGap": 8, "cardGap": 8}
         page = self.new_page()
         evidence = {}
