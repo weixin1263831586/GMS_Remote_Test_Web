@@ -48,68 +48,12 @@
     max-height: var(--analysis-compact-upload-height);
     border: 1px solid var(--report-edge);
 }
-#page-report-analysis #report-upload-zone.upload-empty {
-    flex: 0 0 auto;
-    height: clamp(200px, 32vh, 290px);
-    min-height: 200px;
-    max-height: 290px;
-    width: 100%;
-    background: var(--report-stage);
-}
-#page-report-analysis #report-upload-zone:hover {
-    background: color-mix(in srgb, var(--report-accent) 5%, var(--report-stage));
-    border-color: var(--report-accent-line);
-}
-#page-report-analysis #report-upload-zone.drag-over {
-    border-color: var(--report-accent);
-    background: var(--report-accent-wash);
-    transform: none;
-}
-#page-report-analysis .report-upload-content {
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    min-width: 0;
-    gap: 10px;
-    padding: 0;
-}
-#page-report-analysis .report-upload-mark,
-#page-report-analysis .report-active-icon {
-    display: grid;
-    place-items: center;
-    flex: 0 0 36px;
-    width: 36px;
-    height: 36px;
-    border-radius: 7px;
-    background: var(--report-accent-wash);
-    color: var(--report-accent);
-}
-#page-report-analysis .report-upload-mark > .ui-icon { width: 19px; height: 19px; }
-#page-report-analysis .report-upload-content .analysis-upload-copy {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    text-align: left;
-}
-#page-report-analysis .analysis-upload-title {
-    color: var(--text-primary);
-
-
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
 #page-report-analysis .analysis-upload-copy .upload-instructions {
     margin: 5px 0 0;
     color: var(--report-muted);
 
     line-height: 1.5;
 }
-#page-report-analysis .report-upload-content > button,
 #page-report-analysis .report-overview-actions > button,
 #page-report-analysis .report-failure-action {
     box-sizing: border-box;
@@ -130,19 +74,12 @@
     box-shadow: none;
     transform: none;
 }
-#page-report-analysis .report-upload-content > button:hover,
 #page-report-analysis .report-overview-actions > button:hover,
 #page-report-analysis .report-failure-action:hover {
     background: var(--report-hover);
     border-color: var(--report-accent-line);
     transform: none;
 }
-#page-report-analysis #report-upload-zone.upload-empty .report-upload-content {
-    gap: 14px;
-    flex-wrap: wrap;
-    max-width: min(750px, 95%);
-}
-#page-report-analysis #report-upload-zone.upload-empty .analysis-upload-copy { flex: 0 1 auto; width: auto; }
 /* Inline state is intentionally not a toast: backend parsing of multi-GB CTS
    archives can continue for minutes after upload reaches 100%. */
 #page-report-analysis #report-upload-zone.report-analysis-busy .report-upload-content,
