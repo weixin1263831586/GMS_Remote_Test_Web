@@ -24,10 +24,6 @@
 .page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input):focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px;
 }
-.page-ui-rework :is(.list-table-wrap, .users-table-wrap, .audit-table-wrap) {
-    min-width: 0; border: 1px solid var(--border-color);
-    border-radius: 8px; background: var(--card-bg); box-shadow: none;
-}
 .page-ui-rework .pane-label {
     background: var(--light-bg); border-bottom-color: var(--border-color);
 }
@@ -209,16 +205,6 @@
     color: var(--text-secondary);
 }
 /* 管理页：筛选和列表使用设备库存同款框架。 */
-#page-users.page-ui-rework :is(.users-table-wrap, .agent-access-table-wrap),
-#page-security-audit.page-ui-rework :is(.audit-table-wrap, .audit-filter-bar),
-#page-reports.page-ui-rework > .list-table-wrap,
-#page-api-docs.page-ui-rework > .list-table-wrap {
-    min-width: 0; border: 1px solid var(--border-color);
-    border-radius: 8px; background: var(--card-bg); box-shadow: none;
-}
-#page-security-audit.page-ui-rework .audit-filter-bar {
-    gap: 8px; padding: 10px;
-}
 #page-api-docs.page-ui-rework :is(.api-toolbar, .api-filter-row) { gap: 8px; }
 #page-reports.page-ui-rework > .list-table-wrap {
     display: flex; flex-direction: column; min-height: 0; overflow: auto;
@@ -371,8 +357,7 @@
 #page-security-audit .audit-stat-card .page-stat-label { order:0;  line-height:1.25; color:var(--text-secondary); }
 #page-security-audit .audit-stat-note {  line-height:1.2; color:var(--text-muted); white-space:nowrap; }
 #page-security-audit.page-ui-rework .audit-filter-bar {
-    display: flex; align-items: center; flex-wrap: nowrap; gap: 10px; min-width: 0; margin: 0;
-    padding: 10px 12px; border-radius: 9px; background: var(--card-bg);
+    flex-wrap: nowrap; margin: 0; padding: 10px 12px;
 }
 #page-security-audit .audit-log-filters > .combo-box { flex: 0 1 185px; min-width: 125px; max-width: 210px; }
 #page-security-audit .audit-filter-bar > .entry-field { flex: 1 1 240px; min-width: 150px; }
@@ -410,7 +395,7 @@
 }
 #page-security-audit .audit-log-panel .audit-table-wrap {
     flex:1 1 auto; min-height:0; height:0; max-height:none;
-    overflow:auto; border:0; border-radius:0; background:transparent;
+    overflow:auto;
 }
 #page-security-audit .audit-log-table { table-layout: fixed; min-width: 780px; }
 #page-security-audit .audit-log-table thead th {
@@ -851,7 +836,7 @@
 #page-users #users-list-visible-count {color:var(--text-secondary);white-space:nowrap}
 #page-users #users-list-refresh {display:inline-flex;align-items:center;gap:5px;height:var(--ui-control-height);white-space:nowrap}
 #page-users :is(.users-table-wrap,.agent-access-table-wrap) {
-    min-width:0;overflow-x:auto;overflow-y:auto;background:var(--card-bg);
+    min-width:0;overflow:auto;
 }
 #page-users .users-table-wrap {flex:1 1 auto}
 #page-users .users-table {width:100%;min-width:1320px;table-layout:fixed}
