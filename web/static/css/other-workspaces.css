@@ -340,17 +340,9 @@
 #page-security-audit .audit-operation-cell { color: var(--text-primary); }
 #page-security-audit .audit-source-badge,
 #page-security-audit .audit-status-badge {
-    display: inline-flex; align-items: center; justify-content: center;
-    min-width: 42px; padding: 3px 7px; border-radius: 5px;
-    border: 1px solid transparent;
+    justify-content: center;
+    min-width: 42px;
 }
-#page-security-audit .audit-source-web { color: #94bdff; background: rgba(101,159,255,.13); border-color: rgba(101,159,255,.3); }
-#page-security-audit .audit-source-cli { color: #c09afe; background: rgba(165,119,250,.13); border-color: rgba(165,119,250,.28); }
-#page-security-audit .audit-source-other { color: var(--text-secondary); background: var(--light-bg); }
-#page-security-audit .audit-status-success { color: #73d9a3; background: rgba(70,177,113,.12); border-color: rgba(70,177,113,.24); }
-#page-security-audit .audit-status-warning { color: #f5c570; background: rgba(245,177,67,.13); border-color: rgba(245,177,67,.28); }
-#page-security-audit .audit-status-error { color: #ff91a5; background: rgba(240,104,129,.14); border-color: rgba(240,104,129,.29); }
-#page-security-audit .audit-status-unknown { color: var(--text-muted); background: var(--light-bg); }
 #page-security-audit .audit-side-panels { display:flex; flex-direction:column; gap:var(--ui-spacing-sm); min-width:0; min-height:0; }
 #page-security-audit .audit-side-panels > .audit-notes-card { flex:1 1 auto; }
 #page-security-audit .audit-source-donut:not([data-empty="true"]) {
