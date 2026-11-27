@@ -219,6 +219,44 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_shared_workspace_sidebar_widths(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1792, "height": 960})
+
+            def columns(name, selector):
+                page.evaluate("(name) => switchPage(name, null)", name)
+                grid = page.locator(selector).first
+                grid.wait_for(state="visible")
+                return grid.evaluate("""el => getComputedStyle(el).gridTemplateColumns
+                    .split(/\s+/).map(parseFloat)""")
+
+            for name, selector in (
+                ("agent", "#page-agent .agent-layout"),
+                ("notes", "#page-notes .kb-layout"),
+                ("test-suites", "#page-test-suites .suite-browser-layout"),
+            ):
+                if name == "notes":
+                    page.evaluate("switchPage('notes', null)")
+                    page.locator('#page-notes [data-kb-view="personal"]').click()
+                self.assertAlmostEqual(columns(name, selector)[0], 300, delta=1)
+
+            for width, expected in ((1792, 350), (1280, 310), (1100, None)):
+                page.set_viewport_size({"width": width, "height": 960})
+                api = columns("api-docs", "#page-api-docs .api-body-grid")
+                audit = columns("security-audit", "#page-security-audit .audit-content-grid:visible")
+                if expected is None:
+                    self.assertEqual(len(api), 1)
+                    self.assertEqual(len(audit), 1)
+                else:
+                    self.assertEqual(len(api), 2)
+                    self.assertEqual(len(audit), 2)
+                    self.assertAlmostEqual(api[-1], expected, delta=1)
+                    self.assertAlmostEqual(audit[-1], expected, delta=1)
+        finally:
+            page.close()
+
     def test_full_height_workspaces_have_one_top_boundary(self):
         """Full-height workspaces and their first panes meet the shell frame without a second seam."""
         page = self.new_page()
