@@ -24,7 +24,7 @@
 .page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input):focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px;
 }
-.page-ui-rework :is(.pane, .list-table-wrap, .users-table-wrap, .audit-table-wrap, .suite-browser-sidebar, .suite-browser-main) {
+.page-ui-rework :is(.pane, .list-table-wrap, .users-table-wrap, .audit-table-wrap) {
     min-width: 0; border: 1px solid var(--border-color);
     border-radius: 8px; background: var(--card-bg); box-shadow: none;
 }
@@ -262,15 +262,7 @@
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 9%, var(--card-bg));
 }
-/* 外部知识源：独立工具栏与表格面板，沿用工作区区块间距。 */
-#page-notes .kb-external-layout:not([hidden]) {
-    display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
-    gap: var(--ui-spacing-sm);
-}
-#page-notes [data-kb-source-form] {
-    border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
-}
-#page-notes [data-kb-sources] { min-width: 0; overflow-x: auto; }
+/* 外部知识源：业务列宽和操作排列。 */
 #page-notes [data-kb-source-form] > input[name="name"] {
     flex: 0 1 300px; width: 300px; max-width: 300px; min-width: 0;
 }
@@ -597,16 +589,6 @@
 #page-test-suites.page-ui-rework {
     --suite-table-cols: minmax(195px, 2fr) minmax(130px, 1.15fr) 65px 75px minmax(260px, 1.4fr);
     --suite-row-gap: 12px;
-    --suite-panel-bg: var(--card-bg);
-}
-#page-test-suites .suite-download-section {
-    margin-bottom: var(--ui-spacing-sm); padding: 0;
-    border: 1px solid var(--border-color); border-radius: 8px;
-    background: var(--card-bg);
-}
-#page-test-suites .suite-download-row {
-    display: flex; align-items: center; flex-wrap: nowrap; gap: 10px;
-    margin: 0;
 }
 #page-test-suites .suite-download-label {
     flex: 0 0 116px; display: flex; align-items: center; gap: 8px;
@@ -636,10 +618,7 @@
 }
 #page-test-suites .suite-browser-layout {
     grid-template-columns: minmax(290px, 315px) minmax(0, 1fr);
-    gap: 10px; min-height: 0;
-}
-#page-test-suites.page-ui-rework :is(.suite-browser-sidebar, .suite-browser-main) {
-    background: var(--suite-panel-bg); min-width: 0; overflow: hidden;
+    gap: 10px;
 }
 #page-test-suites.page-ui-rework :is(.suite-browser-toolbar, .suite-browser-header) {
     background: var(--light-bg); border-bottom: 1px solid var(--border-color);
