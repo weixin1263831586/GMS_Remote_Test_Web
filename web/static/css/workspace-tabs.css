@@ -1,7 +1,7 @@
 /* Shared embedded workspace header: header > tablist + optional actions.
    Keep domain classes as behavior hooks; tab geometry belongs here. */
 :root {
-    --workspace-tab-width: 112px;
+    --workspace-tab-width: 110px;
 }
 .workspace-header {
     box-sizing: border-box;
@@ -106,7 +106,7 @@
     padding: 0;
 }
 .workspace-header > .workspace-actions[hidden] { display: none; }
-/* The tab row stays 44px tall; controls use a separate row on narrow screens. */
+/* The tab row uses the shared height; controls use a separate row on narrow screens. */
 @media (max-width: 1199px) {
     .workspace-header { flex-wrap: wrap; }
     .workspace-header > .workspace-tabs { flex: 1 1 100%; width: 100%; }
