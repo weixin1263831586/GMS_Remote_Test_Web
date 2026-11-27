@@ -214,7 +214,7 @@ class UiSizingContractTests(unittest.TestCase):
             "control-height": 32,
             "control-height-dense": 28,
             "workspace-toolbar-height": 36,
-            "workspace-navigation-width": 300,
+            "workspace-navigation-width": 250,
             "workspace-aside-min": 305,
             "workspace-aside-max": 350,
             "control-height-small": 26,
