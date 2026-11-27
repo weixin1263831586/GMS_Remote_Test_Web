@@ -262,7 +262,14 @@
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 9%, var(--card-bg));
 }
-/* 外部知识源：网址占用剩余宽度，操作按钮单行右对齐。 */
+/* 外部知识源：独立工具栏与表格面板，沿用工作区区块间距。 */
+#page-notes .kb-external-layout:not([hidden]) {
+    display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
+    gap: var(--ui-spacing-sm);
+}
+#page-notes [data-kb-source-form] {
+    border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
+}
 #page-notes [data-kb-sources] { min-width: 0; overflow-x: auto; }
 #page-notes [data-kb-source-form] > input[name="name"] {
     flex: 0 1 300px; width: 300px; max-width: 300px; min-width: 0;
@@ -593,7 +600,7 @@
     --suite-panel-bg: var(--card-bg);
 }
 #page-test-suites .suite-download-section {
-    margin-bottom: 8px; padding: 0;
+    margin-bottom: var(--ui-spacing-sm); padding: 0;
     border: 1px solid var(--border-color); border-radius: 8px;
     background: var(--card-bg);
 }
