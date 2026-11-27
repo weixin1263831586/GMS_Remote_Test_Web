@@ -12,14 +12,14 @@ button.danger{color:#ff8a94;border-color:rgba(240,106,117,.45)}
 h1,h2,h3,p{margin:0}
 
 .toolbar p,.section-heading p{color:var(--muted);margin-top:3px}
-.panel{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:14px;box-shadow:var(--shadow)}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:var(--ui-radius-card);padding:14px;box-shadow:var(--shadow)}
 .section-heading{justify-content:space-between;margin-bottom:8px}
 .count-badge,.status-pill{display:inline-flex;align-items:center;border-radius:99px;padding:3px 9px;border:1px solid var(--border);background:var(--panel-2)}
 .status-pill.online{color:var(--green);border-color:rgba(69,196,134,.45)}
 .status-pill.waiting{color:var(--yellow);border-color:rgba(230,180,80,.45)}
 .status-pill.offline{color:var(--muted)}
 .ports-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:10px}
-.port-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:13px;border:1px solid var(--border);border-radius:9px;background:var(--panel-2)}
+.port-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:13px;border:1px solid var(--border);border-radius:var(--ui-radius-card);background:var(--panel-2)}
 .port-card.selected{border-color:var(--blue);box-shadow:0 0 0 1px color-mix(in srgb, var(--primary-color) 25%, transparent)}
 .port-card-head{display:flex;gap:10px;align-items:flex-start;justify-content:space-between}
 .port-title{overflow-wrap:anywhere}
