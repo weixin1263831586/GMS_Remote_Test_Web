@@ -71,67 +71,12 @@
     flex: 1 1 auto;
     width: 100%;
     height: auto;
-    min-height: 84px;
+    min-height: var(--analysis-compact-upload-height);
     max-height: none;
     padding: 10px 12px;
     background: var(--apk-surface);
     border: 1px dashed transparent;
     border-radius: 7px;
-}
-#page-apk-analysis .apk-upload-zone.upload-empty {
-    box-sizing: border-box;
-    width: 100%;
-    height: clamp(200px, 32vh, 290px);
-    min-height: 200px;
-    max-height: 290px;
-    flex: 0 0 auto;
-    background: var(--apk-stage);
-}
-#page-apk-analysis .apk-upload-zone:hover,
-#page-apk-analysis .apk-upload-zone.upload-empty:hover {
-    background: color-mix(in srgb, var(--apk-accent) 5%, var(--apk-stage));
-    border-color: var(--apk-accent-line);
-}
-#page-apk-analysis .apk-upload-zone.drag-over {
-    background: var(--apk-accent-wash);
-    border-color: var(--apk-accent);
-    transform: none;
-}
-#page-apk-analysis .apk-upload-content {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    min-width: 0;
-    padding: 0;
-}
-#page-apk-analysis .apk-upload-mark {
-    display: grid;
-    flex: 0 0 36px;
-    place-items: center;
-    width: 36px;
-    height: 36px;
-    border-radius: 7px;
-    color: var(--apk-accent);
-    background: var(--apk-accent-wash);
-}
-#page-apk-analysis .apk-upload-mark > .ui-icon {
-    width: 19px;
-    height: 19px;
-}
-#page-apk-analysis .apk-upload-content .analysis-upload-copy {
-    width: auto;
-    max-width: none;
-    flex: 1 1 auto;
-    min-width: 0;
-}
-#page-apk-analysis .analysis-upload-title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    color: var(--apk-text);
-
-
 }
 #page-apk-analysis .apk-upload-content .upload-instructions {
     color: var(--apk-muted);
@@ -139,33 +84,7 @@
     line-height: 1.6;
     margin-top: 6px;
 }
-#page-apk-analysis .apk-upload-zone.upload-empty .apk-upload-content {
-    gap: 14px;
-    flex-wrap: wrap;
-    max-width: min(750px, 95%);
-}
-#page-apk-analysis .apk-upload-zone.upload-empty .analysis-upload-copy {
-    flex: 0 1 auto;
-    min-height: 0;
-}
-#page-apk-analysis .apk-upload-content > button {
-    flex: 0 0 auto;
-    width: auto;
-    min-height: var(--ui-control-height);
-    max-width: 100%;
-    margin: 0;
-    padding: 6px 11px;
-
-    background: var(--lighter-bg);
-    border: 1px solid var(--border-light);
-    border-radius: 6px;
-    color: var(--text-primary);
-    white-space: nowrap;
-}
-#page-apk-analysis .apk-upload-content > button:hover {
-    background: var(--apk-hover);
-    border-color: var(--apk-accent-line);
-}
+#page-apk-analysis .apk-upload-content > button { padding: 6px 11px; }
 #page-apk-analysis #apk-analysis-status { height: 100%; }
 #page-apk-analysis .apk-status-card {
     box-sizing: border-box;
