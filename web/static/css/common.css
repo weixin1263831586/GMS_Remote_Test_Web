@@ -740,14 +740,6 @@ body {
 #page-apk-analysis:has(#apk-upload-zone.upload-empty)::after {
     display: none;
 }
-#report-upload-zone:not(.upload-empty),
-#apk-upload-zone:not(.upload-empty) {
-    border: 0;
-    flex: 0 0 80px;
-    height: 80px;
-    min-height: 80px;
-    max-height: 80px;
-}
 
 /* ==================== Desktop Page ==================== */
 .desktop-container {
