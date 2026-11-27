@@ -88,3 +88,40 @@
     -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24'/%3E%3Cpath d='M1 1l22 22'/%3E%3C/svg%3E");
     mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24'/%3E%3Cpath d='M1 1l22 22'/%3E%3C/svg%3E");
 }
+
+/* Standalone dashboard controls. Component-specific widths and states stay local. */
+:where(.ui-dashboard) button {
+    height: var(--ui-control-height);
+    border: 0;
+    border-radius: var(--ui-radius-control);
+    padding: 0 10px;
+    color: var(--text-on-accent, #fff);
+    background: var(--primary-gradient);
+    cursor: pointer;
+}
+:where(.ui-dashboard) button.secondary { background: var(--lighter-bg); }
+:where(.ui-dashboard) button:disabled { opacity: .55; cursor: not-allowed; }
+:where(.ui-dashboard) :is(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]), select) {
+    box-sizing: border-box;
+    height: var(--ui-control-height);
+    background: var(--light-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-control);
+    padding: 0 8px;
+}
+:where(.ui-dashboard) .filter-bar :is(input, select) { height: var(--ui-control-height-dense); }
+:where(.ui-dashboard) .header-toolbar :is(input, select, .btn-group > button) {
+    height: var(--ui-control-height-dense);
+    white-space: nowrap;
+}
+:where(.ui-dashboard) .filter-bar input::placeholder { color: var(--text-muted); }
+:where(.ui-dashboard) .filter-bar :is(input,select):focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+}
+@media (max-width: 560px) {
+    :where(.ui-dashboard) button { min-height: var(--ui-touch-target-height); }
+    :where(.ui-dashboard) button.danger { min-height: var(--ui-touch-target-danger-height); }
+    :where(.ui-dashboard) .header-toolbar select { height: var(--ui-touch-target-height); }
+}
