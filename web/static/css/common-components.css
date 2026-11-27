@@ -27,7 +27,7 @@
     padding: 6px 4px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-control);
+    border-radius: var(--ui-radius-control);
     color: var(--text-primary);
 
     transition: var(--transition-normal);
@@ -157,7 +157,7 @@ select option {
     padding: 5px 8px;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     color: #fff;
 
     cursor: pointer;
@@ -242,7 +242,7 @@ select option {
 .btn-xxs, .btn-xs, .btn-small {
     padding: 5px 10px;
     border: 1px solid var(--border-color);
-    border-radius: 6px;
+    border-radius: var(--ui-radius-control);
     cursor: pointer;
 
 
@@ -297,6 +297,7 @@ select option {
 }
 
 .btn-primary, .btn-danger {
+    border-radius: var(--ui-radius-control);
     color: var(--text-on-accent);
     border: none;
     display: inline-flex;
