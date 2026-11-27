@@ -255,3 +255,18 @@ button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }
     background: var(--light-bg);
 }
 
+
+/* Shared auxiliary column: keep wide charts and collapse before squeezing tables. */
+.ui-workspace-grid--aside {
+    grid-template-columns: minmax(0, 1fr) minmax(var(--ui-workspace-aside-min), var(--ui-workspace-aside-max));
+    align-items: stretch;
+}
+@media (max-width: 1350px) {
+    .ui-workspace-grid--aside {
+        --ui-workspace-aside-min: 275px;
+        --ui-workspace-aside-max: 310px;
+    }
+}
+@media (max-width: 1150px) {
+    .ui-workspace-grid--aside { grid-template-columns: minmax(0, 1fr); }
+}
