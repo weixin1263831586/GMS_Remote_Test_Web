@@ -12,10 +12,10 @@
             <!-- 上传与当前任务：空状态占整行，分析时变为紧凑双栏 -->
             <div class="apk-intake-row">
             <div class="analysis-upload-frame">
-                <div id="apk-upload-zone" class="apk-upload-zone upload-empty">
+                <div id="apk-upload-zone" class="apk-upload-zone analysis-upload-surface upload-empty">
                     <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
-                    <div class="apk-upload-content">
-                        <div class="apk-upload-mark" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></div>
+                    <div class="apk-upload-content analysis-upload-row">
+                        <div class="apk-upload-mark analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg></div>
                         <div class="analysis-upload-copy">
                             <div class="analysis-upload-title">拖拽 APK/JAR 文件到此处</div>
                             <div class="upload-instructions">
@@ -26,8 +26,8 @@
                             <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 选择 APK/JAR 文件
                         </button>
                     </div>
-                    <div class="apk-upload-progress" id="apk-upload-progress">
-                        <div class="apk-upload-progress-bar" id="apk-progress-fill" style="width: 0%"></div>
+                    <div class="apk-upload-progress analysis-upload-progress" id="apk-upload-progress">
+                        <div class="apk-upload-progress-bar analysis-upload-progress-fill" id="apk-progress-fill" style="width: 0%"></div>
                     </div>
                 </div>
             </div>
