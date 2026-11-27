@@ -48,12 +48,12 @@ html[data-ui-type-root="shell"] #page-security-audit .audit-mail-table-wrap .tab
 @media (max-width: 560px) { html[data-ui-type-root="shell"] #page-security-audit .audit-stat-card .page-stat-value { font-size: var(--ui-type-size-display-medium); } }
 
 /* web/static/css/apk-workbench.css */
-html[data-ui-type-root="shell"] #page-apk-analysis .analysis-upload-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-content .upload-instructions { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-zone.upload-empty .analysis-upload-title { font-size: var(--ui-type-size-section); }
-html[data-ui-type-root="shell"] #page-apk-analysis .apk-upload-content > button { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #page-apk-analysis #apk-analysis-state { font-size: var(--ui-type-size-compact); }
+html[data-ui-type-root="shell"] .analysis-upload-row .analysis-upload-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .analysis-upload-row .upload-instructions { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] .analysis-upload-surface.upload-empty .analysis-upload-title { font-size: var(--ui-type-size-section); }
+html[data-ui-type-root="shell"] .analysis-upload-row > button { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
+html[data-ui-type-root="shell"] .analysis-status-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
+html[data-ui-type-root="shell"] .analysis-status-text { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="shell"] #page-apk-analysis .apk-status-actions > .btn-xs { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #page-apk-analysis .filter-btn[data-apk-tab] { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="shell"] #page-apk-analysis #apk-file-search { font-size: var(--ui-type-size-body); }
@@ -70,14 +70,8 @@ html[data-ui-type-root="shell"] #page-apk-analysis .apk-source-placeholder { fon
 html[data-ui-type-root="shell"] #page-apk-analysis .apk-source-placeholder strong { font-size: var(--ui-type-size-body); }
 
 /* web/static/css/report-workbench.css */
-html[data-ui-type-root="shell"] #page-report-analysis .analysis-upload-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #page-report-analysis .analysis-upload-copy .upload-instructions { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] #page-report-analysis .report-upload-content > button,
 html[data-ui-type-root="shell"] #page-report-analysis .report-overview-actions > button,
 html[data-ui-type-root="shell"] #page-report-analysis .report-failure-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
-html[data-ui-type-root="shell"] #page-report-analysis #report-upload-zone.upload-empty .analysis-upload-title { font-size: var(--ui-type-size-section); }
-html[data-ui-type-root="shell"] #page-report-analysis .report-active-name { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #page-report-analysis .report-active-status { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="shell"] #page-report-analysis #report-summary .summary-label { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] #page-report-analysis #report-summary .summary-value { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] #page-report-analysis #report-summary .report-summary-context .summary-value { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
