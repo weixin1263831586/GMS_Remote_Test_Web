@@ -276,6 +276,44 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_daily_brief_compact_kpi_and_status_geometry(self):
+        page = self.new_page()
+        try:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.route("**/api/redmine-agent/**", lambda route: route.fulfill(
+                status=200, content_type="application/json", body='{"success":true,"data":{}}',
+            ))
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.evaluate("switchTab('daily-brief')")
+            geometry = page.evaluate(
+                """() => {
+                    const root = document.getElementById('dailyBriefCard');
+                    root.innerHTML = renderDailyBriefInner({
+                        run: {status: 'completed', issue_count: 12},
+                        issues: []
+                    });
+                    const grid = root.querySelector('.ui-kpi-grid');
+                    const cards = [...grid.querySelectorAll('.ui-kpi-card--compact')];
+                    const badge = document.querySelector('.daily-brief-status.ui-status.is-success');
+                    return {
+                        gap: parseFloat(getComputedStyle(grid).columnGap),
+                        cards: cards.map(el => ({
+                            height: el.getBoundingClientRect().height,
+                            radius: parseFloat(getComputedStyle(el).borderTopLeftRadius)
+                        })),
+                        badge: badge ? badge.textContent : null
+                    };
+                }"""
+            )
+            self.assertEqual(geometry["badge"], "完成")
+            self.assertEqual(geometry["gap"], 8)
+            self.assertEqual(len(geometry["cards"]), 6)
+            for card in geometry["cards"]:
+                self.assertAlmostEqual(card["height"], 70, delta=1, msg=str(geometry))
+                self.assertEqual(card["radius"], 8)
+        finally:
+            page.close()
+
     def test_full_height_workspaces_have_one_top_boundary(self):
         """Full-height workspaces and their first panes meet the shell frame without a second seam."""
         page = self.new_page()
