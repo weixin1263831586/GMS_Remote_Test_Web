@@ -655,18 +655,26 @@ function publishSelectedSuite(suitePath) {
     selectElement.dispatchEvent(new Event('change', { bubbles: true }));
 }
 
+async function saveLocalServer(value) {
+    const localServer = value.trim();
+    await apiCall('/api/config/update', 'POST', {local_server: localServer}, {silentToast: true});
+    if (!state.config || typeof state.config !== 'object') state.config = {};
+    state.config.local_server = localServer;
+    for (const id of ['local-server', 'config-local-server']) {
+        const input = document.getElementById(id);
+        if (input && input !== document.activeElement) input.value = localServer;
+    }
+}
+
 async function onLocalServerConfirm() {
-    const localServer = document.getElementById('local-server').value.trim();
+    const input = document.getElementById('local-server');
     try {
-        await apiCall('/api/config/update', 'POST', {
-            local_server: localServer
-        });
-        if (!state.config || typeof state.config !== 'object') state.config = {};
-        state.config.local_server = localServer;
-        addLogEntry(`本地主机地址已更新: ${localServer}`, 'info');
+        await saveLocalServer(input.value);
+        addLogEntry('本地主机地址已更新', 'info');
         showToast('本地主机地址已更新', 'success');
     } catch (error) {
-        addLogEntry(`本地主机地址更新失败: ${error.message}`, 'error');
+        addLogEntry('本地主机地址更新失败: ' + error.message, 'error');
+        showToast('本地主机地址更新失败：' + error.message, 'error');
     }
 }
 

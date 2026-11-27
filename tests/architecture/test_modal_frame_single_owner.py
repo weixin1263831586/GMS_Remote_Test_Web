@@ -15,7 +15,9 @@ FRAME_JS = ROOT / "web/static/js/dialog-frame.js"
 
 def test_every_shell_dialog_uses_one_svg_perimeter_and_one_header_rule():
     templates = sorted(DIALOGS.glob("*.html"))
-    assert len(templates) >= 40
+    assert len(templates) >= 38
+    assert not (DIALOGS / 'config.html').exists()
+    assert not (DIALOGS / 'gms-assistant-config.html').exists()
     for file in templates:
         markup = file.read_text(encoding="utf-8")
         shells = re.findall(r'<div[^>]+class="[^"]*\bmodal-content\b[^"]*\btech-dialog\b[^"]*"', markup)

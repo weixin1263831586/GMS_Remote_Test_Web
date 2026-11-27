@@ -7,6 +7,7 @@ import uuid
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from features.assistant.context import record_user_message, update_context
@@ -117,6 +118,7 @@ class AgentChatRequest(BaseModel):
     action: str | None = None
     params: dict[str, Any] = Field(default_factory=dict)
     workspace_context: dict[str, Any] = Field(default_factory=dict)
+    images: list[str] = Field(default_factory=list)
 
 
 @router.post("/api/agent/chat")
@@ -125,12 +127,26 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
     if cleanup_due():
         await _cleanup_sessions()
     message = (req.message or "").strip()
-    if not message:
+    if not message and not req.images:
         return error_response("Message cannot be empty", 400)
+    if req.images:
+        require_human_principal_when_auth_required(request)
+        if req.execute or req.action:
+            return error_response("图片仅支持发送分析，不支持直接执行操作", 400)
+        if not message:
+            message = "请分析图片内容。"
+        if len(req.images) > 3:
+            return error_response("每次最多发送 3 张图片", 400)
 
     client_id = get_client_id_from_request(request)
     session = await _get_or_create_session(req.session_id, client_id)
+    if session.get("agent_image_busy"):
+        return error_response("本轮图片分析尚未完成", 409)
     session["owner_id"] = owner_id_from_request(request)
+    if req.images:
+        from features.assistant.image_input import analyze_image_turn
+
+        return await analyze_image_turn(session, message, req.images)
     if req.workspace_context:
         supplied_workspace = _normalize_workspace_context(req.workspace_context)
         session["workspace_context"] = {
@@ -252,6 +268,22 @@ async def agent_chat(request: Request, req: AgentChatRequest = Body(...)):
             session["status"] = "idle"
             _append_message(session, "assistant", "待执行计划格式已失效，请重新发起操作。")
         return success_response({"session": _session_payload(session)}, "Agent updated")
+
+    # Restricted shared scan content is displayed only through a human-authorized API.
+    # Keep the query, not the retrieved policy body, in the durable transcript.
+    if not req.action and not req.execute and not session.get("agent_thinking") and session.get("status") != "thinking":
+        from features.gms import policy_lookup_target
+
+        target = policy_lookup_target(message)
+        if target:
+            _append_message(
+                session, "assistant",
+                "正在读取 GMS Requirements 对应政策章节。以下按条款和表格展示授权索引，"
+                "此结果不进入模型上下文。Low RAM 声明不等同于 Android Go 产品认证。",
+                data={"gms_policy_lookup": target},
+            )
+            _append_step(session, "GMS 政策来源定位", "done", "已选择授权原文查询入口，尚未读取内容")
+            return success_response({"session": _session_payload(session)}, "Agent updated")
 
     # Model-led discovery covers the project tool catalog; rules remain a fallback.
     if not req.action or req.action in {"agent_choices", "agent_retry"}:
@@ -516,6 +548,26 @@ async def delete_agent_session(session_id: str, request: Request):
     """Discard one Agent session: drop live state and its recovery anchor."""
     require_human_principal_when_auth_required(request)
     return delete_session(session_id, get_client_id_from_request(request), owner_id_from_request(request))
+
+
+@router.get("/api/agent/sessions/{session_id}/images/{image_id}")
+async def get_agent_image(session_id: str, image_id: str, request: Request):
+    """Serve a private image for its original session owner."""
+    require_human_principal_when_auth_required(request)
+    from features.assistant import session_store
+
+    owner = owner_id_from_request(request) or get_client_id_from_request(request)
+    session = _agent_sessions.get(session_id) or session_store.load_transcript(session_id)
+    image = session_store.read_session_image(session, image_id, owner) if session else None
+    if image is None:
+        return error_response("图片不存在或无权访问", 404)
+    content, mime = image
+    return Response(content, media_type=mime, headers={
+        "Cache-Control": "private, no-store",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+        "Cross-Origin-Resource-Policy": "same-origin",
+    })
 
 
 @router.get("/api/agent/sessions/{session_id}")

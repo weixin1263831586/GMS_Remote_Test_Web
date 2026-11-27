@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from features.auth import (
     AUTH_COOKIE_NAME,
     CurrentUser,
-    auth_service,
+    is_elevated,
     require_authenticated_user,
     require_elevated_admin,
     validate_websocket_request,
@@ -326,9 +326,7 @@ def _valid_novnc_access(
     user: CurrentUser | None,
     worker_id: str,
 ) -> bool:
-    if user is None or not auth_service.get_elevated_until(
-        str(connection.cookies.get(AUTH_COOKIE_NAME) or "")
-    ):
+    if user is None or not is_elevated(connection):
         return False
     return novnc_access_service.validate(
         str(connection.query_params.get("access_token") or ""),

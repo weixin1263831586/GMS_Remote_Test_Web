@@ -91,14 +91,15 @@ Generic MCP calls use actual arrays, e.g.
 `{"command":"reports-analyze","args":["2026.10.13_17.21.15.621_7814"]}`.
 Do not retry variations of a shell string when the tool requests an array.
 
-## 4. Elevation matrix (human-gated)
+## 4. Human administrator authority
 
-| State | Elevated read-only commands | Mutating commands |
-|---|---|---|
-| logged in, not elevated | exit 4 + hint (blocked) | denied by plugin gate |
-| Agent tries `auth-elevate` via `gms_rt_run` | denied (not agent-safe) | denied |
-| Human elevates via CLI (outside agent) | **5/5 unlocked**: `users-list`, `adb-forward-status`, `desktop-validate`, `desktop-vnc-status`, `test-suites-result` | still denied (8/8 verified) |
-| After `auth-elevation-reset` or expiry | blocked again (exit 4) | denied |
+| Principal | Sensitive operations |
+|---|---|
+| Administrator cookie session | Administrator authority after login |
+| Ordinary cookie session | Requires a temporary administrator grant |
+| Ordinary cookie session after grant reset or expiry | Requires a new grant |
+| Agent Service Token or machine capability | Only the permissions and scopes of that credential |
+
 Human elevation (run by the user outside the agent, never inside):
 
 ```bash

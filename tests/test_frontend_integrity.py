@@ -808,7 +808,7 @@ class FrontendIntegrityTests(unittest.TestCase):
             r'<label data-multi-host-control[^>]*>主机\s*<select id="suite-worker-select"[^>]+disabled[^>]*>\s*<option value="">正在加载主机',
         )
         self.assertIn("_suiteWorkerSelectorPromise", navigation_text)
-        self.assertIn('id="gms-assistant-url" style="width:100%;box-sizing:border-box;"', main_text)
+        self.assertRegex(main_text, r'<input type="url" id="gms-assistant-url"[^>]*autocomplete="off"')
 
     def test_suite_report_copy_modal_uses_worker_and_suite_choices(self):
         main_text = read_shell_bundle()
@@ -947,7 +947,7 @@ class FrontendIntegrityTests(unittest.TestCase):
 
     def test_device_management_renders_fastboot_and_plural_usbip_ids(self):
         main_text = read_shell_bundle()
-        controls = read_text("web/static/js/pages/test-control.js")
+        controls = read_text("web/static/js/shell/system-settings.js")
 
         self.assertIn("device.protocol === 'fastboot'", main_text)
         self.assertIn("states.includes('fastboot')", main_text)

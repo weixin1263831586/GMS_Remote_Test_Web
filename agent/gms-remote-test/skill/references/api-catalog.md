@@ -32,7 +32,7 @@ schemas/handlers.
 | `gms-rt-auth-login [username]` | Create and save a server session (password via stdin) | **human only** |
 | `gms-rt-auth-logout` | Revoke and remove the saved session | agent + human |
 | `gms-rt-auth-elevate [username]` | Re-authenticate an administrator for sensitive operations (password via stdin) | **human only** |
-| `gms-rt-auth-elevation-reset` | Clear administrator elevation | agent + human |
+| `gms-rt-auth-elevation-reset` | Clear temporary elevation | **human only** |
 
 The backend authenticates normal API calls with the `gms_session` cookie or
 an Agent Service Token (`GMS_AUTH_TOKEN_FILE`). The helper sends the saved

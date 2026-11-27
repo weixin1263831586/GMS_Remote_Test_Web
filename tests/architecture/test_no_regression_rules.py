@@ -108,6 +108,11 @@ class PersonalEnvironmentHardcodeTests(unittest.TestCase):
                     continue
                 for lineno, line in enumerate(text.splitlines(), start=1):
                     for pattern, reason in PERSONAL_PATTERNS.items():
+                        if (relative == "features/kkagent/analyzer.py"
+                                and line.strip() == 'or address in ipaddress.ip_network("172.16.0.0/12")'
+                                and pattern == r"172\.16\.\d+\.\d+"):
+                            # Standard RFC 1918 network, not a deployment address.
+                            continue
                         if re.search(pattern, line):
                             violations.append(
                                 f"{relative}:{lineno}: {reason}: {line.strip()[:90]}"

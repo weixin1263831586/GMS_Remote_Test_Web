@@ -150,7 +150,7 @@ def cell_first_link(cell: html.HtmlElement, base_url: str) -> LinkInfo:
     return links[0] if links else LinkInfo(text='', url='')
 
 
-def table_rows(table: html.HtmlElement, base_url: str) -> tuple[list[str], list[dict[str, Any]]]:
+def table_rows(table: html.HtmlElement, base_url: str, *, complete_headers: bool = False) -> tuple[list[str], list[dict[str, Any]]]:
     """Expand HTML row/column spans into logical cells before interpreting headers."""
     rows = table.xpath('./thead/tr|./tbody/tr|./tfoot/tr|./tr')
     if not rows:
@@ -179,13 +179,33 @@ def table_rows(table: html.HtmlElement, base_url: str) -> tuple[list[str], list[
                     pending[col] = (cell, height - 1)
             column += width
         expanded.append([grid.get(col) for col in range(max(grid, default=-1) + 1)])
-    headers = [cell_text(cell) if cell is not None else '' for cell in expanded[0]]
+    header_count = 1
+    width = len(expanded[0])
+    if complete_headers:
+        header_count = 0
+        width = max(map(len, expanded))
+        for row in rows:
+            cells = row.xpath('./th|./td')
+            if row.xpath('ancestor::thead') or (cells and all(cell.tag == 'th' for cell in cells)):
+                header_count += 1
+            else:
+                break
+        headers = [
+            ' / '.join(dict.fromkeys(cell_text(row[col]) for row in expanded[:header_count]
+                                     if col < len(row) and row[col] is not None))
+            for col in range(width)
+        ]
+    else:
+        headers = [cell_text(cell) if cell is not None else '' for cell in expanded[0]]
     parsed_rows: list[dict[str, Any]] = []
-    for row_index, cells in enumerate(expanded[1:], 1):
-        if not cells or any(cell is None for cell in cells):
+    for row_index, cells in enumerate(expanded[header_count:], header_count):
+        if not cells or (not complete_headers and any(cell is None for cell in cells)):
             continue
-        values = [cell_text(cell) for cell in cells]
-        links = [asdict(link) for cell in dict.fromkeys(cells) for link in node_links(cell, base_url)]
+        if complete_headers:
+            cells = cells + [None] * (width - len(cells))
+        values = [cell_text(cell) if cell is not None else '' for cell in cells]
+        links = [asdict(link) for cell in dict.fromkeys(cells) if cell is not None
+                 for link in node_links(cell, base_url)]
         parsed_rows.append({'row_index': row_index, 'values': values, 'links': links, 'cells': cells})
     return headers, parsed_rows
 

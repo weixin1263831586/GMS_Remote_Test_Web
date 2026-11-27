@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
+from urllib.parse import urlsplit
 
 import tomli_w
 
@@ -104,6 +108,53 @@ def default_model_alias(ai_config: dict[str, Any] | None) -> str:
     """默认模型 alias（primary provider 的 model；否则第一个 enabled）。"""
     specs = model_specs(ai_config)
     return specs[0].alias if specs else ""
+
+
+def model_catalog_fingerprint(config=None):
+    """Bind owner approval to the complete enabled model routing catalog."""
+    if config is None:
+        config = _config_manager.get_ai_config()
+    if not isinstance(config, dict) or config.get("enabled") is not True:
+        return ""
+    providers = config.get("providers")
+    if not isinstance(providers, dict):
+        return ""
+    routes = []
+    for name, provider in providers.items():
+        if not isinstance(name, str) or not isinstance(provider, dict):
+            return ""
+        enabled = provider.get("enabled", False)
+        if not isinstance(enabled, bool):
+            return ""
+        if not enabled:
+            continue
+        model, base_url = provider.get("model"), provider.get("base_url")
+        if not isinstance(model, str) or not model.strip() or not isinstance(base_url, str) or not base_url.strip():
+            return ""
+        try:
+            parsed = urlsplit(base_url)
+            if (parsed.scheme not in {"http", "https"} or not parsed.hostname
+                    or parsed.username or parsed.password or parsed.query or parsed.fragment):
+                return ""
+        except ValueError:
+            return ""
+        api_format = api_format_for(name, provider)
+        if api_format not in {"anthropic", "openai"}:
+            return ""
+        routes.append({"name": name, "model": model, "base_url": base_url,
+                       "api_format": api_format, "auth_required": provider.get("auth_required", True)})
+    if not routes:
+        return ""
+    primary = config.get("primary_provider")
+    if not isinstance(primary, str) and primary is not None:
+        return ""
+    names = [route["name"] for route in routes]
+    primary = primary if primary in names else names[0]
+    ordered = [route for route in routes if route["name"] == primary]
+    ordered.extend(route for route in routes if route["name"] != primary)
+    # Do not store credentials; a route/catalog change invalidates prior approval.
+    payload = {"version": 2, "routes": ordered}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def list_model_options(ai_config: dict[str, Any] | None) -> dict[str, Any]:
@@ -257,3 +308,42 @@ def context_limited_config(model: str, limit: int, env_extra: dict[str, str]):
 def analysis_command(command: list[str], entry: dict[str, Any]) -> list[str]:
     path = entry.get("_kkagent_config_path")
     return [command[0], "--config", str(path), *command[1:]] if path else command
+
+
+_PROFILE_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_KKAGENT_CLIENT_RE = re.compile(r'^\s*client\s*=\s*["\']kkagent["\']\s*$', re.MULTILINE)
+
+
+def normalize_agent_profile_name(value: Any) -> str:
+    name = str(value or "").strip()
+    return name if _PROFILE_NAME_RE.fullmatch(name) else ""
+
+
+def list_agent_profiles(
+    profiles_root: Path | None = None,
+) -> dict[str, Any]:
+    """List local kkagent profile names without reading token material into memory."""
+    root = profiles_root or (
+        Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+        / "gms-agent" / "profiles"
+    )
+    if not root.is_dir():
+        return {"profiles": [], "default_profile": ""}
+    profiles: list[str] = []
+    for path in sorted(root.glob("*.toml")):
+        name = path.stem
+        if not _PROFILE_NAME_RE.fullmatch(name) or not path.is_file():
+            continue
+        try:
+            # The profile's client declaration is enough for this selector.
+            # Never parse or return controller, CA, or token-file fields.
+            with path.open(encoding="utf-8", errors="replace") as stream:
+                contents = stream.read(8192)
+        except OSError:
+            continue
+        if _KKAGENT_CLIENT_RE.search(contents):
+            profiles.append(name)
+    return {
+        "profiles": profiles,
+        "default_profile": profiles[0] if len(profiles) == 1 else "",
+    }

@@ -6,6 +6,9 @@ import asyncio
 import logging
 from typing import Any
 
+from features.retrieval import fuse_rankings, local_embedding
+
+from .knowledge.journal_semantic import JournalSemantic
 from .users import RESOLVED_STATUS_NAMES
 from .utils import search_query_tokens
 
@@ -36,6 +39,42 @@ async def search_issue_history(
     items = service.repository.search_history(
         q, exclude_issue_id=exclude_issue_id, limit=limit, resolved_only=resolved_only
     )
+    journal_status = {"status": "disabled", "coverage_complete": False}
+    # Share the existing history entry point with MCP/CLI; never send raw reply snippets.
+    try:
+        embedder = local_embedding("redmine_journals")
+        if embedder is not None:
+            recalled = await asyncio.to_thread(
+                JournalSemantic(service.repository, embedder=embedder).search, q, limit=min(50, limit * 3),
+            )
+            journal_status = recalled["retrieval"]
+            lexical = {int(item["issue_id"]): item for item in items}
+            semantic = {}
+            for hit in recalled["results"]:
+                issue_id = int(hit["issue_id"])
+                if issue_id == exclude_issue_id or issue_id in semantic:
+                    continue
+                item = lexical.get(issue_id)
+                if item is None:
+                    issue = service.repository.get_issue(issue_id)
+                    if not issue or (resolved_only and not issue.get("is_resolved")):
+                        continue
+                    item = {key: issue.get(key) for key in service.repository.HISTORY_RESULT_FIELDS}
+                    for key, cap in service.repository.HISTORY_TEXT_LIMITS.items():
+                        item[key] = str(item.get(key) or "")[:cap]
+                    item["is_resolved"] = bool(item.get("is_resolved"))
+                    item["matched_terms"] = []
+                    item["distinctive_matches"] = []
+                semantic[issue_id] = {**item, "retrieval_channels": ["lexical", "journal_semantic"]
+                                      if issue_id in lexical else ["journal_semantic"],
+                                      "journal_reference": {key: hit[key] for key in
+                                          ("journal_id", "reference", "source_revision")}}
+            representatives = {**lexical, **semantic}
+            order = fuse_rankings([list(lexical), list(semantic)], limit=max(1, min(50, limit)))
+            items = [representatives[issue_id] for issue_id in order]
+    except Exception as exc:
+        logger.warning("Historical journal retrieval unavailable: %s", type(exc).__name__)
+        journal_status = {"status": "error", "coverage_complete": False}
     for item in items:
         item["source"] = "local_db"
     seen = {int(item["issue_id"]) for item in items}
@@ -99,7 +138,9 @@ async def search_issue_history(
                     break
         except Exception as exc:
             remote_error = str(exc)[:200]
-    return {"query": q, "items": items, "remote_search_error": remote_error}
+    return {"query": q, "items": items, "remote_search_error": remote_error,
+            "retrieval": {"journals": journal_status}, "coverage_complete": False,
+            "scope": "bounded_owner_history"}
 
 
 def _status_looks_resolved(status_name: Any) -> bool:

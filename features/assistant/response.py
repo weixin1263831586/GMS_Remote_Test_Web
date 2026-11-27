@@ -120,11 +120,39 @@ def json_body(response) -> dict[str, Any]:
     }
 
 
+def external_knowledge_warnings(data: Any) -> list[str]:
+    """Summarize unavailable sources without exposing provider internals."""
+    if not isinstance(data, dict):
+        return []
+    labels = {"android_internals": "Android 机制 Wiki", "web_documents": "外部网页规范"}
+    statuses = {"error": "检索或索引异常", "disabled": "未启用",
+                "not_configured": "未配置", "empty": "索引未就绪"}
+    warnings = []
+    for row in data.get("sources_status") or []:
+        if not isinstance(row, dict):
+            continue
+        label = labels.get(row.get("source"), "外部知识源")
+        if row.get("status") in statuses:
+            warnings.append(f"{label}：{statuses[row['status']]}")
+        retrieval = row.get("retrieval")
+        if isinstance(retrieval, dict) and retrieval.get("status") in {"error", "partial", "empty", "unavailable"}:
+            warnings.append(f"{label}：语义索引未完整覆盖，已保留可用全文检索")
+    return warnings
+
+
 def format_payload(tool: AgentTool, payload: dict[str, Any]) -> str:
     if payload.get("error"):
         return str(payload["error"])
     if tool.name == "devices_info":
         return format_device_info_payload(payload)
+    if tool.name in {"knowledge_search", "android_internals_search"}:
+        data = payload.get("data", payload)
+        if isinstance(data, dict):
+            items = data.get("results" if tool.name == "android_internals_search" else "items")
+            if isinstance(items, list):
+                summary = f"查询到 {len(items)} 条知识记录。" if items else "未检索到相关知识记录。"
+                warnings = external_knowledge_warnings(data) if tool.name == "android_internals_search" else []
+                return summary + ("\n" + "；".join(warnings) if warnings else "")
     if payload.get("message"):
         return str(payload["message"])
     if "connected" in payload:

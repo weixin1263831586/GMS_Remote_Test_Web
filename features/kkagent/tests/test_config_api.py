@@ -4,8 +4,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from features.assistant import config_api
-from features.users import runtime as users_runtime
+from features.kkagent import config_api
 
 
 class AiConfigApiTests(unittest.TestCase):
@@ -37,9 +36,9 @@ class AiConfigApiTests(unittest.TestCase):
     def test_config_status_does_not_claim_enabled_provider_is_online(self):
         with (
             patch.object(
-                users_runtime,
+                config_api,
                 "config_manager",
-                SimpleNamespace(get_ai_config=lambda: self._config()),
+                SimpleNamespace(get_ai_config=lambda: self._config(), load_config=dict),
             ),
             patch.dict("os.environ", {"GMS_LOCAL_AI_API_KEY": ""}, clear=False),
         ):
@@ -51,6 +50,7 @@ class AiConfigApiTests(unittest.TestCase):
         status = payload["data"]["status"]
         providers = {item["provider"]: item for item in status["providers"]}
         self.assertEqual(status["local_provider"], "glm_local")
+        self.assertEqual(status["routes"], {"default_text": "remote", "local_rag": "", "private_vision": ""})
         self.assertEqual(providers["glm_local"]["state"], "credential_missing")
         self.assertIsNone(providers["glm_local"]["available"])
         self.assertNotEqual(
@@ -73,9 +73,9 @@ class AiConfigApiTests(unittest.TestCase):
         }
         with (
             patch.object(
-                users_runtime,
+                config_api,
                 "config_manager",
-                SimpleNamespace(get_ai_config=lambda: self._config()),
+                SimpleNamespace(get_ai_config=lambda: self._config(), load_config=dict),
             ),
             patch(
                 "features.kkagent.analyzer.UniversalAIAnalyzer.probe_provider",

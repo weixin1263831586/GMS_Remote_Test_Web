@@ -127,6 +127,8 @@ async def cleanup_sessions() -> None:
     async with _agent_sessions_lock:
         stale_ids = []
         for sid, session in _agent_sessions.items():
+            if session.get("agent_image_busy"):
+                continue
             try:
                 updated = datetime.fromisoformat(session.get("updated_at", "")).timestamp()
             except Exception:
@@ -409,6 +411,8 @@ def delete_session(session_id: str, client_id: str, owner_id: str):
         session = _restore_session_from_transcript(session_id, client_id, owner_id)
     if not session or session.get("client_id") != client_id:
         return error_response("Agent session not found", 404)
+    if session.get("agent_image_busy"):
+        return error_response("图片分析尚未结束，请取消或等待完成后删除会话", 409)
     task = _agent_monitor_tasks.pop(session_id, None)
     if task and not task.done():
         task.cancel()

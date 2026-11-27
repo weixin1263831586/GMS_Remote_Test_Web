@@ -395,6 +395,11 @@ class RuntimeTerminalTests(RuntimeUiHarness):
 
         page.route("**/api/auth/elevate", grant_elevation)
         try:
+            user = {"username": "terminal-operator", "password": "TerminalSmokeUser-2026!"}
+            created = page.request.post(f"{self.base_url}/api/auth/users", data={**user, "role": "user"})
+            self.assertTrue(created.ok, created.status)
+            logged_in = page.request.post(f"{self.base_url}/api/auth/login", data=user)
+            self.assertTrue(logged_in.ok, logged_in.status)
             self.goto_shell(page)
             page.wait_for_function("state.authReady && typeof recoverTerminalElevation === 'function'")
             page.evaluate(
@@ -711,15 +716,7 @@ class RuntimeTerminalTests(RuntimeUiHarness):
         )
         try:
             self.goto_shell(page)
-            elevated = page.request.post(
-                f"{self.base_url}/api/auth/elevate",
-                data={
-                    "username": "ui-admin",
-                    "password": "UiSmokeAdmin-2026!",
-                },
-            )
-            self.assertTrue(elevated.ok, elevated.text())
-            page.evaluate("state.elevated = true; state.elevatedUntil = Date.now() + 60000")
+            self.assertTrue(page.evaluate("state.elevated && state.elevatedUntil === null"))
             page.evaluate("switchPage('terminal', null)")
             page.wait_for_function(
                 """() => {

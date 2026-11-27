@@ -1,19 +1,17 @@
-"""AI configuration route owned by the Assistant feature.
-
-``GET /api/config/ai`` reads the shared AI model config (stored in the users
-config tree) and reports provider availability. The route lives here because
-provider status/probing is Assistant-domain logic; users no longer imports
-Assistant for it.
-"""
+"""Unified model catalog and explicit provider probes."""
 
 import asyncio
+import shutil
 
 from fastapi import APIRouter, Query, Request
 
-from features.kkagent import UniversalAIAnalyzer
-from features.users import hide_sensitive_info
-from features.users import runtime as users_runtime
+from foundation.config import config_manager
+from foundation.redaction import redact_sensitive_data
 from foundation.responses import error_response, success_response
+
+from .analyzer import UniversalAIAnalyzer
+from .config import list_model_options
+from .session import KKAGENT_BINARY
 
 
 router = APIRouter()
@@ -26,7 +24,6 @@ async def get_ai_config(
     provider: str = Query(''),
 ):
     """获取脱敏 AI 配置和可用性状态；真实模型探测必须显式请求。"""
-    config_manager = users_runtime.config_manager
     ai_config = config_manager.get_ai_config()
 
     if not ai_config:
@@ -48,12 +45,20 @@ async def get_ai_config(
             for item in statuses
         ]
 
-    safe_config = hide_sensitive_info(ai_config.copy())
+    # Publish actual eligible routes separately from provider naming/readiness.
+    safe_config = redact_sensitive_data(ai_config)
     safe_config['status'] = {
         'local_provider': local_provider,
         'primary_provider': primary_provider,
         'probe_target': target_provider,
         'probed': bool(probe),
-        'providers': statuses,
+        'providers': redact_sensitive_data(statuses),
+        'kkagent_installed': bool(shutil.which(KKAGENT_BINARY)),
+        'routes': {
+            'default_text': primary_provider,
+            'local_rag': analyzer.configured_rag_provider((config_manager.load_config() or {}).get('retrieval', {})) or '',
+            'private_vision': analyzer.image_provider() or '',
+        },
     }
+    safe_config['model_options'] = list_model_options(ai_config)
     return success_response(safe_config)

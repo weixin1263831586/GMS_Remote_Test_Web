@@ -160,7 +160,7 @@
         }
 
         function switchSidebarSettingsTab(tabName) {
-            const target = tabName === 'guide' ? 'guide' : 'visibility';
+            const target = ['guide', 'system'].includes(tabName) ? tabName : 'visibility';
             document.querySelectorAll('[data-sidebar-settings-tab]').forEach(button => {
                 const active = button.dataset.sidebarSettingsTab === target;
                 button.classList.toggle('active', active);
@@ -173,6 +173,7 @@
             // panel, so hide it when the read-only project guide is selected.
             const footer = document.querySelector('#sidebar-visibility-modal .sidebar-settings-footer');
             if (footer) footer.hidden = target !== 'visibility';
+            if (target === 'system') void loadSystemSettings();
         }
 
         function setGuideImageZoom(actualSize) {
@@ -216,7 +217,7 @@
             if (event.target?.id === 'guide-image-modal') closeGuideImageLightbox();
         }
 
-        function openSidebarVisibilityModal() {
+        function openSidebarVisibilityModal(tabName = 'visibility', sectionName = '') {
             const modal = document.getElementById('sidebar-visibility-modal');
             const list = document.getElementById('sidebar-visibility-list');
             if (!modal || !list) return;
@@ -242,9 +243,11 @@
                 </label>`;
             }).join('');
 
-            switchSidebarSettingsTab('visibility');
+            switchSidebarSettingsTab(tabName);
 
+            ModalManager.onClose('sidebar-visibility-modal', resetSystemSettings);
             ModalManager.open('sidebar-visibility-modal');
+            if (tabName === 'system' && sectionName) void scrollSystemSettingsTo(sectionName);
         }
 
         function closeSidebarVisibilityModal() {

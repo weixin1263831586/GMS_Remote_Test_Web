@@ -47,13 +47,38 @@ def test_general_ask_skips_restricted_imports(tmp_path, monkeypatch):
     store = KnowledgeStore(db_path=tmp_path / 'knowledge.sqlite3', attachment_dir=tmp_path / 'files')
     for title, source in [('Ordinary document', 'manual'), ('Restricted document', 'authorized_policy_import')]:
         store.create_doc('owner-a', space_id='gms', title=title, content_md='Bluetooth', source=source)
-    analyzer = Mock()
-    analyzer.generate.return_value = {'success': True, 'content': 'answer'}
+    import json
+
+    config = {"enabled": True, "primary_provider": "local", "providers": {
+        "local": {"enabled": True, "model": "fixture", "base_url": "http://127.0.0.1:3000"},
+    }}
+    monkeypatch.setattr(web_sources.config_manager, "get_ai_config", lambda: config)
+    analyzer = Mock(config=config)
+    analyzer.configured_rag_provider.return_value = "local"
+
+    def infer(prompt, **_kwargs):
+        payload = json.loads(prompt)
+        stage = payload["stage"]
+        assert "Restricted document" not in prompt
+        if stage == "plan":
+            assert any(row["title"] == "Ordinary document" for row in payload["documents"])
+            return {"success": True, "content": '{"searches":[]}'}
+        if stage == "inspect":
+            assert "Ordinary document" in prompt
+            return {"success": True, "content": '{"reads":[]}'}
+        if stage == "draft":
+            return {"success": True, "content": json.dumps({"claims": [
+                {"statement": "Bluetooth", "citations": [{"id": "E1", "quote": "Bluetooth"}]},
+            ]})}
+        return {"success": True, "content": '{"verdicts":[{"id":"C1","supported":true}]}'}
+
+    analyzer.generate_local_rag.side_effect = infer
     monkeypatch.setattr('features.knowledge.service._ask_analyzer_factory', lambda: analyzer)
     result = KnowledgeService(store).ask('owner-a', 'Bluetooth')
     assert result['mode'] == 'ai'
-    assert 'Ordinary document' in analyzer.generate.call_args.args[0]
-    assert 'Restricted document' not in analyzer.generate.call_args.args[0]
+    assert result["rag"]["status"] == "model_reviewed"
+    analyzer.generate.assert_not_called()
+    assert all(row["title"] == "Ordinary document" for row in result["contexts"])
 
 
 def test_partner_grant_requires_upstream_account_verification(monkeypatch):
@@ -64,3 +89,45 @@ def test_partner_grant_requires_upstream_account_verification(monkeypatch):
     monkeypatch.setattr(external_api, 'require_elevated_admin', lambda _request: SimpleNamespace(resource_owner_id='owner-a'))
     payload = external_api.PartnerGrantRequest(enabled=True, authorized_for_ai_processing=True)
     assert external_api.update_partner_policy_grant(None, payload).status_code == 409
+
+
+def test_model_catalog_fingerprint_binds_primary_and_fallback_order():
+    from copy import deepcopy
+
+    config = {"enabled": True, "primary_provider": "a", "providers": {
+        name: {"enabled": True, "model": name, "base_url": f"https://{name}.example.test",
+               "api_format": "openai", "api_key": "secret"}
+        for name in ("a", "b", "c")
+    }}
+    fingerprint = web_sources.model_catalog_fingerprint(config)
+    assert fingerprint
+    changed = deepcopy(config)
+    changed["primary_provider"] = "b"
+    assert web_sources.model_catalog_fingerprint(changed) != fingerprint
+    changed = deepcopy(config)
+    changed["providers"] = {name: changed["providers"][name] for name in ("a", "c", "b")}
+    assert web_sources.model_catalog_fingerprint(changed) != fingerprint
+    changed = deepcopy(config)
+    changed["providers"]["a"]["api_key"] = "rotated"
+    assert web_sources.model_catalog_fingerprint(changed) == fingerprint
+    changed["providers"]["b"]["model"] = ""
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+    changed = deepcopy(config)
+    changed["providers"]["a"]["enabled"] = "false"
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+    changed = deepcopy(config)
+    changed["providers"]["a"]["base_url"] += "?token=secret"
+    assert web_sources.model_catalog_fingerprint(changed) == ""
+
+
+def test_route_change_invalidates_existing_owner_import_grant(tmp_path, monkeypatch):
+    config = {"enabled": True, "primary_provider": "a", "providers": {
+        name: {"enabled": True, "model": name, "base_url": f"https://{name}.example.test"}
+        for name in ("a", "b")
+    }}
+    monkeypatch.setattr(web_sources.config_manager, "get_ai_config", lambda: config)
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    provider.approve_import("owner", "doc", "digest")
+    assert provider.approved_imports("owner") == {"doc": "digest"}
+    config["primary_provider"] = "b"
+    assert provider.approved_imports("owner") == {}

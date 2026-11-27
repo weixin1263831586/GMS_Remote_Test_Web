@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, Response
 
 from foundation.error_model import ApiError
@@ -25,14 +25,16 @@ PAGE_SCRIPTS = (
 )
 _ASSET_TYPES = {
     **{name: "application/javascript" for name in PAGE_SCRIPTS},
+    "settings-page.js": "application/javascript",
     "daily-brief-session.css": "text/css",
     "case-library.css": "text/css",
 }
 
 
 @page_router.get("/redmine-agent", response_class=HTMLResponse)
-async def redmine_agent_page():
-    html = (_UI_DIR / "page.html").read_text(encoding="utf-8")
+async def redmine_agent_page(request: Request):
+    template = "settings.html" if request.query_params.get("settings") == "1" else "page.html"
+    html = (_UI_DIR / template).read_text(encoding="utf-8")
     html = html.replace(
         "{{REDMINE_CSS}}",
         (_UI_DIR / "page.css").read_text(encoding="utf-8").rstrip(),

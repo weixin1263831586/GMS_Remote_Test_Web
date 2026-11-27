@@ -1,5 +1,8 @@
 """Architecture typography and navigation in the actual browser renderer."""
 
+import os
+from pathlib import Path
+
 from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
@@ -22,6 +25,15 @@ class RuntimeArchitectureViewsTests(RuntimeUiHarness):
             )
             frame = page.frame_locator('#architecture-iframe')
             child = page.locator('#architecture-iframe').element_handle().content_frame()
+            output = os.getenv("GMS_UI_PREVIEW_DIR")
+            if output:
+                directory = Path(output) / "architecture"
+                directory.mkdir(parents=True, exist_ok=True)
+                for name in VIEWS:
+                    frame.locator(f'[data-arch="{name}"]').click()
+                    expect(frame.locator(f'[data-arch-pane="{name}"]')).to_have_attribute(
+                        'data-arch-scene-ready', 'true')
+                    page.screenshot(path=str(directory / f'{name}.png'), animations='disabled')
             for name in VIEWS:
                 frame.locator(f'[data-arch="{name}"]').click()
                 pane = frame.locator(f'[data-arch-pane="{name}"]')

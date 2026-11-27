@@ -451,6 +451,26 @@ class KnowledgeStore(KnowledgeVersionMixin):
             conn.commit()
             return cur.rowcount > 0
 
+    def list_doc_ids(self, user_id: str, *, space_id: str = "", tag: str = "", limit: int = 12) -> list[str]:
+        """Bounded owner-scoped inventory without loading document bodies."""
+        sql = """SELECT d.doc_id FROM knowledge_docs d
+                 JOIN knowledge_nodes n ON n.node_id=d.node_id
+                 WHERE d.user_id=? AND n.archived=0"""
+        params: list[Any] = [user_id]
+        if space_id:
+            sql += " AND d.space_id=?"
+            params.append(space_id)
+        if tag:
+            sql += """ AND EXISTS (
+                SELECT 1 FROM knowledge_doc_tags dt JOIN knowledge_tags t ON t.tag_id=dt.tag_id
+                WHERE dt.doc_id=d.doc_id AND t.name=?
+            )"""
+            params.append(tag)
+        sql += " ORDER BY d.updated_at DESC, d.doc_id LIMIT ?"
+        params.append(max(1, min(limit, 32)))
+        with self._connect() as conn:
+            return [row[0] for row in conn.execute(sql, params)]
+
     def list_docs(
         self,
         user_id: str,

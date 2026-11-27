@@ -27,7 +27,6 @@
     header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
     header .filter-bar select { width:86px; min-width:86px; }
     header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
-    header .btn-group > .settings-btn { width:72px; min-width:72px; }
 
     @media (max-width:1199px) {
 
@@ -61,16 +60,24 @@
         .modal-content { max-height:calc(100dvh - 16px); }
     }
 
-    /* 统计设置弹框：标题字号与其他页面统一 */
-
-    /* Long modal forms scroll; do not shrink field cards into overlap. */
-    #settingsModal .tech-dialog--redmine-settings > .modal-body {
-        overflow-y:auto;
-        overflow-x:hidden;
+    html.embedded-system-settings, html.embedded-system-settings body {
+        height:auto;
+        min-height:0;
+        overflow-y:hidden;
+    }
+    html.embedded-system-settings body { display:block; }
+    #redmine-system-settings {
+        display:flex;
+        flex-direction:column;
+        gap:8px;
+        padding:8px;
         align-items:stretch;
         min-height:0;
     }
-    #settingsModal .tech-dialog--redmine-settings > .modal-body > * {
+    #redmine-system-settings label { color:var(--muted); }
+    #redmine-system-settings input:not([type=checkbox]),
+    #redmine-system-settings select { width:100%; min-width:0; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; }
+    #redmine-system-settings > * {
         flex:0 0 auto;
     }
 
@@ -558,3 +565,17 @@
 }
 :where(table) th { position: sticky; top: 0; z-index: 1; background: var(--panel2); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
+
+.redmine-settings-fields {
+  min-width: 0;
+  border: 1px solid var(--border);
+  margin: 0 0 12px;
+  padding: 12px;
+}
+.redmine-settings-fields legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.redmine-settings-fields p[role="status"]:empty {
+  display: none;
+}

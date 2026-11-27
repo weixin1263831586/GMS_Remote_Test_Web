@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sqlite3
 import tempfile
@@ -155,20 +156,36 @@ class KnowledgeStoreTests(unittest.TestCase):
         )
 
         class Analyzer:
-            def generate(self, user_prompt, system_prompt="", max_tokens=None, preferred_provider=None):
-                self.prompt = user_prompt
-                self.preferred_provider = preferred_provider
-                return {"success": True, "content": "GTS 测试需要使用 gts-tradefed，并准备账号、网络和设备。", "provider": "fake"}
+            config = {"enabled": True, "providers": {"local": {
+                "enabled": True, "base_url": "http://127.0.0.1:3000", "model": "fixture",
+            }}}
+
+            @staticmethod
+            def configured_rag_provider(_config):
+                return "local"
+
+            def generate_local_rag(self, user_prompt, *, provider_name, **_kwargs):
+                self.provider_name = provider_name
+                prompt = json.loads(user_prompt)
+                reply = {
+                    "plan": {"searches": [{"source": "personal_documents", "query": "gts-tradefed"}]},
+                    "inspect": {"reads": []},
+                    "draft": {"claims": [{"statement": "GTS 测试使用 gts-tradefed",
+                                          "citations": [{"id": "E1", "quote": "gts-tradefed"}]}]},
+                    "review": {"verdicts": [{"id": "C1", "supported": True}]},
+                }
+                return {"success": True, "content": json.dumps(reply[prompt["stage"]])}
 
         analyzer = Analyzer()
-        # 依赖 seam（bootstrap 注入分析器工厂）：patch 模块级工厂全局即可，
-        # 无需真实接线 composition root。
-        with patch("features.knowledge.service._ask_analyzer_factory", return_value=analyzer):
+        with (
+            patch("features.knowledge.service._ask_analyzer_factory", return_value=analyzer),
+            patch("foundation.config.config_manager.get_ai_config", return_value=analyzer.config),
+        ):
             result = self.service.ask("u1", "GTS测试", space_id="gms")
 
         self.assertEqual(result["mode"], "ai")
-        self.assertEqual(analyzer.preferred_provider, "glm_local")
-        self.assertIn("gts-tradefed", analyzer.prompt)
+        self.assertEqual(analyzer.provider_name, "local")
+        self.assertIn("gts-tradefed", result["answer"])
         self.assertIn("GTS 测试", result["contexts"][0]["snippet"])
         self.assertEqual(result["contexts"][0]["title"], "Android_GMS_Developer_Guide_CN")
 

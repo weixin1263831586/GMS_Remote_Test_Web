@@ -515,3 +515,61 @@ async def test_guard_pauses_for_human_elevation_then_retries_the_exact_query(mod
     assert "share-1" in turn.await_args.kwargs["context"]
     assert current["agent_question"]["fields"][0]["options"][0]["value"] == "share-1"
     assert not current.get("agent_retry")
+
+
+@pytest.mark.asyncio
+async def test_partner_policy_chat_routes_without_disclosing_scan_to_model(model, monkeypatch):
+    from features.assistant import api
+    from features.assistant.tests.test_agent_session_safety import _bare_request, _seed_confirm_session
+
+    turn, execute = model
+    saved = dict(api._agent_sessions)
+    try:
+        current = _seed_confirm_session(api, {})
+        current["pending_plan"] = None
+        current["status"] = "idle"
+        monkeypatch.setattr(api, "cleanup_due", lambda: False)
+        await api.agent_chat(_bare_request(), api.AgentChatRequest(
+            session_id="s-confirm", message="过GMS认证，Android17设备RAM要求，Go和非Go"))
+        assert current["messages"][-1]["data"]["gms_policy_lookup"] == "section:Low RAM;android=17"
+        assert "此结果不进入模型上下文" in current["messages"][-1]["content"]
+        turn.assert_not_awaited()
+        execute.assert_not_awaited()
+    finally:
+        api._agent_sessions.clear()
+        api._agent_sessions.update(saved)
+
+
+@pytest.mark.asyncio
+async def test_evidence_followup_does_not_repeat_successful_query(model):
+    turn, execute = model
+    execute.return_value = ToolResult(success=True, tool_name="android_internals_search", data={
+        "results": [{"reference": "ref1", "source_revision": "rev1"}],
+        "coverage_complete": False,
+    })
+    call = decision("call", tool="android_internals_search", params={"query": "memory"})
+    turn.side_effect = [call, decision("answer", text="初步结论"), call,
+                        decision("answer", text="证据范围不完整")]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("分析内存"))
+    assert execute.await_count == 1
+    assert current["messages"][-1]["content"] == "证据范围不完整"
+    assert current["messages"][-1]["data"]["evidence_plan"]["has_unresolved_scope"]
+
+
+
+@pytest.mark.asyncio
+async def test_evidence_followup_cannot_start_workflow(model):
+    turn, execute = model
+    execute.return_value = ToolResult(success=True, tool_name="android_internals_search",
+                                      data={"coverage_complete": False, "results": []})
+    turn.side_effect = [
+        decision("call", tool="android_internals_search", params={"query": "CDD"}),
+        decision("answer", text="初步结论"),
+        decision("workflow", entities={}),
+        decision("answer", text="证据不足"),
+    ]
+    current = session()
+    assert await agent.handle_project_turn(current, object(), request("查询 CDD"))
+    assert execute.await_count == 1
+    assert current["messages"][-1]["content"] == "证据不足"

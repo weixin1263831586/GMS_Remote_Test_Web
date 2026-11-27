@@ -14,7 +14,6 @@ from features.apk.service import (
     safe_join,
 )
 from features.assistant import api as assistant
-from features.assistant import config_api as assistant_config
 from features.auth import router as auth_router
 from features.auth.api import configure_client_ssh_authenticator
 from features.automation import api as automation
@@ -47,6 +46,7 @@ from features.gerrit.config import config_manager as gerrit_config_manager
 from features.gerrit.service import query_gerrit_dual_mode
 from features.gms import api as gms_update_center
 from features.gms.radar import router as gms_update_radar_router
+from features.kkagent import config_api as model_config_api
 from features.knowledge.service import set_ask_analyzer_factory
 from features.ops import api as ops
 from features.redmine import api as redmine
@@ -120,7 +120,7 @@ set_ask_analyzer_factory(get_universal_analyzer)
 
 ALL_ROUTERS = [
     assistant.router,
-    assistant_config.router,
+    model_config_api.router,
     assets.router,
     audit.router,
     auth_router,

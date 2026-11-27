@@ -36,6 +36,7 @@
 .agent-message-header { padding: 8px 12px; background: transparent; border-bottom: 0; }
 .agent-role {  color: var(--text-primary); }
 .agent-message-body { padding-top: 2px; line-height: 1.7; }
+.agent-policy-evidence .list-table :is(th, td) { text-align: center; }
 .agent-message.plan { border-color: color-mix(in srgb, var(--primary-color) 45%, var(--border-color)); }
 .agent-composer { align-items: stretch; padding: 12px; background: var(--card-bg); }
 /* 高度对齐右侧按钮列：textarea 的 rows 固有高度会让 flex stretch 失效，
@@ -129,4 +130,78 @@
 }
 @media (max-width: 760px) {
     #aoa-panel .aoa-header-status { flex: none; align-self: stretch; max-width: 100%; width: 100%; }
+}
+
+/* Clipboard previews occupy space only when images are attached. */
+.agent-image-previews { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 12px 0; background: var(--card-bg); }
+.agent-image-previews[hidden] { display: none; }
+.agent-image-preview {
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    padding: 4px;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+}
+.agent-image-preview img { display: block; width: 72px; height: 56px; object-fit: contain; background: var(--darker-bg); }
+.agent-message-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.agent-message-images .agent-image-preview { cursor: zoom-in; height: auto; min-height: 0; background: transparent; }
+.agent-message-images .agent-image-preview img { width: 144px; height: 104px; max-width: 100%; }
+.agent-image-viewer-modal.modal { cursor: zoom-out; }
+.agent-image-viewer-frame {
+    position: relative;
+    flex: none;
+    outline: 1px solid var(--primary-color);
+    cursor: default;
+}
+.agent-image-viewer-frame > img:not([hidden]) {
+    display: block;
+    width: min(80vw, calc(80vh * var(--agent-image-ratio, 1)));
+    height: auto;
+    max-width: 80vw;
+    max-height: 80vh;
+    object-fit: contain;
+    cursor: default;
+}
+.agent-image-viewer-frame > .agent-image-viewer-close {
+    position: absolute;
+    top: var(--ui-spacing-sm);
+    right: var(--ui-spacing-sm);
+    background: var(--darker-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+}
+.agent-image-viewer-frame > .agent-image-viewer-close:hover { background: var(--lighter-bg); }
+.agent-image-viewer-status { color: var(--text-secondary); padding: 16px 56px 16px 16px; }
+.agent-image-preview .agent-image-remove {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: #202127;
+    color: #fff;
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    opacity: 0;
+    pointer-events: none;
+}
+.agent-image-preview:hover .agent-image-remove,
+.agent-image-preview .agent-image-remove:focus-visible {
+    opacity: 1;
+    pointer-events: auto;
+}
+.agent-image-preview .agent-image-remove:hover { background: #454650; }
+.agent-image-preview .agent-image-remove:disabled { opacity: 0; pointer-events: none; }
+@media (hover: none) {
+    .agent-image-preview .agent-image-remove:not(:disabled) { opacity: 1; pointer-events: auto; }
 }

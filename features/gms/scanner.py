@@ -20,7 +20,7 @@ from .update_records import bulletin_detail_coverage, record_change, sync_source
 
 # Bump whenever parser semantics change. A new parser is a reindex, not
 # evidence that Google published new information.
-PARSER_VERSION = '4'
+PARSER_VERSION = '8'
 ISSUE_KEYS = ('product_section','issue_type','test_module','test_case','exemption_id','android_versions')
 CVE_KEYS = ('source_url','cve_id','mainline_module')
 VOLATILE = {'id','first_seen_at','last_seen_at','content_hash','detail_fetched_at'}
@@ -198,7 +198,7 @@ def run_scan(path, mode='full', keys=None, *, trigger='manual', timeout=25,
                             WHERE r.source_key=? AND r.state IN ('ready','unchanged') ORDER BY r.run_id DESC LIMIT 1""",
                             (source.key,)).fetchone()
                         parser = PARSERS[source.parser]
-                        if (mode=='incremental' and source.key not in (MAINLINE,'gms_bulletins')
+                        if (mode=='incremental' and source.key not in (MAINLINE,'gms_bulletins','gms_requirements')
                                 and previous and previous['parser_version']==PARSER_VERSION
                                 and previous['fingerprint']==stable_hash(sorted((u,v[1]) for u,v in fetcher.documents.items()))):
                             from .update_records import upsert_source

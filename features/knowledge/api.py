@@ -11,13 +11,15 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
-from features.auth import require_elevated_admin, require_human_principal_when_auth_required
+from features.auth import require_elevated_admin, require_human_principal, require_human_principal_when_auth_required
+from features.kkagent import model_catalog_fingerprint
+from features.retrieval import embedding_configuration_issue
 from features.users import owner_id_from_request
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 from foundation.uploads import save_upload_to_path
 
-from .external.web_sources import model_catalog_fingerprint
+from .personal_semantic import PersonalSemantic
 from .policy_imports import (
     IMPORT_SUFFIXES,
     MAX_IMPORT_BYTES,
@@ -354,6 +356,47 @@ async def search_docs(
     return success_response(data={"items": [_preview(d) for d in docs], "count": len(docs)})
 
 
+@personal_router.get("/semantic-index")
+@handle_api_errors
+async def personal_semantic_status(request: Request, kind: str = Query("embedding"),
+                                   approved_only: bool = Query(False)):
+    require_human_principal(request)
+    owner = _user(request)
+    if kind == "understanding":
+        result = await asyncio.to_thread(_service.document_understanding, owner, approved_only=approved_only)
+        return success_response(data=result)
+    if kind != "embedding" or approved_only:
+        return error_response("未知索引类型", 422)
+    try:
+        result = await asyncio.to_thread(lambda: PersonalSemantic(_service.store, owner).status())
+    except Exception as exc:
+        result = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+    issue = await asyncio.to_thread(embedding_configuration_issue, "personal_knowledge")
+    if issue:
+        result = {**result, "configuration_issue": issue}
+    return success_response(data=result)
+
+
+@personal_router.post("/semantic-index")
+@handle_api_errors
+async def sync_personal_semantic(request: Request, batch_size: int = Query(128, ge=1, le=128),
+                                 kind: str = Query("embedding"), approved_only: bool = Query(False)):
+    require_human_principal(request)
+    owner = _user(request)
+    if kind == "understanding":
+        result = await asyncio.to_thread(_service.document_understanding, owner, approved_only=approved_only,
+                                         sync=True, batch_size=min(batch_size, 4))
+        return success_response(data=result)
+    if kind != "embedding" or approved_only:
+        return error_response("未知索引类型", 422)
+    try:
+        result = await asyncio.to_thread(
+            lambda: PersonalSemantic(_service.store, owner).sync(batch_size=batch_size))
+    except Exception:
+        return error_response("个人知识库语义索引未完成，请检查本地模型配置", 502)
+    return success_response(data=result)
+
+
 @personal_router.get("/tags")
 @handle_api_errors
 async def list_tags(request: Request):
@@ -456,12 +499,17 @@ async def ask_knowledge(request: Request):
         limit = int(data.get("limit") or 8)
     except (TypeError, ValueError):
         return error_response("limit 必须是整数", 422)
+    include_imports = data.get("include_authorized_imports") is True
+    if include_imports:
+        require_human_principal(request)
     result = await asyncio.to_thread(
         _service.ask,
         _user(request),
         str(data.get("question") or ""),
         space_id=str(data.get("space_id") or ""),
         limit=limit,
+        include_external=data.get("include_external") is True,
+        include_authorized_imports=include_imports,
     )
     return success_response(data=result)
 

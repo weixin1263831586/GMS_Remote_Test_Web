@@ -84,6 +84,7 @@ async function _apiCallOnce(url, method, data, opts) {
         }
 
         options.credentials = 'same-origin';
+        if (opts.cache) options.cache = opts.cache;
         const response = await fetch(url, options);
         const contentType = response.headers.get('content-type') || '';
         let result = null;
@@ -134,12 +135,13 @@ async function _apiCallOnce(url, method, data, opts) {
                 needsElevation
                 && !opts._elevationRetried
                 && !opts.background
+                && (opts.shouldRetry?.() ?? true)
             ) {
                 debugLog('[apiCall] 403 elevation_required — prompting for admin credentials');
                 const granted = await (window.requestElevatedAccess
                     ? window.requestElevatedAccess('需要管理员权限执行此操作')
                     : Promise.resolve(false));
-                if (granted) {
+                if (granted && (opts.shouldRetry?.() ?? true)) {
                     // 保留调用方 opts（如 silentToast），仅标记已重试一次。
                     return _apiCallOnce(url, method, data, { ...opts, _elevationRetried: true });
                 }
@@ -190,7 +192,10 @@ async function _apiCallOnce(url, method, data, opts) {
                     showAuthGate(false);
                 }
             }
-            if (needsElevation) error.suppressToast = true;
+            if (needsElevation) {
+                error.elevationRequired = true;
+                error.suppressToast = true;
+            }
             if (result.need_password) {
                 error.needPassword = true;
                 error.suppressToast = true;
@@ -528,6 +533,9 @@ async function submitAuthForm() {
         state.currentUser = result.user || null;
         state.lastConfirmedUser = state.currentUser;
         state.clientId = result.client_id || result.user?.id || null;
+        _clearElevationExpiryTimer();
+        state.elevated = result.elevated === true;
+        state.elevatedUntil = result.elevated_until || null;
         if (state.currentUser?.role === 'admin') state.defaultAdminUsername = state.currentUser.username;
         updateLoginAccountDisplay();
         state.authReady = true;
@@ -684,9 +692,8 @@ async function selectClientAccountSwitch(target) {
 }
 
 async function ensureAuthenticatedBeforeAppStart() {
-    // Elevation is a fixed-TTL grant bound to the authenticated platform
-    // session. Browser tabs share that session cookie, so clearing the grant
-    // when any new tab opens would also revoke it in every existing tab.
+    // Admin role authority and temporary user grants share the effective status.
+    // Restoring a browser tab must not revoke another tab's session grant.
     const status = await fetchAuthStatus();
     state.authRequired = status.auth_required !== false;
     state.defaultAdminUsername = String(status.default_admin_username || '').trim();
@@ -714,8 +721,13 @@ async function ensureAuthenticatedBeforeAppStart() {
     state.clientId = status.user?.id || null;
     updateLoginAccountDisplay();
     state.authReady = true;
-    state.elevated = Boolean(status.elevated);
-    state.elevatedUntil = status.elevated_until || null;
+    _clearElevationExpiryTimer();
+    if (status.elevated) {
+        _markElevated(status.elevated_until);
+    } else {
+        state.elevated = false;
+        state.elevatedUntil = null;
+    }
     hideAuthGate();
     applyRoleBasedUiAccess();
     return true;

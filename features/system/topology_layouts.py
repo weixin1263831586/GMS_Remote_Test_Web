@@ -156,13 +156,15 @@ LAYOUTS = {
     'agent-analysis-topology.mmd': Layout(
         positions={
             'Chat': (140, 68), 'Planner': (460, 68), 'Guard': (780, 68), 'Run': (1100, 68),
-            'Evidence': (1100, 260), 'Collect': (780, 260), 'References': (460, 260),
+            'Evidence': (1100, 260), 'Collect': (780, 260), 'References': (460, 260), 'Partner': (140, 260),
             'Knowledge': (1100, 452),
             'Review': (780, 452), 'Monitor': (460, 452), 'Reply': (140, 452),
+            'Index': (1100, 580), 'PublicCDD': (780, 580), 'Report': (460, 580), 'Image': (140, 580),
         },
         kinds={
             'Chat': ACCESS, 'Planner': ACCESS, 'Guard': CONTROL, 'Run': CONTROL,
             'Collect': WORKER, 'Review': ACCESS, 'Monitor': CONTROL, 'Reply': ACCESS,
+            'Index': CONTROL, 'PublicCDD': RESOURCE, 'Report': RESOURCE, 'Image': ACCESS,
         },
         routes={
             ('Chat', 'Planner'): Route(label=(300, 68)),
@@ -177,6 +179,15 @@ LAYOUTS = {
             ('Review', 'Monitor'): Route(('left', 0), ('right', 0), label=(620, 452), label_width=100),
             ('Planner', 'Monitor'): Route(('bottom', 0), ('top', 0),
                                          ((460, 164), (300, 164), (300, 384), (460, 384)), (300, 300)),
+            ('Index', 'Knowledge'): Route(('top', 0), ('bottom', 0), label=(1100, 516), label_width=105),
+            ('Knowledge', 'PublicCDD'): Route(('bottom', -45), ('top', 0),
+                                                ((1055, 510), (780, 510)), (940, 510), 120, 'above'),
+            ('Chat', 'Image'): Route(('left', -15), ('left', -15),
+                                     ((20, 53), (20, 565)), (20, 355), 90),
+            ('PublicCDD', 'Image'): Route(('top', -40), ('top', 0),
+                                           ((740, 529), (140, 529)), (300, 529)),
+            ('PublicCDD', 'Report'): Route(('left', 0), ('right', 0), label=(620, 580)),
+            ('Chat', 'Partner'): Route(('bottom', 0), ('top', 0), label=(140, 164)),
             ('Monitor', 'Reply'): Route(('left', 0), ('right', 0), label=(300, 452)),
         },
     ),

@@ -105,11 +105,11 @@ async function requestElevatedAccess(actionLabel = '需要管理员权限', opti
     if (!state.authRequired) {
         if (options.allowAnonymousDev) return true;
     }
-    if (state.elevated) {
+    if (state.elevated || state.currentUser?.role === 'admin') {
         try {
             const status = await fetchAuthStatus();
             state.defaultAdminUsername = String(status.default_admin_username || '').trim();
-            if (status.elevated) {
+            if (status.authenticated && status.elevated) {
                 _markElevated(status.elevated_until);
                 debugLog('[Elevation] server confirmed the active elevation');
                 return true;

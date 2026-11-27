@@ -41,6 +41,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from features.retrieval import fuse_rankings
 from foundation.config import settings
 from foundation.processes import run_local_command
 
@@ -340,7 +341,45 @@ class AndroidInternalsProvider:
     # 检索
     # ------------------------------------------------------------------
 
-    def search(
+    def semantic_status(self):
+        from .wiki_semantic import WikiSemantic
+
+        try:
+            return WikiSemantic(self, index_db_path()).status()
+        except Exception as exc:
+            logger.warning("Wiki semantic status unavailable: %s", type(exc).__name__)
+            return {"status": "unavailable", "indexed": 0, "total": 0, "coverage_complete": False}
+
+    def sync_semantic(self, *, batch_size=128):
+        from .wiki_semantic import WikiSemantic
+
+        with self._reindex_lock:
+            return WikiSemantic(self, index_db_path()).sync(batch_size=batch_size)
+
+    def search(self, query: str, *, limit: int = DEFAULT_MAX_HITS,
+               android_api_level: int | None = None) -> list[KnowledgeHit]:
+        return self.search_with_status(query, limit=limit, android_api_level=android_api_level)[0]
+
+    def search_with_status(self, query: str, *, limit: int = DEFAULT_MAX_HITS,
+                           android_api_level: int | None = None):
+        from .wiki_semantic import WikiSemantic
+
+        lexical = self._lexical_search(query, limit=limit, android_api_level=android_api_level)
+        try:
+            semantic = WikiSemantic(self, index_db_path())
+            dense, status = semantic.search(query, limit=limit, android_api_level=android_api_level)
+        except Exception as exc:
+            logger.warning("Wiki semantic retrieval unavailable: %s", type(exc).__name__)
+            return lexical, {"status": "unavailable", "coverage_complete": False}
+        if not dense:
+            return lexical, status
+        by_path = {hit.source_path: hit for hit in dense}
+        by_path.update({hit.source_path: hit for hit in lexical})
+        keys = fuse_rankings([[hit.source_path for hit in lexical], [hit.source_path for hit in dense]],
+                             limit=max(1, min(limit, MAX_OUTPUT_HITS)))
+        return [by_path[key] for key in keys], status
+
+    def _lexical_search(
         self,
         query: str,
         *,

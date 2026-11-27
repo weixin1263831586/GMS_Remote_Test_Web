@@ -31,7 +31,7 @@
     </section>
     <div class="arch-v2-bottom arch-v2-bottom--platform">
       <section class="arch-v2-info-panel"><h2>模块职责与依赖</h2><div class="arch-v2-table-scroll"><table><thead><tr><th>模块</th><th>职责边界</th><th>主要连接</th></tr></thead><tbody>
-        <tr><td>Controller</td><td>认证、任务与设备租约、状态审计</td><td>Web / Worker / 外部服务</td></tr><tr><td>Worker</td><td>Tradefed / ADB、结果与日志采集</td><td>Controller / Android</td></tr><tr><td>USB/IP</td><td>从 Source 导出 USB 设备并接入 Worker</td><td>Source / Worker</td></tr><tr><td>ADB Proxy</td><td>受控命令代理与设备路由</td><td>ADB 客户端 / 设备</td></tr><tr><td>外部协同</td><td>工单、代码、模型、受控构建</td><td>Redmine / Gerrit / SDK</td></tr><tr><td>Knowledge</td><td>个人知识、联邦检索及授权召回</td><td>Wiki / CDD / Web / PDF</td></tr><tr><td>Bootstrap / Runtime</td><td>应用组装、服务注入与类型契约</td><td>Feature / Foundation</td></tr><tr><td>Feature / Foundation</td><td>业务公共接口、Port 与公共基础设施</td><td>存储 / SSH / 服务</td></tr>
+        <tr><td>Controller</td><td>认证、任务与设备租约、状态审计</td><td>Web / Worker / 外部服务</td></tr><tr><td>Worker</td><td>Tradefed / ADB、结果与日志采集</td><td>Controller / Android</td></tr><tr><td>USB/IP</td><td>从 Source 导出 USB 设备并接入 Worker</td><td>Source / Worker</td></tr><tr><td>ADB Proxy</td><td>受控命令代理与设备路由</td><td>ADB 客户端 / 设备</td></tr><tr><td>外部协同</td><td>工单、代码、模型、受控构建</td><td>Redmine / Gerrit / SDK</td></tr><tr><td>Knowledge</td><td>个人知识、混合召回与授权来源复核</td><td>Wiki / CDD / Web / PDF</td></tr><tr><td>Bootstrap / Runtime</td><td>应用组装、服务注入与类型契约</td><td>Feature / Foundation</td></tr><tr><td>Feature / Foundation</td><td>业务公共接口、Port 与公共基础设施</td><td>存储 / SSH / 服务</td></tr>
       </tbody></table></div></section>
       <section class="arch-v2-info-panel"><h2>核心数据流（事件流）</h2><ol class="arch-v2-timeline"><li>请求接入与权限校验</li><li>资源选择与设备租约</li><li>Worker Poll / ACK 与测试执行</li><li>日志、原生结果与任务状态回传</li><li>报告索引、证据快照与知识召回</li><li>证据门禁、结论复核与结果追踪</li></ol></section>
     </div>
@@ -78,7 +78,7 @@
   </div>
 </main>
 <script src="/static/js/pages/architecture-view.js?v=20261116-clear-arrow-labels" defer></script>
-<script src="/static/js/pages/architecture-scene-data.js?v=20261126-architecture-flow" defer></script>
+<script src="/static/js/pages/architecture-scene-data.js?v=20261126-rag-evidence" defer></script>
 <script src="/static/js/pages/architecture-scenes.js?v=20261126-table-dedup-final" defer></script>
 </body>
 </html>

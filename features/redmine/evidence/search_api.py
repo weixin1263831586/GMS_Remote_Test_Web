@@ -374,6 +374,10 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
     # per-artifact 命中计数摘要：不管分页截断，agent 都能先看到
     # "哪个附件命中多少"，再决定翻页还是按附件过滤。
     artifact_hits: dict[str, dict[str, Any]] = {}
+    artifacts = store.list_artifacts(snapshot["snapshot_id"])
+    artifact_revisions = {str(item["artifact_id"]): str(item.get("sha256") or "")
+                          for item in artifacts}
+    snapshot_revision = str(snapshot.get("content_sha256") or "")
 
     def note_artifact_hit(artifact) -> None:
         key = str(artifact.get("artifact_id") or "")
@@ -396,6 +400,20 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
         index = row["display"]
         row["display"] += 1
         if offset <= index < offset + limit:
+            entry["source"] = "redmine_evidence"
+            entry["snapshot_id"] = snapshot["snapshot_id"]
+            entry["issue_id"] = snapshot.get("issue_id")
+            revision = (artifact_revisions.get(str(entry.get("artifact_id")), "")
+                        if entry.get("artifact_id") else snapshot_revision)
+            if revision:
+                entry["source_revision"] = revision
+                entry["reference"] = json.dumps(
+                    [snapshot["snapshot_id"], entry["kind"], entry.get("artifact_id"),
+                     entry.get("journal_id"), entry.get("detail_index"),
+                     entry.get("zip_member"), entry["char_index"]],
+                    ensure_ascii=False, separators=(",", ":"),
+                )
+            entry["evidence_level"] = "candidate"
             row["matches"].append(entry)
 
     def scan(chunks, sink, *, with_lines=False):
@@ -408,7 +426,7 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
     manifest = snapshot.get("manifest") or {}
     scan(iter([str(manifest.get("description") or "")]),
          lambda needle, occ: add_hit(needle, _occurrence_entry(occ, "description", "", None)))
-    for artifact in store.list_artifacts(snapshot["snapshot_id"]):
+    for artifact in artifacts:
         kind = str(artifact.get("kind") or "")
         if artifact.get("status") != "ready" or artifact.get("derived_status") in {"partial", "missing"}:
             warnings.append({"artifact_id": artifact["artifact_id"], "filename": artifact.get("filename"),
@@ -504,10 +522,12 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
             ("journal_detail", json.dumps(detail, ensure_ascii=False))
             for detail in journal.get("details") or []
         ]
-        for kind, text in texts:
-            def journal_sink(needle, occ, kind=kind, journal=journal):
+        for detail_index, (kind, text) in enumerate(texts):
+            def journal_sink(needle, occ, kind=kind, journal=journal, detail_index=detail_index):
                 entry = _occurrence_entry(occ, kind, "", None)
                 entry["journal_id"] = journal.get("id")
+                if kind == "journal_detail":
+                    entry["detail_index"] = detail_index
                 add_hit(needle, entry)
             scan(iter([text]), journal_sink)
 
@@ -521,6 +541,14 @@ def _search_all_evidence(store, snapshot, needles, limit, offset,
             "total_matches": sum(len(row["matches"]) for row in rows.values()),
             "total_occurrences": sum(row["total"] for row in rows.values()),
             "coverage_complete": complete, "index_complete": complete and not warnings,
+            "source_coverage_complete": bool(
+                snapshot_revision and snapshot.get("status") == "ready"
+                and snapshot.get("download_policy") == "all"
+                and int(snapshot.get("attachment_count") or 0) == len(artifacts)
+                and complete and not warnings and not artifact_filter and not member_filter
+                and all(item.get("status") == "ready" and item.get("sha256") for item in artifacts)
+            ),
+            "scope": "snapshot_text", "latest_confirmed": False,
             "index_warnings": warnings, "scanned_bytes": scanned_bytes, "total_bytes": total_bytes,
             "artifact_hits": sorted(artifact_hits.values(), key=lambda row: -row["hits"]),
             "filters": {"artifact": artifact_filter, "member": member_filter,

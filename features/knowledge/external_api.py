@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import sqlite3
 
 from fastapi import APIRouter, Query, Request
@@ -18,6 +19,7 @@ from features.auth import (
     require_elevated_admin,
     require_permission,
 )
+from features.retrieval import embedding_configuration_issue
 from foundation.errors import handle_api_errors
 from foundation.responses import error_response, success_response
 
@@ -78,6 +80,32 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         unknown = _validate_sources(payload.sources)
         if unknown:
             return error_response(unknown, 422)
+    if query.startswith("analyze:"):
+        question = query.removeprefix("analyze:").strip()
+        if not question:
+            return error_response("分析问题不能为空", 422)
+        from .service import analyze_external_knowledge
+
+        selected = payload.sources or ["web_documents"]
+        result = analyze_external_knowledge(question, sources=selected, limit=payload.limit,
+                                            android_api_level=payload.android_api_level)
+        result["sources_status"] = [row for row in federated_status() if row.get("source") in selected]
+        return success_response(data=result)
+    if query.startswith(('context:', 'section:')):
+        if payload.sources and 'web_documents' not in payload.sources:
+            return error_response('请求的来源不包含外部网页', 422)
+        match = re.fullmatch(r'(context|section):(POL-[0-9a-f]{24})(?:\|(\d{1,5}))?', query)
+        if not match or int(match.group(3) or 0) > 30000:
+            return error_response('读取格式：context:POL-引用|偏移 或 section:POL-引用|偏移', 422)
+        mode, token, offset = match.groups()
+        result = WebKnowledgeProvider().read_cdd_scope(
+            token, mode=mode, offset=int(offset or 0), limit=payload.limit,
+            android_api_level=payload.android_api_level,
+        )
+        result['sources_status'] = [row for row in federated_status() if row.get('source') == 'web_documents']
+        if result['next_offset'] is not None:
+            result['next_query'] = f"{mode}:{token}|{result['next_offset']}"
+        return success_response(data=result)
     # Exact citation retrieval and version comparison use the existing search contract.
     if query.startswith('POL-') or query.startswith('compare:'):
         if payload.sources and 'web_documents' not in payload.sources:
@@ -247,6 +275,67 @@ def sync_web_source(request: Request, source_id: str):
         logger.warning("Web knowledge synchronization failed: %s", type(exc).__name__)
         return error_response("知识源同步失败；请检查网址、访问权限和文档格式，已有索引未覆盖", 502)
     return success_response(data=data)
+
+
+@router.get("/web-sources/{source_id}/semantic-index")
+@handle_api_errors
+def semantic_index_status(request: Request, source_id: str):
+    require_elevated_admin(request)
+    provider = WebKnowledgeProvider()
+    result = {**provider.semantic_status(source_id), **provider.semantic_schedule_status(source_id)}
+    from .external import cdd_intelligence
+
+    result["document_understanding"] = cdd_intelligence.status(provider, source_id)
+    issue = embedding_configuration_issue("cdd")
+    if issue:
+        result = {**result, "configuration_issue": issue}
+    return success_response(data=result)
+
+
+@router.post("/web-sources/{source_id}/semantic-index")
+@handle_api_errors
+def sync_semantic_index(request: Request, source_id: str, batch_size: int = Query(128, ge=1, le=128)):
+    require_elevated_admin(request)
+    try:
+        result = WebKnowledgeProvider().sync_semantic(source_id, batch_size=batch_size)
+    except Exception as exc:
+        logger.warning("Local semantic index synchronization failed: %s", type(exc).__name__)
+        return error_response("本地语义索引未完成，请检查模型配置和公开 CDD 来源", 502)
+    return success_response(data=result)
+
+
+@router.get("/wiki-semantic-index")
+@handle_api_errors
+def wiki_semantic_status(request: Request):
+    require_elevated_admin(request)
+    provider = _federated_provider("android_internals")
+    result = (provider.semantic_status() if provider is not None
+              else {"status": "unavailable", "indexed": 0, "total": 0})
+    result = {**result, **WebKnowledgeProvider().semantic_schedule_status("android_internals", wiki=True)}
+    from .service import wiki_document_understanding
+
+    try:
+        result["document_understanding"] = wiki_document_understanding()
+    except Exception:
+        result["document_understanding"] = {"status": "error", "coverage_complete": False}
+    issue = embedding_configuration_issue("android_internals")
+    if issue:
+        result = {**result, "configuration_issue": issue}
+    return success_response(data=result)
+
+
+@router.post("/wiki-semantic-index")
+@handle_api_errors
+def sync_wiki_semantic_index(request: Request, batch_size: int = Query(128, ge=1, le=128)):
+    require_elevated_admin(request)
+    provider = _federated_provider("android_internals")
+    if provider is None:
+        return error_response("Wiki 知识源未配置", 409)
+    try:
+        return success_response(data=provider.sync_semantic(batch_size=batch_size))
+    except Exception as exc:
+        logger.warning("Wiki semantic index synchronization failed: %s", type(exc).__name__)
+        return error_response("语义索引未完成，请检查本地模型及已批准的 Wiki 索引", 502)
 
 
 class PartnerGrantRequest(BaseModel):

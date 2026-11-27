@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
+from starlette.requests import HTTPConnection
 
 from .request_security import authentication_required
 from .service import AUTH_COOKIE_NAME, CurrentUser, auth_service
 
 
-def get_authenticated_user(request: Request) -> CurrentUser | None:
+def get_authenticated_user(request: HTTPConnection) -> CurrentUser | None:
     user = getattr(request.state, "current_user", None)
     if isinstance(user, CurrentUser):
         return user
@@ -275,37 +276,34 @@ def require_permission_when_auth_required(permission: str):
     return dependency
 
 
-def is_elevated(request: Request) -> bool:
-    """Return whether this request has a live re-authenticated elevation."""
-    # Elevation lives on a human *cookie* session. A Bearer principal
-    # (agent token or machine capability, valid or not) must never inherit
-    # the elevation of a leftover browser/CLI cookie that happens to ride
-    # along in the same request — that would let a machine capability
-    # combine with a human admin elevation and amplify its authority far
-    # beyond the snapshotted run plan (ADR 0010 / ADR 0012). Bearer and
-    # elevation are mutually exclusive by definition.
-    if getattr(request.state, "auth_method", None) in {
-        "agent_token",
-        "machine_authority",
-        "invalid_agent_token",
-        "invalid_capability_token",
-    }:
+def is_elevated(request: HTTPConnection, *, revalidate_session: bool = False) -> bool:
+    """Check administrator authority, revalidating long-lived connections when requested."""
+    # Bearer and machine credentials never inherit human cookie authority.
+    if getattr(request.state, "auth_method", None) not in {None, "session"}:
         return False
-    if getattr(request.state, "is_elevated", None) is not None:
-        return bool(request.state.is_elevated)
-    token = request.cookies.get(AUTH_COOKIE_NAME)
-    elevated_until = auth_service.get_elevated_until(token)
-    request.state.is_elevated = bool(elevated_until)
-    return bool(elevated_until)
+    if revalidate_session:
+        if str(request.headers.get("Authorization") or "").lower().startswith("bearer "):
+            return False
+        user = auth_service.get_user_for_token(request.cookies.get(AUTH_COOKIE_NAME), refresh=False)
+    else:
+        user = get_authenticated_user(request)
+        if getattr(request.state, "auth_method", None) != "session":
+            return False
+    if user is None:
+        return False
+    if user.role == "admin":
+        return True
+    cached = getattr(request.state, "is_elevated", None)
+    if not revalidate_session and cached is not None:
+        return bool(cached)
+    elevated = bool(auth_service.get_elevated_until(request.cookies.get(AUTH_COOKIE_NAME)))
+    if not revalidate_session:
+        request.state.is_elevated = elevated
+    return elevated
 
 
 def require_elevated_admin(request: Request) -> CurrentUser:
-    """Require a session verified by an administrator.
-
-    The authenticated user may remain an ordinary client. The separate admin
-    verification is stored on that same session and never changes its role.
-    """
-
+    """Require a human admin or a live temporary admin grant."""
     user = require_authenticated_user(request)
     if not is_elevated(request):
         raise HTTPException(

@@ -260,3 +260,196 @@ class RuntimeAgentQuestionTests(RuntimeUiHarness):
                     assert submissions == []
         finally:
             page.close()
+
+
+    def test_gms_policy_read_requires_elevation_and_retries_only_expired_grant(self):
+        page = self.new_page()
+        requests = []
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.policyAuthCalls = 0;
+                window.policyAuthGranted = false;
+                window.requestElevatedAccess = async () => {
+                    window.policyAuthCalls++;
+                    return window.policyAuthGranted;
+                };
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+
+            def reply(route):
+                requests.append(route.request.url)
+                if len(requests) <= 2:
+                    route.fulfill(status=403, content_type='application/json',
+                                  body=json.dumps({'detail': {'elevation_required': True}}))
+                else:
+                    route.fulfill(status=200, content_type='application/json',
+                                  body=json.dumps({'success': True, 'data': {
+                                      'status': 'matched', 'sections': [{'title': 'Fixture Low RAM',
+                                          'text': 'Example policy', 'table_rows': []}]
+                                  }}))
+
+            page.route('**/api/gms-update-center/requirements/clauses?*', reply)
+            button = page.get_by_role('button', name='读取 GMS 政策原文', exact=True)
+            button.click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('需要有效的管理员授权')
+            self.assertEqual(len(requests), 1)
+            page.evaluate('window.policyAuthGranted = true')
+            button.click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('Example policy')
+            self.assertEqual(len(requests), 3)
+            self.assertEqual(page.evaluate('window.policyAuthCalls'), 2)
+        finally:
+            page.close()
+
+    def test_gms_policy_non_elevation_forbidden_is_not_retried(self):
+        page = self.new_page()
+        requests = []
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+
+            def forbidden(route):
+                requests.append(route.request.url)
+                route.fulfill(status=403, content_type='application/json',
+                              body=json.dumps({'detail': {'agent_forbidden': True}}))
+
+            page.route('**/api/gms-update-center/requirements/clauses?*', forbidden)
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('当前身份无权读取')
+            self.assertEqual(len(requests), 1)
+        finally:
+            page.close()
+
+
+    def test_admin_role_authority_reads_policy_without_second_password_prompt(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json', body=json.dumps({
+                    'success': True, 'data': {'status': 'matched', 'sections': [{
+                        'title': 'Policy fixture', 'text': 'Example policy', 'table_rows': [],
+                    }]},
+                })))
+            page.evaluate("""() => {
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            expect(page.locator('.agent-policy-evidence')).to_contain_text('Example policy')
+            expect(page.locator('#elevate-modal')).not_to_be_visible()
+            self.assertTrue(page.evaluate('state.elevated'))
+            self.assertIsNone(page.evaluate('state.elevatedUntil'))
+        finally:
+            page.close()
+
+
+    def test_gms_policy_version_summary_and_historical_rows(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            headers = ['OS Version', 'Must be Low RAM', 'Optionally Low RAM', 'Not qualified for GMS']
+            current = {'headers': headers, 'values': ['Android 16 or higher', 'Example A', 'Example B', 'Example C'],
+                       'table_index': 1, 'row_index': 1}
+            old = {'headers': headers, 'values': ['Android 15', 'Historical A', 'Historical B', 'Historical C'],
+                   'table_index': 1, 'row_index': 2}
+            data = {'status': 'matched', 'requested_android_version': 17, 'lookup_scope': 'low_ram_declaration',
+                    'sections': [{'title': 'Declare Low RAM devices', 'context_limited': True,
+                                  'clauses': [{'requirement_id': 'GMS-10.0-001', 'original_text': 'Example rule'}],
+                                  'table_rows': [current, old], 'version_rows': [current]}],
+                    'related_ram': {'scanned_sections': 5, 'section_matches': 1, 'clause_matches': 1,
+                                    'sections': [{'title': 'Example page size', 'clause_matches': 1,
+                                                  'clauses': [{'requirement_id': 'GMS-VSR-3.14-003',
+                                                               'context_text': 'Example RAM condition',
+                                                               'original_text': 'Example feature requirement'}]}]}}
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': data})))
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM;android=17'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            evidence = page.locator('.agent-policy-evidence')
+            expect(evidence).to_contain_text('Android 17：政策表格对应要求')
+            expect(evidence).to_contain_text('必须声明 Low RAM：Example A')
+            expect(evidence).to_contain_text('不符合 GMS 资格：Example C')
+            expect(evidence).to_contain_text('Go / 非 Go 设备 RAM 要求解读')
+            expect(evidence).to_contain_text('非 Low RAM 设备参考容量（非 Go 认证仍需核实）：Example B')
+            expect(evidence).to_contain_text('不是独立的非 Go 认证最低 RAM 条款')
+            expect(evidence.locator('table tbody tr')).to_have_count(1)
+            expect(evidence.locator('table')).not_to_contain_text('Historical A')
+            alignment = evidence.locator('table').evaluate("""table => {
+                const headers = [...table.tHead.rows[0].cells];
+                const cells = [...table.tBodies[0].rows[0].cells];
+                return headers.map((header, index) => {
+                    const cell = cells[index];
+                    const h = header.getBoundingClientRect();
+                    const d = cell.getBoundingClientRect();
+                    return getComputedStyle(header).textAlign === 'center'
+                        && getComputedStyle(cell).textAlign === 'center'
+                        && Math.abs(h.left - d.left) <= 1
+                        && Math.abs(h.width - d.width) <= 1;
+                });
+            }""")
+            self.assertEqual(alignment, [True] * 4)
+            expect(evidence).to_contain_text('其他 RAM 相关政策')
+            expect(evidence).to_contain_text('不能将功能触发门槛当作统一 GMS 准入门槛')
+            expect(evidence.locator('details').first).not_to_have_attribute('open', '')
+            evidence.locator('summary').first.click()
+            expect(evidence.get_by_text('Historical A', exact=False)).to_be_visible()
+            evidence.get_by_text('展开其他 RAM 相关政策（功能及适用条件）', exact=True).click()
+            evidence.get_by_text('Example page size（1 条候选）', exact=True).click()
+            expect(evidence.get_by_text('Example feature requirement', exact=True)).to_be_visible()
+        finally:
+            page.close()
+
+
+    def test_gms_policy_non_go_summary_does_not_invent_unlisted_capacity(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('agent', null)")
+            row = {
+                'headers': ['OS Version', 'Must be Low RAM', 'Optionally Low RAM', 'Not qualified for GMS'],
+                'values': ['Android 12', 'Example required', 'N/A', 'Example excluded'],
+                'table_index': 1, 'row_index': 1,
+            }
+            data = {'status': 'matched', 'requested_android_version': 12,
+                    'lookup_scope': 'low_ram_declaration',
+                    'sections': [{'title': 'Fixture', 'table_rows': [row], 'version_rows': [row]}]}
+            page.route('**/api/gms-update-center/requirements/clauses?*', lambda route: route.fulfill(
+                status=200, content_type='application/json',
+                body=json.dumps({'success': True, 'data': data})))
+            page.evaluate("""() => {
+                window.requestElevatedAccess = async () => true;
+                renderAgentMessages({status: 'idle', messages: [{
+                    id: 'policy', role: 'assistant', content: '政策查询',
+                    data: {gms_policy_lookup: 'section:Low RAM;android=12'}
+                }]});
+            }""")
+            page.get_by_role('button', name='读取 GMS 政策原文', exact=True).click()
+            evidence = page.locator('.agent-policy-evidence')
+            expect(evidence).to_contain_text('不能据此推断 Standard 设备最低 RAM')
+            expect(evidence).not_to_contain_text('可以选择不声明 Low RAM')
+        finally:
+            page.close()

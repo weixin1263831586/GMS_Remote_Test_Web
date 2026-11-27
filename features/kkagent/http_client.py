@@ -10,6 +10,7 @@ post_chat 对这类错误统一改用 reasoning_effort=low 重试一次。
 from __future__ import annotations
 
 import re
+from contextlib import nullcontext
 
 import requests
 
@@ -146,18 +147,23 @@ def build_chat_request(
     return url, headers, data, api_format
 
 
-def post_chat(url: str, headers: dict, data: dict, api_format: str, timeout: int = 60):
-    """POST 补全请求；常开思考模型拒绝关闭思考时降级 reasoning_effort 重试一次。"""
-    response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                             json=data, timeout=timeout)
-    if (response.status_code in _THINKING_RETRY_STATUSES
-            and rejects_disabling_thinking(_error_message(response))):
-        retry_data = {k: v for k, v in data.items() if k not in _THINKING_CONTROL_KEYS}
-        if api_format != API_FORMAT_ANTHROPIC:
-            retry_data['reasoning_effort'] = 'low'
-        response = requests.post(url, headers={'Connection': 'keep-alive', **headers},
-                                 json=retry_data, timeout=timeout)
-    return response
+def post_chat(url: str, headers: dict, data: dict, api_format: str, timeout: int = 60, *,
+              allow_redirects: bool = True, direct: bool = False):
+    """POST completion; local-only calls bypass inherited HTTP proxy settings."""
+    options = {} if allow_redirects else {'allow_redirects': False}
+    with requests.Session() if direct else nullcontext(requests) as transport:
+        if direct:
+            transport.trust_env = False
+        response = transport.post(url, headers={'Connection': 'keep-alive', **headers},
+                                  json=data, timeout=timeout, **options)
+        if (response.status_code in _THINKING_RETRY_STATUSES
+                and rejects_disabling_thinking(_error_message(response))):
+            retry_data = {k: v for k, v in data.items() if k not in _THINKING_CONTROL_KEYS}
+            if api_format != API_FORMAT_ANTHROPIC:
+                retry_data['reasoning_effort'] = 'low'
+            response = transport.post(url, headers={'Connection': 'keep-alive', **headers},
+                                      json=retry_data, timeout=timeout, **options)
+        return response
 
 
 def parse_response_text(payload: dict, api_format: str) -> str:

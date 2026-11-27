@@ -54,9 +54,12 @@ Worker Token 的 HTTP(S) 通信，设备所在主机无需开放入站执行通�
   `require_authenticated_user`、`require_resource_owner`、`require_agent_scope`。
   `*_when_auth_required` 变体在非强制认证（内部/dev）部署下保留匿名可用性。
 
-**Elevation（管理员二次提权）**是挂在人类 cookie 会话上的 step-up，**不改变
-账户角色**，仅在该会话上记录 `elevated_until`。`require_permission` /
-`require_role("admin")` 认可活跃 elevation；`require_elevated_admin` 要求它。
+**管理员权限**由已认证的人类 cookie 会话中的 admin 角色直接授予，无需二次认证。
+普通用户可通过管理员凭据获取固定有效期的临时提权，**不改变账户角色**。
+`require_elevated_admin`、`require_permission` 和 `require_role("admin")`
+统一认可有效管理员权限。认证状态的 `elevated=true` 表示有效权限；
+管理员角色的 `elevated_until=null`，普通用户临时提权返回到期时间。
+重置提权仅撤销临时授权，不撤销管理员自身角色权限。
 
 **Agent 永远不可提权**：`is_elevated` 对 `auth_method == "agent_token"` 直接返回
 `False`——避免 agent 令牌继承同请求里残留的浏览器 cookie elevation、击穿 agent

@@ -7,10 +7,13 @@ import re
 import sqlite3
 from contextlib import closing
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query, Request, Response
+
+from features.auth import require_elevated_admin, require_human_principal
 
 from .mainline_records import escape_like
 from .repository import DB_PATH, connect
+from .requirement_lookup import lookup_requirement_sections, read_requirement_index_status
 from .sources import SOURCES
 from .update_records import query_bulletin_patches
 
@@ -476,9 +479,14 @@ async def list_gms_update_mainline(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/requirements/sections')
+def _require_human_policy_read(request: Request, response: Response):
+    require_human_principal(request)
+    response.headers['Cache-Control'] = 'no-store'
+
+
+@router.get('/requirements/sections', dependencies=[Depends(_require_human_policy_read)])
 async def list_gms_update_requirement_sections(
-    level: int | None = Query(None, ge=2, le=3),
+    level: int | None = Query(None, ge=1, le=6),
     top_only: bool = Query(False, description='Only return top-level numbered chapters such as 1, 2, 3'),
     q: str = Query(''),
     limit: int = Query(100, ge=1, le=500),
@@ -512,7 +520,7 @@ async def list_gms_update_requirement_sections(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/requirements/version-summary')
+@router.get('/requirements/version-summary', dependencies=[Depends(_require_human_policy_read)])
 async def gms_update_requirement_version_summary():
     conn = _get_db()
     with closing(conn), conn:
@@ -535,7 +543,7 @@ async def gms_update_requirement_version_summary():
     return {'success': True, 'data': {'summary': _rows_to_dicts(rows), 'by_section': _rows_to_dicts(by_section)}}
 
 
-@router.get('/requirements')
+@router.get('/requirements', dependencies=[Depends(_require_human_policy_read)])
 async def list_gms_update_requirement_version_tags(
     android_version: str = Query('', description='Android 15, Android 16, or Android 17'),
     change_kind: str = Query('', description='added, changed, or specific'),
@@ -572,7 +580,7 @@ async def list_gms_update_requirement_version_tags(
     return {'success': True, 'data': {'items': _rows_to_dicts(rows)}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
 
 
-@router.get('/requirements/table-rows')
+@router.get('/requirements/table-rows', dependencies=[Depends(_require_human_policy_read)])
 async def list_gms_update_requirement_table_rows(
     section_key: str = Query(''),
     q: str = Query(''),
@@ -609,3 +617,58 @@ async def list_gms_update_requirement_table_rows(
         item['values'] = json.loads(item.pop('values_json') or '[]')
         items.append(item)
     return {'success': True, 'data': {'items': items}, 'meta': {'total': total, 'limit': limit, 'offset': offset}}
+
+
+@router.get('/requirements/coverage')
+def gms_requirement_coverage(request: Request, response: Response):
+    require_elevated_admin(request)
+    response.headers['Cache-Control'] = 'no-store'
+    with closing(_get_db()) as conn, conn:
+        conn.execute("BEGIN")
+        data = read_requirement_index_status(conn)
+    return {'success': True, 'data': data}
+
+
+@router.get('/requirements/clauses')
+def list_gms_requirement_clauses(request: Request, response: Response, q: str = Query('', max_length=256),
+                                 requirement_id: str = Query('', max_length=128),
+                                 section_key: str = Query('', max_length=128),
+                                 change_version: str = Query('', max_length=40),
+                                 limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0)):
+    require_elevated_admin(request)
+    response.headers['Cache-Control'] = 'no-store'
+    if q.startswith(("https://", "http://", "section:")):
+        with closing(_get_db()) as conn, conn:
+            conn.execute("BEGIN")
+            data = lookup_requirement_sections(conn, q)
+        return {'success': True, 'data': data}
+    where = ['source_key=?']
+    params: list[str | int] = ['gms_requirements']
+    if requirement_id:
+        where.append('requirement_id=? COLLATE NOCASE')
+        params.append(requirement_id)
+    if section_key:
+        where.append('section_key=?')
+        params.append(section_key)
+    if change_version:
+        where.append('change_version=? COLLATE NOCASE')
+        params.append(change_version)
+    if q:
+        like = _like_param(q)
+        where.append('(original_text LIKE ? ESCAPE "\\" OR context_text LIKE ? ESCAPE "\\" OR section_title LIKE ? ESCAPE "\\")')
+        params.extend([like, like, like])
+    predicate = ' AND '.join(where)
+    with closing(_get_db()) as conn, conn:
+        conn.execute("BEGIN")
+        total = conn.execute(f'SELECT count(*) FROM gms_update_requirement_clauses WHERE {predicate}', params).fetchone()[0]
+        rows = conn.execute(f"""SELECT * FROM gms_update_requirement_clauses WHERE {predicate}
+            ORDER BY section_title,requirement_id,clause_key LIMIT ? OFFSET ?""",
+            [*params, limit, offset]).fetchall()
+    items = _rows_to_dicts(rows)
+    for item in items:
+        item.update(source='gms_requirements', reference=item['clause_key'],
+                    evidence_level='requirement_candidate', applicability_verified=False,
+                    original_document_verified=False)
+    return {'success': True, 'data': {'items': items, 'coverage_complete': False,
+                                      'scope': 'authorized_fetched_html_candidates'},
+            'meta': {'total': total, 'limit': limit, 'offset': offset}}

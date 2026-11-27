@@ -262,20 +262,28 @@
     border-color: var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 9%, var(--card-bg));
 }
-/* 外部知识源：长网址占用剩余宽度，短字段和操作列保持紧凑。 */
-#page-notes [data-kb-sources] { overflow-x: auto; }
-#page-notes .kb-source-table { table-layout: fixed; min-width: 1120px; }
-#page-notes .kb-source-table col:nth-child(1) { width: 270px; }
-#page-notes .kb-source-table col:nth-child(3) { width: 76px; }
+/* 外部知识源：网址占用剩余宽度，操作按钮单行右对齐。 */
+#page-notes [data-kb-sources] { min-width: 0; overflow-x: auto; }
+#page-notes [data-kb-source-form] > input[name="name"] {
+    flex: 0 1 300px; width: 300px; max-width: 300px; min-width: 0;
+}
+#page-notes [data-kb-source-form] > input[name="url"] { flex: 1 1 400px; min-width: 0; }
+#page-notes [data-kb-source-form] > button { flex-shrink: 0; }
+#page-notes .kb-source-table { table-layout: fixed; min-width: 1360px; }
+#page-notes .kb-source-table col:nth-child(1) { width: 300px; }
+#page-notes .kb-source-table col:nth-child(3) { width: 90px; }
 #page-notes .kb-source-table col:nth-child(4) { width: 100px; }
-#page-notes .kb-source-table col:nth-child(5) { width: 164px; }
-#page-notes .kb-source-table col:nth-child(6) { width: 270px; }
+#page-notes .kb-source-table col:nth-child(5) { width: 180px; }
+#page-notes .kb-source-table col:nth-child(6) { width: 460px; }
 #page-notes .kb-source-table :is(th, td) {
     text-align: center; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis;
 }
 #page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
-#page-notes .kb-source-actions { display: flex; align-items: center; justify-content: center; gap: 4px; }
+#page-notes .kb-source-table :is(th, td):last-child { text-align: right; }
+#page-notes .kb-source-actions {
+    display: flex; align-items: center; justify-content: flex-end; flex-wrap: nowrap; gap: 4px;
+}
 #page-notes .kb-source-actions > button { flex-shrink: 0; white-space: nowrap; }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */

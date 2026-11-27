@@ -13,7 +13,7 @@ from .parsers import PARSERS, bulletin_content_hash, bulletin_month_identity
 from .parsing import matched_excerpt, reference_term_matches
 
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def init_db(conn: sqlite3.Connection, *, manage_transaction: bool = True) -> None:
@@ -220,6 +220,20 @@ def init_db(conn: sqlite3.Connection, *, manage_transaction: bool = True) -> Non
         )
         """
     )
+    conn.execute("""CREATE TABLE IF NOT EXISTS gms_update_requirement_clauses (
+        source_key TEXT NOT NULL, clause_key TEXT NOT NULL, requirement_id TEXT NOT NULL,
+        section_key TEXT NOT NULL, section_title TEXT NOT NULL, original_text TEXT NOT NULL,
+        context_text TEXT NOT NULL, change_version TEXT NOT NULL, change_kind TEXT NOT NULL,
+        version_mentions_json TEXT NOT NULL, scope_json TEXT NOT NULL, source_url TEXT NOT NULL,
+        anchor_kind TEXT NOT NULL, source_revision TEXT NOT NULL, references_json TEXT NOT NULL,
+        media_json TEXT NOT NULL, content_hash TEXT NOT NULL, PRIMARY KEY(source_key, clause_key)
+    )""")
+    conn.execute("""CREATE INDEX IF NOT EXISTS idx_gms_requirement_clause_id
+        ON gms_update_requirement_clauses(source_key, requirement_id)""")
+    conn.execute("""CREATE TABLE IF NOT EXISTS gms_update_requirement_coverage (
+        source_key TEXT PRIMARY KEY, run_id INTEGER NOT NULL, indexed_at TEXT NOT NULL,
+        coverage_json TEXT NOT NULL
+    )""")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS gms_update_change_events (
@@ -766,4 +780,22 @@ def sync_source(conn: sqlite3.Connection, run_id: int, fetched: FetchedDocument,
         entity_type='requirement_version_tag',
         timestamp=timestamp,
     )
+    if fetched.source.parser == 'gms_requirements':
+        # Derived indexes are published atomically with existing business records.
+        conn.execute('DELETE FROM gms_update_requirement_clauses WHERE source_key=?', (fetched.source.key,))
+        for clause in parsed.requirement_clauses:
+            fields = asdict(clause)
+            conn.execute(
+                """INSERT INTO gms_update_requirement_clauses (
+                source_key,clause_key,requirement_id,section_key,section_title,original_text,
+                context_text,change_version,change_kind,version_mentions_json,scope_json,source_url,
+                anchor_kind,source_revision,references_json,media_json,content_hash)
+                VALUES (:source_key,:clause_key,:requirement_id,:section_key,:section_title,:original_text,
+                :context_text,:change_version,:change_kind,:version_mentions_json,:scope_json,:source_url,
+                :anchor_kind,:source_revision,:references_json,:media_json,:content_hash)""", fields,
+            )
+        conn.execute("""INSERT INTO gms_update_requirement_coverage VALUES (?,?,?,?)
+            ON CONFLICT(source_key) DO UPDATE SET run_id=excluded.run_id,
+            indexed_at=excluded.indexed_at,coverage_json=excluded.coverage_json""",
+            (fetched.source.key, run_id, timestamp, json.dumps(parsed.requirement_coverage, ensure_ascii=False)))
     return True, changes, parsed

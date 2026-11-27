@@ -95,7 +95,7 @@
     <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261117-radar-fixed-footer">
     <script src="/static/js/update-radar-settings.js?v=20261117-radar-fixed-footer" defer></script>
     <!-- 加载API调用工具 - 通知中心与页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/api.js?v=20261125-setup-account-name" defer></script>
+    <script src="/static/js/api.js?v=20261126-settings-auth" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20261105-aoa-device-refresh" defer></script>
     <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/tools-render.js?v=20261118-square-cards" defer></script>
@@ -124,15 +124,17 @@
     <script src="/static/js/pages/firmware-burn-vnc.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-usbip.js?v=20261124-usbip-short-label" defer></script>
-    <script src="/static/js/pages/auth-elevation.js?v=20261124-usbip-short-label" defer></script>
+    <script src="/static/js/pages/auth-elevation.js?v=20261126-admin-role" defer></script>
     <script src="/static/js/pages/vpn-control.js?v=20261124-usbip-short-label" defer></script>
     <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
-    <script src="/static/js/pages/test-control.js?v=20261126-legacy-usbip-ids" defer></script>
+    <script src="/static/js/pages/test-control.js?v=20261126-central-settings" defer></script>
+    <script src="/static/js/shell/system-settings.js?v=20261126-settings-forms" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20261126-table-dedup" defer></script>
     <script src="/static/js/pages/report-analysis.js?v=20261123-summary-150px-v1" defer></script>
     <script src="/static/js/pages/report-analysis-activity.js?v=20261119-shared-status-v2" defer></script>
     <script src="/static/js/pages/report-failure-workbench.js?v=20261119-hostlog-source" defer></script>
-    <script src="/static/js/pages/conversational-agent.js?v=20261112-agent-sessions" defer></script>
+    <script src="/static/js/pages/agent-policy-evidence.js?v=20261126" defer></script>
+    <script src="/static/js/pages/conversational-agent.js?v=20261126-policy-evidence" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261119-users-single-row" defer></script>
     <script src="/static/js/pages/sdk-config.js?v=20261119-sdk-reload-write-outcomes" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20261126-table-dedup" defer></script>
@@ -140,7 +142,7 @@
     <script src="/static/js/pages/security-audit.js?v=20261126-table-dedup" defer></script>
     <script src="/static/js/pages/audit-disk.js?v=20261119-disk-interactions" defer></script>
     <!-- 加载主导航模块 - 使用 defer 异步加载，不阻塞页面渲染 -->
-    <script src="/static/js/navigation.js?v=20261124-gts-interactive" defer crossorigin="anonymous"></script>
+    <script src="/static/js/navigation.js?v=20261126-runtime-config" defer crossorigin="anonymous"></script>
 
     <!-- 立即执行脚本，防止页面闪屏和导航栏跳转 -->
 <script src="/static/js/shell/shell-early-boot.js" fetchpriority="high"></script>

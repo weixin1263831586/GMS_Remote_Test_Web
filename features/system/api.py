@@ -16,7 +16,7 @@ from fastapi.responses import (
     Response,
 )
 
-from features.auth import AUTH_COOKIE_NAME, auth_service
+from features.auth import is_elevated
 from features.system import gms_assistant_proxy, jq_binary
 from features.system.agent_package import registry as agent_package_registry
 from features.system.agent_package.signing import (
@@ -518,6 +518,12 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             global_state.websocket_connections[client_id] = {websocket}
     logger.info(f"WebSocket client connected: {client_id} ({display_client_id})")
 
+    admin_handlers = {
+        "terminal_connect": handle_terminal_connect,
+        "terminal_input": handle_terminal_input,
+        "terminal_resize": handle_terminal_resize,
+        "tradefed_list_results": handle_tradefed_list_results,
+    }
     try:
         while True:
             # 接收消息（添加30秒超时，用于心跳检测）
@@ -545,57 +551,19 @@ async def websocket_endpoint(websocket: WebSocket, client_id: str):
             elif message_type == 'refresh_devices':
                 await refresh_devices_websocket(client_id, websocket)
 
-            elif message_type == 'terminal_connect':
-                token = websocket.cookies.get(AUTH_COOKIE_NAME)
-                live_user = auth_service.get_user_for_token(token, refresh=False)
-                if live_user is not None and auth_service.get_elevated_until(token):
-                    await handle_terminal_connect(client_id, websocket, data)
-                else:
-                    await websocket.send_json({
-                        'type': 'terminal_error',
-                        'error': '需要已提权的管理员会话',
-                        'elevation_required': True,
-                    })
-
-            elif message_type == 'terminal_input':
-                token = websocket.cookies.get(AUTH_COOKIE_NAME)
-                live_user = auth_service.get_user_for_token(token, refresh=False)
-                if live_user is not None and auth_service.get_elevated_until(token):
-                    await handle_terminal_input(client_id, websocket, data)
-                else:
+            elif isinstance(message_type, str) and message_type in admin_handlers:
+                if is_elevated(websocket, revalidate_session=True):
+                    await admin_handlers[message_type](client_id, websocket, data)
+                    continue
+                error = '需要管理员权限'
+                if message_type in {'terminal_input', 'terminal_resize'}:
                     close_websocket_terminal(websocket)
-                    await websocket.send_json({
-                        'type': 'terminal_error',
-                        'error': '管理员提权已失效，终端已关闭',
-                        'elevation_required': True,
-                    })
-
-            elif message_type == 'terminal_resize':
-                token = websocket.cookies.get(AUTH_COOKIE_NAME)
-                live_user = auth_service.get_user_for_token(token, refresh=False)
-                if live_user is not None and auth_service.get_elevated_until(token):
-                    await handle_terminal_resize(client_id, websocket, data)
-                else:
-                    close_websocket_terminal(websocket)
-                    await websocket.send_json({
-                        'type': 'terminal_error',
-                        'error': '管理员提权已失效，终端已关闭',
-                        'elevation_required': True,
-                    })
-
-            elif message_type == 'tradefed_list_results':
-                # 与 HTTP 孪生路由 POST /api/test/suites/result 一致：执行
-                # tradefed 二进制属于提权操作，非提权会话不得经 WS 绕过。
-                token = websocket.cookies.get(AUTH_COOKIE_NAME)
-                live_user = auth_service.get_user_for_token(token, refresh=False)
-                if live_user is not None and auth_service.get_elevated_until(token):
-                    await handle_tradefed_list_results(client_id, websocket, data)
-                else:
-                    await websocket.send_json({
-                        'type': 'terminal_error',
-                        'error': '需要已提权的管理员会话',
-                        'elevation_required': True,
-                    })
+                    error = '管理员授权已失效，终端已关闭'
+                await websocket.send_json({
+                    'type': 'terminal_error',
+                    'error': error,
+                    'elevation_required': True,
+                })
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket client disconnected: {client_id}")

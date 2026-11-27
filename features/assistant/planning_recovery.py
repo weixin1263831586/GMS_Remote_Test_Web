@@ -30,6 +30,7 @@ class PlanningState:
     automatic_retry_used: bool = False
     pending_call: dict | None = None
     report_actions: list[dict] = field(default_factory=list)
+    successful_retrievals: set[str] = field(default_factory=set)
 
 
 # Keep operational state out of the JSON session/history payload.

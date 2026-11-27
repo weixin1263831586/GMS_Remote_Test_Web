@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+from . import config_api
 from .analyzer import (
     UniversalAIAnalyzer,
     call_provider_chain,
@@ -26,8 +27,11 @@ from .config import (
     analysis_command,
     context_limited_config,
     default_model_alias,
+    list_agent_profiles,
     list_model_options,
+    model_catalog_fingerprint,
     model_config,
+    normalize_agent_profile_name,
     resolve_model_spec,
 )
 from .errors import (
@@ -114,6 +118,7 @@ __all__ = [
     "call_provider_chain",
     "child_env",
     "classify_failure",
+    "config_api",
     "consume_event",
     "consume_line",
     "context_length_limit",
@@ -124,9 +129,12 @@ __all__ = [
     "first_local_provider",
     "interrupted_exit",
     "is_local_provider",
+    "list_agent_profiles",
     "list_model_options",
     "llm_stream_timeout",
+    "model_catalog_fingerprint",
     "model_config",
+    "normalize_agent_profile_name",
     "parse_response_text",
     "post_chat",
     "probe_provider",

@@ -52,6 +52,83 @@ let agentHistoryIndex = -1;  // -1 = not browsing history
 let agentModelStatusLoaded = false;
 let agentModelStatusFlight = null;
 let agentElevationFlight = null;
+let agentImageDrafts = [];
+let agentImagePasteFlight = false;
+let agentImageSendFlight = false;
+let agentImageDraftGeneration = 0;
+const AGENT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+
+function renderAgentImageDrafts() {
+    const panel = $('agent-image-previews');
+    if (!panel) return;
+    panel.replaceChildren();
+    panel.hidden = agentImageDrafts.length === 0;
+    agentImageDrafts.forEach((item, index) => {
+        const card = document.createElement('div');
+        card.className = 'agent-image-preview';
+        const image = document.createElement('img');
+        image.src = item.data;
+        image.alt = '待发送图片 ' + (index + 1);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'agent-image-remove';
+        remove.textContent = '×';
+        remove.title = '移除图片';
+        remove.setAttribute('aria-label', '移除图片 ' + (index + 1));
+        remove.disabled = agentImageSendFlight;
+        remove.addEventListener('click', () => {
+            if (agentImageSendFlight) return;
+            agentImageDrafts = agentImageDrafts.filter(value => value !== item);
+            renderAgentImageDrafts();
+        });
+        card.append(image, remove);
+        panel.append(card);
+    });
+    const execute = document.querySelector('.agent-composer .agent-execute-action');
+    if (execute) execute.disabled = agentImageDrafts.length > 0 || agentImagePasteFlight || agentImageSendFlight;
+}
+
+function clearAgentImageDrafts() {
+    agentImageDraftGeneration++;
+    agentImageDrafts = [];
+    renderAgentImageDrafts();
+}
+
+async function pasteAgentImages(event) {
+    const items = Array.from(event.clipboardData?.items || []);
+    const files = items.filter(item => item.kind === 'file' && item.type.startsWith('image/'))
+        .map(item => item.getAsFile()).filter(Boolean);
+    if (!files.length) return;
+    event.preventDefault();
+    if (agentImagePasteFlight || agentImageSendFlight) return;
+    if (files.some(file => !['image/png', 'image/jpeg', 'image/webp'].includes(file.type))) {
+        showToast('仅支持 PNG、JPEG、WebP 图片', 'warning');
+        return;
+    }
+    if (agentImageDrafts.length + files.length > 3 ||
+        agentImageDrafts.reduce((total, item) => total + item.size, 0) +
+        files.reduce((total, file) => total + file.size, 0) > AGENT_IMAGE_MAX_BYTES) {
+        showToast('每次最多 3 张图片，总大小不超过 4 MB', 'warning');
+        return;
+    }
+    const generation = agentImageDraftGeneration;
+    agentImagePasteFlight = true;
+    renderAgentImageDrafts();
+    try {
+        const images = await Promise.all(files.map(file => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve({data: String(reader.result), size: file.size});
+            reader.onerror = reader.onabort = reject;
+            reader.readAsDataURL(file);
+        })));
+        if (generation === agentImageDraftGeneration) agentImageDrafts.push(...images);
+    } catch (_) {
+        showToast('无法读取剪贴板图片，请重新粘贴', 'warning');
+    } finally {
+        agentImagePasteFlight = false;
+        renderAgentImageDrafts();
+    }
+}
 let agentRetryId = '';
 let agentCurrentSession = null;
 let agentSessionDirectory = [];
@@ -226,10 +303,70 @@ function renderAgentPlanContent(content) {
     return introHtml + gridHtml + noteHtml;
 }
 
+function openAgentImagePreview(button) {
+    if (document.querySelector('.agent-image-viewer-modal.show')) return;
+    const thumbnail = button.querySelector('img');
+    if (!thumbnail) return;
+    const chat = $('agent-chat-messages');
+    const sessionId = agentSessionId;
+    const scrollTop = chat?.scrollTop || 0;
+    const modal = document.createElement('div');
+    modal.id = 'agent-image-viewer-modal';
+    modal.className = 'modal agent-image-viewer-modal';
+    modal.setAttribute('aria-label', '图片预览');
+    modal.tabIndex = -1;
+    const image = document.createElement('img');
+    image.alt = thumbnail.alt;
+    image.hidden = true;
+    const status = document.createElement('div');
+    status.className = 'agent-image-viewer-status';
+    status.setAttribute('role', 'status');
+    status.textContent = '正在加载图片…';
+    image.addEventListener('load', () => {
+        if (!image.naturalWidth || !image.naturalHeight) return;
+        image.style.setProperty('--agent-image-ratio', String(image.naturalWidth / image.naturalHeight));
+        image.hidden = false;
+        status.hidden = true;
+    });
+    image.addEventListener('error', () => {
+        image.hidden = true;
+        status.hidden = false;
+        status.textContent = '图片不存在或无法读取。';
+    });
+    const frame = document.createElement('div');
+    frame.className = 'agent-image-viewer-frame';
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'modal-close agent-image-viewer-close';
+    close.setAttribute('aria-label', '关闭');
+    close.title = '关闭';
+    close.textContent = '×';
+    close.addEventListener('click', () => ModalManager.close(modal.id));
+    frame.append(image, status, close);
+    modal.append(frame);
+    ModalManager.onClose(modal.id, () => {
+        if (chat && sessionId === agentSessionId) {
+            chat.scrollTop = scrollTop;
+            requestAnimationFrame(() => {
+                if (agentSessionId !== sessionId || document.querySelector('.modal.show')) return;
+                const current = [...chat.querySelectorAll('.agent-message-images button')]
+                    .find(item => item.querySelector('img')?.src === thumbnail.src);
+                current?.focus({preventScroll: true});
+            });
+        }
+    });
+    modal.addEventListener('click', event => {
+        if (event.target === modal) ModalManager.close(modal.id);
+    });
+    ModalManager.registerDynamic(modal);
+    image.src = thumbnail.getAttribute('src');
+}
+
 function renderAgentMessages(session) {
     const container = $('agent-chat-messages');
     if (!container) return;
 
+    const previousTop = container.scrollTop;
     const messages = session?.messages || [];
     if (!messages.length) {
         container.innerHTML = '<div class="agent-chat-empty">可以问：每个页面功能、rk3572设备、最近报告、测试套件、VPN状态；也可以说：跑 CtsWifiTestCases，失败 retry 2 次并分析报告</div>';
@@ -309,9 +446,27 @@ function renderAgentMessages(session) {
             `;
         }
 
+        if (data.gms_policy_lookup && !isUser) {
+            const query = encodeURIComponent(data.gms_policy_lookup);
+            actions += `<div class="agent-actions"><button type="button" class="btn-xs"
+                data-gms-policy-query="${escapeHtml(query)}">读取 GMS 政策原文</button>
+                </div>
+                <div class="agent-policy-evidence" aria-live="polite"></div>`;
+        }
+
         const escapedContent = escapeHtml(message.content || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        const attachments = isUser && Array.isArray(data.image_attachments)
+            ? data.image_attachments.slice(0, 3).filter(image => /^[a-f0-9]{32}$/.test(image?.id || '')) : [];
+        const imageCount = isUser && Number.isInteger(data.image_count) && data.image_count > 0
+            ? '<div class="ui-meta">图片 ' + data.image_count + ' 张（' + (attachments.length ? '点击查看' : '未保留原图') + '）</div>' : '';
+        const imageHtml = attachments.length ? '<div class="agent-message-images">' + attachments.map((image, index) => {
+            const url = '/api/agent/sessions/' + encodeURIComponent(session.session_id)
+                + '/images/' + encodeURIComponent(image.id);
+            return '<button type="button" class="agent-image-preview" aria-label="查看图片 ' + (index + 1) + '" title="查看图片 ' + (index + 1) + '">'
+                + '<img src="' + url + '" loading="lazy" alt="查看图片 ' + (index + 1) + '"></button>';
+        }).join('') + '</div>' : '';
         const contentHtml = (isPlanLike ? renderAgentPlanContent(message.content || '') : escapedContent)
-            + (data.question ? renderAgentQuestion(message, session) : '');
+            + imageCount + imageHtml + (data.question ? renderAgentQuestion(message, session) : '');
         const toneClass = tone ? ` ${tone}` : '';
         const bodyClass = isPlanLike ? 'agent-message-body plan-body' : 'agent-message-body';
 
@@ -328,7 +483,12 @@ function renderAgentMessages(session) {
             </div>
         `;
     }).join('');
-    container.scrollTop = container.scrollHeight;
+    container.querySelectorAll('.agent-message-images button').forEach(button => {
+        button.addEventListener('click', () => openAgentImagePreview(button));
+    });
+    bindAgentPolicyLookup(container, () => agentSessionId);
+    container.scrollTop = document.querySelector('.agent-image-viewer-modal.show')
+        ? previousTop : container.scrollHeight;
 
     const lastAutoOpen = [...messages].reverse().find(message =>
         message.role !== 'user'
@@ -443,8 +603,15 @@ function renderAgentSteps(session) {
     if (!stepsEl) return;
 
     const steps = session?.steps || [];
+    const sessionKey = String(session?.session_id || '');
+    const previousTop = stepsEl.scrollTop;
+    // Follow the tail unless the user is reading earlier steps.
+    const followLatest = stepsEl.dataset.renderedSession !== sessionKey
+        || stepsEl.scrollHeight - stepsEl.clientHeight - previousTop <= 24;
+    stepsEl.dataset.renderedSession = sessionKey;
     if (!steps.length) {
         stepsEl.innerHTML = '<div class="suite-empty">等待任务</div>';
+        stepsEl.scrollTop = 0;
         return;
     }
 
@@ -500,6 +667,7 @@ function renderAgentSteps(session) {
             </article>
         `;
     }).join('');
+    stepsEl.scrollTop = followLatest ? stepsEl.scrollHeight : previousTop;
 }
 
 function openAgentRunInAts(runId) {
@@ -604,6 +772,7 @@ function renderAgentSessionDirectory() {
 async function switchAgentSession(sessionId) {
     const target = String(sessionId || '');
     if (!target || target === agentSessionId) return;
+    clearAgentImageDrafts();
     stopAgentPolling();
     agentSessionId = target;
     localStorage.setItem('gms_agent_session_id', agentSessionId);
@@ -707,12 +876,25 @@ function stopAgentPolling() {
 async function sendAgentMessage(execute = false, overrideMessage = '') {
     const input = $('agent-input');
     const message = (overrideMessage || input?.value || '').trim();
-    if (!message && !execute) {
+    if (agentImagePasteFlight || agentImageSendFlight) return;
+    const images = overrideMessage ? [] : agentImageDrafts.map(item => item.data);
+    if (images.length && execute) {
+        showToast('图片请使用发送按钮进行分析', 'warning');
+        return;
+    }
+    const sourceSession = agentSessionId;
+    const generation = agentImageDraftGeneration;
+    if (!message && !execute && !images.length) {
         showToast('请输入 Agent 指令', 'warning');
         return;
     }
 
-    if (input && !overrideMessage) {
+    if (images.length) {
+        agentImageSendFlight = true;
+        if (input) input.disabled = true;
+        renderAgentImageDrafts();
+    }
+    if (input && !overrideMessage && !images.length) {
         if (message && message !== agentInputHistory[0]) {
             agentInputHistory.unshift(message);
             if (agentInputHistory.length > 50) agentInputHistory.length = 50;
@@ -735,7 +917,8 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 session_id: agentSessionId || null,
-                message: message || '确认执行',
+                message: message || (images.length ? '' : '确认执行'),
+                ...(images.length ? {images} : {}),
                 execute,
                 workspace_context: getAgentWorkspaceContext()
             })
@@ -759,11 +942,27 @@ async function sendAgentMessage(execute = false, overrideMessage = '') {
             showToast(result.error || 'Agent 请求失败', 'error');
             return;
         }
+        if (images.length) {
+            if (agentSessionId !== sourceSession || generation !== agentImageDraftGeneration) return;
+            if (input) input.value = '';
+            clearAgentImageDrafts();
+        }
         renderAgentSession(result.data.session);
+        const last = result.data.session.messages?.at(-1);
+        if (last?.data?.gms_policy_lookup && !execute) {
+            const buttons = $('agent-chat-messages')?.querySelectorAll('[data-gms-policy-query]');
+            buttons?.[buttons.length - 1]?.click();
+        }
     } catch (error) {
         const indicator = document.getElementById('agent-typing');
         if (indicator) indicator.remove();
         showToast(`Agent 请求失败: ${error.message}`, 'error');
+    } finally {
+        if (images.length) {
+            agentImageSendFlight = false;
+            if (input) input.disabled = false;
+            renderAgentImageDrafts();
+        }
     }
 }
 
@@ -873,6 +1072,7 @@ function confirmAgentPlan() {
 }
 
 function newAgentSession() {
+    clearAgentImageDrafts();
     clearAgentQuestions();
     agentSessionId = '';
     agentCurrentSession = null;
@@ -932,6 +1132,8 @@ function openAgentApkAnalysis(taskId) {
 }
 
 function initAgentPage() {
+    const stepsEl = $('agent-steps');
+    if (stepsEl) delete stepsEl.dataset.renderedSession;
     if (!agentInitialized) {
         agentInitialized = true;
         const input = $('agent-input');
@@ -939,7 +1141,9 @@ function initAgentPage() {
             // Track current draft when user starts browsing history
             let agentDraftInput = '';
 
+            input.addEventListener('paste', pasteAgentImages);
             input.addEventListener('keydown', (event) => {
+                if (event.isComposing) return;
                 if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault();
                     sendAgentMessage(false);

@@ -354,7 +354,7 @@ gms-rt-redmine-references() {
     while [ "$#" -gt 0 ]; do
         case "$1" in
             -h|--help)
-                echo "Usage: gms-rt-redmine-references <snapshot_id> [--query IDENTIFIERS]"
+                echo "Usage: gms-rt-redmine-references <snapshot_id> [--query IDENTIFIERS|analyze:QUESTION]"
                 echo "  Read official Mainline security fixes, test exemptions and Critical Fix references from retained evidence."
                 return 0 ;;
             --query)

@@ -29,9 +29,11 @@ class AgentTool:
     executor_ref: str               # "features.devices.api:function_name"
     response_type: str              # list / detail / status / file / stream
 
+    label: str = ""
+
     @property
     def display_name(self) -> str:
-        return self.description.split("（")[0].split("(")[0].strip()
+        return self.label or self.description.split("（")[0].split("(")[0].strip()
 
 
 @dataclass
@@ -239,7 +241,7 @@ _EXECUTOR_REF_OVERRIDES: dict[str, str] = {
     "/api/websites/load": "features.system.tools_data_api:load_user_tools",
     "/api/tools/list": "features.system.assets:list_utility_tools",
     # --- 补充：配置 ---
-    "/api/config/ai": "features.assistant.config_api:get_ai_config",
+    "/api/config/ai": "features.kkagent.config_api:get_ai_config",
     "/api/config/opengrok": "features.users.config_api:get_opengrok_config",
     "/api/config/redmine": "features.reports.api:get_redmine_config",
     "/api/tailscale/status": "features.users.config_api:get_tailscale_status",
@@ -518,24 +520,30 @@ def knowledge_agent_tools() -> list[AgentTool]:
         AgentTool(
             name="android_internals_search",
             category="knowledge",
+            label="搜索外部知识源",
             description=(
-                "搜索 Android 系统机制背景知识（android-internals-wiki，非内部案例）。"
-                "命中后按 📚机制解释（引用 chapter/适用版本/last_verified）→ "
-                "🧪结合当前测试现象 → 🔍建议补充的设备/源码取证 组织回答；"
-                "背景知识不得作为已证实根因"
+                "搜索外部知识源：Android CDD 等公开规范及 android-internals-wiki 系统机制。"
+                "规范问题引用具体条款、适用版本和原文；机制问题引用 chapter/适用版本/last_verified。"
+                "区分规范要求与背景解释，检查 sources_status 和适用条件；"
+                "背景知识不得作为已证实根因。"
+                "复杂公开 CDD 问题优先使用 query=analyze:完整自然语言问题，由本地 LLM 规划、补证及复核。"
+                "若命中 POL- 引用但仅返回片段，使用该完整引用作为 query 单独读取原条款；"
+                "条件引导句使用 context:POL-引用|0 展开同条件的下属记录；"
+                "section:POL-引用|0 分页读取同章节，按 next_query 继续。"
+                "保留目标 Android 版本，不能将其他版本或过期修订用于当前结论。"
             ),
             api_path="/api/knowledge/external/search",
             method="POST",
             params=[
-                {"name": "query", "type": "string", "required": True, "desc": "机制/关键词，如 LMKD、Binder 超时"},
-                {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源（默认全部）"},
+                {"name": "query", "type": "string", "required": True, "desc": "规范或机制关键词；完整 POL- 引用可读取对应条款原文；context:POL-引用|0 展开条件；section:POL-引用|0 分页读取章节；compare:章节|条款编号比较版本"},
+                {"name": "sources", "type": "array", "required": False, "desc": "限定外部知识源：web_documents（公开网页规范）、android_internals（机制 Wiki）；默认全部"},
                 {"name": "limit", "type": "integer", "required": False, "desc": "返回数量（1-10）"},
                 {"name": "android_api_level", "type": "integer", "required": False,
                  "desc": "目标 Android API level（A13/14/15/16/17 → 33/34/35/36/37），用于版本匹配重排"},
             ],
             keywords=_kw(
                 "knowledge", "系统机制", "原理", "Android机制", "LMKD", "Binder",
-                "ANR", "内存", "SurfaceFlinger", "Perfetto", "背景知识",
+                "ANR", "内存", "SurfaceFlinger", "Perfetto", "背景知识", "CDD", "RAM", "兼容性", "规范",
             ),
             is_readonly=True,
             is_dangerous=False,

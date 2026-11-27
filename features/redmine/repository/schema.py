@@ -291,7 +291,18 @@ class RepositorySchemaMixin:
             conn.execute(schema)
 
     def reset(self) -> None:
-        """Delete all runtime-generated data but keep the empty database shell."""
+        """Delete archived data and derived journal vectors under the indexing lock."""
+        from features.retrieval import VectorIndex
+        from foundation.process_sync import hold_sync_lock
+
+        from ..knowledge.journal_semantic import journal_index_location
+
+        path, namespace = journal_index_location(self.db_path)
+        with hold_sync_lock(path.with_suffix(".lock")):
+            self._reset_records()
+            VectorIndex(path).clear(namespace)
+
+    def _reset_records(self) -> None:
         with self.connect() as conn:
             conn.executescript(
                 """

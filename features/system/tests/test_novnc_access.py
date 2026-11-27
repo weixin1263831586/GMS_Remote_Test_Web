@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import unittest
+from contextlib import closing, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from bootstrap.application import create_app
 from features.auth import auth_service
@@ -58,16 +60,25 @@ class NoVNCAccessBoundaryTests(unittest.TestCase):
             json={"username": "admin", "password": "strongpass1"},
         )
 
-    def test_access_grant_requires_elevation_and_is_bound_to_session_worker(self):
-        denied = self.client.post(
-            "/api/desktop/novnc/access",
-            headers={"Origin": "http://testserver"},
-            json={},
+    def _assert_grant_opens_proxy(self, url, socket_prefix):
+        upstream = SimpleNamespace(status=200, headers={"content-type": "text/html"})
+        backend = SimpleNamespace(
+            get=lambda *_args, **_kwargs: nullcontext(upstream),
+            ws_connect=lambda *_args, **_kwargs: nullcontext(None),
         )
-        self.assertEqual(denied.status_code, 403)
-        self.assertTrue(denied.json()["detail"]["elevation_required"])
+        socket_path = parse_qs(urlsplit(url).query)["path"][0]
+        with (
+            patch("features.system.host.desktop.novnc_client_session", return_value=nullcontext(backend)),
+            patch("features.system.host.desktop._read_novnc_body", return_value=b"<html>noVNC</html>"),
+            patch("features.system.host.desktop._relay_novnc_websockets") as relay,
+        ):
+            self.assertEqual(self.client.get(url).status_code, 200)
+            with self.client.websocket_connect(socket_prefix + socket_path):
+                pass
+            relay.assert_awaited_once()
 
-        self.assertEqual(self._elevate().status_code, 200)
+    def test_admin_login_grant_opens_proxy_and_is_bound_to_session_worker(self):
+        self.assertIsNone(auth_service.get_elevated_until(self.client.cookies.get("gms_session")))
         issued = self.client.post(
             "/api/desktop/novnc/access",
             headers={"Origin": "http://testserver"},
@@ -96,6 +107,37 @@ class NoVNCAccessBoundaryTests(unittest.TestCase):
                 "another-worker",
             )
         )
+        self._assert_grant_opens_proxy(payload["url"], "/novnc/")
+        with closing(TestClient(self.client.app)) as second_session:
+            login = second_session.post(
+                "/api/auth/login",
+                headers={"Origin": "http://testserver"},
+                json={"username": "admin", "password": "strongpass1"},
+            )
+            self.assertEqual(login.status_code, 200)
+            self.assertEqual(second_session.get(payload["url"]).status_code, 403)
+
+    def test_ordinary_user_grant_requires_active_temporary_elevation(self):
+        auth_service.create_user("operator", "operatorpass1", role="user")
+        origin = {"Origin": "http://testserver"}
+        login = self.client.post("/api/auth/login", headers=origin,
+                                 json={"username": "operator", "password": "operatorpass1"})
+        self.assertEqual(login.status_code, 200)
+        denied = self.client.post("/api/desktop/novnc/access", headers=origin, json={})
+        self.assertEqual(denied.status_code, 403)
+        self.assertTrue(denied.json()["detail"]["elevation_required"])
+        self.assertEqual(self._elevate().status_code, 200)
+        issued = self.client.post("/api/desktop/novnc/access", headers=origin, json={})
+        self.assertEqual(issued.status_code, 200)
+        url = issued.json()["url"]
+        self._assert_grant_opens_proxy(url, "/novnc/")
+
+        self.assertEqual(self.client.post("/api/auth/elevation/reset", headers=origin).status_code, 200)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        socket_path = parse_qs(urlsplit(url).query)["path"][0]
+        with self.assertRaises(WebSocketDisconnect) as closed, self.client.websocket_connect("/novnc/" + socket_path):
+            self.fail("revoked elevation must reject the WebSocket handshake")
+        self.assertEqual(closed.exception.code, 4403)
 
     def test_entry_html_rejects_missing_or_forged_grant(self):
         missing = self.client.get("/novnc/vnc.html")
@@ -133,7 +175,6 @@ class NoVNCAccessBoundaryTests(unittest.TestCase):
                 pin_novnc_host(blocked, 6080)
 
     def test_access_grant_supports_registered_vpn_worker(self):
-        self.assertEqual(self._elevate().status_code, 200)
         cluster = SimpleNamespace(
             effective_enabled=True,
             config=SimpleNamespace(local_worker_id="local"),
@@ -141,14 +182,18 @@ class NoVNCAccessBoundaryTests(unittest.TestCase):
                 "id": "vpn-worker", "status": "online", "address": "100.95.20.10",
             }),
         )
-        with patch("foundation.cluster_port.get_cluster_service", return_value=cluster):
+        with (
+            patch("foundation.cluster_port.get_cluster_service", return_value=cluster),
+            patch("foundation.cluster_port.worker_tokens", return_value={"vpn-worker": "fixture-token"}),
+        ):
             issued = self.client.post(
                 "/api/desktop/novnc/access",
                 headers={"Origin": "http://testserver"},
                 json={"worker_id": "vpn-worker"},
             )
+            self.assertEqual(issued.status_code, 200, issued.text)
+            self._assert_grant_opens_proxy(issued.json()["url"], "/")
 
-        self.assertEqual(issued.status_code, 200, issued.text)
         self.assertEqual(issued.json()["worker_id"], "vpn-worker")
         self.assertTrue(issued.json()["url"].startswith("/cluster/novnc/vpn-worker/vnc.html?"))
 

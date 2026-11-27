@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from pathlib import Path
 from typing import Any
 
+from features.kkagent import model_catalog_fingerprint
+
+from .intelligent import (
+    local_document_model,
+    local_document_rag,
+    personal_insight_index,
+    personal_source,
+    render_rag_answer,
+    web_source,
+    wiki_insight_index,
+    wiki_source,
+)
 from .parsers import parse_file
-from .policy_imports import policy_import_filter
 from .storage import POLICY_IMPORT_SOURCE, KnowledgeStore
 
 
@@ -130,72 +140,126 @@ class KnowledgeService:
         )
         return self.store.get_doc(user_id, doc["doc_id"]) or doc
 
-    def ask(self, user_id: str, question: str, *, space_id: str = "", limit: int = 8) -> dict[str, Any]:
+    def document_understanding(self, user_id, *, approved_only=False, sync=False, batch_size=4):
+        """Process only the authenticated owner's ordinary or explicitly approved corpus."""
+        catalog = model_catalog_fingerprint()
+        index = personal_insight_index(self.store, user_id, approved_only=approved_only)
+        if not index.model_key or not catalog:
+            return {"status": "disabled", "processed": 0, "total": 0, "coverage_complete": False}
+        source = personal_source(self.store, user_id, approved_only=approved_only, catalog_hash=catalog)
+        manifest, complete = source.manifest()
+        if not sync:
+            return index.status(manifest, complete=complete)
+        model, name, fingerprint = local_document_model(_ask_analyzer_factory, catalog_hash=catalog)
+        if not name or fingerprint != catalog:
+            return {"status": "model_unavailable", "coverage_complete": False}
+
+        def current(hit):
+            fresh = personal_insight_index(self.store, user_id, approved_only=approved_only)
+            return fresh.model_key == index.model_key and source.current(hit)
+
+        return index.sync(manifest, current, model, complete=complete, batch_size=batch_size)
+
+    def ask(self, user_id: str, question: str, *, space_id: str = "", limit: int = 8,
+            include_external: bool = False, include_authorized_imports: bool = False) -> dict[str, Any]:
         question = (question or "").strip()
         if not question:
             return {"answer": "请输入问题。", "contexts": []}
-        try:
-            exclude_document = policy_import_filter(user_id)
-        except (OSError, sqlite3.Error):
-            return {"answer": "暂时无法验证文档的模型访问权限。", "contexts": []}
-        contexts = self.store.retrieve_contexts(
-            user_id, question, space_id=space_id, limit=max(1, min(limit, 12)),
-            exclude_document=exclude_document,
-        )
-        if not contexts:
-            return {"answer": "没有检索到相关知识文档。", "contexts": []}
-        prompt = self._build_rag_prompt(question, contexts)
-        system = (
-            "你是个人知识库 AI Agent。只能基于给定知识库片段回答；"
-            "如果片段不足，明确说明缺口。回答要给出可执行步骤、关键词和引用来源编号。"
-        )
-        try:
-            result = _ask_analyzer_factory().generate(
-                prompt,
-                system_prompt=system,
-                max_tokens=1800,
-                preferred_provider="glm_local",
-            )
-        except Exception as exc:
-            result = {"success": False, "error": str(exc)}
+        # The personal route already binds the authenticated owner. Only explicitly
+        # approved imports with the current model catalog may join ordinary documents.
+        catalog = model_catalog_fingerprint()
+        sources = [personal_source(self.store, user_id, space_id=space_id)]
+        if include_authorized_imports and catalog:
+            sources.append(personal_source(self.store, user_id, space_id=space_id,
+                                           approved_only=True, catalog_hash=catalog))
+        if include_external:
+            sources.extend([web_source(), wiki_source()])
+        result = local_document_rag(question, sources, _ask_analyzer_factory,
+                                    limit=limit, catalog_hash=catalog)
+        contexts = [{"doc_id": item["metadata"].get("doc_id"), "title": item["metadata"].get("title"),
+                     "snippet": item["text"], "source": item["source"], "reference": item["reference"],
+                     "source_revision": item["revision"], "evidence_id": item["id"],
+                     **item["metadata"]} for item in result["evidence"]]
+        return {"answer": render_rag_answer(result),
+                "mode": "ai" if result["claims"] else "retrieval",
+                "provider": result["provider"], "error": "" if result["claims"] else result["status"],
+                "contexts": contexts, "retrieval": {"status": result["status"], "coverage_complete": False},
+                "rag": result}
 
-        if result.get("success") and result.get("content"):
-            answer = result["content"]
-            mode = "ai"
-            provider = result.get("provider")
-            error = ""
-        else:
-            lines = [f"AI 不可用，先返回检索到的相关片段。原因：{result.get('error') or '未配置 AI'}", ""]
-            for idx, ctx in enumerate(contexts[:5], 1):
-                lines.append(f"[{idx}] {ctx.get('title')}: {_summary(ctx.get('snippet') or ctx.get('summary') or '', 220)}")
-            answer = "\n".join(lines)
-            mode = "retrieval"
-            provider = ""
-            error = result.get("error") or ""
 
-        return {
-            "answer": answer,
-            "mode": mode,
-            "provider": provider,
-            "error": error,
-            "contexts": contexts,
-        }
+def analyze_public_cdd(question, *, limit=8, android_api_level=None, recall_only=False):
+    """Public-only Agent and report entry."""
+    return analyze_external_knowledge(
+        question, sources=["web_documents"], limit=limit,
+        android_api_level=android_api_level, recall_only=recall_only,
+    )
 
-    @staticmethod
-    def _build_rag_prompt(question: str, contexts: list[dict[str, Any]]) -> str:
-        blocks = []
-        for idx, ctx in enumerate(contexts, 1):
-            tags = ", ".join(ctx.get("tags") or [])
-            snippet = str(ctx.get("snippet") or "").strip()
-            blocks.append(
-                f"[{idx}] 标题: {ctx.get('title') or '无标题'}\n"
-                f"标签: {tags or '-'}\n"
-                f"片段:\n{snippet}"
-            )
-        return (
-            f"用户问题：{question}\n\n"
-            "知识库片段如下：\n\n"
-            + "\n\n---\n\n".join(blocks)
-            + "\n\n请基于这些片段回答。若用户问的是测试主题（如 GTS/CTS/GMS），"
-              "优先总结：是什么、入口/前置条件、执行或排查步骤、常见关键词、需要继续查看哪些文档。"
-        )
+
+def sync_due_cdd_understanding():
+    """Use the existing Controller tick; no new service or external model."""
+    from .external import cdd_intelligence
+    from .external.web_sources import WebKnowledgeProvider
+
+    key = cdd_intelligence.enabled_key()
+    if not key:
+        return []
+    model, name, fingerprint = local_document_model(_ask_analyzer_factory)
+    if not name or not fingerprint or fingerprint != model_catalog_fingerprint():
+        return [{"operation": "document_understanding", "status": "model_unavailable"}]
+    return [cdd_intelligence.sync_batch(WebKnowledgeProvider(), model, key)]
+
+
+def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=None, recall_only=False):
+    """Public CDD and separately approved local Wiki; reads no owner imports."""
+    selected = set(sources or ["web_documents"])
+    adapters = []
+    if "web_documents" in selected:
+        adapters.append(web_source(android_api_level=android_api_level, cdd_only=True))
+    if "android_internals" in selected:
+        adapters.append(wiki_source(android_api_level=android_api_level))
+
+    result = local_document_rag(question, adapters, _ask_analyzer_factory, limit=limit, recall_only=recall_only)
+    rows = []
+    for item in result["evidence"]:
+        metadata = item["metadata"]
+        row = {"source": item["source"], "source_path": item["reference"],
+               "source_revision": item["revision"], "snippet": item["text"],
+               "title": metadata.get("title"), "extra": metadata, "evidence_level": "background"}
+        if item["source"] == "web_documents":
+            row["applicable_versions"] = str(metadata.get("android_version") or "")
+            row["source_anchors"] = [{"url": metadata["source_url"], "revision": item["revision"],
+                                      "evidence_type": "official"}]
+            row["extra"] = {**metadata, "source_kind": "cdd", "status": "indexed",
+                            "reference": item["reference"], "applicability_context": metadata.get("condition", "")}
+        rows.append(row)
+    scope = {("web_documents",): "public_cdd_only",
+             ("android_internals",): "approved_local_wiki_only"}
+    return {"answer": "" if recall_only else render_rag_answer(result), "rag": result,
+            "coverage_complete": False, "results": rows,
+            "analysis_scope": scope.get(tuple(sorted(selected)), "public_cdd_and_approved_local_wiki")}
+
+
+def run_authorized_rag(question, sources, *, limit=8, recall_only=False):
+    """Use the injected model gateway with domain-owned, request-authorized adapters."""
+    return local_document_rag(question, sources, _ask_analyzer_factory, limit=limit, recall_only=recall_only)
+
+
+def wiki_document_understanding(*, sync=False, batch_size=4):
+    """Only process explicitly approved current Wiki content and local model route."""
+    index = wiki_insight_index()
+    if not index.model_key:
+        return {"status": "disabled", "processed": 0, "total": 0, "coverage_complete": False}
+    source = wiki_source()
+    manifest, complete = source.manifest()
+    if not sync:
+        return index.status(manifest, complete=complete)
+    if not manifest:
+        return {"status": "unavailable", "processed": 0, "total": 0, "coverage_complete": False}
+    model, name, fingerprint = local_document_model(_ask_analyzer_factory)
+    if not name or fingerprint != model_catalog_fingerprint():
+        return {"status": "model_unavailable", "coverage_complete": False}
+
+    def current(hit):
+        return wiki_insight_index().model_key == index.model_key and source.current(hit)
+
+    return index.sync(manifest, current, model, complete=complete, batch_size=batch_size)

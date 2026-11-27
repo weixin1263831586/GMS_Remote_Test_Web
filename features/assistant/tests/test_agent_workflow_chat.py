@@ -276,6 +276,7 @@ def _plain_user_request(monkeypatch, *, elevated: bool | None):
 
     request = _bare_request()
     request.state.current_user = CurrentUser(id="u1", username="u1", role="user")
+    request.state.auth_method = "session"
     if elevated is not None:
         request.state.is_elevated = elevated
     return request

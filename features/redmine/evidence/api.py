@@ -15,6 +15,7 @@ import codecs
 import json
 import logging
 import re
+import sqlite3
 from contextlib import closing
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,7 @@ from features.redmine.evidence.service import (
 )
 from features.redmine.evidence.store import owner_evidence_store
 from features.users import owner_id_from_request
+from foundation.error_model import ApiError
 from foundation.errors import handle_api_errors
 
 
@@ -315,6 +317,45 @@ async def get_evidence_references(
     require_agent_scope("redmine.read")(request)
     require_agent_scope("artifacts.read_own")(request)
     from ..reference_recall import collect_snapshot_references
+
+    if q.startswith("analyze:"):
+        from features.knowledge import run_authorized_rag
+        from foundation.config import config_manager
+
+        from .intelligent import SnapshotCorpus, SnapshotNotFoundError
+
+        config = (config_manager.load_config() or {}).get("retrieval") or {}
+        if not isinstance(config, dict) or config.get("allow_local_redmine_llm") is not True:
+            raise ApiError.forbidden("尚未启用本地 Redmine 智能取证")
+        question = q.removeprefix("analyze:").strip()
+        if not question:
+            raise ApiError.invalid_semantics("分析问题不能为空")
+
+        owner = _owner(request)
+
+        def analyze():
+            from dataclasses import replace
+
+            corpus = SnapshotCorpus(owner, snapshot_id)
+
+            def current(hit):
+                settings = (config_manager.load_config() or {}).get("retrieval") or {}
+                return (isinstance(settings, dict) and settings.get("allow_local_redmine_llm") is True
+                        and corpus.current(hit))
+
+            result = run_authorized_rag(question, [replace(corpus.source(), current=current)])
+            return {"snapshot_id": snapshot_id, "rag": result, "coverage_complete": False,
+                    "snapshot_bounded": corpus.bounded, "sources": {}}
+
+        try:
+            data = await asyncio.to_thread(analyze)
+        except SnapshotNotFoundError as exc:
+            raise ApiError.not_found("snapshot 不存在") from exc
+        except ValueError as exc:
+            raise ApiError.conflict("保留的证据快照尚未就绪") from exc
+        except (OSError, sqlite3.Error) as exc:
+            raise ApiError.dependency_unavailable("证据快照存储暂不可用") from exc
+        return {"success": True, "data": data}
 
     data = await asyncio.to_thread(
         collect_snapshot_references, _owner(request), snapshot_id, query=q,

@@ -69,6 +69,7 @@
             const submitButton = panel.querySelector('[data-kb-submit]');
             const resetButton = panel.querySelector('[data-kb-reset]');
             const partnerUrl = 'https://docs.partner.android.com/gms/policies/domains/reqs';
+            const partnerApi = '/api/gms-update-center';
             let editing = null;
             let busy = false;
 
@@ -96,8 +97,21 @@
                 b.className = 'btn-xs';
                 b.textContent = label;
                 if (label === '同步') b.dataset.busySize = 'short';
+                if (label === '语义索引') b.dataset.busySize = 'plain';
                 b.addEventListener('click', action);
                 return b;
+            }
+            function openUrlButton(value) {
+                let url;
+                try {
+                    url = new URL(value);
+                } catch {
+                    return null;
+                }
+                if (url.protocol !== 'https:' || url.username || url.password) return null;
+                const action = button('打开网址', () => window.open(url.href, '_blank', 'noopener,noreferrer'));
+                action.title = url.href;
+                return action;
             }
             async function openPolicyImport() {
                 if (await window.showConfirmDialog('授权规范导入', '仅导入你有权访问且允许当前已启用 AI 模型处理的 PDF/HTML 文件。文件仅供本账号的工单分析使用，内容或模型配置变更后需要重新授权。')) kbOpenUpload(true);
@@ -108,8 +122,104 @@
                     body: JSON.stringify({url: source.url, name: source.name || '', enabled})
                 });
             }
+            async function documentUnderstanding(trigger) {
+                const approved = await showConfirmDialog('文档理解范围',
+                    '是否处理本人已授权导入的规范？取消则处理本人普通文档。');
+                const endpoint = '/api/knowledge/semantic-index?kind=understanding&approved_only=' + (approved ? 'true' : 'false');
+                const before = await kbFetch(endpoint);
+                const counts = value => (value.processed ?? 0) + '/' + (value.total ?? 0);
+                trigger.title = 'LLM 文档理解：' + counts(before);
+                if (before.status === 'disabled') {
+                    showToast('尚未启用本地个人文档理解，请检查 Controller retrieval 配置。', 'warning');
+                    return;
+                }
+                if (!await showConfirmDialog('本地 LLM 文档理解',
+                    '已处理 ' + counts(before) + '。继续处理最多四个原文窗口？')) return;
+                trigger.disabled = true;
+                try {
+                    const result = await kbFetch(endpoint + '&batch_size=4', {method: 'POST'});
+                    const message = 'LLM 文档理解 ' + counts(result)
+                        + '；有效 ' + (result.enriched ?? 0) + '；失败 ' + (result.errors ?? 0)
+                        + (result.corpus_bounded ? '；当前语料范围受限' : '');
+                    trigger.title = message;
+                    showToast(message + '；' + result.status, result.coverage_complete ? 'success' : 'warning');
+                } finally {
+                    trigger.disabled = false;
+                }
+            }
+            async function semanticIndex(endpoint, trigger) {
+                const status = await kbFetch(endpoint);
+                const counts = (value) => `${value.indexed ?? 0}/${value.total ?? 0}`;
+                const understanding = status.document_understanding;
+                const understandingInfo = understanding && understanding.status !== 'disabled'
+                    ? '；LLM 文档理解：' + (understanding.processed ?? 0) + '/' + (understanding.total ?? 0)
+                        + '（有效提取 ' + (understanding.enriched ?? 0) + '，失败 ' + (understanding.errors ?? 0)
+                        + '，截断 ' + (understanding.bounded ?? 0) + '）'
+                    : '';
+                const scheduling = (status.auto_index_enabled === true
+                    ? 'Controller 自动索引已配置' + (status.last_auto_index_attempt
+                        ? '；最近调度：' + status.last_auto_index_attempt : '；尚无调度记录')
+                    : '手动索引') + understandingInfo;
+                trigger.title = '语义索引覆盖：' + counts(status) + '；' + scheduling;
+                const reasons = {
+                    disabled: 'Controller 尚未启用 retrieval.enabled，请配置本地语义检索。',
+                    source_disabled: '当前知识源未加入 retrieval.enabled_sources。',
+                    invalid_config: 'Controller retrieval 配置格式不正确。',
+                    model_unconfigured: '尚未配置本地 Embedding 模型目录或模型修订版本。',
+                    model_missing: 'Controller 本地 Embedding 模型目录不存在或不可读。',
+                    dependency_missing: 'Controller 服务 Python 环境缺少 sentence-transformers。',
+                    configuration_error: 'Controller 本地语义检索配置读取失败。'
+                };
+                if (status.configuration_issue && reasons[status.configuration_issue]) {
+                    showToast(reasons[status.configuration_issue] + understandingInfo, 'warning');
+                    return;
+                }
+                if (!['empty', 'partial', 'ready'].includes(status.status)) {
+                    const message = {disabled: '当前知识源的语义索引未启用。',
+                        unavailable: '当前知识源索引不可用，请检查原始索引或 Wiki 审批状态。',
+                        error: '语义索引状态读取失败，请检查 Controller 日志。'}[status.status];
+                    showToast(message || '语义索引暂不可用。', 'warning');
+                    return;
+                }
+                if (status.coverage_complete) {
+                    showToast('语义索引已完整：' + counts(status) + '；' + scheduling, 'success');
+                    return;
+                }
+                if (!await window.showConfirmDialog('语义索引', '当前覆盖：' + counts(status) + '；' + scheduling + '。连续构建剩余批次？')) return;
+                run(async () => {
+                    let current = status;
+                    // Keep each server request bounded; committed batches can be resumed.
+                    for (let batch = 0; batch < 256; batch++) {
+                        if (!trigger.isConnected || panel.hidden) break;
+                        const result = await kbFetch(endpoint + '?batch_size=128', {method: 'POST'});
+                        trigger.title = '语义索引覆盖：' + counts(result) + '；' + scheduling;
+                        if (result.coverage_complete) {
+                            showToast('语义索引覆盖：' + counts(result), 'success');
+                            return;
+                        }
+                        if (result.status === 'busy') {
+                            showToast('已有索引任务运行，请完成后继续。', 'info');
+                            return;
+                        }
+                        if (!['empty', 'partial', 'ready'].includes(result.status)) {
+                            showToast('语义索引未完成：' + counts(result) + '，请检查来源和模型配置。', 'warning');
+                            return;
+                        }
+                        if (!Number.isInteger(result.indexed) || result.indexed <= (current.indexed ?? 0)) {
+                            showToast('语义索引无新增进度：' + counts(result) + '，请检查语料范围或模型状态。', 'warning');
+                            return;
+                        }
+                        current = result;
+                    }
+                    showToast('本轮索引结束：' + counts(current) + '，可继续构建剩余批次。', 'info');
+                }, trigger, '索引中');
+            }
             async function load() {
-                const data = await kbFetch(api);
+                const [data, partnerIndex, partnerScan] = await Promise.all([
+                    kbFetch(api),
+                    kbFetch(partnerApi + '/requirements/coverage', {cache: 'no-store'}).catch(() => null),
+                    kbFetch(partnerApi + '/scan/status', {cache: 'no-store'}).catch(() => null)
+                ]);
                 const table = document.createElement('table');
                 table.className = 'list-table kb-source-table';
                 const columns = ['知识源名称', '网址', '版本', '索引条目', '状态', '操作'];
@@ -150,19 +260,85 @@
                                 });
                             }
                         }));
+                    if (source.kind === 'cdd' && source.enabled && source.revision) {
+                        actions.append(button('语义索引', event => {
+                            semanticIndex(api + '/' + encodeURIComponent(source.id) + '/semantic-index',
+                                event.currentTarget).catch(error => showToast(error.message, 'warning'));
+                        }));
+                    }
+                    const open = openUrlButton(source.url);
+                    if (open) actions.append(open);
                 }
+                const wiki = body.insertRow();
+                for (const value of ['Android Internals Wiki', '本地已批准索引', '多版本', '—', '支持混合检索']) {
+                    const cell = wiki.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const wikiActions = document.createElement('div');
+                wikiActions.className = 'kb-source-actions';
+                wiki.insertCell().append(wikiActions);
+                wikiActions.append(button('语义索引', event => {
+                    semanticIndex('/api/knowledge/external/wiki-semantic-index',
+                        event.currentTarget).catch(error => showToast(error.message, 'warning'));
+                }));
+                const personal = body.insertRow();
+                for (const value of ['个人知识库', '本账号普通文档', '当前修订', '—', '支持混合检索']) {
+                    const cell = personal.insertCell();
+                    cell.textContent = value;
+                    cell.title = value;
+                }
+                const personalActions = document.createElement('div');
+                personalActions.className = 'kb-source-actions';
+                personal.insertCell().append(personalActions);
+                personalActions.append(button('语义索引', event => {
+                    semanticIndex('/api/knowledge/semantic-index', event.currentTarget)
+                        .catch(error => showToast(error.message, 'warning'));
+                }));
+                personalActions.append(button('文档理解', event => {
+                    documentUnderstanding(event.currentTarget).catch(error => showToast(error.message, 'warning'));
+                }));
                 const partner = body.insertRow();
-                for (const value of ['GMS Certification Requirements', partnerUrl, '通用', '—',
-                    '支持账号文件导入']) {
+                partner.dataset.kbSource = 'gms_requirements';
+                const scan = partnerScan?.status;
+                const coverage = partnerIndex?.coverage;
+                const latest = partnerIndex?.latest_scan;
+                const indexed = partnerIndex?.index_consistent === true;
+                const scanning = scan?.running && (scan.source || []).includes('gms_requirements');
+                const failed = ['failed', 'interrupted', 'partial'].includes(latest?.state)
+                    || (!scan?.running && ['failed', 'interrupted', 'partial'].includes(scan?.state)
+                        && (scan.source || []).includes('gms_requirements'));
+                const pending = ['pending', 'running'].includes(latest?.state);
+                const count = partnerIndex === null ? '—' : indexed ? String(coverage.clause_candidates)
+                    : coverage ? '—' : '0';
+                const status = scanning ? '同步中' : !partnerIndex ? '状态不可用'
+                    : pending && scan?.running ? '同步中'
+                    : failed || (pending && scan && !scan.running) ? (indexed ? '同步失败，保留旧索引' : '同步失败')
+                    : partnerIndex.latest_confirmed ? '已同步（待核验）'
+                    : indexed ? '索引待更新' : coverage ? '索引异常' : '待同步';
+                for (const value of ['GMS Certification Requirements', partnerUrl, '多版本', count, status]) {
                     const cell = partner.insertCell();
                     cell.textContent = value;
                     cell.title = value;
                 }
+                partner.cells[3].title = indexed
+                    ? `条款候选：${coverage.clause_candidates}；章节：${coverage.sections ?? 0}；表格行：${coverage.table_rows ?? 0}`
+                    : count;
+                partner.cells[4].title = status + (partnerIndex?.indexed_at ? '；索引时间：' + partnerIndex.indexed_at : '');
                 const actions = document.createElement('div');
                 actions.className = 'kb-source-actions';
                 partner.insertCell().append(actions);
-                actions.append(button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
-                    button('导入授权文档', openPolicyImport));
+                const sync = button('同步', event => {
+                    run(async () => {
+                        const result = await kbFetch(partnerApi + '/scan?mode=full&source=gms_requirements', {method: 'POST'});
+                        showToast(result.status?.running ? 'GMS Requirements 同步已启动，完成后刷新状态'
+                            : '已提交同步请求，请刷新核查结果', 'info');
+                    }, event.currentTarget, '同步中');
+                });
+                sync.disabled = Boolean(scan?.running);
+                sync.title = scan?.running ? '已有 GMS 更新扫描运行中' : '使用现有授权来源重新扫描 GMS Requirements';
+                actions.append(sync, button('GMS 更新中心', () => { window.location.href = '/gms-update-center'; }),
+                    button('导入授权文档', openPolicyImport), openUrlButton(partnerUrl));
                 list.replaceChildren(table);
             }
             async function run(action, trigger = refreshButton, label = '刷新中') {
@@ -545,26 +721,51 @@
         }
 
         async function kbAsk() {
-            const result = await GmsDialogs.form('全库提问', [{name: 'value', label: '全库提问', required: true, multiline: true}]);
+            const result = await GmsDialogs.form('智能知识问答', [
+                {name: 'value', label: '问题', required: true, multiline: true}
+            ], {message: '本地 LLM 将主动检索、阅读原文及复核结论。'});
             const question = result?.value;
             if (!question || !question.trim()) return;
-            const data = await kbFetch('/api/knowledge/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:question.trim(), space_id:kbState.currentSpace})});
+            const includeImports = await window.showConfirmDialog('授权知识源',
+                '是否同时检索本人已授权导入的规范及公开网页？取消则仅检索当前个人知识空间。');
             const info = document.getElementById('kb-side-info');
+            if (info) info.textContent = '本地 RAG 正在规划、检索和复核，请以实际完成结果为准。';
+            const data = await kbFetch('/api/knowledge/ask', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({question: question.trim(), space_id: includeImports ? '' : kbState.currentSpace,
+                    include_external: !!includeImports, include_authorized_imports: !!includeImports})
+            });
             if (info) {
                 const contexts = Array.isArray(data.contexts) ? data.contexts : [];
+                const steps = Array.isArray(data.rag?.steps) ? data.rag.steps : [];
+                const labels = {plan: '问题规划', search: '检索', read: '原文阅读', inspect: '证据检查',
+                    draft: '综合分析', review: '结论复核', model: '模型调用'};
+                const trace = steps.length ? `
+                    <details><summary>执行记录（${steps.length}）</summary>
+                    ${steps.map(step => `<div>${kbEsc(labels[step.stage] || step.stage)}：
+                        ${kbEsc(step.source || '')} ${kbEsc(step.status || '')}
+                        ${Number.isInteger(step.new_evidence) ? ' · 新证据 ' + step.new_evidence : ''}</div>`).join('')}
+                    </details>` : '';
                 const sources = contexts.length ? `
                     <div style="font-weight:var(--ui-type-weight-semibold);margin-top:10px;margin-bottom:6px;">来源</div>
-                    ${contexts.map((ctx, i) => `
-                        <div style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
-                            <button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}" style="margin-bottom:4px;">[${i + 1}] ${kbEsc(ctx.title || '无标题')}</button>
-                            <div style="color:var(--text-secondary);line-height:1.5;">${kbEsc(kbSnippet(ctx.snippet || ctx.summary || '', 180))}</div>
-                        </div>
-                    `).join('')}
+                    ${contexts.map((ctx, i) => {
+                        const title = '[' + (ctx.evidence_id || i + 1) + '] ' + (ctx.title || '无标题');
+                        const heading = ctx.doc_id
+                            ? `<button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}">${kbEsc(title)}</button>`
+                            : `<strong>${kbEsc(title)}</strong>`;
+                        return `<details style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
+                            <summary>${heading}</summary>
+                            <div style="color:var(--text-secondary);white-space:pre-wrap;overflow-wrap:anywhere;">${kbEsc(ctx.snippet || '')}</div>
+                            <div style="color:var(--text-secondary);overflow-wrap:anywhere;">${kbEsc(ctx.reference || '')} · ${kbEsc(ctx.source_revision || '')}</div>
+                            <div style="color:var(--text-secondary);overflow-wrap:anywhere;">${kbEsc(ctx.source_url || '')}</div>
+                        </details>`;
+                    }).join('')}
                 ` : '';
                 info.innerHTML = `
-                    <div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:6px;">问答结果 ${data.mode === 'ai' && data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
+                    <div style="font-weight:var(--ui-type-weight-semibold);margin-bottom:6px;">智能问答
+                    ${data.provider ? `<span style="font-weight:normal;color:var(--text-secondary);">(${kbEsc(data.provider)})</span>` : ''}</div>
                     <div style="white-space:pre-wrap;color:var(--text-color);line-height:1.6;">${kbEsc(data.answer || '')}</div>
-                    ${sources}
+                    ${trace}${sources}
                 `;
             }
         }

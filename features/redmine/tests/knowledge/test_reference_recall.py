@@ -362,3 +362,29 @@ def test_policy_owner_refuses_ambiguous_redmine_directory(monkeypatch):
     assert reference_recall._policy_owner('owner_a') is None
     users.pop()
     assert reference_recall._policy_owner('owner_a') == 'owner.a'
+
+
+def test_official_reference_revision_and_shared_evidence_trace(references):
+    from features.redmine.analysis.kkagent.trace import trace_from_summary
+
+    root, store, snapshot = references
+    add_text(store, snapshot, "CVE-2026-58835")
+    first = recall_mainline_references(["CVE-2026-58835"], data_root=root)
+    second = recall_mainline_references(["ag/40830952"], data_root=root)
+    by_reference = {row["reference"]: row["source_revision"]
+                    for row in first["sources"]["security_patches"]["items"]}
+    assert by_reference
+    assert by_reference == {row["reference"]: row["source_revision"]
+                            for row in second["sources"]["security_patches"]["items"]}
+    data = reference_recall.collect_snapshot_references("owner-a", snapshot)
+    trace = KkAgentTrace()
+    consume_line(trace, json.dumps({"type": "tool_call", "tool_call_id": "r1",
+                                   "tool_name": "gms_rt_redmine_references",
+                                   "input": {"snapshot_id": snapshot}}))
+    consume_line(trace, json.dumps({"type": "tool_result", "tool_call_id": "r1",
+                                   "is_error": False,
+                                   "output": json.dumps({"success": True, "data": {"data": data}})}))
+    evidence = trace.tool_calls[0].retrieval_evidence
+    assert evidence["references"]
+    assert not evidence["coverage_complete"]
+    assert trace_from_summary(trace.to_summary()).tool_calls[0].retrieval_evidence == evidence

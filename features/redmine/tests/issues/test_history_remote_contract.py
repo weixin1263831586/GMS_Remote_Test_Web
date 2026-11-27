@@ -91,3 +91,29 @@ class HistoryRemoteFilteringTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+async def _semantic_history_result(monkeypatch):
+    from features.redmine import history_search
+
+    monkeypatch.setattr(history_search, "local_embedding", lambda _source: object())
+    monkeypatch.setattr(history_search, "JournalSemantic", lambda *a, **k: SimpleNamespace(
+        search=lambda *a, **k: {"retrieval": {"status": "ready", "coverage_complete": True},
+                                "results": [{"issue_id": 12, "journal_id": "7", "reference": "ref",
+                                             "source_revision": "rev", "snippet": "private raw reply"}]}))
+    repo = SimpleNamespace(search_history=lambda *a, **k: [],
+                           get_issue=lambda _id: {"issue_id": 12, "subject": "candidate", "is_resolved": True},
+                           HISTORY_RESULT_FIELDS=("issue_id", "subject", "is_resolved"),
+                           HISTORY_TEXT_LIMITS={}, corpus_token_stats=lambda _tokens: {})
+    result = await search_issue_history(SimpleNamespace(repository=repo), "query", limit=1)
+    assert result["items"][0]["issue_id"] == 12
+    assert result["items"][0]["retrieval_channels"] == ["journal_semantic"]
+    assert result["items"][0]["journal_reference"]["source_revision"] == "rev"
+    assert "private raw reply" not in str(result)
+    assert not result["coverage_complete"]
+
+
+def test_existing_history_search_uses_semantic_candidates_without_raw_notes(monkeypatch):
+    import asyncio
+
+    asyncio.run(_semantic_history_result(monkeypatch))

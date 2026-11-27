@@ -147,7 +147,7 @@ _gms_rt_command_summary() {
         gms-rt-auth-login) printf '%s' 'Create and save a human API session (password prompt or --password-stdin)' ;;
         gms-rt-auth-logout) printf '%s' 'Revoke the current human API session and remove its local cookie jar' ;;
         gms-rt-auth-elevate) printf '%s' 'Activate administrator elevation for the current human session' ;;
-        gms-rt-auth-elevation-reset) printf '%s' 'Clear administrator elevation from the current human session' ;;
+        gms-rt-auth-elevation-reset) printf '%s' 'Clear temporary elevation from the current human session' ;;
         gms-rt-auth-credential-mode) printf '%s' 'Show whether this CLI invocation uses an Agent Token file or a session cookie' ;;
         gms-rt-auth-scopes-check) printf '%s' 'Pre-flight check that the current credential carries required agent scopes (default: Redmine evidence chain)' ;;
         gms-rt-agent-enroll) printf '%s' 'Exchange a one-shot enrollment code for an Agent Service Token stored as a 0600 file' ;;
@@ -499,7 +499,7 @@ ${YELLOW}Authentication:${NC}
   gms-rt-auth-scopes-check       - Pre-flight required agent scopes (default: Redmine evidence chain)
   gms-rt-auth-logout             - Revoke and remove the saved session
   gms-rt-auth-elevate [username] - Verify an admin for sensitive operations
-  gms-rt-auth-elevation-reset    - Clear administrator elevation
+  gms-rt-auth-elevation-reset    - Clear temporary elevation
 
 ${YELLOW}Agent Credentials and Approval:${NC}
   gms-rt-agent-enroll            - Exchange a one-shot code for a local 0600 Agent Token

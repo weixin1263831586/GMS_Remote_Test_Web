@@ -35,8 +35,9 @@
                     <div id="agent-chat-messages">
                         <div class="agent-chat-empty">输入测试需求，例如：跑 CtsWifiTestCases，找一台空闲设备，失败 retry 2 次，还失败就报告分析</div>
                     </div>
+                    <div id="agent-image-previews" class="agent-image-previews" hidden aria-label="待发送图片"></div>
                     <div class="agent-composer">
-                        <textarea id="agent-input" class="entry-field" rows="1" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Shift+Enter 换行，Enter 发送"></textarea>
+                        <textarea id="agent-input" class="entry-field" rows="1" placeholder="描述你的目标：设备与固件、测试、报告、构建、工单或知识查询&#10;Ctrl+V 粘贴图片 · Shift+Enter 换行 · Enter 发送"></textarea>
                         <div class="agent-send-actions">
                             <button class="btn-primary" data-click="sendAgentMessage" data-a0="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#message"></use></svg>发送</button>
                             <button class="btn-xs agent-execute-action" data-click="sendAgentMessage" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#play"></use></svg>执行</button>

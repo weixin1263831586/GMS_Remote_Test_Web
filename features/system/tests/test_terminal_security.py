@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 from bootstrap.application import create_app
 from features.auth import auth_service
@@ -94,8 +95,23 @@ class TerminalSecurityTests(unittest.TestCase):
             json={"username": "admin", "password": "strongpass1"},
         )
 
+    def _login_operator(self):
+        auth_service.create_user("operator", "operatorpass1", role="user")
+        return self.client.post(
+            "/api/auth/login",
+            headers={"Origin": "http://testserver"},
+            json={"username": "operator", "password": "operatorpass1"},
+        )
+
     def test_terminal_message_requires_elevation_even_on_non_terminal_socket_name(self):
         self.assertEqual(self._setup_admin().status_code, 200)
+        self.assertEqual(self._login_operator().status_code, 200)
+        with self.assertRaises(WebSocketDisconnect) as rejected, self.client.websocket_connect(
+            "/api/system/websocket/terminal_workspace",
+            headers={"Origin": "http://testserver"},
+        ):
+            self.fail("terminal handshake unexpectedly accepted an ordinary session")
+        self.assertEqual(rejected.exception.code, 4403)
         with self.client.websocket_connect(
             "/api/system/websocket/workspace-bypass-attempt",
             headers={"Origin": "http://testserver"},
@@ -113,18 +129,41 @@ class TerminalSecurityTests(unittest.TestCase):
         self.assertEqual(response["type"], "terminal_error")
         self.assertTrue(response["elevation_required"])
 
-    def test_client_host_is_ignored_in_favor_of_worker_directory(self):
+    def test_open_terminal_rechecks_temporary_elevation(self):
         self.assertEqual(self._setup_admin().status_code, 200)
+        self.assertEqual(self._login_operator().status_code, 200)
+        origin = {"Origin": "http://testserver"}
         self.assertEqual(
             self.client.post(
                 "/api/auth/elevate",
-                headers={"Origin": "http://testserver"},
+                headers=origin,
                 json={"username": "admin", "password": "strongpass1"},
             ).status_code,
             200,
         )
+
+        async def handle_input(_client_id, websocket, _data):
+            await websocket.send_json({"type": "accepted"})
+
+        with (
+            patch("features.system.api.handle_terminal_input", side_effect=handle_input) as handler,
+            self.client.websocket_connect("/api/system/websocket/terminal_workspace", headers=origin) as websocket,
+        ):
+            websocket.send_json({"type": "terminal_input", "input": "test"})
+            self.assertEqual(websocket.receive_json()["type"], "accepted")
+            self.assertEqual(self.client.post("/api/auth/elevation/reset", headers=origin).status_code, 200)
+            for action in ("terminal_input", "terminal_resize", "tradefed_list_results"):
+                websocket.send_json({"type": action})
+                response = websocket.receive_json()
+                self.assertEqual(response["type"], "terminal_error")
+                self.assertTrue(response["elevation_required"])
+            handler.assert_awaited_once()
+
+    def test_admin_login_uses_worker_directory_without_step_up(self):
+        self.assertEqual(self._setup_admin().status_code, 200)
+        self.assertIsNone(self.client.get("/api/auth/status").json()["elevated_until"])
         with self.client.websocket_connect(
-            "/api/system/websocket/terminal-authorized",
+            "/api/system/websocket/terminal_authorized",
             headers={"Origin": "http://testserver"},
         ) as websocket:
             websocket.send_json(
@@ -334,7 +373,7 @@ class TerminalSecurityTests(unittest.TestCase):
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "NEW-SERIAL"}
             ))
 
-        self.assertEqual(websocket.messages[-1]["type"], "terminal_connected")
+        self.assertEqual(websocket.messages[0]["type"], "terminal_connected")
 
         close_websocket_terminal(websocket)
 
@@ -442,7 +481,7 @@ class TerminalSecurityTests(unittest.TestCase):
                 "admin-user-id", websocket, {"mode": "adb", "serial_no": "BACK-SERIAL"}
             ))
 
-        self.assertEqual(websocket.messages[-1]["type"], "terminal_connected")
+        self.assertEqual(websocket.messages[0]["type"], "terminal_connected")
 
         close_websocket_terminal(websocket)
 

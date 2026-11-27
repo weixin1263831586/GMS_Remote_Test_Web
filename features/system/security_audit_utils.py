@@ -89,6 +89,19 @@ AUDIT_CREDENTIAL_BODY_REDACTED = {
 }
 
 
+_PRIVATE_CONTENT_PATHS = (
+    re.compile(r'/api/agent/chat'),
+    re.compile(r'/api/agent/sessions/[^/]+'),
+    re.compile(r'/api/knowledge/ask'),
+    re.compile(r'/api/gms-update-center/requirements(?:/.*)?'),
+    re.compile(r'/api/redmine-agent/evidence/[^/]+/references'),
+)
+
+
+def _is_private_content_path(path: str) -> bool:
+    return any(pattern.fullmatch(path) for pattern in _PRIVATE_CONTENT_PATHS)
+
+
 def can_audit_path(path: str) -> bool:
     if path in AUDIT_SKIP_PATHS:
         return False
@@ -158,6 +171,10 @@ async def summarize_audit_request(request: Request, should_audit: bool) -> dict[
         summary['body'] = dict(AUDIT_CREDENTIAL_BODY_REDACTED)
         return summary
 
+    if _is_private_content_path(request.url.path):
+        summary['body'] = {'captured': False, 'reason': '私有内容正文不记录'}
+        return summary
+
     if 'multipart/form-data' in content_type:
         summary['body'] = {'body_type': 'multipart', 'captured': False, 'reason': '文件上传内容不记录'}
         return summary
@@ -210,6 +227,10 @@ async def summarize_audit_response(
         'content_type': content_type.split(';')[0] if content_type else '',
         'content_length': content_length,
     }
+
+    if _is_private_content_path(path):
+        summary.update({'captured': False, 'reason': '私有内容正文不记录'})
+        return response, summary
 
     if 'application/json' not in content_type or content_encoding:
         return response, summary

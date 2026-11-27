@@ -282,7 +282,7 @@ class ModalRedesignTests(RuntimeUiHarness):
                 }}
             ))
             ids = page.locator('.modal[id]').evaluate_all('els => els.map(el => el.id)')
-            self.assertGreaterEqual(len(ids), 42)
+            self.assertGreaterEqual(len(ids), 41)
             for viewport in [{"width": 1672, "height": 941}, {"width": 390, "height": 844}]:
                 page.set_viewport_size(viewport)
                 page.evaluate("""() => {
@@ -296,13 +296,10 @@ class ModalRedesignTests(RuntimeUiHarness):
                         # These two dialogs require their real controllers/data to
                         # build meaningful content. Opening only the bare template
                         # produces deceptively blank screenshots.
-                        if modal_id == 'config-modal':
-                            page.evaluate('showConfig()')
-                            expect(page.locator('#config-modal-body input').first).to_be_visible()
-                            expect(page.locator('#config-modal-footer')).to_be_visible()
-                            self.assertFalse(page.locator('#elevate-modal').evaluate(
-                                "el => el.classList.contains('show')"
-                            ), 'Isolated config preview must not be obscured by an elevation dialog')
+                        if modal_id == 'sidebar-visibility-modal':
+                            page.evaluate("openSidebarVisibilityModal('system', 'runtime')")
+                            expect(page.locator('#system-config-body input').first).to_be_visible()
+                            expect(page.locator('#system-config-footer')).to_be_visible()
                         elif modal_id == 'guide-image-modal':
                             page.evaluate("""() => {
                                 const image = document.getElementById('guide-image-preview');
@@ -470,12 +467,10 @@ class ModalRedesignTests(RuntimeUiHarness):
             ]:
                 with self.subTest(viewport=viewport):
                     page.set_viewport_size(viewport)
-                    page.goto(self.base_url + "/redmine-agent", wait_until="domcontentloaded")
-                    page.wait_for_function("typeof EmbeddedModalController !== 'undefined'")
-                    page.evaluate("EmbeddedModalController.open('settingsModal')")
-                    content = page.locator("#settingsModal .modal-content")
+                    page.goto(self.base_url + "/redmine-agent?settings=1", wait_until="domcontentloaded")
+                    content = page.locator("#redmine-system-settings")
                     expect(content).to_be_visible()
-                    rows = page.locator("#settingsModal .modal-body > .tech-field-stack").evaluate_all(
+                    rows = page.locator("#redmine-system-settings fieldset > .tech-field-stack").evaluate_all(
                         """nodes => nodes.map(node => {
                           const parent = node.getBoundingClientRect();
                           const children = [...node.children]
@@ -491,7 +486,7 @@ class ModalRedesignTests(RuntimeUiHarness):
                         self.assertLessEqual(row["childBottom"], row["bottom"] + 1, row)
                     for above, below in itertools.pairwise(rows):
                         self.assertLessEqual(above["bottom"], below["top"] + 1, [above, below])
-                    scrolling = page.locator("#settingsModal .modal-body").evaluate(
+                    scrolling = page.locator("html").evaluate(
                         """el => { el.scrollTop = el.scrollHeight; return {
                           scrollTop: el.scrollTop, scrollHeight: el.scrollHeight,
                           clientHeight: el.clientHeight}; }"""

@@ -3,7 +3,6 @@
 // 数据源：GET /api/redmine-agent/daily-brief/latest（只读展示；生成/重分析走 POST）。
 
 var dailyBriefCache = null;
-var dailyBriefConfigCache = null;
 var singleIssueAnalysisRunId = '';
 var singleIssueAnalysisTimer = null;
 var singleIssueAnalysisHistory = [];

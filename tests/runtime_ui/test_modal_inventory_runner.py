@@ -150,10 +150,18 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
 
     def _prepare_content(self, page, modal_id: str):
         # A visible frame alone cannot validate a lazily populated workspace.
-        if modal_id == "config-modal":
-            page.evaluate("() => { void showConfig(); }")
-            expect(page.locator("#config-modal-body input").first).to_be_visible()
-            expect(page.locator("#config-modal-footer")).to_be_visible()
+        if modal_id == "sidebar-visibility-modal":
+            page.evaluate("openSidebarVisibilityModal('system', 'runtime')")
+            expect(page.locator("#system-config-body input").first).to_be_visible()
+            expect(page.locator("#system-config-footer")).to_be_visible()
+            panel = page.locator("#sidebar-settings-panel-system")
+            expect(panel.locator("[data-system-settings-section]")).to_have_count(4)
+            expect(panel.locator(".sidebar-settings-tabs")).to_have_count(0)
+            page.wait_for_function("document.querySelector('#sidebar-settings-panel-system').scrollHeight > document.querySelector('#sidebar-settings-panel-system').clientHeight")
+            panel.evaluate("(el) => { el.scrollTop = el.scrollHeight; }")
+            assert panel.evaluate("(el) => el.scrollTop > 0")
+            expect(page.locator("#gms-assistant-url")).to_be_in_viewport()
+            expect(page.locator('[data-sidebar-settings-tab="system"]')).to_be_in_viewport()
             expect(page.locator("#elevate-modal")).to_be_hidden()
         elif modal_id == "radar-settings-modal":
             page.evaluate("() => { void GmsUpdateRadarSettings.open(); }")

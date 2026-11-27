@@ -339,6 +339,26 @@ class ProviderTests(unittest.TestCase):
             self.assertEqual(hit.source_revision, status.source_revision)
             self.assertIn("PRESSURE_AFTER_KILL", hit.snippet)
 
+    def test_wiki_semantic_recall_is_revision_bound(self):
+        class Embedder:
+            identity = "wiki-test-v1"
+
+            def encode(self, texts):
+                return [[1.0, 0.0] if "LMKD" in text or "xyzcapacity" in text
+                        else [0.0, 1.0] for text in texts]
+
+        provider = self._provider()
+        with self._indexed(provider), patch(
+                "features.knowledge.external.wiki_semantic.local_embedding", return_value=Embedder()):
+            provider.reindex()
+            status = provider.sync_semantic()
+            self.assertTrue(status["coverage_complete"])
+            hits, status = provider.search_with_status("xyzcapacity")
+            self.assertTrue(status["coverage_complete"])
+            self.assertIn("lmkd.md", hits[0].source_path)
+            self.assertEqual(hits[0].source_revision, provider.status().source_revision)
+            self.assertGreater(hits[0].extra["section"]["start_line"], 0)
+
     def test_incremental_reindex_skips_unchanged_and_removes_stale(self):
         provider = self._provider()
         with self._indexed(provider):

@@ -109,6 +109,14 @@
     // Listen for embedded dashboard notifications from iframes
     window.addEventListener('message', function(e) {
         if (e.origin !== window.location.origin) return;
+        if (e.data?.type === 'redmine-settings-saved') {
+            const settingsFrame = document.getElementById('system-redmine-settings-frame');
+            const redmineFrame = document.getElementById('redmine-agent-frame');
+            if (settingsFrame?.contentWindow === e.source && redmineFrame?.getAttribute('src')) {
+                redmineFrame.contentWindow.location.reload();
+            }
+            return;
+        }
         const allowedTypes = new Set([
             'redmine-agent-notification',
             'gms-dashboard-notification',

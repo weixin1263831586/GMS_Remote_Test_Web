@@ -1,0 +1,66 @@
+name: On-prem local LLM and retained RAG replay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onprem-rag-live
+  cancel-in-progress: false
+
+jobs:
+  real-local-model:
+    if: github.repository == 'weixin1263831586/GMS_Remote_Test_Web'
+    runs-on: [self-hosted, linux, x64]
+    timeout-minutes: 65
+    steps:
+      - name: Verify registered lab Runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_NAME" = "ats-041055-64g"
+          test "$(id -un)" = "hcq"
+          test -s "$HOME/GMS_Remote_Test_Web/actions-runner/.runner"
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.10'
+      - name: Isolated regression and actual local model replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          controller="$HOME/GMS_Remote_Test_Web"
+          scratch=$(mktemp -d "$RUNNER_TEMP/rag-live.XXXXXXXX")
+          trap 'rm -rf -- "$scratch"' EXIT
+          python -m venv "$scratch/venv"
+          "$scratch/venv/bin/python" -m pip install --disable-pip-version-check -r requirements-dev.txt
+          export GMS_DATA_ROOT="$scratch/data"
+          export PYTHONDONTWRITEBYTECODE=1
+          export GMS_SKIP_RUNTIME_ENV=1
+          "$scratch/venv/bin/python" -m pytest -q features/retrieval/tests \
+            features/knowledge/tests/test_policy_imports.py \
+            features/knowledge/tests/test_cdd_intelligence.py \
+            features/knowledge/tests/test_intelligent_documents.py \
+            features/redmine/tests/knowledge/test_intelligent_snapshot.py \
+            tests/architecture/test_dependency_rules.py
+          # Do not print model configuration, private text or exception tracebacks.
+          # No production writes except the owner-only evaluation report.
+          unset GMS_SKIP_RUNTIME_ENV
+          set +e
+          "$scratch/venv/bin/python" -m tools.scripts.testing.audit_rag_live \
+            --controller-root "$controller" --data-root "$controller/data" \
+            --manifest "$controller/configs/local/rag-evaluation.json" \
+            --report "$controller/data/rag-evaluation/replay-${{ github.run_id }}-${{ github.run_attempt }}.json" \
+            >"$scratch/replay.log" 2>&1
+          code=$?
+          set -e
+          grep -E '^RAG_(LOCAL_MODEL_PROBE=passed|REAL_CASES=(\{|blocked_)|LIVE_ERROR=[A-Za-z]+$)' "$scratch/replay.log" || true
+          if [ "$code" -eq 2 ]; then
+            echo "::error::Real case replay blocked by missing explicit local authorization manifest or configuration"
+          fi
+          exit "$code"

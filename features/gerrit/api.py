@@ -458,7 +458,20 @@ async def list_gerrit_changes(request: Request, profile_id: str = Query(""), que
                 "message": "Gerrit 看板不需要服务端插件；配置 gerrit_dashboard.base_url 可走 REST，或配置 ssh_host/ssh_user 走 SSH。",
             },
         }
-    result = await query_gerrit_dual_mode(cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"])
+    # Exact commit lookups need current patchset metadata for reproducible SDK correlation.
+    exact_commit_query = bool(re.search(r"(?<![\w:])commit:(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})(?![0-9a-fA-F])",
+                                        effective_query))
+    options = {"commit_message": True} if exact_commit_query else {}
+    result = await query_gerrit_dual_mode(
+        cfg, effective_query, max_changes=_extract_query_limit(effective_query) or cfg["query_limit"], **options,
+    )
+    if exact_commit_query:
+        # Keep patchset identity, but do not expand a dashboard result with commit bodies.
+        items = []
+        for row in result.get("items") or []:
+            item = {key: value for key, value in row.items() if key not in {"commitMessage", "commit_message", "revisions"}}
+            items.append(item)
+        result = {**result, "items": items}
     return {"success": True, "data": {**result, "configured": True, "config": _public_config(cfg, manager=_config_for_request(request)), "profile": profile, "query": effective_query}}
 
 

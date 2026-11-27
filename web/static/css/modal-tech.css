@@ -251,14 +251,6 @@
                 12px 0 0 var(--tech-modal-highlight),
                 18px 0 0 var(--tech-modal-highlight);
 }
-#config-modal .modal-header {
-    background: var(--tech-modal-surface);
-    border-bottom: 1px solid var(--tech-modal-border);
-}
-#config-modal .modal-title,
-#config-modal .modal-close { color: var(--text-primary); }
-#config-modal .modal-close { background: transparent; }
-#config-modal .modal-close:hover { background: var(--lighter-bg); }
 #radar-settings-save { background: var(--tech-modal-accent) !important; }
 
 /* Cluster section-header modals should look like standard header modals. */

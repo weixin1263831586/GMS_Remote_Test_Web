@@ -10,6 +10,7 @@ from features.auth import (
     AUTH_COOKIE_NAME,
     CurrentUser,
     auth_service,
+    is_elevated,
     validate_websocket_request,
 )
 from features.users import format_client_display_id, get_client_ip
@@ -81,9 +82,7 @@ async def authorize_websocket_identity(
     if (
         path_client_id.startswith("terminal_")
         and current_user is not None
-        and not auth_service.get_elevated_until(
-            websocket.cookies.get(AUTH_COOKIE_NAME)
-        )
+        and not is_elevated(websocket, revalidate_session=True)
     ):
         await websocket.close(code=4403)
         return None

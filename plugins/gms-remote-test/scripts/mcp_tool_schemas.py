@@ -1168,6 +1168,8 @@ ALL_TOOLS: list[dict[str, Any]] = [
                 "from this owner's issue description, journals and retained attachment/OCR text. "
                 "Reports per-source matched/no_match/unavailable states and scan coverage. "
                 "Release inclusion does not prove the device contains the fix. "
+                "When explicitly enabled, query=analyze:<question> runs local LLM reading and review on the same owner snapshot; "
+                "rag.claims remain candidate conclusions, and incomplete coverage is never proof of absence. "
                 "CLI equivalent: gms-rt-redmine-references."
             ),
             "inputSchema": {

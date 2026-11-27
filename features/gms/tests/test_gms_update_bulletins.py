@@ -17,6 +17,7 @@ from features.gms.parsing import matched_excerpt
 from features.gms.radar.scanning import batch_changes, inventory_counts
 from features.gms.sources import SOURCES
 from features.gms.update_records import (
+    SCHEMA_VERSION,
     bulletin_detail_coverage,
     init_db,
     query_bulletin_patches,
@@ -195,7 +196,7 @@ def test_schema_migration_is_process_safe_and_preserves_legacy_records(tmp_path)
     with ThreadPoolExecutor(max_workers=4) as pool:
         list(pool.map(migrate, range(4)))
     with sqlite3.connect(path) as conn:
-        assert conn.execute('PRAGMA user_version').fetchone()[0] == 2
+        assert conn.execute('PRAGMA user_version').fetchone()[0] == SCHEMA_VERSION
         assert conn.execute('SELECT patch_id,detail_status FROM gms_update_bulletin_patches').fetchone() == (
             'A-123456789', 'not_scanned',
         )

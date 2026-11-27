@@ -177,8 +177,12 @@ gms-rt-auth-elevation-reset() {
     check_jq || return "$GMS_RT_EXIT_OPERATION"
     local response
     response=$(api_call "/auth/elevation/reset" "POST" "{}") || return $?
-    if echo "$response" | jq -e '.success == true and .elevated == false' >/dev/null 2>&1; then
-        success "Administrator elevation cleared"
+    if echo "$response" | jq -e '.success == true and (.elevated | type == "boolean")' >/dev/null 2>&1; then
+        if echo "$response" | jq -e '.elevated' >/dev/null 2>&1; then
+            success "Temporary elevation cleared; administrator role remains active"
+        else
+            success "Temporary elevation cleared"
+        fi
         echo "$response" | jq '.'
         return 0
     fi

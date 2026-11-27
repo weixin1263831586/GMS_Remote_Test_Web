@@ -1,77 +1,7 @@
 // Redmine daily-brief; loaded by page.html in dependency order.
-function dailyBriefSetting(name) {
-  return document.querySelector('[data-daily-brief-setting="' + name + '"]');
-}
-
-function appendDailyBriefModelOption(select, value, label) {
-  var option = document.createElement('option');
-  option.value = String(value || '');
-  option.textContent = String(label || value || '');
-  select.appendChild(option);
-}
-
-async function loadDailyBriefAgentProfiles(selectedProfile) {
-  var select = dailyBriefSetting('agent_profile');
-  if (!select) return;
-  var selected = String(selectedProfile || '').trim();
-  select.replaceChildren();
-  try {
-    var payload = await api('/api/redmine-agent/daily-brief/agent-profiles') || {};
-    var profiles = Array.isArray(payload.profiles) ? payload.profiles : [];
-    var known = {};
-    if (profiles.length > 1 && !selected) {
-      appendDailyBriefModelOption(select, '', '请选择 kkagent Profile');
-    }
-    profiles.forEach(function(item) {
-      var profile = String(item || '').trim();
-      if (!profile || known[profile]) return;
-      known[profile] = true;
-      appendDailyBriefModelOption(select, profile, profile);
-    });
-    if (!profiles.length) {
-      appendDailyBriefModelOption(select, '', '未发现本机 kkagent Profile');
-    } else if (selected && !known[selected]) {
-      appendDailyBriefModelOption(select, selected, '当前保存的 Profile：' + selected);
-    }
-    select.value = selected || String(payload.default_profile || '').trim();
-  } catch (_) {
-    appendDailyBriefModelOption(select, selected, selected || 'Profile 列表读取失败');
-    select.value = selected;
-  }
-}
-
-async function loadDailyBriefModelOptions(selectedModel) {
-  var select = dailyBriefSetting('model');
-  if (!select) return;
-  var selected = String(selectedModel || '').trim();
-  select.replaceChildren();
-  try {
-    var payload = await api('/api/redmine-agent/daily-brief/model-options') || {};
-    var models = Array.isArray(payload.models) ? payload.models : [];
-    var known = {};
-    models.forEach(function(item) {
-      var model = String((item || {}).model || '').trim();
-      if (!model || known[model]) return;
-      known[model] = true;
-      var display = String((item || {}).display_name || model).trim() || model;
-      var provider = String((item || {}).provider || '').trim();
-      appendDailyBriefModelOption(select, model, provider ? display + '（' + provider + '）' : display);
-    });
-    if (!models.length) {
-      appendDailyBriefModelOption(select, '', '未发现已启用的系统模型（使用 kkagent 默认模型）');
-    } else if (selected && !known[selected]) {
-      appendDailyBriefModelOption(select, selected, '当前保存的模型：' + selected);
-    }
-    select.value = selected || String(payload.default_model || '').trim();
-    if (!select.value && select.options.length) select.selectedIndex = 0;
-  } catch (_) {
-    appendDailyBriefModelOption(select, selected, selected || '模型列表读取失败（使用 kkagent 默认模型）');
-    select.value = selected;
-  }
-}
-
 // Tab changes, visibility events and polling share one refresh to avoid races.
 var dailyBriefLoadPromise = null;
+var dailyBriefConfigCache = null;
 function loadDailyBrief() {
   if (dailyBriefLoadPromise) return dailyBriefLoadPromise;
   dailyBriefLoadPromise = loadDailyBriefOnce().finally(function() {

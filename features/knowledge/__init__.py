@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from features.kkagent import model_catalog_fingerprint
+
 from .api import page_router, router
 from .external import (
     EVIDENCE_LEVEL_BACKGROUND,
@@ -15,9 +17,9 @@ from .external import (
 )
 from .external.web_sources import (
     WebKnowledgeProvider,
-    model_catalog_fingerprint,
     recall_web_references,
 )
+from .model_context import public_cdd_context, retrieve_public_cdd_context
 from .policy_imports import owner_policy_imports_current, recall_owner_policy_imports
 
 
@@ -34,15 +36,19 @@ __all__ = [
     "model_catalog_fingerprint",
     "owner_policy_imports_current",
     "page_router",
+    "public_cdd_context",
     "recall_owner_policy_imports",
     "recall_web_references",
+    "retrieve_public_cdd_context",
     "router",
+    "run_authorized_rag",
     "sync_due_web_sources",
 ]
 
 
 _LAZY_API_EXPORTS = {
     "ExternalSearchRequest": ".external_api",
+    "run_authorized_rag": ".service",
 }
 
 
@@ -59,4 +65,16 @@ def __getattr__(name: str):
 
 
 def sync_due_web_sources():
-    return WebKnowledgeProvider().sync_due()
+    provider = WebKnowledgeProvider()
+    outcomes = provider.sync_due()
+    outcomes.extend(provider.sync_due_semantic())
+    from .service import sync_due_cdd_understanding, wiki_document_understanding
+
+    outcomes.extend(sync_due_cdd_understanding())
+    try:
+        wiki = wiki_document_understanding(sync=True)
+        if wiki.get('status') != 'disabled':
+            outcomes.append({'source_id': 'android_internals', 'operation': 'document_understanding', **wiki})
+    except Exception:
+        outcomes.append({'source_id': 'android_internals', 'operation': 'document_understanding', 'status': 'error'})
+    return outcomes
