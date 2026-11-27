@@ -24,11 +24,11 @@
 .page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input):focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px;
 }
-.page-ui-rework :is(.pane, .list-table-wrap, .users-table-wrap, .audit-table-wrap) {
+.page-ui-rework :is(.list-table-wrap, .users-table-wrap, .audit-table-wrap) {
     min-width: 0; border: 1px solid var(--border-color);
     border-radius: 8px; background: var(--card-bg); box-shadow: none;
 }
-.page-ui-rework :is(.pane-bar, .suite-browser-header, .suite-browser-toolbar, .pane-label) {
+.page-ui-rework .pane-label {
     background: var(--light-bg); border-bottom-color: var(--border-color);
 }
 .page-ui-rework :is(.pane-title, .suite-browser-title, .report-section-head) {
@@ -286,10 +286,6 @@
 #page-notes .kb-source-actions > button { flex-shrink: 0; white-space: nowrap; }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
-#page-notes.page-ui-rework .kb-layout { gap: 10px; }
-#page-notes.page-ui-rework .kb-layout > .pane {
-    display: flex; flex-direction: column; min-height: 0; background: var(--card-bg);
-}
 #page-notes.page-ui-rework #kb-doc-content {
     min-height: 0; border: 0; padding: 12px;
     background: var(--card-bg); color: var(--text-primary); line-height: 1.65;
@@ -618,10 +614,6 @@
 }
 #page-test-suites .suite-browser-layout {
     grid-template-columns: minmax(290px, 315px) minmax(0, 1fr);
-    gap: 10px;
-}
-#page-test-suites.page-ui-rework :is(.suite-browser-toolbar, .suite-browser-header) {
-    background: var(--light-bg); border-bottom: 1px solid var(--border-color);
 }
 #page-test-suites .suite-sidebar-heading {
     display: inline-flex; align-items: center; gap: 7px;
@@ -632,7 +624,6 @@
     background: color-mix(in srgb, var(--primary-color) 23%, transparent);
     color: var(--primary-light); text-align: center;
 }
-#page-test-suites .suite-sidebar-filter { border-bottom: 1px solid var(--border-color); }
 #page-test-suites .suite-browser-filter { display: block; margin: 0; width: 100%; }
 #page-test-suites .suite-browser-list { padding: 6px 8px 8px; }
 #page-test-suites.page-ui-rework .suite-suite-item {
