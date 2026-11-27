@@ -92,12 +92,26 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                         };
                     });
                     const form = document.querySelector('#page-notes [data-kb-source-form]');
+                    const toolbar = form.getBoundingClientRect();
+                    const panel = wrap.getBoundingClientRect();
                     return {rows, scrollable: wrap.scrollWidth > wrap.clientWidth,
+                        panelGap: panel.top - toolbar.bottom,
+                        leftEdgeDelta: panel.left - toolbar.left,
+                        rightEdgeDelta: panel.right - toolbar.right,
+                        toolbarHeight: toolbar.height,
+                        toolbarBottomBorder: getComputedStyle(form).borderBottomWidth,
+                        panelTopBorder: getComputedStyle(wrap).borderTopWidth,
                         inputWidth: form.elements.name.getBoundingClientRect().width,
                         urlWidth: form.elements.url.getBoundingClientRect().width,
                         nameWidth: table.tHead.rows[0].cells[0].getBoundingClientRect().width,
                         actionWidth: table.tHead.rows[0].cells[5].getBoundingClientRect().width};
                 }""")
+                self.assertAlmostEqual(metrics["panelGap"], 8, delta=0.5)
+                self.assertAlmostEqual(metrics["leftEdgeDelta"], 0, delta=0.5)
+                self.assertAlmostEqual(metrics["rightEdgeDelta"], 0, delta=0.5)
+                self.assertAlmostEqual(metrics["toolbarHeight"], 36, delta=0.5)
+                self.assertEqual(metrics["toolbarBottomBorder"], "1px")
+                self.assertEqual(metrics["panelTopBorder"], "1px")
                 self.assertLessEqual(metrics["inputWidth"], 301)
                 if width >= 1440:
                     self.assertGreater(metrics["urlWidth"], metrics["inputWidth"])
