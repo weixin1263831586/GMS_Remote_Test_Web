@@ -1204,21 +1204,6 @@ body.apk-resizing {
 .api-filter-spacer { flex: 1; }
 .filter-btn.tone-primary { background: var(--primary-gradient); color: #fff; }
 .filter-btn.tone-success { background: var(--success-color); color: #fff; }
-.suite-download-section {
-    margin-bottom: 10px;
-    padding: 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--card-bg);
-}
-.suite-download-row {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 8px;
-}
-.suite-download-row > div:first-child { flex: 1; min-width: 200px; }
 #suite-download-url { width: 100%; }
 #btn-download-suite,
 #btn-extract-suite { min-width: 100px; white-space: nowrap; }
@@ -1347,12 +1332,8 @@ body.apk-resizing {
         flex: 1 1 180px;
     }
 
-    .suite-download-section > div:first-child {
-        flex-wrap: wrap !important;
-    }
-
-    .suite-download-section > div:first-child > div,
-    .suite-download-section > div:first-child > button {
+    .suite-download-row > div,
+    .suite-download-row > button {
         flex: 1 1 100%;
         min-width: 0 !important;
         max-width: 100%;
