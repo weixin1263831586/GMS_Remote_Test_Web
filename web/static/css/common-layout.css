@@ -1180,13 +1180,6 @@
     gap: 6px;
     flex-shrink: 0;
 }
-.suite-empty {
-    padding: 20px;
-    text-align: center;
-    color: var(--text-secondary);
-
-}
-
 /* 报告诊断工作台。外框尺寸走 modal-workspace。 */
 
 .report-diagnosis-header {
