@@ -397,8 +397,11 @@ class UiSizingContractTests(unittest.TestCase):
         for role in roles:
             self.assertIn(f"var(--ui-{role})", aoa_source + workspace_source)
         self.assertIn("--ui-control-height", (CSS / "other-workspaces.css").read_text(encoding="utf-8"))
-        self.assertIn("var(--ui-control-height-dialog-field)", (
-            ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8"))
+        redmine = (ROOT / "features/redmine/ui/page.css").read_text(encoding="utf-8")
+        toolbar = re.search(r"\.daily-brief-toolbar \.ka-btn\s*\{([^}]*)\}", redmine)
+        self.assertIsNotNone(toolbar)
+        self.assertNotRegex(toolbar[1], r"(?:^|[;\s])(?:min-height|height|max-height)\s*:")
+        self.assertNotIn("--ui-control-height-dialog-field", toolbar[1])
 
     def test_data_table_geometry_has_one_shared_template(self):
         source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
