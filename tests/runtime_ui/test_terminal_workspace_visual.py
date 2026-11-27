@@ -61,6 +61,13 @@ class TerminalWorkspaceVisualTests(RuntimeUiHarness):
                             leftPadding: getComputedStyle(grid).paddingLeft,
                             rightPadding: getComputedStyle(grid).paddingRight,
                             headerHeight: getComputedStyle(header).height,
+                            labelGeometry: (() => {
+                                const label = grid.querySelector('.host-pane-label');
+                                const icon = getComputedStyle(label.querySelector('.host-pane-label-icon'));
+                                const css = getComputedStyle(label);
+                                return {width: icon.width, height: icon.height, glyph: icon.fontSize,
+                                    label: css.fontSize, weight: css.fontWeight, gap: css.columnGap};
+                            })(),
                             helpRows: grid.querySelectorAll('.host-desktop-meta').length,
                             lazyButtons: grid.querySelectorAll(
                                 '.host-terminal-connect-button[data-click="refreshTerminalWorkspacePane"]').length,
@@ -130,6 +137,10 @@ class TerminalWorkspaceVisualTests(RuntimeUiHarness):
             self.assertEqual(result["quad"]["leftPadding"], "0px")
             self.assertEqual(result["quad"]["rightPadding"], "0px")
             self.assertEqual(result["quad"]["headerHeight"], "34px")
+            self.assertEqual(result["quad"]["labelGeometry"], {
+                "width": "22px", "height": "22px", "glyph": "17px",
+                "label": "12px", "weight": "500", "gap": "6px",
+            })
             self.assertEqual(result["quad"]["helpRows"], 0)
             self.assertEqual(result["quad"]["lazyButtons"], 2)
             self.assertEqual(
