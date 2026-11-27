@@ -452,6 +452,43 @@ class ModalRedesignTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_project_guide_map_allocates_space_to_descriptions(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            self.close_initial_modals(page)
+            for viewport in [
+                {"width": 1672, "height": 941},
+                {"width": 1024, "height": 768},
+                {"width": 390, "height": 844},
+            ]:
+                with self.subTest(viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.evaluate("openSidebarVisibilityModal('guide')")
+                    table = page.locator(".project-guide-map")
+                    expect(table).to_be_visible()
+                    widths = table.evaluate("""table => {
+                        const row = table.rows[0];
+                        return [...row.cells].map(cell => {
+                            const box = cell.getBoundingClientRect();
+                            return {width:box.width, top:box.top, bottom:box.bottom,
+                                    left:box.left, right:box.right};
+                        });
+                    }""")
+                    self.assertLessEqual(abs(widths[0]["width"] - widths[2]["width"]), 1)
+                    self.assertLessEqual(abs(widths[1]["width"] - widths[3]["width"]), 1)
+                    if viewport["width"] > 760:
+                        self.assertAlmostEqual(widths[0]["width"], 140, delta=2)
+                        self.assertGreater(widths[1]["width"], widths[0]["width"])
+                        self.assertAlmostEqual(widths[0]["top"], widths[2]["top"], delta=1)
+                    else:
+                        self.assertGreaterEqual(widths[2]["top"], widths[0]["bottom"] - 1)
+                        self.assertGreater(widths[1]["width"], widths[0]["width"])
+                    self.assertTrue(table.evaluate("el => el.scrollWidth <= el.clientWidth + 2"))
+                    page.evaluate("closeSidebarVisibilityModal()")
+        finally:
+            page.close()
+
     def test_redmine_settings_field_cards_never_overlap(self):
         """Each tall settings card must keep its controls inside its own border.
 
