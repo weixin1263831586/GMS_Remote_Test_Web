@@ -49,14 +49,16 @@
                     <div id="kb-side-info">选择或新建一篇文档。</div>
                 </div>
             </div>
-            <section class="kb-external-layout" data-kb-external hidden>
-                <form class="pane-bar ui-workspace-toolbar" data-kb-source-form>
-                    <input type="text" name="name" class="combo-box ui-workspace-control" placeholder="知识源名称（选填，留空自动获取）" aria-label="知识源名称（选填）" maxlength="160" />
-                    <input type="url" name="url" class="combo-box pane-grow ui-workspace-control" placeholder="请输入外部知识源 HTTPS 网址" aria-label="知识源网址" required maxlength="2048" />
-                    <button type="submit" class="btn-xs btn-primary ui-workspace-control" data-kb-submit data-busy-size="short">添加</button>
-                    <button type="button" class="btn-xs ui-workspace-control" data-kb-reset hidden style="display: none;">取消编辑</button>
-                    <button type="button" class="btn-xs ui-workspace-control" data-kb-refresh data-busy-size="short">刷新</button>
-                </form>
-                <div class="pane-scroll list-table-wrap" data-kb-sources></div>
+            <section class="ui-workspace-stack" data-kb-external hidden>
+                <div class="ui-workspace-panel ui-workspace-toolbar-panel">
+                    <form class="ui-workspace-toolbar" data-kb-source-form>
+                        <input type="text" name="name" class="combo-box ui-workspace-control" placeholder="知识源名称（选填，留空自动获取）" aria-label="知识源名称（选填）" maxlength="160" />
+                        <input type="url" name="url" class="combo-box pane-grow ui-workspace-control" placeholder="请输入外部知识源 HTTPS 网址" aria-label="知识源网址" required maxlength="2048" />
+                        <button type="submit" class="btn-xs btn-primary ui-workspace-control" data-kb-submit data-busy-size="short">添加</button>
+                        <button type="button" class="btn-xs ui-workspace-control" data-kb-reset hidden style="display: none;">取消编辑</button>
+                        <button type="button" class="btn-xs ui-workspace-control" data-kb-refresh data-busy-size="short">刷新</button>
+                    </form>
+                </div>
+                <div class="ui-workspace-panel ui-workspace-content ui-workspace-panel--scroll" data-kb-sources></div>
             </section>
         </div>
