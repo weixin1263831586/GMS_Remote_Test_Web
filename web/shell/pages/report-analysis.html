@@ -2,7 +2,7 @@
     {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📈</span> 报告分析{% include 'components/page-header-end.html' %}
 
     <!-- Analysis workbench: same 84px compact intake and 29px controls as APK. -->
-    <div class="analysis-upload-frame report-workbench-upload">
+    <div class="analysis-upload-frame report-workbench-upload analysis-intake">
         <div id="report-upload-zone" class="report-upload-zone analysis-upload-surface upload-empty">
             <input type="file" id="report-file-input" accept=".xml,.zip,.rar,.tar,.tar.gz,.txt,.log" multiple style="display:none">
             <input type="file" id="report-folder-input" webkitdirectory directory style="display:none">
@@ -31,12 +31,16 @@
                 <div class="report-upload-progress-bar analysis-upload-progress-fill" id="report-progress-fill" style="width:0%"></div>
             </div>
         </div>
-        <div id="report-active-file" class="report-active-file" hidden>
-            <span class="report-active-icon analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#archive"></use></svg></span>
-            <div class="report-active-copy">
-                <div id="report-active-name" class="report-active-name" title=""></div>
-                <div class="report-active-status"><span class="report-active-dot"></span>解析完成</div>
-                <div class="report-active-progress" aria-hidden="true"><span></span></div>
+        <div id="report-active-file" class="report-active-file analysis-status-card" hidden>
+            <div class="analysis-status-row">
+                <div class="report-active-copy analysis-status-main">
+                    <span class="report-active-icon analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#archive"></use></svg></span>
+                    <div id="report-active-name" class="report-active-name analysis-status-name" title=""></div>
+                    <div class="report-active-status analysis-status-text"><span class="report-active-dot"></span>解析完成</div>
+                </div>
+            </div>
+            <div class="analysis-status-progress">
+                <div class="report-active-progress analysis-status-track" aria-hidden="true"><span class="analysis-status-fill" style="width:100%"></span></div>
             </div>
         </div>
     </div>
