@@ -244,7 +244,7 @@
                         cell.title = String(value);
                     }
                     const actions = document.createElement('div');
-                    actions.className = 'kb-source-actions';
+                    actions.className = 'kb-source-actions ui-table-actions ui-table-actions--end';
                     row.insertCell().append(actions);
                     actions.append(button('编辑', () => edit(source)),
                         button('同步', event => run(async () => {
@@ -276,7 +276,7 @@
                     cell.title = value;
                 }
                 const wikiActions = document.createElement('div');
-                wikiActions.className = 'kb-source-actions';
+                wikiActions.className = 'kb-source-actions ui-table-actions ui-table-actions--end';
                 wiki.insertCell().append(wikiActions);
                 wikiActions.append(button('语义索引', event => {
                     semanticIndex('/api/knowledge/external/wiki-semantic-index',
@@ -289,7 +289,7 @@
                     cell.title = value;
                 }
                 const personalActions = document.createElement('div');
-                personalActions.className = 'kb-source-actions';
+                personalActions.className = 'kb-source-actions ui-table-actions ui-table-actions--end';
                 personal.insertCell().append(personalActions);
                 personalActions.append(button('语义索引', event => {
                     semanticIndex('/api/knowledge/semantic-index', event.currentTarget)
@@ -326,7 +326,7 @@
                     : count;
                 partner.cells[4].title = status + (partnerIndex?.indexed_at ? '；索引时间：' + partnerIndex.indexed_at : '');
                 const actions = document.createElement('div');
-                actions.className = 'kb-source-actions';
+                actions.className = 'kb-source-actions ui-table-actions ui-table-actions--end';
                 partner.insertCell().append(actions);
                 const sync = button('同步', event => {
                     run(async () => {
