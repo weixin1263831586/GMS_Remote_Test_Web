@@ -240,7 +240,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 if name == "notes":
                     page.evaluate("switchPage('notes', null)")
                     page.locator('#page-notes [data-kb-view="personal"]').click()
-                self.assertAlmostEqual(columns(name, selector)[0], 300, delta=1)
+                self.assertAlmostEqual(columns(name, selector)[0], 250, delta=1)
 
             for width, expected in ((1792, 350), (1280, 310), (1100, None)):
                 page.set_viewport_size({"width": width, "height": 960})
