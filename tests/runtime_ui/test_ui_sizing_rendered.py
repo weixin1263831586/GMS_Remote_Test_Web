@@ -385,6 +385,13 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                             chartGap: nextRect.top - gridRect.bottom,
                             cardGap: parseFloat(getComputedStyle(grid).columnGap),
                             cardHeights: cards.map(card => card.getBoundingClientRect().height),
+                            cardRadii: cards.map(card => parseFloat(getComputedStyle(card).borderTopLeftRadius)),
+                            icons: cluster ? cards.map(card => {
+                              const icon = card.querySelector('.ui-kpi-icon');
+                              if (!icon) throw new Error('Missing shared KPI icon role');
+                              const rect = icon.getBoundingClientRect();
+                              return {width: rect.width, height: rect.height};
+                            }) : [],
                           };
                         }""",
                         module,
@@ -401,6 +408,12 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                             self.assertAlmostEqual(
                                 card_height, 95, delta=1, msg=str(geometry),
                             )
+                        for radius in geometry['cardRadii']:
+                            self.assertAlmostEqual(radius, 8, delta=1, msg=str(geometry))
+                        for icon in geometry['icons']:
+                            size = 42 if width > 1200 else 34
+                            self.assertAlmostEqual(icon['width'], size, delta=1, msg=str(geometry))
+                            self.assertAlmostEqual(icon['height'], size, delta=1, msg=str(geometry))
                 evidence[str(width)] = measured
             target = os.getenv("GMS_UI_PREVIEW_DIR")
             if target:
@@ -410,6 +423,36 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     json.dumps(evidence, ensure_ascii=False, indent=2),
                     encoding="utf-8",
                 )
+        finally:
+            page.close()
+
+    def test_common_pagination_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for width in (1440, 390):
+                page.set_viewport_size({"width": width, "height": 900})
+                geometry = page.evaluate("""() => {
+                    const host = document.createElement('div');
+                    host.className = 'ui-pagination-footer';
+                    host.style.cssText = 'position:fixed;left:0;top:0;z-index:-1';
+                    host.innerHTML = '<div class="ui-pagination"><button>上一页</button>'
+                      + '<button class="active" disabled>1</button></div>'
+                      + '<select><option>20</option></select>';
+                    document.body.appendChild(host);
+                    try {
+                        return Array.from(host.querySelectorAll('button,select')).map(el => ({
+                            height: el.getBoundingClientRect().height,
+                            radius: parseFloat(getComputedStyle(el).borderTopLeftRadius),
+                        }));
+                    } finally {
+                        host.remove();
+                    }
+                }""")
+                expected = 28 if width > 560 else 40
+                for item in geometry:
+                    self.assertAlmostEqual(item["height"], expected, delta=1)
+                    self.assertAlmostEqual(item["radius"], 6, delta=1)
         finally:
             page.close()
 
