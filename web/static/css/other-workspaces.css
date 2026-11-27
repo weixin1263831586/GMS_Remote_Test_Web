@@ -8,16 +8,10 @@
 }
 .page-ui-rework .page-header-row > .section-title { color: var(--text-primary); }
 .page-ui-rework :is(.page-title-icon, .section-title .ui-icon) { color: var(--primary-light); }
-.page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small, .btn-primary, .btn-danger) {
-    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
-}
-.page-ui-rework :is(.btn-xs, .btn-xxs, .btn-small):hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--primary-color) 60%, var(--border-color));
-}
-.page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input) {
+.page-ui-rework :is(.suite-browser-filter, .suite-file-search, .apk-search-input) {
     border: 1px solid var(--border-color);
     background: var(--darker-bg); color: var(--text-primary);
-    border-radius: 6px; box-shadow: none;
+    border-radius: var(--ui-radius-control); box-shadow: none;
 }
 .page-ui-rework :is(.entry-field, .combo-box, .suite-browser-filter, .suite-file-search, .apk-search-input):focus-visible {
     outline: 2px solid var(--primary-color); outline-offset: 1px;
