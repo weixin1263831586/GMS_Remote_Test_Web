@@ -22,7 +22,7 @@
     --ui-aoa-command-editor-height: 22px;
     --ui-aoa-config-control-height: 27px;
     --ui-aoa-config-control-height-short: 30px;
-    --ui-tab-height: 44px; /* full workbench tab strip */
+    --ui-tab-height: 42px; /* full workbench tab strip */
     --ui-tab-height-narrow: 38px; /* narrow viewport tab strip */
     --ui-touch-target-height: 40px;
     --ui-touch-target-danger-height: 44px;
