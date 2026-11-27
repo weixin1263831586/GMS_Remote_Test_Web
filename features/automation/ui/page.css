@@ -350,7 +350,6 @@ textarea { min-height: 76px; resize: vertical;  }
 }
 .advanced-test-options summary { cursor: pointer; color: var(--muted);  }
 .advanced-test-options label { margin-top: 8px; }
-.log-actions { display: flex; align-items: center; gap: 8px; }
 .create-run-button {
     min-height: var(--ui-control-height-large);
 
@@ -404,12 +403,6 @@ textarea { min-height: 76px; resize: vertical;  }
     background: color-mix(in srgb, var(--dark-bg) 35%, transparent);
 }
 .subtabs-label { color: var(--muted);   margin-right: 6px; }
-.empty-state {
-    color: var(--muted);
-    text-align: center;
-    padding: 48px 12px;
-
-}
 .build-monitor-body {
     display: grid;
     grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
@@ -433,11 +426,7 @@ textarea { min-height: 76px; resize: vertical;  }
 }
 .build-log-pane { min-width: 0; min-height: 0; overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .build-log-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
+    padding: var(--ui-spacing-sm) var(--ui-spacing-md);
     border-bottom: 1px solid var(--line);
 }
 .log-toolbar-actions { flex-wrap: wrap; justify-content: flex-end; }
@@ -620,7 +609,6 @@ textarea { min-height: 76px; resize: vertical;  }
 .event-line-level.info { color: var(--primary-hover); }
 .event-line-message { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .event-line-detail { color: var(--subtle); }
-.event-log-empty { padding: 36px 12px; text-align: center; color: var(--muted); }
 .event-columns-hint { color: var(--subtle);  }
 #run-log-links { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 #run-log-links button,
@@ -688,7 +676,7 @@ textarea { min-height: 76px; resize: vertical;  }
 .dashboard-stats {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 10px;
+    gap: var(--ui-spacing-sm);
 }
 .stat-card .stat-value {
 
