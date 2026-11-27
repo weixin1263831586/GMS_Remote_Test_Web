@@ -23,7 +23,6 @@
 #page-api-docs .api-category-toolbar .api-action-install { background:color-mix(in srgb,var(--success-color) 12%,var(--card-bg));color:var(--success-color); }
 #page-api-docs .api-category-chips { display:flex;flex:1 1 auto;align-items:center;flex-wrap:wrap;gap:5px;min-width:0; }
 #page-api-docs .api-category-actions { display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px;padding-left:8px;border-left:1px solid var(--border-color); }
-#page-api-docs .api-body-grid { grid-template-columns:minmax(0,1fr) minmax(290px,325px);align-items:stretch; }
 #page-api-docs .api-side-heading { display:flex;align-items:center;gap:8px;height:var(--ui-card-heading-height);min-height:var(--ui-card-heading-height);box-sizing:border-box;padding:6px 12px;border-bottom:1px solid var(--border-color);background:var(--light-bg); }
 #page-api-docs .api-side-heading strong { color:var(--text-primary); }
 #page-api-docs .api-side-heading .ui-icon { width:18px;height:18px;color:var(--primary-light); }
@@ -74,6 +73,6 @@
 #page-api-docs .api-notes { margin:0;padding:8px 16px 9px 26px; }
 #page-api-docs .api-notes li { padding:3px 1px;color:var(--text-secondary);line-height:1.5; }
 #page-api-docs .api-notes li::marker { color:var(--primary-light); }
-@media (max-width:1350px) { #page-api-docs .api-body-grid { grid-template-columns:minmax(0,1fr) 285px; } #page-api-docs .api-chart-body { flex-wrap:wrap; } }
-@media (max-width:1100px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } #page-api-docs .api-body-grid { grid-template-columns:minmax(0,1fr); } #page-api-docs .api-side-panels { display:grid;grid-template-columns:repeat(3,minmax(0,1fr)); } }
+@media (max-width:1350px) { #page-api-docs .api-chart-body { flex-wrap:wrap; } }
+@media (max-width:1150px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } #page-api-docs .api-side-panels { display:grid;grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-search-toolbar,#page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-search-box { flex-basis:100%; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }
