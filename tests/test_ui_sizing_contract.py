@@ -177,9 +177,9 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertIn(".btn-act { min-height: var(--ui-control-height-dense);", layout)
 
     def test_stacked_workspace_uses_one_panel_template(self):
-        layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
+        layout = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
         self.assertRegex(layout, r"\.ui-workspace-stack:not\(\[hidden\]\)\s*\{[^}]*gap:\s*var\(--ui-spacing-sm\)")
-        self.assertRegex(layout, r"\.ui-workspace-panel\s*\{[^}]*border-radius:\s*var\(--ui-radius-card\)")
+        self.assertRegex(layout, r"\.ui-panel-frame,[^{}]*\.ui-workspace-panel,[^{}]*\{[^}]*border-radius:\s*var\(--ui-radius-card\)")
         for name in ("notes.html", "test-suites.html"):
             markup = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
             for role in ("ui-workspace-stack", "ui-workspace-toolbar-panel", "ui-workspace-content",
@@ -190,6 +190,23 @@ class UiSizingContractTests(unittest.TestCase):
             self.assertNotRegex(source, r"\.suite-download-section\s*\{")
             self.assertNotIn(".kb-external-layout", source)
 
+    def test_workspace_sidebar_roles(self):
+        for filename, selector in (
+            ("workspace-panels.css", ".agent-layout.agent-layout-with-sessions"),
+            ("common.css", ".kb-layout"),
+            ("common-layout.css", ".suite-browser-layout"),
+        ):
+            css = (CSS / filename).read_text(encoding="utf-8")
+            rule = re.search(re.escape(selector) + r"\s*\{([^}]*)\}", css)
+            self.assertIsNotNone(rule, selector)
+            self.assertIn("grid-template-columns: var(--ui-workspace-navigation-width)", rule[1])
+        for name, selector in (("api-docs.html", "api-body-grid"), ("security-audit.html", "audit-content-grid")):
+            markup = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
+            self.assertRegex(markup, rf'class="{selector} ui-workspace-grid ui-workspace-grid--aside"')
+        for name, selector in (("api-docs-workbench.css", ".api-body-grid"), ("other-workspaces.css", ".audit-content-grid")):
+            css = (CSS / name).read_text(encoding="utf-8")
+            self.assertNotRegex(css, re.escape(selector) + r"\s*\{[^}]*grid-template-columns")
+
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {
@@ -197,6 +214,9 @@ class UiSizingContractTests(unittest.TestCase):
             "control-height": 32,
             "control-height-dense": 28,
             "workspace-toolbar-height": 36,
+            "workspace-navigation-width": 300,
+            "workspace-aside-min": 305,
+            "workspace-aside-max": 350,
             "control-height-small": 26,
             "segmented-inner-height": 24,
             "table-header-height": 38,
