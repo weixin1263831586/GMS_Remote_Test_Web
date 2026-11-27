@@ -7,22 +7,22 @@
                     </div>
                 </div>
             {% include 'components/page-header-end.html' %}
-            <div class="kb-layout split-layout">
-                <div class="pane">
-                    <div class="pane-bar spread ui-workspace-toolbar">
+            <div class="kb-layout ui-workspace-grid">
+                <div class="ui-workspace-panel">
+                    <div class="pane-bar spread ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                         <span class="pane-title">知识库</span>
                         <button class="btn-xs pane-icon-btn ui-workspace-control" data-click="kbNewSpace">＋</button>
                     </div>
                     <div id="kb-space-list"></div>
                     <div class="pane-label">目录</div>
-                    <div id="kb-tree" class="pane-scroll"></div>
+                    <div id="kb-tree" class="ui-workspace-scroll"></div>
                     <div class="pane-foot">
                         <button class="btn-xs" data-click="kbNewFolder">新目录</button>
                         <button class="btn-xs btn-primary" data-click="kbNewDoc">新文档</button>
                     </div>
                 </div>
-                <div class="pane">
-                    <div class="pane-bar ui-workspace-toolbar">
+                <div class="ui-workspace-panel">
+                    <div class="pane-bar ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                         <input type="text" id="kb-search-input" class="combo-box pane-grow ui-workspace-control" placeholder="全库搜索文档、标签、附件..." data-keydown="kbSearch" data-key="Enter" />
                         <button class="btn-xs ui-workspace-control" data-busy-size="short" data-click="kbSearch">搜索</button>
                     </div>
@@ -31,16 +31,16 @@
                         <button class="btn-xs" data-click="kbOpenUpload">上传文件入库</button>
                     </div>
                 </div>
-                <div class="pane">
+                <div class="ui-workspace-panel">
                     <div id="kb-editor">
-                        <div class="kb-editor-toolbar pane-bar ui-workspace-toolbar">
+                        <div class="kb-editor-toolbar pane-bar ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                             <input id="kb-doc-title" class="combo-box pane-grow ui-workspace-control" placeholder="文档标题" />
                             <button class="btn-xs ui-workspace-control" data-click="kbToggleFavorite">收藏</button>
                             <button class="btn-xs ui-workspace-control" data-click="kbShowHistory">历史</button>
                             <button class="btn-xs btn-primary ui-workspace-control" data-click="kbSaveDoc">保存</button>
                             <button class="btn-xs btn-danger-quiet ui-workspace-control" data-click="kbDeleteCurrent">删除</button>
                         </div>
-                        <div class="kb-editor-tags pane-bar ui-workspace-toolbar">
+                        <div class="kb-editor-tags pane-bar ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                             <input id="kb-doc-tags" class="combo-box pane-grow ui-workspace-control" placeholder="标签，逗号分隔" />
                             <button class="btn-xs ui-workspace-control" data-click="kbAsk">问答</button>
                         </div>
