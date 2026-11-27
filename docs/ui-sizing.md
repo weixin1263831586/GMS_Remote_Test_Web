@@ -78,3 +78,9 @@ tests/runtime_ui/test_workspaces.py`。建议在桌面宽度 1440/1792px
 修改 `ui-sizing.css` 的全局尺寸角色后，**所有独立工作区和 Shell 入口**
 必须同时更新样式 URL 版本，避免旧浏览器缓存缺失新变量。
 `test_geometry_cache_version_is_consistent_between_ui_roots` 用于检查版本一致性。
+
+## KPI、看板控件与表格操作
+
+普通 KPI 卡片共用 95px 高度、8px 圆角及主题面板边框。图标式卡片由 `ui-foundations.css` 提供共同结构，桌面图标容器 42×42px、图标 25×25px；窄屏使用共同的紧凑尺寸。Redmine/Gerrit 居中计数卡、GMS ATS 纵向统计卡保留各自内容角色，业务网格列数及状态颜色不强制相同。报告分析的专属统计条不改动。
+
+Redmine/Gerrit 通过 `ui-dashboard` 共用普通按钮、输入/选择框及页头筛选布局。普通控件 32px，紧凑筛选 28px，移动端触控要求保留。分页采用 `ui-pagination`，页码控件 28px，`ui-pagination-footer` 管理页大小选择框；表格操作组采用 `ui-table-actions`，可通过修饰类指定右对齐。弹框共用科技风底部按钮布局，特定业务宽度及文件浏览、复杂内容布局仍独立。
