@@ -5,94 +5,96 @@
                 </label>
             {% include 'components/page-header-end.html' %}
 
-            <!-- 下载和解压区域 -->
-            <div class="suite-download-section">
-                <div class="suite-download-row ui-workspace-toolbar">
-                    <div class="suite-download-label">
-                        <span class="suite-download-symbol" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#download"></use></svg></span>
-                        <span><strong>套件下载</strong></span>
-                    </div>
-                    <div class="suite-download-field">
-                        <input type="text" id="suite-download-url" class="combo-box ui-workspace-control" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" />
-                    </div>
-                    <button id="btn-download-suite" class="btn-primary ui-workspace-control" data-click="downloadTestSuite">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 下载套件
-                    </button>
-                    <button id="btn-extract-suite" class="btn-primary ui-workspace-control" data-click="extractTestSuite">
-                        <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 解压套件
-                    </button>
-                </div>
-                <!-- 下载进度 -->
-                <div id="suite-download-progress" style="display: none;">
-                    <div class="suite-progress-row">
-                        <span id="suite-progress-status" class="suite-progress-status">正在下载...</span>
-                        <div class="suite-progress-track">
-                            <div id="suite-progress-bar"></div>
+            <div class="ui-workspace-stack">
+                <!-- 下载和解压区域 -->
+                <div class="suite-download-section ui-workspace-panel ui-workspace-toolbar-panel">
+                    <div class="suite-download-row ui-workspace-toolbar">
+                        <div class="suite-download-label">
+                            <span class="suite-download-symbol" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#download"></use></svg></span>
+                            <span><strong>套件下载</strong></span>
                         </div>
-                        <span id="suite-progress-percent" class="suite-progress-percent">0%</span>
+                        <div class="suite-download-field">
+                            <input type="text" id="suite-download-url" class="combo-box ui-workspace-control" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" />
+                        </div>
+                        <button id="btn-download-suite" class="btn-primary ui-workspace-control" data-click="downloadTestSuite">
+                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 下载套件
+                        </button>
+                        <button id="btn-extract-suite" class="btn-primary ui-workspace-control" data-click="extractTestSuite">
+                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 解压套件
+                        </button>
                     </div>
-                </div>
-            </div>
-
-            <div class="suite-browser-layout">
-                <div class="suite-browser-sidebar">
-                    <div class="suite-browser-toolbar ui-workspace-toolbar">
-                        <div class="suite-sidebar-heading">套件列表 <span id="suite-browser-count" class="suite-browser-count">0</span></div>
-                        <button class="btn-xs ui-workspace-control" data-click="refreshTestSuiteBrowser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                    <!-- 下载进度 -->
+                    <div id="suite-download-progress" style="display: none;">
+                        <div class="suite-progress-row">
+                            <span id="suite-progress-status" class="suite-progress-status">正在下载...</span>
+                            <div class="suite-progress-track">
+                                <div id="suite-progress-bar"></div>
+                            </div>
+                            <span id="suite-progress-percent" class="suite-progress-percent">0%</span>
+                        </div>
                     </div>
-                    <div class="suite-sidebar-filter ui-workspace-toolbar">
-                        <input type="text" id="suite-browser-filter" class="suite-browser-filter ui-workspace-control" placeholder="按名称、类型或路径筛选..."
-                               data-input="filterTestSuiteBrowserList" />
-                    </div>
-                    <div id="suite-browser-list" class="suite-browser-list">
-                        <div class="suite-empty">正在加载...</div>
-                    </div>
-                    <div class="suite-sidebar-footer"><span class="suite-online-dot"></span> 列表来自当前选择的 Worker</div>
                 </div>
 
-                <div class="suite-browser-main">
-                    <div class="suite-browser-header ui-workspace-toolbar">
-                        <div class="suite-browser-identity">
-                            <span id="suite-browser-type" class="suite-header-type" hidden></span>
-                            <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
-                            <div id="suite-browser-path" class="suite-browser-path" title=""></div>
+                <div class="suite-browser-layout ui-workspace-content">
+                    <div class="suite-browser-sidebar ui-workspace-panel">
+                        <div class="suite-browser-toolbar ui-workspace-toolbar">
+                            <div class="suite-sidebar-heading">套件列表 <span id="suite-browser-count" class="suite-browser-count">0</span></div>
+                            <button class="btn-xs ui-workspace-control" data-click="refreshTestSuiteBrowser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                         </div>
-                        <div class="suite-browser-actions">
-                            <button id="btn-copy-test-report" class="btn-xs ui-workspace-control" data-click="openReportCopyModal" title="在同一主机或不同主机的测试套件之间复制 Tradefed results 报告">
-                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#copy"></use></svg> 拷贝报告
-                            </button>
-                            <button id="btn-test-results" class="btn-xs ui-workspace-control" data-click="openTestResultsModal" title="执行 tradefed list results 查看该套件的测试结果">
-                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 测试结果列表
-                            </button>
-                            <button id="btn-add-local-suite" class="btn-xs ui-workspace-control" data-click="showAddLocalSuiteDialog">
-                                <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg> 添加本地路径
-                            </button>
+                        <div class="suite-sidebar-filter ui-workspace-toolbar">
+                            <input type="text" id="suite-browser-filter" class="suite-browser-filter ui-workspace-control" placeholder="按名称、类型或路径筛选..."
+                                   data-input="filterTestSuiteBrowserList" />
                         </div>
+                        <div id="suite-browser-list" class="suite-browser-list">
+                            <div class="suite-empty">正在加载...</div>
+                        </div>
+                        <div class="suite-sidebar-footer"><span class="suite-online-dot"></span> 列表来自当前选择的 Worker</div>
                     </div>
-                    <div class="suite-search-bar ui-workspace-toolbar" role="toolbar" aria-label="文件浏览操作">
-                        <nav id="suite-browser-breadcrumb" class="suite-browser-breadcrumb" aria-label="当前目录导航"></nav>
-                        <div class="suite-search-field">
-                            <input type="text" id="suite-file-search" class="suite-file-search ui-workspace-control"
-                                   placeholder="搜索文件或目录..." aria-label="搜索套件文件或目录"
-                                   data-keydown="handleSuiteFileSearchKeydown" data-r0="event" autocomplete="off" />
-                            <button class="btn-xs suite-search-submit ui-workspace-control" data-click="searchSuiteFiles">搜索</button>
-                            <button class="btn-xs ui-workspace-control" data-click="clearSuiteFileSearch">清除</button>
+
+                    <div class="suite-browser-main ui-workspace-panel">
+                        <div class="suite-browser-header ui-workspace-toolbar">
+                            <div class="suite-browser-identity">
+                                <span id="suite-browser-type" class="suite-header-type" hidden></span>
+                                <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
+                                <div id="suite-browser-path" class="suite-browser-path" title=""></div>
+                            </div>
+                            <div class="suite-browser-actions">
+                                <button id="btn-copy-test-report" class="btn-xs ui-workspace-control" data-click="openReportCopyModal" title="在同一主机或不同主机的测试套件之间复制 Tradefed results 报告">
+                                    <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#copy"></use></svg> 拷贝报告
+                                </button>
+                                <button id="btn-test-results" class="btn-xs ui-workspace-control" data-click="openTestResultsModal" title="执行 tradefed list results 查看该套件的测试结果">
+                                    <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> 测试结果列表
+                                </button>
+                                <button id="btn-add-local-suite" class="btn-xs ui-workspace-control" data-click="showAddLocalSuiteDialog">
+                                    <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg> 添加本地路径
+                                </button>
+                            </div>
                         </div>
-                        <div class="suite-context-actions">
-                            <div id="suite-browser-run-actions" class="suite-run-actions" aria-label="运行结果操作"></div>
+                        <div class="suite-search-bar ui-workspace-toolbar" role="toolbar" aria-label="文件浏览操作">
+                            <nav id="suite-browser-breadcrumb" class="suite-browser-breadcrumb" aria-label="当前目录导航"></nav>
+                            <div class="suite-search-field">
+                                <input type="text" id="suite-file-search" class="suite-file-search ui-workspace-control"
+                                       placeholder="搜索文件或目录..." aria-label="搜索套件文件或目录"
+                                       data-keydown="handleSuiteFileSearchKeydown" data-r0="event" autocomplete="off" />
+                                <button class="btn-xs suite-search-submit ui-workspace-control" data-click="searchSuiteFiles">搜索</button>
+                                <button class="btn-xs ui-workspace-control" data-click="clearSuiteFileSearch">清除</button>
+                            </div>
+                            <div class="suite-context-actions">
+                                <div id="suite-browser-run-actions" class="suite-run-actions" aria-label="运行结果操作"></div>
+                            </div>
                         </div>
-                    </div>
-                    <div id="suite-search-results" class="suite-search-results"></div>
-                    <div class="suite-file-table" role="table" aria-label="测试套件文件浏览">
-                        <div class="suite-file-table-head" role="row">
-                            <span role="columnheader">文件名称</span>
-                            <span role="columnheader">说明</span>
-                            <span role="columnheader">类型</span>
-                            <span role="columnheader">大小</span>
-                            <span role="columnheader">操作</span>
-                        </div>
-                        <div id="suite-file-list" class="suite-file-list" role="rowgroup">
-                            <div class="suite-empty">从左侧选择一个测试套件</div>
+                        <div id="suite-search-results" class="suite-search-results"></div>
+                        <div class="suite-file-table" role="table" aria-label="测试套件文件浏览">
+                            <div class="suite-file-table-head" role="row">
+                                <span role="columnheader">文件名称</span>
+                                <span role="columnheader">说明</span>
+                                <span role="columnheader">类型</span>
+                                <span role="columnheader">大小</span>
+                                <span role="columnheader">操作</span>
+                            </div>
+                            <div id="suite-file-list" class="suite-file-list" role="rowgroup">
+                                <div class="suite-empty">从左侧选择一个测试套件</div>
+                            </div>
                         </div>
                     </div>
                 </div>
