@@ -5,20 +5,20 @@
                 <button class="btn-xs" data-click="exportAgentSessionTranscript"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg>导出记录</button>
             {% include 'components/page-header-end.html' %}
 
-            <div class="split-layout agent-layout agent-layout-with-sessions">
-                <div class="pane agent-sessions-pane">
-                    <div class="agent-sessions-heading ui-workspace-toolbar">
+            <div class="ui-workspace-grid agent-layout agent-layout-with-sessions">
+                <div class="ui-workspace-panel agent-sessions-pane">
+                    <div class="agent-sessions-heading ui-workspace-toolbar ui-workspace-divider">
                         <strong>会话列表</strong>
                     </div>
-                    <div class="agent-session-search ui-workspace-toolbar">
+                    <div class="agent-session-search ui-workspace-toolbar ui-workspace-divider">
                         <input id="agent-session-search" class="entry-field ui-workspace-control" type="search" placeholder="搜索会话标题" data-input="renderAgentSessionDirectory" autocomplete="off">
                     </div>
-                    <div id="agent-session-list">
+                    <div id="agent-session-list" class="ui-workspace-scroll">
                         <div class="agent-session-empty">暂无历史会话</div>
                     </div>
                 </div>
-                <div class="pane agent-conversation-pane">
-                    <div class="agent-conversation-heading ui-workspace-toolbar">
+                <div class="ui-workspace-panel agent-conversation-pane">
+                    <div class="agent-conversation-heading ui-workspace-toolbar ui-workspace-divider">
                         <strong>任务对话</strong>
                         <div class="agent-heading-status">
                             <span id="agent-engine-status" data-state="idle">对话引擎：待连接</span>
@@ -41,8 +41,8 @@
                         </div>
                     </div>
                 </div>
-                <div class="pane agent-execution-pane">
-                    <div class="agent-run-header ui-workspace-toolbar">
+                <div class="ui-workspace-panel agent-execution-pane">
+                    <div class="agent-run-header ui-workspace-toolbar ui-workspace-divider">
                         <div class="agent-run-title">执行步骤</div>
                         <span id="agent-status">idle</span>
                     </div>
