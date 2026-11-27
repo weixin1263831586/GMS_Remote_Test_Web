@@ -1206,30 +1206,9 @@ td.table-placeholder {
 .page-header-actions label input[type="checkbox"] { cursor: pointer; }
 
 /* 知识库、对话 Agent 等分栏页共用的面板。列宽由 .kb-layout / .agent-layout 决定。 */
-.split-layout {
-    display: grid;
-    gap: 10px;
-    flex: 1;
-    min-height: 0;
-}
-.agent-layout { grid-template-columns: minmax(0, 1fr) 340px; }
+
 .kb-layout { grid-template-columns: 220px 300px minmax(0, 1fr); }
-.pane {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    overflow: hidden;
-}
-.pane-bar {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 10px;
-    border-bottom: 1px solid var(--border-color);
-}
+
 .pane-bar.spread { justify-content: space-between; }
 .pane-bar.end { align-items: flex-end; }
 .pane-label {
@@ -1239,7 +1218,6 @@ td.table-placeholder {
 
 
 }
-.pane-scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .pane-foot {
     display: flex;
     gap: 6px;
