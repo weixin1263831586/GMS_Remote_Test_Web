@@ -699,16 +699,6 @@ textarea { min-height: 76px; resize: vertical;  }
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
     gap: 10px;
 }
-.stat-card {
-    min-height: var(--ui-stat-height);
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    padding: 14px;
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
 .stat-card .stat-value {
 
 
@@ -989,7 +979,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 
 /* ATS：工作流区沿用 Agent 任务步骤的紧凑层级，保留 pane/Tab 结构。 */
 
-:where(.panel, .dash-stat-card, .stat-card, .overview-card, .run-card) {
+:where(.panel, .dash-stat-card, .overview-card, .run-card) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: none;
 }
