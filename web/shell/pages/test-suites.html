@@ -35,13 +35,13 @@
                     </div>
                 </div>
 
-                <div class="suite-browser-layout ui-workspace-content">
+                <div class="suite-browser-layout ui-workspace-grid ui-workspace-content">
                     <div class="suite-browser-sidebar ui-workspace-panel">
-                        <div class="suite-browser-toolbar ui-workspace-toolbar">
+                        <div class="suite-browser-toolbar ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                             <div class="suite-sidebar-heading">套件列表 <span id="suite-browser-count" class="suite-browser-count">0</span></div>
                             <button class="btn-xs ui-workspace-control" data-click="refreshTestSuiteBrowser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
                         </div>
-                        <div class="suite-sidebar-filter ui-workspace-toolbar">
+                        <div class="suite-sidebar-filter ui-workspace-toolbar ui-workspace-divider">
                             <input type="text" id="suite-browser-filter" class="suite-browser-filter ui-workspace-control" placeholder="按名称、类型或路径筛选..."
                                    data-input="filterTestSuiteBrowserList" />
                         </div>
@@ -52,7 +52,7 @@
                     </div>
 
                     <div class="suite-browser-main ui-workspace-panel">
-                        <div class="suite-browser-header ui-workspace-toolbar">
+                        <div class="suite-browser-header ui-workspace-toolbar ui-workspace-heading ui-workspace-divider">
                             <div class="suite-browser-identity">
                                 <span id="suite-browser-type" class="suite-header-type" hidden></span>
                                 <div id="suite-browser-title" class="suite-browser-title">请选择测试套件</div>
@@ -70,7 +70,7 @@
                                 </button>
                             </div>
                         </div>
-                        <div class="suite-search-bar ui-workspace-toolbar" role="toolbar" aria-label="文件浏览操作">
+                        <div class="suite-search-bar ui-workspace-toolbar ui-workspace-divider" role="toolbar" aria-label="文件浏览操作">
                             <nav id="suite-browser-breadcrumb" class="suite-browser-breadcrumb" aria-label="当前目录导航"></nav>
                             <div class="suite-search-field">
                                 <input type="text" id="suite-file-search" class="suite-file-search ui-workspace-control"
