@@ -1091,7 +1091,7 @@ body {
 /* 页面顶部统计卡公共规范（用户/设备/审计/API 页共享；原为各页复制的
    内联样式）。line-height 必须显式声明：button 卡（users 筛选卡）的
    UA 默认 line-height:normal 会覆盖继承值，导致同一模板出现两种卡高。 */
-.page-stat-row { display: flex; gap: 15px; margin-bottom: 10px; }
+.page-stat-row { display: flex; gap: var(--ui-spacing-sm); margin-bottom: 10px; }
 .page-stat-card {
     background: var(--light-bg);
     border: 1px solid var(--border-color);
