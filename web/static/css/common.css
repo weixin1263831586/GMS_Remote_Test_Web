@@ -1121,11 +1121,6 @@ body {
 .page-stat-value.tone-skill { color: var(--skill-accent); }
 
 /* 设备 / 报告 / 审计 / 接口列表共用的表格壳。列宽仍由页面声明。 */
-.list-table-wrap {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-}
 .list-table {
     width: 100%;
     border-collapse: collapse;
