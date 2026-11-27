@@ -470,6 +470,25 @@ class ModalRedesignTests(RuntimeUiHarness):
                     page.goto(self.base_url + "/redmine-agent?settings=1", wait_until="domcontentloaded")
                     content = page.locator("#redmine-system-settings")
                     expect(content).to_be_visible()
+                    expect(content.locator(".modal-buttons")).to_have_count(0)
+                    actions = content.locator(".settings-action-row")
+                    expect(actions).to_have_count(4)
+                    for action in actions.all():
+                        self.assertTrue(action.evaluate("""el => {
+                            const box = el.getBoundingClientRect();
+                            const button = el.querySelector('button').getBoundingClientRect();
+                            return getComputedStyle(el).display === 'flex'
+                                && button.right <= box.right + 1
+                                && button.bottom <= box.bottom + 1
+                                && getComputedStyle(el).paddingTop === '0px'
+                                && getComputedStyle(el).paddingBottom === '0px';
+                        }"""))
+                        if viewport["width"] >= 1000:
+                            self.assertTrue(action.evaluate("""el => {
+                                const status = el.querySelector('[role="status"]');
+                                return Boolean(status?.textContent.trim())
+                                    || el.clientHeight <= el.querySelector('button').offsetHeight + 4;
+                            }"""))
                     rows = page.locator("#redmine-system-settings fieldset > .tech-field-stack").evaluate_all(
                         """nodes => nodes.map(node => {
                           const parent = node.getBoundingClientRect();
