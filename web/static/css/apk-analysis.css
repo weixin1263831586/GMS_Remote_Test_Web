@@ -44,23 +44,14 @@
     border-radius: 6px;
 }
 
-.apk-status-row,
 .apk-tab-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
-.apk-status-main { display: flex; align-items: center; gap: 12px; }
 .apk-status-actions { display: flex; gap: 8px; }
 .apk-tab-actions .apk-status-actions { gap: 4px; }
 #apk-analysis-state { color: var(--success-color);  }
-.apk-progress-track {
-    height: 4px;
-    margin-top: 12px;
-    overflow: hidden;
-    border-radius: 2px;
-    background: var(--darker-bg);
-}
 .apk-section-title { margin-bottom: 12px;   }
 #apk-permissions-list { max-height: 600px; overflow-y: auto; }
 .apk-source-frame {
