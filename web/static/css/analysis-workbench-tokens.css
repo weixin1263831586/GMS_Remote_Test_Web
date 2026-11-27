@@ -6,7 +6,7 @@
     --analysis-compact-upload-height: 84px;
     --analysis-pane-heading-height: 39px;
     --analysis-pane-radius: var(--ui-radius-card);
-    --analysis-pane-gap: 9px;
+    --analysis-pane-gap: var(--ui-spacing-sm);
 
 }
 
@@ -19,17 +19,85 @@
     margin-bottom: 1px;
 }
 
-/* Both pages intentionally share the SAME empty-state page and drop surfaces. */
-:is(#page-apk-analysis, #page-report-analysis) {
-    background: var(--page-background);
+/* Shared intake lane: one panel when empty, two equal-height panels with an active file. */
+.analysis-intake {
+    display: grid;
+    grid-template-columns: minmax(270px, .38fr) minmax(0, .62fr);
+    flex: 0 0 auto;
+    align-items: stretch;
+    gap: var(--analysis-pane-gap);
+    min-width: 0;
+    margin: 0 0 var(--analysis-pane-gap);
 }
-:is(#page-apk-analysis, #page-report-analysis) .analysis-upload-frame:has(.upload-empty) {
-    background: transparent;
-    box-shadow: none;
+.analysis-intake:has(.upload-empty) { grid-template-columns: minmax(0, 1fr); }
+.analysis-intake > .analysis-upload-frame { min-width: 0; display: flex; }
+.analysis-intake > .analysis-upload-frame > .analysis-upload-surface { flex: 1 1 auto; }
+.analysis-intake .analysis-status-card[hidden] { display: none; }
+.analysis-intake .analysis-status-card {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-width: 0;
+    min-height: var(--analysis-compact-upload-height);
+    height: 100%;
+    padding: 10px 12px;
+    gap: 6px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-card);
+    background: var(--analysis-workbench-surface);
 }
-:is(#page-apk-analysis, #page-report-analysis)
-    :is(#apk-upload-zone.upload-empty, #report-upload-zone.upload-empty) {
-    background: var(--analysis-workbench-stage);
+.analysis-status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-width: 0;
+}
+.analysis-status-main {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 3px 10px;
+    align-items: center;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.analysis-status-main > .analysis-upload-symbol { grid-column: 1; grid-row: 1 / 3; }
+.analysis-status-name {
+    grid-column: 2;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+}
+.analysis-status-text {
+    grid-column: 2;
+    min-width: 0;
+    color: var(--success-color);
+}
+.analysis-status-progress { margin-left: 46px; }
+.analysis-status-track {
+    height: 3px;
+    overflow: hidden;
+    background: var(--darker-bg);
+    border-radius: 3px;
+}
+.analysis-status-fill {
+    display: block;
+    height: 100%;
+    background: #7c709f;
+    transition: width .3s ease;
+}
+@media (max-width: 1100px) {
+    .analysis-intake:not(:has(.upload-empty)) {
+        grid-template-columns: minmax(240px, .45fr) minmax(0, .55fr);
+    }
+}
+@media (max-width: 850px) {
+    .analysis-intake, .analysis-intake:not(:has(.upload-empty)) { grid-template-columns: minmax(0, 1fr); }
+    .analysis-status-row { flex-wrap: wrap; }
 }
 
 /* Shared analysis intake components; business modules retain their own layout and state. */
@@ -38,7 +106,15 @@
     --analysis-upload-accent-line: #7c709f;
     --analysis-upload-accent-wash: rgba(138, 126, 182, .11);
     box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     position: relative;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-card);
+    background: var(--analysis-workbench-surface);
     overflow: hidden;
     text-align: center;
     cursor: pointer;
@@ -50,10 +126,9 @@
     min-height: 200px;
     max-height: 290px;
     flex: 0 0 auto;
-    border: 1px solid var(--border-color);
-    border-radius: var(--ui-radius-card);
     background: var(--analysis-workbench-stage);
 }
+.analysis-upload-surface:not(.upload-empty) { min-height: var(--analysis-compact-upload-height); }
 .analysis-upload-surface:hover {
     background: color-mix(in srgb, var(--analysis-upload-accent) 5%, var(--analysis-workbench-stage));
     border-color: var(--analysis-upload-accent-line);
@@ -106,7 +181,8 @@
 .analysis-upload-surface.upload-empty .analysis-upload-row {
     gap: 14px;
     flex-wrap: wrap;
-    max-width: min(750px, 95%);
+    width: fit-content;
+    max-width: 95%;
 }
 .analysis-upload-surface.upload-empty .analysis-upload-copy { flex: 0 1 auto; }
 .analysis-upload-row > button {
@@ -114,6 +190,7 @@
     flex: 0 0 auto;
     min-width: 0;
     width: auto;
+    height: var(--ui-control-height);
     min-height: var(--ui-control-height);
     max-width: 100%;
     margin: 0;
@@ -144,6 +221,7 @@
 @media (max-width: 760px) {
     .analysis-upload-surface.upload-empty { min-height: 210px; }
     .analysis-upload-row { flex-wrap: wrap; justify-content: flex-start; }
-    .analysis-upload-row .analysis-upload-copy { flex: 1 1 calc(100% - 50px); }
+    .analysis-upload-surface.upload-empty .analysis-upload-row { width: 100%; }
+    .analysis-upload-surface .analysis-upload-row .analysis-upload-copy { flex: 1 1 calc(100% - 50px); }
     .analysis-upload-row > button { margin-left: 46px; }
 }
