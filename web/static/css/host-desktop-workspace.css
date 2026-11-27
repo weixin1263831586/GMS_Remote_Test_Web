@@ -3,22 +3,6 @@
  * 页面外框、布局按钮、终端页、noVNC iframe 尺寸与连接机制均不修改。
  * 字体和字号仍使用全局 typography 规则。
  */
-#page-desktop.page-ui-rework .host-desktop-screen-label {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: none;
-    width: 22px;
-    height: 22px;
-    /* Icon glyph sizing is centralized in typography/roles-and-pages.css. */
-    line-height: 1;
-    white-space: nowrap;
-}
-#page-desktop.page-ui-rework .host-desktop-type-label {
-    flex: 0 0 auto;
-    color: var(--text-secondary);
-    white-space: nowrap;
-}
 #page-desktop.page-ui-rework .host-desktop-status {
     flex: 0 0 auto;
     max-width: 138px;
