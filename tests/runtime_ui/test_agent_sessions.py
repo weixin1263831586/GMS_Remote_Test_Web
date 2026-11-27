@@ -131,6 +131,48 @@ class AgentSessionDirectoryTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_compact_knowledge_and_suite_toolbars_share_geometry(self):
+        page = self.new_page()
+        try:
+            page.set_viewport_size({"width": 1792, "height": 960})
+            self.goto_shell(page)
+
+            def check(root, selectors, *, aligned=False):
+                metrics = page.locator(root).evaluate("""(root, selectors) => {
+                    const rows = selectors.map(s => root.querySelector(s));
+                    return rows.map(row => ({
+                        height: row.getBoundingClientRect().height,
+                        bottom: row.getBoundingClientRect().bottom,
+                        controls: [...row.querySelectorAll('.ui-workspace-control')]
+                            .filter(c => c.getClientRects().length)
+                            .map(c => c.getBoundingClientRect().height)
+                    }));
+                }""", selectors)
+                for row in metrics:
+                    self.assertAlmostEqual(row["height"], 36, delta=1, msg=metrics)
+                    for height in row["controls"]:
+                        self.assertAlmostEqual(height, 28, delta=1, msg=metrics)
+                if aligned:
+                    bottoms = [row["bottom"] for row in metrics]
+                    self.assertLessEqual(max(bottoms) - min(bottoms), 1, metrics)
+
+            page.evaluate("switchPage('notes', null)")
+            expect(page.locator("#page-notes .kb-layout")).to_be_visible()
+            check("#page-notes", [".kb-layout > .pane:nth-child(1) > .pane-bar",
+                                  ".kb-layout > .pane:nth-child(2) > .pane-bar",
+                                  ".kb-editor-toolbar"], aligned=True)
+            check("#page-notes", [".kb-editor-tags"])
+            page.locator('#page-notes [data-kb-view="external"]').click()
+            expect(page.locator("#page-notes [data-kb-source-form]")).to_be_visible()
+            check("#page-notes", ["[data-kb-source-form]"])
+            page.evaluate("switchPage('test-suites', null)")
+            expect(page.locator("#page-test-suites .suite-download-row")).to_be_visible()
+            check("#page-test-suites", [".suite-download-row"])
+            check("#page-test-suites", [".suite-browser-toolbar", ".suite-browser-header"], aligned=True)
+            check("#page-test-suites", [".suite-sidebar-filter", ".suite-search-bar"], aligned=True)
+        finally:
+            page.close()
+
     def test_page_reload_keeps_recovered_conversation(self):
         """强刷回归：重启后 GET 返回恢复会话时，对话不得被重置为空。"""
         page = self.new_page()
