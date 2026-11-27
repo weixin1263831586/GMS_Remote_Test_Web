@@ -62,6 +62,13 @@ class DesktopWorkspaceVisualTests(RuntimeUiHarness):
                         typeLabels: [...grid.querySelectorAll('.host-desktop-type-label')]
                             .map(node => node.textContent.trim()),
                         headerHeight: getComputedStyle(panelHeaders[0]).height,
+                            labelGeometry: (() => {
+                                const label = grid.querySelector('.host-pane-label');
+                                const icon = getComputedStyle(label.querySelector('.host-pane-label-icon'));
+                                const css = getComputedStyle(label);
+                                return {width: icon.width, height: icon.height, glyph: icon.fontSize,
+                                    label: css.fontSize, weight: css.fontWeight, gap: css.columnGap};
+                            })(),
                         outerInset: getComputedStyle(grid).padding,
                     };
                     setHostWorkspaceStatus(0, '桌面已连接', true);
@@ -124,6 +131,10 @@ class DesktopWorkspaceVisualTests(RuntimeUiHarness):
             self.assertEqual(result["quad"]["emojiIcons"], ["🖥️"] * 4)
             self.assertEqual(result["quad"]["typeLabels"], ["桌面"] * 4)
             self.assertEqual(result["quad"]["headerHeight"], "34px")
+            self.assertEqual(result["quad"]["labelGeometry"], {
+                "width": "22px", "height": "22px", "glyph": "17px",
+                "label": "12px", "weight": "500", "gap": "6px",
+            })
             self.assertEqual(result["quad"]["outerInset"], "0px")
             self.assertEqual(result["status"], {"text": "桌面已连接", "connected": True})
             self.assertEqual(result["horizontal"]["count"], 2)
