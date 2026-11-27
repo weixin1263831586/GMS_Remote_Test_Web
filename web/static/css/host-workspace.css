@@ -22,6 +22,23 @@ body.workspace-scope-single .host-workspace-surface .host-workspace-pane {
     white-space: nowrap;
 }
 
+.host-pane-label {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 6px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+.host-pane-label-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 22px;
+    width: 22px;
+    height: 22px;
+    line-height: 1;
+}
 .host-workspace-surface .host-pane-single-name {
     display: none;
     overflow: hidden;
