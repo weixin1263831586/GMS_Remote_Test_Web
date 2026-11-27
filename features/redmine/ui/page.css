@@ -167,11 +167,7 @@
     .run-item-meta {  color:var(--muted); }
 
     /* Pagination */
-    .pagination { display:flex; justify-content:center; align-items:center; gap:8px; margin:16px 0; flex-wrap:wrap; }
-    .pagination button { min-width:32px; }
-    .pagination button:disabled { opacity:.45; cursor:default; }
-    .pagination button.page-num { min-width:32px; padding:0; background:var(--lighter-bg); }
-    .pagination button.page-num.active { background:var(--primary); cursor:default; }
+    .pagination { margin:16px 0; }
 
     /* Stats */
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:var(--ui-spacing-md); }
