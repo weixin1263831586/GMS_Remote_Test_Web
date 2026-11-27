@@ -3,7 +3,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    min-height: 30px;
+    min-height: var(--ui-control-height);
     min-width: 0;
 }
 
@@ -14,7 +14,7 @@
     text-align: left;
     white-space: nowrap;
 
-    line-height: 30px;
+    line-height: var(--ui-control-height);
     display: flex;
     align-items: center;
     margin: 0;
@@ -31,7 +31,7 @@
     color: var(--text-primary);
 
     transition: var(--transition-normal);
-    height: 30px;
+    height: var(--ui-control-height);
     box-sizing: border-box;
     margin: 0;
 }
@@ -161,7 +161,7 @@ select option {
     color: #fff;
 
     cursor: pointer;
-    height: 30px;
+    height: var(--ui-control-height);
     box-sizing: border-box;
     display: flex;
     align-items: center;
@@ -183,7 +183,7 @@ select option {
 
 .input-with-btn .entry-field {
     flex: 1;
-    height: 28px;
+    height: var(--ui-control-height-dense);
     margin: 0;
     padding: 4px 8px;
 }
@@ -192,7 +192,7 @@ select option {
     margin: 0;
     padding: 4px 8px;
     white-space: nowrap;
-    height: auto;
+    height: var(--ui-control-height-dense);
     align-self: center;
 }
 
