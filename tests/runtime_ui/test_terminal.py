@@ -102,8 +102,8 @@ class RuntimeTerminalTests(RuntimeUiHarness):
                 page.set_viewport_size({'width': width, 'height': 960})
                 for tab in page.locator('.workspace-tabs [role="tab"]').all():
                     rect = tab.bounding_box()
-                    self.assertAlmostEqual(rect['width'], 112, delta=0.5)
-                    self.assertAlmostEqual(rect['height'], 44, delta=0.5)
+                    self.assertAlmostEqual(rect['width'], 110, delta=0.5)
+                    self.assertAlmostEqual(rect['height'], 42, delta=0.5)
                 self.assertTrue(page.evaluate(
                     'document.documentElement.scrollWidth <= innerWidth'
                 ))

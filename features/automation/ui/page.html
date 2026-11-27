@@ -71,13 +71,13 @@
             <div id="dashboard-active-runs" class="run-list muted"></div>
             <div class="overview-breakdowns">
                 <section class="panel">
-                    <div class="panel-header">运行状态分布</div>
+                    <div class="panel-header ui-panel-heading">运行状态分布</div>
                     <div class="panel-body">
                         <div id="dashboard-status-breakdown" class="breakdown-list muted"></div>
                     </div>
                 </section>
                 <section class="panel">
-                    <div class="panel-header">按 Profile 分布</div>
+                    <div class="panel-header ui-panel-heading">按 Profile 分布</div>
                     <div class="panel-body">
                         <div id="dashboard-profile-breakdown" class="breakdown-list muted"></div>
                     </div>
@@ -89,7 +89,7 @@
     <section id="workflow-pane-create" class="workflow-pane" aria-hidden="true">
         <div class="create-layout">
             <section class="panel profile-panel">
-                <div class="panel-header guided-header">
+                <div class="panel-header ui-panel-heading guided-header">
                     <span class="step-index" id="step-1">1</span>
                     <div class="guided-copy">
                         <div>运行配置</div>
@@ -116,7 +116,7 @@
                 </div>
             </section>
             <section class="panel build-panel">
-                <div class="panel-header guided-header build-panel-header">
+                <div class="panel-header ui-panel-heading guided-header build-panel-header">
                     <div class="guided-title">
                         <span class="step-index" id="step-2">2</span>
                         <div class="guided-copy">
@@ -188,7 +188,7 @@
                 </div>
             </section>
             <section class="panel test-panel">
-                <div class="panel-header guided-header">
+                <div class="panel-header ui-panel-heading guided-header">
                     <span class="step-index" id="step-3">3</span>
                     <div class="guided-copy">
                         <div>设备与测试</div>
@@ -269,7 +269,7 @@
                 </div>
             </section>
             <section class="panel launch-panel">
-                <div class="panel-header guided-header launch-panel-header">
+                <div class="panel-header ui-panel-heading guided-header launch-panel-header">
                     <span class="step-index" id="step-4">4</span>
                     <div class="guided-copy">
                         <div>预检并启动流水线</div>
@@ -293,7 +293,7 @@
 
     <section id="workflow-pane-plans" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-title-block"><span class="stage-nav-label">测试计划</span><span class="panel-description">按顺序执行多套件；自动调度需后台 Worker 运行</span></div>
                 <div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="create">前往创建运行</button><button type="button" data-click="loadTestPlans">刷新计划</button></div>
             </div>
@@ -326,7 +326,7 @@
 
     <section id="workflow-pane-runs" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-nav">
                     <div class="stage-title-block">
                         <span class="stage-nav-label">运行监控</span>
@@ -358,7 +358,7 @@
                 </form>
                 <p class="history-help">执行完成不代表用例全部通过；无可靠统计的历史记录显示“结果待确认”。</p>
                 <div id="automation-runs" class="run-list"></div>
-                <nav class="history-pager" aria-label="运行记录分页">
+                <nav class="history-pager ui-pagination ui-pagination-footer" aria-label="运行记录分页">
                     <span id="history-page-runs" aria-live="polite">第 1 页</span>
                     <label>每页<select id="history-limit-runs" data-change="applyRunHistoryFilters" data-a0="runs"><option value="25">25 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label>
                     <button type="button" id="history-first-runs" data-click="changeRunHistoryPage" data-a0="runs" data-a1="0" disabled>返回首页</button>
@@ -371,7 +371,7 @@
 
     <section id="workflow-pane-resources" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header"><span>资源与存储</span><div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="ops">运维 →</button><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div></div>
+            <div class="panel-header ui-panel-heading stage-header"><span>资源与存储</span><div class="log-actions"><button type="button" data-click="switchWorkflowPane" data-a0="ops">运维 →</button><button type="button" data-click="loadResourceCatalog">刷新资源与预览</button></div></div>
             <div class="stage-pane resource-workspace">
                 <section><h3>套件版本与缓存预热</h3><p class="history-help">先计算 SHA-256，再下发到指定 Worker。校验一致时复用已有缓存；新下载校验失败会保留原缓存。下发需要管理员权限。</p>
                     <label>目标 Worker<select id="resource-worker"></select></label><div id="resource-catalog" class="run-list"></div><div id="resource-transfers" aria-live="polite"></div>
@@ -387,7 +387,7 @@
 
     <section id="workflow-pane-build" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-title-block">
                     <span class="stage-nav-label">构建日志</span>
                     <span class="panel-description">左侧选择构建任务，右侧查看实时输出和最终结果</span>
@@ -421,7 +421,7 @@
 
     <section id="workflow-pane-events" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-title-block">
                     <span class="stage-nav-label">事件诊断</span>
                     <span class="panel-description">按时间查看选定运行的阶段切换、重试与错误</span>
@@ -461,7 +461,7 @@
 
     <section id="workflow-pane-reports" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-title-block">
                     <span class="stage-nav-label">测试报告</span>
                     <span class="panel-description">仅展示已生成报告的 ATS 运行</span>
@@ -485,7 +485,7 @@
                 <div id="automation-runs-report" class="run-list report-run-list">
                     <div class="empty-state">加载中...</div>
                 </div>
-                <nav class="history-pager" aria-label="报告运行分页">
+                <nav class="history-pager ui-pagination ui-pagination-footer" aria-label="报告运行分页">
                     <span id="history-page-reports" aria-live="polite">第 1 页</span>
                     <label>每页<select id="history-limit-reports" data-change="applyRunHistoryFilters" data-a0="reports"><option value="25">25 条</option><option value="50">50 条</option><option value="100">100 条</option></select></label>
                     <button type="button" id="history-first-reports" data-click="changeRunHistoryPage" data-a0="reports" data-a1="0" disabled>返回首页</button>
@@ -498,7 +498,7 @@
 
     <section id="workflow-pane-ops" class="workflow-pane" aria-hidden="true">
         <section class="panel stage-panel">
-            <div class="panel-header stage-header">
+            <div class="panel-header ui-panel-heading stage-header">
                 <div class="stage-title-block">
                     <span class="stage-nav-label">运维</span>
                     <span class="panel-description">全局停机开关与运维事件台账（无人值守告警）</span>

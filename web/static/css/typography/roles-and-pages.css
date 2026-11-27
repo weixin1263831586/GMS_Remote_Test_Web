@@ -308,6 +308,7 @@ html[data-ui-type-root="redmine"] details summary { font-size: var(--ui-type-siz
 html[data-ui-type-root="redmine"] pre { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .ka-btn { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .settings-subsection-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
+html[data-ui-type-root="redmine"] .redmine-settings-fields legend { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="redmine"] .setting-help { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="redmine"] .daily-brief-title { font-size: var(--ui-type-size-dialog); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="redmine"] #singleIssueAnalysisDevice [data-device-toggle] { font: inherit; font-size: var(--ui-type-size-small); }

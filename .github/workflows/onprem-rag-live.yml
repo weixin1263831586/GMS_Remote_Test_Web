@@ -31,6 +31,9 @@ jobs:
           python-version: '3.10'
       - name: Isolated regression and actual local model replay
         shell: bash
+        env:
+          GMS_REPLAY_RUN_ID: ${{ github.run_id }}
+          GMS_REPLAY_RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
           umask 077
@@ -55,7 +58,7 @@ jobs:
           "$scratch/venv/bin/python" -m tools.scripts.testing.audit_rag_live \
             --controller-root "$controller" --data-root "$controller/data" \
             --manifest "$controller/configs/local/rag-evaluation.json" \
-            --report "$controller/data/rag-evaluation/replay-${{ github.run_id }}-${{ github.run_attempt }}.json" \
+            --report "$controller/data/rag-evaluation/replay-${GMS_REPLAY_RUN_ID}-${GMS_REPLAY_RUN_ATTEMPT}.json" \
             >"$scratch/replay.log" 2>&1
           code=$?
           set -e

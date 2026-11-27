@@ -58,7 +58,7 @@ class RuntimeWorkspaceTabsTests(RuntimeUiHarness):
                         self.assertAlmostEqual(geometry['header']['y'], 0, delta=0.5)
                         self.assertAlmostEqual(geometry['list']['x'], 8, delta=0.5)
                         self.assertAlmostEqual(geometry['list']['y'], 0, delta=0.5)
-                        self.assertAlmostEqual(geometry['list']['height'], 44, delta=0.5)
+                        self.assertAlmostEqual(geometry['list']['height'], 42, delta=0.5)
                         self.assertLessEqual(geometry['overflow'], 1)
                         if width >= 1440:
                             last = geometry['tabs'][-1]
@@ -68,9 +68,9 @@ class RuntimeWorkspaceTabsTests(RuntimeUiHarness):
                                 'desktop actions must not clip the last tab',
                             )
                         for index, tab in enumerate(geometry['tabs']):
-                            self.assertAlmostEqual(tab['width'], 112, delta=0.5)
-                            self.assertAlmostEqual(tab['height'], 44, delta=0.5)
-                            self.assertAlmostEqual(tab['x'], 8 + index * 112, delta=0.5)
+                            self.assertAlmostEqual(tab['width'], 110, delta=0.5)
+                            self.assertAlmostEqual(tab['height'], 42, delta=0.5)
+                            self.assertAlmostEqual(tab['x'], 8 + index * 110, delta=0.5)
                             self.assertAlmostEqual(tab['y'], 0, delta=0.5)
                             reference_font = reference_font or tab['font']
                             self.assertEqual(tab['font'], reference_font)

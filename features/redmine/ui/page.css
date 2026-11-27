@@ -542,7 +542,6 @@
 }
 .redmine-settings-fields legend {
   padding: 0 var(--ui-spacing-sm) 0 0;
-  font-weight: var(--ui-type-weight-semibold);
   color: var(--text-primary);
 }
 .redmine-settings-fields p[role="status"]:empty { display: none; }

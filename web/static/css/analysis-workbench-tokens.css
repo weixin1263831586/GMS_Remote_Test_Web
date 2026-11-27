@@ -4,7 +4,6 @@
     --analysis-workbench-stage: #17171d;
     --analysis-workbench-surface: var(--card-bg);
     --analysis-compact-upload-height: 84px;
-    --analysis-pane-heading-height: 39px;
     --analysis-pane-radius: var(--ui-radius-card);
     --analysis-pane-gap: var(--ui-spacing-sm);
     background: var(--page-background);
@@ -129,7 +128,7 @@
     overflow: hidden;
     text-align: center;
     cursor: pointer;
-    transition: var(--transition-normal);
+    transition: background-color .25s ease, border-color .25s ease, box-shadow .25s ease;
 }
 .analysis-upload-surface.upload-empty {
     width: 100%;

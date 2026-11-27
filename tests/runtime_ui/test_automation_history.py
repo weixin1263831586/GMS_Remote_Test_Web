@@ -107,6 +107,24 @@ class RuntimeAutomationHistoryTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_history_controls_use_common_panel_and_pagination_roles(self):
+        page = self.new_page()
+        self.mock_history(page)
+        try:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            self.open_history(page)
+            for name in ("runs", "reports"):
+                page.locator(f'[data-workflow="{name}"]').click()
+                pane = page.locator(f"#workflow-pane-{name}")
+                heading = pane.locator(".ui-panel-heading").first
+                pager = pane.locator(".ui-pagination")
+                expect(pager).to_be_visible()
+                self.assertGreaterEqual(heading.bounding_box()["height"], 41)
+                for control in pager.locator("button, select").all():
+                    self.assertAlmostEqual(control.bounding_box()["height"], 28, delta=1)
+        finally:
+            page.close()
+
     def test_pipeline_rerun_explains_scope_and_requires_actual_user_action(self):
         page = self.new_page()
         calls = self.mock_history(page)

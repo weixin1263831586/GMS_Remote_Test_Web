@@ -153,16 +153,7 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
     height: 100%;
     min-height: 0;
 }
-.panel-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    padding: 10px 12px;
-    border-bottom: 1px solid var(--line);
-    background: var(--panel-2);
-
-}
+.panel-header { justify-content: space-between; }
 .guided-header { justify-content: flex-start; }
 .build-panel-header { justify-content: space-between; }
 .guided-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -893,8 +884,8 @@ body.overlay-open { overflow: hidden; }
 .history-filters label { display: flex; flex: 1 1 140px; flex-direction: column; gap: 5px; min-width: 0;  }
 .history-filters .history-search { flex: 2 1 260px; }
 .history-filters input, .history-filters select { width: 100%; box-sizing: border-box; }
-.history-filter-actions, .history-pager { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.history-pager { padding: 12px 0; }
+.history-filter-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ui-spacing-sm); }
+.history-pager { padding: var(--ui-spacing-sm) 0; }
 .history-pager > span { margin-right: auto; color: var(--muted);  }
 .history-pager label { display: flex; align-items: center; gap: 6px;  }
 .history-pager select { width: auto; }
@@ -927,7 +918,6 @@ body.overlay-open { overflow: hidden; }
 .plan-import textarea { width: 100%; box-sizing: border-box; }
 
 @media (max-height: 820px) and (min-width: 981px) {
-    .panel-header { padding: 8px 10px; }
     .panel-body { padding: 9px; }
     .compact-stack,
     .build-config-fields { gap: 6px; }

@@ -10,6 +10,7 @@ import json
 import os
 import re
 import tempfile
+from html.parser import HTMLParser
 from pathlib import Path
 from unittest.mock import patch
 
@@ -31,15 +32,26 @@ WORKSPACES = {
     "devices": ("features/devices/ui/page.html", "/devices-console"),
     "update-monitor": ("features/gms/ui/page.html", "/gms-update-center"),
 }
-SOURCE_MODAL = re.compile(r'<div\b[^>]*\bid="([^"]+)"[^>]*\bclass="([^"]+)"', re.S)
+class _ModalDiscovery(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ids = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag != "div":
+            return
+        attributes = dict(attrs)
+        classes = set((attributes.get("class") or "").split())
+        modal_id = attributes.get("id")
+        if modal_id and classes.intersection({"modal", "modal-backdrop"}):
+            self.ids.append(modal_id)
 
 
 def discover(source: Path) -> list[str]:
-    markup = source.read_text(encoding="utf-8")
-    return [
-        modal_id for modal_id, classes in SOURCE_MODAL.findall(markup)
-        if "modal" in classes.split() or "modal-backdrop" in classes.split()
-    ]
+    parser = _ModalDiscovery()
+    parser.feed(source.read_text(encoding="utf-8"))
+    parser.close()
+    return parser.ids
 
 
 SHELL_CASES = sorted(
@@ -408,8 +420,10 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
                 self.assertTrue((output / record["screenshot"]).is_file())
 
     def test_inventory_matches_all_shell_source_templates(self):
-        self.assertGreaterEqual(len(list(SHELL_ROOT.glob("*.html"))), 40)
-        self.assertGreaterEqual(len(SHELL_CASES), 40)
+        templates = {path.relative_to(ROOT).as_posix() for path in SHELL_ROOT.glob("*.html")}
+        self.assertTrue(templates, "shell dialog templates are missing")
+        self.assertEqual(templates, {source for source, _ in SHELL_CASES},
+                         "every shell dialog template must contribute a test case")
         self.assertEqual(
             len({modal_id for _, modal_id in SHELL_CASES}),
             len(SHELL_CASES),
@@ -418,7 +432,7 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
         page = self.new_page()
         try:
             self.goto_shell(page)
-            observed = set(page.locator(".modal[id]").evaluate_all(
+            observed = set(page.locator(".modal[id], .modal-backdrop[id]").evaluate_all(
                 "els => els.map(el => el.id)"))
             expected = {modal_id for _, modal_id in SHELL_CASES}
             self.assertEqual(expected - observed, set(), "missing source-owned modal")

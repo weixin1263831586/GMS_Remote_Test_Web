@@ -303,6 +303,19 @@ class UiSizingContractTests(unittest.TestCase):
                 if selector in rule[1]:
                     self.assertNotRegex(rule[2], r"(?:^|[;\s])(?:width|height|flex(?:-basis)?)\s*:")
 
+    def test_ats_and_analysis_use_shared_panel_roles(self):
+        markup = (ROOT / "features/automation/ui/page.html").read_text(encoding="utf-8")
+        for classes in re.findall(r'class="([^"]+)"', markup):
+            roles = set(classes.split())
+            if "panel-header" in roles:
+                self.assertIn("ui-panel-heading", roles)
+            if "history-pager" in roles:
+                self.assertTrue({"ui-pagination", "ui-pagination-footer"} <= roles)
+        for name in ("analysis-workbench-tokens.css", "apk-workbench.css", "report-workbench.css"):
+            self.assertNotIn("--analysis-pane-heading-height", (CSS / name).read_text(encoding="utf-8"))
+        for name in ("apk-workbench.css", "report-workbench.css"):
+            self.assertIn("var(--ui-card-heading-height)", (CSS / name).read_text(encoding="utf-8"))
+
     def test_shared_kpi_and_pagination_roles(self):
         foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
         self.assertIn(".ui-kpi-card--icon", foundation)

@@ -53,7 +53,7 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                         if item["whiteSpace"] != "nowrap":
                             failures.append(f"{width}px {name}: wraps {item}")
                         if name == "apk-analysis":
-                            expected = 38 if width <= 850 else 44
+                            expected = 38 if width <= 850 else 42
                             if abs(item["height"] - expected) > 1:
                                 failures.append(f"{width}px APK tab height {item} != {expected}")
                         elif item["height"] > 44:

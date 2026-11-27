@@ -56,6 +56,9 @@ on:
       - 'tests/runtime_ui/test_header_action_alignment.py'
       - 'tests/architecture/test_shared_page_edge.py'
       - 'tests/runtime_ui/test_ui_controls_matrix.py'
+      - 'tests/runtime_ui/test_workspace_tabs.py'
+      - 'tests/runtime_ui/test_terminal.py'
+      - 'tests/runtime_ui/test_automation_history.py'
       - 'tests/runtime_ui/test_apk_workbench.py'
       - 'tests/runtime_ui/test_api_catalog.py'
       - 'web/static/js/pages/architecture-scene-data.js'
@@ -134,6 +137,9 @@ jobs:
             tests/runtime_ui/test_desktop_workspace_visual.py \
             tests/runtime_ui/test_terminal_workspace_visual.py \
             tests/runtime_ui/test_ui_controls_matrix.py \
+            tests/runtime_ui/test_workspace_tabs.py \
+            tests/runtime_ui/test_terminal.py::RuntimeTerminalTests::test_devices_console_tabs_keep_multiple_console_sessions \
+            tests/runtime_ui/test_automation_history.py::RuntimeAutomationHistoryTests::test_history_controls_use_common_panel_and_pagination_roles \
             tests/runtime_ui/test_modal_compact_layout.py \
             tests/runtime_ui/test_apk_workbench.py \
             tests/runtime_ui/test_report_workbench.py \
