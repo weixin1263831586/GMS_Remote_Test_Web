@@ -6,6 +6,7 @@
     --ui-page-edge: 8px;
     --ui-control-height: 32px;
     --ui-control-height-dense: 28px;
+    --ui-workspace-toolbar-height: 36px;
     --ui-control-height-small: 26px;
     --ui-segmented-inner-height: 24px; /* 26px capsule + borders */
     --ui-control-height-large: 40px;
@@ -51,6 +52,22 @@
 .ui-control--dialog { min-height: var(--ui-control-height-dialog); }
 .ui-control--touch { min-height: var(--ui-touch-target-height); }
 .ui-toolbar { display: flex; align-items: center; gap: var(--ui-spacing-sm); min-width: 0; }
+.ui-workspace-toolbar {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    min-height: var(--ui-workspace-toolbar-height);
+    padding: 3px var(--ui-spacing-sm);
+}
+.ui-workspace-toolbar .ui-workspace-control {
+    box-sizing: border-box;
+    height: var(--ui-control-height-dense);
+    min-height: var(--ui-control-height-dense);
+    max-height: var(--ui-control-height-dense);
+    padding-block: 2px;
+    margin-block: 0;
+}
 .ui-card-heading { min-height: var(--ui-card-heading-height); display: flex; align-items: center; }
 .ui-stat-card { min-height: var(--ui-stat-height); }
 .ui-stat-card--compact { min-height: var(--ui-stat-height-compact); }
