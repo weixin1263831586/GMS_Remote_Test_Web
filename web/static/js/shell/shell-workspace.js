@@ -166,15 +166,15 @@
             // Explicit action bindings remain discoverable by the UI contract
             // scanner and by the event delegation bridge.
             const action = view.action === 'refreshHostWorkspacePane'
-                ? `<button class="btn-xs host-desktop-connect-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
+                ? `<button class="btn-xs host-desktop-connect-button host-pane-connect-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
                 : view.action === 'reopenHostWorkspacePane'
-                    ? `<button class="btn-xs host-desktop-connect-button" type="button" data-click="reopenHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
+                    ? `<button class="btn-xs host-desktop-connect-button host-pane-connect-button" type="button" data-click="reopenHostWorkspacePane" data-a0="${index}">${icon}${view.button}</button>`
                     : '<span class="host-desktop-waiting" aria-hidden="true"></span>';
             return `<div class="host-workspace-empty host-desktop-placeholder host-desktop-placeholder-${kind}">
-                <div class="host-desktop-placeholder-content">
-                    <span class="host-desktop-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
-                    <strong class="host-desktop-placeholder-title">${view.title}</strong>
-                    <span class="host-desktop-placeholder-hint">${escapeHtml(view.hint)}</span>
+                <div class="host-desktop-placeholder-content host-pane-placeholder-content">
+                    <span class="host-desktop-placeholder-icon host-pane-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
+                    <strong class="host-desktop-placeholder-title host-pane-placeholder-title">${view.title}</strong>
+                    <span class="host-desktop-placeholder-hint host-pane-placeholder-hint">${escapeHtml(view.hint)}</span>
                     ${action}
                 </div>
             </div>`;
@@ -226,19 +226,19 @@
                 return `
                 <section class="host-workspace-pane${hostWorkspace.maximized === index ? ' maximized' : ''}" data-workspace-pane="${index}" aria-label="桌面 ${index + 1}">
                     <div class="host-workspace-pane-header">
-                        <div class="host-desktop-identity">
+                        <div class="host-desktop-identity host-pane-identity">
                             <span class="host-desktop-screen-label" aria-hidden="true">🖥️</span>
                             <span class="host-desktop-type-label">桌面</span>
-                            <span class="host-desktop-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
-                            <select class="host-desktop-select" data-multi-host-control aria-label="主机" data-change="changeHostWorkspacePaneHost" data-a0="${index}" data-r1="value"${pane.type === 'empty' ? ' disabled' : ''}>
+                            <span class="host-desktop-single-name host-pane-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
+                            <select class="host-desktop-select host-pane-select" data-multi-host-control aria-label="主机" data-change="changeHostWorkspacePaneHost" data-a0="${index}" data-r1="value"${pane.type === 'empty' ? ' disabled' : ''}>
                                 ${hostWorkspaceHostOptions(pane.hostId, hostWorkspace.panes, index)}
                             </select>
                         </div>
-                        <span class="host-workspace-pane-status host-desktop-status" id="host-workspace-status-${index}" role="status" aria-live="polite" title="桌面连接状态">准备中</span>
-                        <div class="host-desktop-pane-actions">
-                            <button class="btn-xs host-workspace-refresh-btn host-desktop-icon-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}" title="重新连接桌面" aria-label="重新连接桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
-                            <button data-multi-host-control class="btn-xs host-desktop-icon-button" type="button" data-click="maximizeHostWorkspacePane" data-a0="${index}" title="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦当前桌面'}" aria-label="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦桌面 ' + (index + 1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
-                            <button data-multi-host-control class="btn-xs host-desktop-icon-button host-desktop-close" type="button" data-click="closeHostWorkspacePane" data-a0="${index}" title="关闭此桌面窗格" aria-label="关闭桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#close"></use></svg></button>
+                        <span class="host-workspace-pane-status host-desktop-status host-pane-status" id="host-workspace-status-${index}" role="status" aria-live="polite" title="桌面连接状态">准备中</span>
+                        <div class="host-desktop-pane-actions host-pane-actions">
+                            <button class="btn-xs host-workspace-refresh-btn host-desktop-icon-button host-pane-icon-button" type="button" data-click="refreshHostWorkspacePane" data-a0="${index}" title="重新连接桌面" aria-label="重新连接桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
+                            <button data-multi-host-control class="btn-xs host-desktop-icon-button host-pane-icon-button" type="button" data-click="maximizeHostWorkspacePane" data-a0="${index}" title="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦当前桌面'}" aria-label="${hostWorkspace.maximized === index ? '恢复多屏布局' : '聚焦桌面 ' + (index + 1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
+                            <button data-multi-host-control class="btn-xs host-desktop-icon-button host-desktop-close host-pane-icon-button" type="button" data-click="closeHostWorkspacePane" data-a0="${index}" title="关闭此桌面窗格" aria-label="关闭桌面 ${index + 1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#close"></use></svg></button>
                         </div>
                     </div>
                     <div class="host-workspace-pane-body" id="host-workspace-body-${index}">
