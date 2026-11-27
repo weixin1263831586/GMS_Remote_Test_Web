@@ -21,6 +21,10 @@ MAX_CORPUS = 30000
 MAX_BATCH = 128
 MAX_DIMENSION = 4096
 MAX_TEXT = 6000
+DEFAULT_EMBEDDING_SOURCES = (
+    "cdd", "web_documents", "android_internals", "personal_knowledge",
+    "redmine_cases", "redmine_journals",
+)
 
 
 class LocalEmbedding:
@@ -57,32 +61,31 @@ def _model(path, revision):
     return LocalEmbedding(Path(path), revision)
 
 
+def _source_configuration(config, source):
+    if not isinstance(config, dict) or not isinstance(config.get("enabled", False), bool):
+        return "invalid_config"
+    if not config.get("enabled"):
+        return "disabled"
+    allowed = config.get("enabled_sources", list(DEFAULT_EMBEDDING_SOURCES))
+    if not isinstance(allowed, list):
+        return "invalid_config"
+    if source not in DEFAULT_EMBEDDING_SOURCES or source not in allowed:
+        return "source_disabled"
+    return None
+
+
 def _source_config(source):
-    config = (config_manager.load_config() or {}).get("retrieval") or {}
-    if not isinstance(config, dict) or config.get("enabled") is not True:
-        return {}
-    allowed = config.get("enabled_sources", ["cdd"])
-    if not isinstance(allowed, list) or source not in allowed:
-        return {}
-    return config
+    config = (config_manager.load_config() or {}).get("retrieval", {})
+    return config if _source_configuration(config, source) is None else {}
 
 
 def embedding_configuration_issue(source="cdd"):
     """Return a safe configuration diagnostic without loading or downloading a model."""
     try:
         config = (config_manager.load_config() or {}).get("retrieval", {})
-        if not isinstance(config, dict):
-            return "invalid_config"
-        enabled = config.get("enabled", False)
-        if not isinstance(enabled, bool):
-            return "invalid_config"
-        if not enabled:
-            return "disabled"
-        allowed = config.get("enabled_sources", ["cdd"])
-        if not isinstance(allowed, list):
-            return "invalid_config"
-        if source not in allowed:
-            return "source_disabled"
+        issue = _source_configuration(config, source)
+        if issue:
+            return issue
         path = config.get("model_path")
         revision = config.get("model_revision")
         if not isinstance(path, str) or not path.strip() or not isinstance(revision, str) or not revision.strip():
@@ -98,7 +101,7 @@ def embedding_configuration_issue(source="cdd"):
 
 
 def local_embedding(source="cdd"):
-    """Opt in to each corpus; private data is never enabled by the public CDD setting."""
+    """Use local embeddings for eligible sources under the deployment's scope."""
     config = _source_config(source)
     if not config:
         return None
@@ -165,23 +168,41 @@ def run_scheduled_index_batches(jobs, attempts, mark_attempt, *, max_sources=1, 
     if max_sources < 1:
         return []
     outcomes = []
-    for source_id, (inspect, sync) in sorted(jobs.items(), key=lambda item: (attempts.get(item[0], ""), item[0])):
+    max_sources = min(max_sources, 4)
+    ordered = sorted(jobs.items(), key=lambda item: (attempts.get(item[0], ""), item[0]))
+    for source_id, (inspect, sync) in ordered[:max_sources * 8]:
+        mark_attempt(source_id)
         try:
             status = inspect()
         except Exception as exc:
             status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
-        if status.get("coverage_complete") is True:
+        if status.get("coverage_complete") is True or (
+            type(status.get("indexed")) is int and status.get("indexed") == status.get("total")
+        ):
             continue
-        mark_attempt(source_id)
         if status.get("status") not in {"disabled", "unavailable", "stale", "busy"}:
             try:
                 status = sync(batch_size=max(1, min(batch_size, MAX_BATCH)))
             except Exception as exc:
                 status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
         outcomes.append({**status, "source_id": source_id, "operation": "semantic_index"})
-        if len(outcomes) >= min(max_sources, 4):
+        if len(outcomes) >= max_sources:
             break
     return outcomes
+
+
+def owner_index_job(scope, owner, factory):
+    """Build lazy scheduler callbacks with an opaque, owner-specific attempt key."""
+    index = lru_cache(maxsize=1)(factory)
+
+    def status():
+        return index().status()
+
+    def sync(*, batch_size):
+        return index().sync(batch_size=batch_size)
+
+    key = scope + ":" + hashlib.sha256(owner.encode()).hexdigest()
+    return key, (status, sync)
 
 
 def _unit(vector):

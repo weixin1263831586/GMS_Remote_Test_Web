@@ -260,7 +260,7 @@
                                 });
                             }
                         }));
-                    if (source.kind === 'cdd' && source.enabled && source.revision) {
+                    if (source.enabled && source.revision) {
                         actions.append(button('语义索引', event => {
                             semanticIndex(api + '/' + encodeURIComponent(source.id) + '/semantic-index',
                                 event.currentTarget).catch(error => showToast(error.message, 'warning'));

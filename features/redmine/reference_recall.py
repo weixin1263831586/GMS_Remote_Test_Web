@@ -13,6 +13,7 @@ from dataclasses import replace
 from features.auth import auth_service
 from features.gms import extract_reference_identifiers, recall_mainline_references
 from features.knowledge import (
+    android_property_names,
     model_catalog_fingerprint,
     owner_policy_imports_current,
     recall_owner_policy_imports,
@@ -27,9 +28,10 @@ from .users import owner_redmine_root
 
 MAX_SCAN_BYTES = 128 * 1024 * 1024
 MAX_IDENTIFIERS = 128
-_RELEASE = re.compile(r'\bAndroid\s+(1[5-9]|[2-9]\d)\b', re.I)
-_BUILD_RELEASE = re.compile(r'ro\.build\.version\.release\s*[:=\]]\s*\[?(1[5-9]|[2-9]\d)\b', re.I)
-_BUILD_SDK = re.compile(r'ro\.build\.version\.sdk\s*[:=\]]\s*\[?(35|36|37)\b', re.I)
+MAX_POLICY_PROPERTIES = 6
+_RELEASE = re.compile(r'\bAndroid\s+(1[4-9]|[2-9]\d)\b', re.I)
+_BUILD_RELEASE = re.compile(r'ro\.build\.version\.release\s*[:=\]]\s*\[?(1[4-9]|[2-9]\d)\b', re.I)
+_BUILD_SDK = re.compile(r'ro\.build\.version\.sdk\s*[:=\]]\s*\[?(34|35|36|37)\b', re.I)
 
 
 def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=None, include_policy_query=False):
@@ -60,11 +62,21 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     if not isinstance(manifest, dict):
         raise ApiError.upstream_failure("证据清单格式无效。")
     identifiers = set()
+    properties = {}
     build_versions = set()
     warnings = []
     scanned = 0
     complete = snapshot["status"] == "ready"
     exhausted = False
+
+    def collect_properties(text, *, complete=False):
+        if len(properties) >= MAX_POLICY_PROPERTIES:
+            return
+        for name in sorted(android_property_names(text)):
+            if complete or not text.lower().endswith(name):
+                properties[name] = None
+            if len(properties) >= MAX_POLICY_PROPERTIES:
+                break
 
     def scan(chunks):
         nonlocal scanned, complete, exhausted
@@ -74,6 +86,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
             text = tail + chunk
             build_versions.update(int(value) for value in _BUILD_RELEASE.findall(text))
             build_versions.update(int(value) - 20 for value in _BUILD_SDK.findall(text))
+            collect_properties(text)
             # 跨分块边界截断的标识符推迟到下一块或 EOF 再确认，
             # 避免把 CVE-2026-5883 + 5 拆成不完整的 CVE。
             identifiers.update(value for value in extract_reference_identifiers(text)
@@ -84,6 +97,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
                 break
             tail = text[-512:]
         identifiers.update(extract_reference_identifiers(tail))
+        collect_properties(tail, complete=True)
 
     texts = [query, str(manifest.get("subject") or ""), str(manifest.get("description") or "")]
     texts.extend(str(item.get("notes") or "") for item in manifest.get("journals") or [] if isinstance(item, dict))
@@ -123,7 +137,7 @@ def collect_snapshot_references(owner_id, snapshot_id, *, query="", data_root=No
     versions = described_versions | build_versions
     version = next(iter(versions)) if len(versions) == 1 else None
     policy_identifiers = sorted(identifiers, key=lambda value: (not bool(re.search(r"^(?:Cts|Gts|Mts|Sts|Vts)|#", value, re.I)), value))
-    policy_query = " ".join([texts[0], texts[1], *policy_identifiers[:6], texts[2]])[:512]
+    policy_query = " ".join([*properties, texts[0], texts[1], *policy_identifiers[:6], texts[2]])[:512]
     policy = recall_web_references(policy_query, android_version=version)
     if policy is not None:
         policy["target_android_version"] = version

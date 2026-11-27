@@ -10,6 +10,7 @@ from .semantic import (
     embedding_configuration_issue,
     local_embedding,
     local_reranker,
+    owner_index_job,
     run_scheduled_index_batches,
     semantic_coverage,
 )
@@ -49,6 +50,7 @@ __all__ = [
     "fuse_rankings",
     "local_embedding",
     "local_reranker",
+    "owner_index_job",
     "passage_token",
     "run_scheduled_index_batches",
     "semantic_coverage",

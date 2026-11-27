@@ -1,6 +1,6 @@
 """Public CDD semantic retrieval without external model dependencies."""
 
-from features.knowledge.external import cdd_semantic
+from features.knowledge.external import cdd_semantic as web_semantic
 from features.knowledge.external.web_sources import WebKnowledgeProvider
 
 
@@ -13,7 +13,7 @@ class Encoder:
 
 def test_public_semantic_recall_without_lexical_hit(tmp_path, monkeypatch):
     provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
-    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: Encoder())
+    monkeypatch.setattr(web_semantic, "local_embedding", lambda _scope: Encoder())
     source = provider.save(name="CDD 16", url="https://source.android.com/docs/compatibility/16/android-16-cdd",
                            kind="cdd", android_version=16, license="CC-BY-4.0")
     with provider._db(write=True) as db:
@@ -35,11 +35,10 @@ def test_public_semantic_recall_without_lexical_hit(tmp_path, monkeypatch):
 
 
 def test_unconfigured_embedding_keeps_lexical_behavior(tmp_path, monkeypatch):
-    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: None)
+    monkeypatch.setattr(web_semantic, "local_embedding", lambda _scope: None)
     provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
-    assert provider.search_with_status("memory") == ([], {
-        "status": "disabled", "coverage_complete": False, "indexed": 0, "total": 0
-    })
+    disabled = {"status": "disabled", "coverage_complete": False, "indexed": 0, "total": 0}
+    assert provider.search_with_status("memory") == ([], {**disabled, "web_documents": disabled})
 
 
 def test_public_scheduler_resumes_batches_and_rotates_after_failure(tmp_path, monkeypatch):
@@ -50,8 +49,8 @@ def test_public_scheduler_resumes_batches_and_rotates_after_failure(tmp_path, mo
 
     config = {"retrieval": {"auto_index_public_cdd": True}}
     monkeypatch.setattr(web_sources.config_manager, "load_config", lambda: config)
-    monkeypatch.setattr(retrieval, "embedding_configuration_issue", lambda: None)
-    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: Encoder())
+    monkeypatch.setattr(retrieval, "embedding_configuration_issue", lambda _scope: None)
+    monkeypatch.setattr(web_semantic, "local_embedding", lambda _scope: Encoder())
     path = tmp_path / "web.sqlite3"
     provider = WebKnowledgeProvider(path)
     ids = []
@@ -99,7 +98,7 @@ def test_dense_recall_rejects_manifest_change_during_query(tmp_path):
         db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r1", "2026-01-01"))
         db.execute("INSERT INTO clauses VALUES(?,?,?,?,?,?,?,?,?)",
                    (source, "r1", "Memory", "", "MUST", "", "memory", url, "old-token"))
-    assert cdd_semantic.CddSemantic(provider, embedder=Encoder()).sync(source)["coverage_complete"]
+    assert web_semantic.WebSemantic(provider, embedder=Encoder()).sync(source)["coverage_complete"]
 
     class ChangingEncoder(Encoder):
         def encode(self, texts):
@@ -108,7 +107,7 @@ def test_dense_recall_rejects_manifest_change_during_query(tmp_path):
                 db.execute("INSERT INTO revisions VALUES(?,?,?)", (source, "r2", "2026-01-02"))
             return super().encode(texts)
 
-    hits, status = cdd_semantic.CddSemantic(provider, embedder=ChangingEncoder()).search("memory")
+    hits, status = web_semantic.WebSemantic(provider, embedder=ChangingEncoder()).search("memory")
     assert hits == []
     assert status["status"] == "stale" and not status["coverage_complete"]
 
@@ -119,7 +118,7 @@ def test_model_context_only_recalls_fresh_public_cdd(tmp_path, monkeypatch):
 
     provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
     monkeypatch.setattr(web_sources, "index_path", lambda: provider._path())
-    monkeypatch.setattr(cdd_semantic, "local_embedding", lambda: Encoder())
+    monkeypatch.setattr(web_semantic, "local_embedding", lambda _scope: Encoder())
     urls = (
         ("https://source.android.com/docs/compatibility/16/android-16-cdd", "cdd", 16),
         ("https://source.android.com/docs/compatibility/17/android-17-cdd", "cdd", 17),
@@ -174,13 +173,15 @@ def test_wiki_scheduler_shares_budget_and_requires_current_approval(tmp_path, mo
     wiki.sync_semantic.return_value = {"status": "ready", "coverage_complete": True}
     monkeypatch.setattr(federation, "federated_service", lambda: SimpleNamespace(provider=lambda _id: wiki))
     now = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    assert provider.sync_due_semantic(now=now)[0]["source_id"] == source_id
-    assert provider.sync_due_semantic(now=now + timedelta(minutes=1))[0]["status"] == "stale"
+    outcomes = [provider.sync_due_semantic(now=now + timedelta(minutes=offset))[0] for offset in (0, 1)]
+    assert {row["source_id"]: row["status"] for row in outcomes} == {
+        source_id: "partial", "android_internals": "stale",
+    }
     wiki.sync_semantic.assert_not_called()
     assert provider.semantic_schedule_status("android_internals", wiki=True)["last_auto_index_attempt"]
     wiki.status.return_value.available_revision = "w1"
-    assert provider.sync_due_semantic(now=now + timedelta(minutes=2))[0]["source_id"] == source_id
-    assert provider.sync_due_semantic(now=now + timedelta(minutes=3))[0]["source_id"] == "android_internals"
+    for offset, previous in enumerate(outcomes, start=2):
+        assert provider.sync_due_semantic(now=now + timedelta(minutes=offset))[0]["source_id"] == previous["source_id"]
     wiki.sync_semantic.assert_called_once_with(batch_size=128)
     config["retrieval"]["auto_index_approved_wiki"] = False
     assert not provider.semantic_schedule_status("android_internals", wiki=True)["auto_index_enabled"]

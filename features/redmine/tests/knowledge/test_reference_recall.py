@@ -333,10 +333,11 @@ async def test_analyzer_recovers_official_context_before_repair_and_review(refer
 
 def test_public_policy_version_uses_retained_build_properties(references, monkeypatch):
     _root, store, snapshot = references
-    add_text(store, snapshot, 'ro.build.version.sdk=36\nCtsBluetoothTestCases')
+    add_text(store, snapshot, 'ro.build.version.sdk=36\nCtsBluetoothTestCases\nro.board.api_level')
     web_recall = Mock(return_value={'status': 'matched', 'items': [], 'coverage_complete': False})
     monkeypatch.setattr(reference_recall, 'recall_web_references', web_recall)
     data = reference_recall.collect_snapshot_references('owner-a', snapshot)
+    assert "ro.board.api_level" in web_recall.call_args.args[0]
     assert web_recall.call_args.kwargs['android_version'] == 16
     assert data['sources']['web_documents']['target_android_version'] == 16
     assert data['sources']['web_documents']['version_resolution'] == 'matched'

@@ -567,15 +567,16 @@ class AndroidInternalsProvider:
     # 索引重建
     # ------------------------------------------------------------------
 
-    def reindex(self) -> dict[str, Any]:
+    def reindex(self, *, approved_only: bool = False) -> dict[str, Any]:
         """全量增量重建；并发触发时后者以 409 语义失败（ExternalKnowledgeError）。"""
         reason = self.validate()
         if reason:
             raise ExternalKnowledgeError(reason)
         with self._reindex_lock:
-            return self._reindex_locked()
+            return self._reindex_locked(approved_only=approved_only)
 
-    def _reindex_locked(self) -> dict[str, Any]:
+    def _reindex_locked(self, *, approved_only: bool = False) -> dict[str, Any]:
+        revision = self._head_revision()
         policy = self.load_policy()
         if policy.degraded:
             # fail-closed：发布策略缺失/损坏时不重建，显式暴露而不是放宽
@@ -585,7 +586,8 @@ class AndroidInternalsProvider:
                 "已拒绝重建索引，请检查 tools/android-internals-wiki 的 knowledge-pack/policy.yaml"
             )
         pages = self._collect_pages(policy)
-        revision = self._head_revision()
+        if revision != self._head_revision():
+            raise ExternalKnowledgeError("索引期间 Wiki 修订发生变化，请重试")
         db_path = index_db_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
         started = time.time()
@@ -606,7 +608,8 @@ class AndroidInternalsProvider:
                 approved_revision = (
                     stored_meta.get("approved_revision", "") or indexed_revision
                 )
-                if indexed_revision and revision != approved_revision:
+                if (approved_only and not approved_revision) or (
+                        (approved_only or indexed_revision) and revision != approved_revision):
                     raise ExternalKnowledgeError(
                         f"revision {revision[:12]} 尚未批准；当前批准版本为 "
                         f"{approved_revision[:12] or 'none'}，请先执行 approve-revision"

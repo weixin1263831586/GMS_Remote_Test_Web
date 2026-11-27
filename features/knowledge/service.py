@@ -191,7 +191,7 @@ def analyze_public_cdd(question, *, limit=8, android_api_level=None, recall_only
     """Public-only Agent and report entry."""
     return analyze_external_knowledge(
         question, sources=["web_documents"], limit=limit,
-        android_api_level=android_api_level, recall_only=recall_only,
+        android_api_level=android_api_level, recall_only=recall_only, cdd_only=True,
     )
 
 
@@ -209,12 +209,13 @@ def sync_due_cdd_understanding():
     return [cdd_intelligence.sync_batch(WebKnowledgeProvider(), model, key)]
 
 
-def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=None, recall_only=False):
-    """Public CDD and separately approved local Wiki; reads no owner imports."""
+def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=None, recall_only=False,
+                               cdd_only=False):
+    """Analyze public AOSP and authorized local Wiki documents."""
     selected = set(sources or ["web_documents"])
     adapters = []
     if "web_documents" in selected:
-        adapters.append(web_source(android_api_level=android_api_level, cdd_only=True))
+        adapters.append(web_source(android_api_level=android_api_level, cdd_only=cdd_only, public_only=True))
     if "android_internals" in selected:
         adapters.append(wiki_source(android_api_level=android_api_level))
 
@@ -229,14 +230,14 @@ def analyze_external_knowledge(question, *, sources, limit=8, android_api_level=
             row["applicable_versions"] = str(metadata.get("android_version") or "")
             row["source_anchors"] = [{"url": metadata["source_url"], "revision": item["revision"],
                                       "evidence_type": "official"}]
-            row["extra"] = {**metadata, "source_kind": "cdd", "status": "indexed",
+            row["extra"] = {**metadata, "status": "indexed",
                             "reference": item["reference"], "applicability_context": metadata.get("condition", "")}
         rows.append(row)
-    scope = {("web_documents",): "public_cdd_only",
+    scope = {("web_documents",): "public_cdd_only" if cdd_only else "public_aosp",
              ("android_internals",): "approved_local_wiki_only"}
     return {"answer": "" if recall_only else render_rag_answer(result), "rag": result,
             "coverage_complete": False, "results": rows,
-            "analysis_scope": scope.get(tuple(sorted(selected)), "public_cdd_and_approved_local_wiki")}
+            "analysis_scope": scope.get(tuple(sorted(selected)), "public_aosp_and_approved_local_wiki")}
 
 
 def run_authorized_rag(question, sources, *, limit=8, recall_only=False):

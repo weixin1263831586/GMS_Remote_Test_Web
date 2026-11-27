@@ -100,7 +100,7 @@ def search_external(request: Request, payload: ExternalSearchRequest):
         mode, token, offset = match.groups()
         result = WebKnowledgeProvider().read_cdd_scope(
             token, mode=mode, offset=int(offset or 0), limit=payload.limit,
-            android_api_level=payload.android_api_level,
+            android_api_level=payload.android_api_level, include_documents=True,
         )
         result['sources_status'] = [row for row in federated_status() if row.get('source') == 'web_documents']
         if result['next_offset'] is not None:
@@ -282,11 +282,13 @@ def sync_web_source(request: Request, source_id: str):
 def semantic_index_status(request: Request, source_id: str):
     require_elevated_admin(request)
     provider = WebKnowledgeProvider()
-    result = {**provider.semantic_status(source_id), **provider.semantic_schedule_status(source_id)}
+    kind = provider.semantic_kind(source_id)
+    result = {**provider.semantic_status(source_id), **provider.semantic_schedule_status(source_id, web_kind=kind)}
     from .external import cdd_intelligence
 
-    result["document_understanding"] = cdd_intelligence.status(provider, source_id)
-    issue = embedding_configuration_issue("cdd")
+    if kind == "cdd":
+        result["document_understanding"] = cdd_intelligence.status(provider, source_id)
+    issue = embedding_configuration_issue("cdd" if kind == "cdd" else "web_documents")
     if issue:
         result = {**result, "configuration_issue": issue}
     return success_response(data=result)
@@ -300,7 +302,7 @@ def sync_semantic_index(request: Request, source_id: str, batch_size: int = Quer
         result = WebKnowledgeProvider().sync_semantic(source_id, batch_size=batch_size)
     except Exception as exc:
         logger.warning("Local semantic index synchronization failed: %s", type(exc).__name__)
-        return error_response("本地语义索引未完成，请检查模型配置和公开 CDD 来源", 502)
+        return error_response("本地语义索引未完成，请检查模型配置和网页知识来源", 502)
     return success_response(data=result)
 
 

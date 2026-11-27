@@ -8,6 +8,7 @@ import shutil
 import sqlite3
 import threading
 import uuid
+from contextlib import closing
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -136,6 +137,10 @@ class KnowledgeStore(KnowledgeVersionMixin):
     def init_db(self) -> None:
         with self._open_connection() as conn:
             initialize_knowledge_schema(conn)
+
+    def document_owners(self) -> set[str]:
+        with closing(self._connect()) as conn:
+            return {row[0] for row in conn.execute("SELECT DISTINCT user_id FROM knowledge_docs")}
 
     def ensure_default_spaces(self, user_id: str) -> None:
         if user_id in self._ensured_users:

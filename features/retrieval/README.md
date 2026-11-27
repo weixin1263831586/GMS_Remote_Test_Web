@@ -1,9 +1,7 @@
 # Shared retrieval
 
 `features/retrieval` is a domain-independent retrieval capability, not a second
-business database. Providers retain authorization and source ownership. The
-first dense adapter indexes enabled public CDD clauses only. Other feature
-retrieval remains on its existing authorized paths.
+business database. Providers retain authorization and source ownership.
 
 Enable local semantic indexing through the local platform configuration:
 
@@ -22,9 +20,14 @@ Python environment and provision the model locally before enabling. No
 download, remote model code or external embedding API is used. Changing model
 files requires a new model_revision.
 
+Omit `retrieval.enabled_sources` to enable all supported local embedding
+sources. An explicit list limits embedding to those named sources. The
+supported scopes are `cdd`, `web_documents`, `android_internals`,
+`personal_knowledge`, `redmine_cases`, and `redmine_journals`.
+
 An elevated administrator calls POST
 `/api/knowledge/external/web-sources/{source_id}/semantic-index?batch_size=128`
-to index one batch of the current CDD revision, and repeats until the returned
+to index one batch of the current web document revision, and repeats until the returned
 coverage is complete. GET on the same path reports index coverage. The
 existing external search endpoint uses lexical plus dense RRF when the
 semantic index is available; source status reports disabled, empty, partial
@@ -40,8 +43,6 @@ performance must be evaluated on the Controller.
 
 ## Owner-scoped Redmine case retrieval
 
-Set `retrieval.enabled_sources` to `["cdd", "redmine_cases"]` to allow local
-processing of historical case facts. The default remains public CDD only.
 An authenticated human may use GET/POST
 `/api/redmine-agent/search/semantic-index` to inspect or build a batch for
 their own case repository. Existing similar-case search merges lexical,
@@ -56,11 +57,11 @@ live device data are included in these indexes.
 
 ### Android Internals Wiki
 
-Add `android_internals` to `retrieval.enabled_sources` to opt in. Approve and reindex the Wiki using the existing workflow first. The external knowledge page provides a semantic-index action (also available through GET/POST `/api/knowledge/external/wiki-semantic-index`). Build bounded batches until coverage is complete. Semantic tokens are tied to the approved revision and section content; changed policy requires reindex. Existing lexical search remains available when semantic retrieval is disabled or unavailable.
+Use the existing Wiki workflow to establish the initial approved index and approve later revisions. The external knowledge page provides a semantic-index action (also available through GET/POST `/api/knowledge/external/wiki-semantic-index`). Semantic tokens are tied to the approved revision and section content. Existing lexical search remains available when semantic retrieval is disabled or unavailable.
 
 ### Personal knowledge
 
-Add `personal_knowledge` to `retrieval.enabled_sources` to opt in. GET/POST
+GET/POST
 `/api/knowledge/semantic-index` is scoped to the current human owner. The
 ordinary personal knowledge Q&A route fuses document FTS with semantic
 chunk recall; original text and offsets are resolved from the current owner
@@ -81,8 +82,7 @@ establishes device applicability or a verified root cause.
 
 ### Archived Redmine replies
 
-Add `redmine_journals` to `retrieval.enabled_sources` to opt in to local
-embedding of archived reply notes. Explicitly private notes are excluded.
+The journal index embeds archived replies locally and excludes explicitly private notes.
 Authenticated human owners can inspect/build bounded batches with GET/POST
 `/api/redmine-agent/search/journal-semantic-index` and search with POST
 `/api/redmine-agent/search/journals` (JSON: query, limit).
@@ -95,7 +95,7 @@ No new model-provider or Agent/MCP exposure is enabled by these endpoints.
 
 ### Existing diagnosis paths
 
-The existing Redmine history search merges opt-in archived journal candidates
+Redmine history search merges case and journal candidates
 with lexical issue results through RRF, retaining only journal citation
 coordinates (not reply text). The snapshot search retains its streaming
 artifact/ZIP/description/journal search and reports scan coverage separately
@@ -185,23 +185,27 @@ in one confirmed operation. It stops on completion, no progress, busy or error,
 and can resume committed batches later. It is not a persistent background
 scheduler; closing the page stops further client-side requests.
 
-### Automatic CDD and approved Wiki index maintenance
+### Automatic index maintenance
 
-Set `retrieval.auto_index_public_cdd` to the JSON boolean `true` in addition
-to the existing local embedding configuration to enable bounded automatic
-maintenance. The Controller's existing external-knowledge lifecycle tick
-runs at most one batch (up to 128 vectors) by default, shared between CDD and
-Wiki. Enable `retrieval.auto_index_approved_wiki` separately and allow
-`android_internals` in `retrieval.enabled_sources`. The indexed, approved and
-available Wiki revisions must match; the scheduler never approves or reindexes
-an upstream revision. An attempt
-timestamp is persisted before inference, so restarts and failures rotate to
-other sources fairly and resume from committed vectors. Disabled or stale
-sources are not embedded. The existing semantic-index status endpoints include
-`auto_index_enabled` and `last_auto_index_attempt`; the knowledge source UI
-shows this metadata without changing button geometry. Owner-scoped and restricted indexes are
-not automatically scheduled by this option. The derived index still reflects
-only the retained authorized manifest, not upstream coverage.
+The Controller registers Android 14–17 CDD and public AOSP references for
+Vendor API level, VINTF and system properties. The initial registration
+preserves administrator names and disabled settings. Deleting a registered
+default keeps it out of subsequent automatic registrations. Enabled web
+sources refresh daily in bounded groups.
+
+With local embeddings configured, each Controller tick builds up to two
+batches of 128 vectors across eligible web documents, approved Wiki, and
+retained personal documents, Redmine cases and Redmine replies of active
+accounts. Subsequent ticks resume committed work and rotate between sources.
+The approved Wiki revision can refresh automatically once it is available.
+GMS Partner content continues to use the Update Center's authenticated scan
+and owner-approved import workflow.
+
+Set any of `auto_register_public_web_sources`, `auto_index_public_cdd`,
+`auto_index_web_documents`, `auto_index_approved_wiki`,
+`auto_index_owner_knowledge` and `auto_index_redmine` to `false` in
+`retrieval` to disable that automatic operation. Local-model processing
+approvals are independent of these indexing settings.
 
 ## Module boundary
 
@@ -255,7 +259,7 @@ Redmine archive; synthetic fixtures do not establish real quality gains.
 示例 provider 名称应替换为实际配置项。专用 LLM 路由仅接受 loopback、RFC1918 地址及 IPv6 ULA，禁止代理、重定向及远端 fallback。未指定 provider 时选择可用的本地路由。Embedding 仍沿用既有 enabled、enabled_sources 及模型目录配置，与生成式模型独立；没有向量索引也可通过文本检索和授权文档阅读进行智能问答。
 
 - 个人知识问答：原有 `/api/knowledge/ask` 接入编排器；显式选择授权导入文档时校验当前本人身份、内容哈希及模型目录授权；通用 Agent 不可擅自扩大该范围。
-- 公开 CDD 分析：原有 external search 使用 `analyze:` 前缀；后台召回开关用于单测诊断、Redmine 参考资料及图片文字查询，失败时保留原有授权检索。
+- 公开文档分析：原有 external search 使用 `analyze:` 前缀查询 CDD 与公开 AOSP；单测诊断及图片文字查询继续使用专用 CDD 检索。
 - 公共 CDD 文档理解：自动任务每轮最多四条当前原文，使用本地模型提取有逐字引句支持的定义、条件、例外和术语；派生索引绑定原文版本及模型配置，缺失或无效输出可重试，派生结果只用于召回，不替代原文。语义索引状态接口分别返回文档理解覆盖情况。
 - 单次完整问答最多五次模型调用、八次检索、六次主动阅读，限制证据数量和字符数。超预算、模型故障、授权变化或缺少可靠引句均不得伪造结论。
 - 尚未实现所有私有语料的持久化 LLM 文档理解、图片专用视觉模型的版面理解及 SDK/Gerrit 全部资料的智能阅读适配。受限 Partner 扫描继续使用原有授权边界。

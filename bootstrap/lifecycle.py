@@ -105,15 +105,27 @@ async def _periodic_cleanup() -> None:
             await asyncio.sleep(300)
 
 
-async def _periodic_knowledge_sync() -> None:
+def _sync_knowledge_sources() -> None:
+    from features.auth import auth_service
     from features.knowledge import sync_due_web_sources
+    from features.redmine import redmine_index_jobs
 
+    try:
+        owners = {row["id"] for row in auth_service.list_users() if not row["disabled"]}
+    except Exception:
+        logger.exception('Knowledge index owner discovery failed')
+        owners = set()
+    sync_due_web_sources(owners=owners, owner_index_jobs=redmine_index_jobs)
+
+
+async def _periodic_knowledge_sync() -> None:
+    await asyncio.sleep(15)
     while True:
-        await asyncio.sleep(CLEANUP_INTERVAL_SECONDS)
         try:
-            await asyncio.to_thread(sync_due_web_sources)
+            await asyncio.to_thread(_sync_knowledge_sources)
         except Exception:
-            logger.exception('Periodic external knowledge synchronization failed')
+            logger.exception('Periodic knowledge synchronization failed')
+        await asyncio.sleep(300)
 
 
 async def _dispatch_usb_events(app) -> None:

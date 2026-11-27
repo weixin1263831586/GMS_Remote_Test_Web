@@ -65,7 +65,7 @@ def test_embedding_configuration_diagnostics(tmp_path, monkeypatch):
     monkeypatch.setattr(semantic.config_manager, "load_config", lambda: config)
     assert embedding_configuration_issue() == "disabled"
     config["retrieval"] = {"enabled": True}
-    assert embedding_configuration_issue("personal_knowledge") == "source_disabled"
+    assert embedding_configuration_issue("personal_knowledge") == "model_unconfigured"
     assert embedding_configuration_issue() == "model_unconfigured"
     config["retrieval"].update(model_path=str(tmp_path / "missing"), model_revision="v1")
     assert embedding_configuration_issue() == "model_missing"
@@ -74,6 +74,9 @@ def test_embedding_configuration_diagnostics(tmp_path, monkeypatch):
     assert embedding_configuration_issue() == "dependency_missing"
     monkeypatch.setattr(semantic.importlib.util, "find_spec", lambda name: object())
     assert embedding_configuration_issue() is None
+    assert embedding_configuration_issue("redmine_journals") is None
+    config["retrieval"]["enabled_sources"] = ["cdd"]
+    assert embedding_configuration_issue("personal_knowledge") == "source_disabled"
     config["retrieval"]["enabled_sources"] = "cdd"
     assert embedding_configuration_issue() == "invalid_config"
 

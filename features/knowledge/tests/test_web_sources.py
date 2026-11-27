@@ -39,6 +39,34 @@ def configure(provider, version):
     )
 
 
+def test_seeded_aosp_recall_matches_full_property_and_preserves_admin_choices(tmp_path, monkeypatch):
+    provider = WebKnowledgeProvider(tmp_path / "web.sqlite3")
+    cdd_id = configure(provider, 14)
+    provider.register_defaults()
+    sources = provider.list_sources()
+    assert len(sources) == 7
+    assert next(row for row in sources if row["android_version"] == 14)["id"] == cdd_id
+    vendor = next(row for row in sources if row["name"] == "Vendor API level")
+    html = b'<article><h2 id="board">Board level</h2><p>Build sets ro.board.api_level.</p></article>'
+    monkeypatch.setattr(web_sources, "fetch_html", lambda *args, **kwargs: (html, "", ""))
+    monkeypatch.setattr(web_sources, "index_path", lambda: provider._path())
+    provider.sync(vendor["id"])
+    query = "Android版本ro.board.api_level属性要求"
+    recalled = web_sources.recall_web_references(query, android_version=14)
+    assert recalled["items"][0]["source_url"] == vendor["url"] + "#board"
+    assert recalled["items"][0]["source_kind"] == "document"
+    assert provider.read_cdd_scope(recalled["items"][0]["reference"], mode="section",
+                                   android_api_level=34, include_documents=True)["status"] == "matched"
+    assert provider.search_with_status(query, public_cdd_only=True)[0] == []
+    provider.save_url(url=vendor["url"], name="Renamed", enabled=False, source_id=vendor["id"])
+    provider.register_defaults()
+    row = next(row for row in provider.list_sources() if row["id"] == vendor["id"])
+    assert not row["enabled"] and row["name"] == "Renamed"
+    provider.delete(vendor["id"])
+    provider.register_defaults()
+    assert all(row["url"] != vendor["url"] for row in provider.list_sources())
+
+
 @pytest.mark.parametrize('url', [
     'http://source.android.com/docs',
     'https://user:secret@example.com/',

@@ -22,8 +22,23 @@ from .web_fetch import fetch_html, validate_url
 
 
 SOURCE = "web_documents"
-API_TO_ANDROID = {35: 15, 36: 16, 37: 17}
+API_TO_ANDROID = {34: 14, 35: 15, 36: 16, 37: 17}
 MAX_REVISIONS_PER_SOURCE = 8
+MAX_SOURCES = 64
+_AOSP_LICENSE = 'CC-BY-4.0 (AOSP documentation, unless otherwise noted)'
+_AOSP_DOC_PREFIX = 'https://source.android.com/docs/'
+# Put unversioned architecture references first on an empty deployment.
+_DEFAULT_AOSP_DOCUMENTS = (
+    ('core/architecture/api-flags', 'Vendor API level'),
+    ('core/architecture/vintf', 'Vendor interface object'),
+    ('core/architecture/configuration/add-system-properties', 'Add system properties'),
+)
+_SEMANTIC_SOURCE_FLAGS = {
+    "cdd": ("cdd", "auto_index_public_cdd"),
+    "document": (SOURCE, "auto_index_web_documents"),
+}
+_PROPERTY_RE = re.compile(r"(?<![\w.])(?:ro|persist|sys|vendor|odm)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*",
+                          re.ASCII | re.IGNORECASE)
 
 #: 排序用词表桥接：CDD 用 "memory available to the kernel and userspace" 表达
 #: 内存门槛，用户和模型更常说 RAM、内存。桥接只影响**章内排序**，不扩大
@@ -67,6 +82,7 @@ CREATE TABLE IF NOT EXISTS sync_attempts (
 CREATE TABLE IF NOT EXISTS semantic_sync_attempts (
  source_id TEXT PRIMARY KEY, attempted_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS seeded_default_sources (url TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS cdd_insights (
  id INTEGER PRIMARY KEY, token TEXT UNIQUE NOT NULL, source_id TEXT NOT NULL,
  revision TEXT NOT NULL, model_key TEXT NOT NULL, status TEXT NOT NULL,
@@ -195,7 +211,7 @@ class WebKnowledgeProvider:
             if not name:
                 name = old['name']
         elif host == 'source.android.com' and path.startswith('/docs/'):
-            license = 'CC-BY-4.0 (AOSP documentation, unless otherwise noted)'
+            license = _AOSP_LICENSE
         elif authorized_for_ai_processing:
             license = 'Administrator-approved content use; license not independently verified'
         else:
@@ -237,12 +253,37 @@ class WebKnowledgeProvider:
                 db.execute("UPDATE sources SET name=?,url=?,kind=?,android_version=?,license=?,enabled=?,generation=? WHERE id=?",
                            (name, url, kind, android_version, license, int(enabled), uuid.uuid4().hex, source_id))
             else:
-                if db.execute("SELECT count(*) FROM sources").fetchone()[0] >= 64:
+                if db.execute("SELECT count(*) FROM sources").fetchone()[0] >= MAX_SOURCES:
                     raise ValueError("Source limit reached")
-                source_id = uuid.uuid4().hex
-                db.execute("INSERT INTO sources(id,name,url,kind,android_version,license,enabled,generation) VALUES (?,?,?,?,?,?,?,?)",
-                           (source_id, name, url, kind, android_version, license, int(enabled), uuid.uuid4().hex))
+                source_id = self._insert_source(db, name, url, kind, android_version, license, enabled)
         return source_id
+
+    @staticmethod
+    def _insert_source(db, name, url, kind, android_version, license, enabled):
+        source_id = uuid.uuid4().hex
+        db.execute("INSERT INTO sources(id,name,url,kind,android_version,license,enabled,generation) VALUES (?,?,?,?,?,?,?,?)",
+                   (source_id, name, url, kind, android_version, license, int(enabled), uuid.uuid4().hex))
+        return source_id
+
+    def register_defaults(self):
+        """Register built-in sources once, preserving administrator edits and deletions."""
+        defaults = [(path, name, "document", None) for path, name in _DEFAULT_AOSP_DOCUMENTS]
+        defaults.extend((f"compatibility/{version}/android-{version}-cdd", f"Android {version} CDD", "cdd", version)
+                        for version in API_TO_ANDROID.values())
+        with self._db(write=True) as db:
+            db.execute("BEGIN IMMEDIATE")
+            existing = {row[0] for row in db.execute("SELECT url FROM sources")}
+            seeded = {row[0] for row in db.execute("SELECT url FROM seeded_default_sources")}
+            for path, name, kind, version in defaults:
+                url = _AOSP_DOC_PREFIX + path
+                if url in seeded:
+                    continue
+                if url not in existing:
+                    if len(existing) >= MAX_SOURCES:
+                        continue
+                    self._insert_source(db, name, url, kind, version, _AOSP_LICENSE, True)
+                    existing.add(url)
+                db.execute("INSERT INTO seeded_default_sources VALUES (?)", (url,))
 
     def delete(self, source_id):
         with self._db(write=True) as db:
@@ -329,7 +370,8 @@ class WebKnowledgeProvider:
             return outcomes
         with self._db(write=True) as db:
             attempts = dict(db.execute("SELECT source_id,attempted_at FROM sync_attempts").fetchall())
-        for source in sorted(sources, key=lambda row: (attempts.get(row["id"], ""), row["id"])):
+        for source in sorted(sources, key=lambda row: (attempts.get(row["id"], ""),
+                                                       row["kind"] != "document", row["id"])):
             if not source['enabled']:
                 continue
             stamp = source['synced_at']
@@ -347,23 +389,26 @@ class WebKnowledgeProvider:
                 break
         return outcomes
 
-    def sync_due_semantic(self, *, now=None, max_sources=1, batch_size=128):
-        """Resume explicitly enabled CDD and approved Wiki indexes on controller ticks."""
+    def sync_due_semantic(self, *, now=None, max_sources=1, batch_size=128, additional_jobs=None):
+        """Resume authorized local indexes in bounded batches on controller ticks."""
         from features.retrieval import embedding_configuration_issue, run_scheduled_index_batches
 
         config = (config_manager.load_config() or {}).get("retrieval")
         if not isinstance(config, dict) or max_sources < 1:
             return []
-        jobs = {}
-        if config.get("auto_index_public_cdd") is True and embedding_configuration_issue() is None:
-            for row in self.list_sources():
-                if row["enabled"] and row["kind"] == "cdd" and row["revision"] and not row["error"]:
-                    source_id = row["id"]
-                    jobs[source_id] = (
-                        lambda source_id=source_id: self.semantic_status(source_id),
-                        lambda source_id=source_id, **kwargs: self.sync_semantic(source_id, **kwargs),
-                    )
-        if (config.get("auto_index_approved_wiki") is True
+        jobs = dict(additional_jobs or {})
+        enabled_kinds = {
+            kind for kind, (scope, flag) in _SEMANTIC_SOURCE_FLAGS.items()
+            if config.get(flag, True) is True and embedding_configuration_issue(scope) is None
+        }
+        for row in self.list_sources() if enabled_kinds else ():
+            if row["enabled"] and row["kind"] in enabled_kinds and row["revision"] and not row["error"]:
+                source_id = row["id"]
+                jobs[source_id] = (
+                    lambda source_id=source_id: self.semantic_status(source_id),
+                    lambda source_id=source_id, **kwargs: self.sync_semantic(source_id, **kwargs),
+                )
+        if (config.get("auto_index_approved_wiki", True) is True
                 and embedding_configuration_issue("android_internals") is None):
             from .federation import federated_service
 
@@ -399,11 +444,11 @@ class WebKnowledgeProvider:
         finally:
             release_sync_lock(descriptor)
 
-    def semantic_schedule_status(self, source_id, *, wiki=False):
+    def semantic_schedule_status(self, source_id, *, wiki=False, web_kind="cdd"):
         """Read scheduling metadata without creating a database or loading models."""
         config = (config_manager.load_config() or {}).get("retrieval")
-        flag = "auto_index_approved_wiki" if wiki else "auto_index_public_cdd"
-        enabled = isinstance(config, dict) and config.get(flag) is True
+        flag = "auto_index_approved_wiki" if wiki else _SEMANTIC_SOURCE_FLAGS[web_kind][1]
+        enabled = isinstance(config, dict) and config.get(flag, True) is True
         attempted_at = ""
         if self._path().is_file():
             try:
@@ -446,7 +491,8 @@ class WebKnowledgeProvider:
                 """SELECT DISTINCT c.*,s.android_version,s.error FROM clauses c JOIN sources s
                    ON c.source_id=s.id AND c.revision=s.revision
                    WHERE c.token=? AND s.enabled=1 AND (?=1 OR s.kind='cdd')
-                   AND (? IS NULL OR s.android_version=?) LIMIT 2""", (token, int(include_documents), version, version)
+                   AND (? IS NULL OR s.android_version IS NULL OR s.android_version=?) LIMIT 2""",
+                (token, int(include_documents), version, version)
             ).fetchall()
             if len(anchors) != 1:
                 return result
@@ -535,61 +581,72 @@ class WebKnowledgeProvider:
         return coverage
 
     def semantic_status(self, source_id=None):
-        from .cdd_semantic import CddSemantic
+        from .cdd_semantic import WebSemantic
 
         try:
-            return CddSemantic(self).status(source_id)
+            return WebSemantic(self, kind=self.semantic_kind(source_id)).status(source_id)
         except Exception as exc:
             return {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
 
     def sync_semantic(self, source_id, *, batch_size=128):
-        from .cdd_semantic import CddSemantic
+        from .cdd_semantic import WebSemantic
 
-        return CddSemantic(self).sync(source_id, batch_size=batch_size)
+        return WebSemantic(self, kind=self.semantic_kind(source_id)).sync(source_id, batch_size=batch_size)
+
+    def semantic_kind(self, source_id):
+        return next((row["kind"] for row in self.list_sources() if row["id"] == source_id), "cdd")
 
     def search(self, query, *, limit=5, android_api_level=None):
         hits, _ = self.search_with_status(query, limit=limit, android_api_level=android_api_level)
         return hits
 
-    def search_with_status(self, query, *, limit=5, android_api_level=None, public_cdd_only=False):
+    def search_with_status(self, query, *, limit=5, android_api_level=None, public_cdd_only=False, public_only=False):
         from . import cdd_intelligence
-        from .cdd_semantic import CddSemantic
+        from .cdd_semantic import WebSemantic
 
         limit = min(max(limit, 1), 20)
         lexical = self._lexical_search(query, limit=limit, android_api_level=android_api_level,
-                                       public_cdd_only=public_cdd_only)
-        version = API_TO_ANDROID.get(android_api_level)
-        if android_api_level is not None and version is None:
-            version = -1
-        try:
-            rows, status = CddSemantic(self).search(query, version=version, limit=max(limit, 20),
-                                                    fresh_only=public_cdd_only)
-        except Exception as exc:
-            rows = []
-            status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+                                       public_cdd_only=public_cdd_only, public_only=public_only)
+        version = API_TO_ANDROID.get(android_api_level, -1) if android_api_level is not None else None
+        dense_rankings = []
+        semantic_statuses = {}
+        for kind in ("cdd",) if public_cdd_only else _SEMANTIC_SOURCE_FLAGS:
+            try:
+                rows, status = WebSemantic(self, kind=kind, public_only=public_only).search(
+                    query, version=version, limit=20, fresh_only=public_cdd_only or public_only)
+            except Exception as exc:
+                rows = []
+                status = {"status": "error", "coverage_complete": False, "detail": type(exc).__name__}
+            semantic_statuses[kind] = status
+            dense_rankings.append([_clause_hit(row, score=score) for row, score in rows])
+        status = semantic_statuses["cdd"]
+        if "document" in semantic_statuses:
+            status = {**status, "web_documents": semantic_statuses["document"]}
         try:
             insights = [_clause_hit(row) for row in cdd_intelligence.search(self, query, version=version, limit=limit)]
         except Exception:
             insights = []
-        dense = [_clause_hit(row, score=score) for row, score in rows]
-        if not dense and not insights:
+        if not any(dense_rankings) and not insights:
             return lexical, status
         if insights:
             status = {**status, "document_understanding_hits": len(insights)}
-        pool = {hit.source_path: hit for hit in [*insights, *dense, *lexical]}
+        pool = {hit.source_path: hit for hits in (insights, *dense_rankings, lexical) for hit in hits}
+        properties = android_property_names(query)
         exact = [key for key, hit in pool.items()
-                 if (identifier := str(hit.extra.get("requirement_id") or "")) and
-                 re.search(r"(?<![\w.-])" + re.escape(identifier) + r"(?![\w.-])", query, re.I)]
-        keys = fuse_rankings([[hit.source_path for hit in lexical], [hit.source_path for hit in dense],
-                              [hit.source_path for hit in insights]], limit=limit, exact_keys=exact)
+                 if properties.intersection(android_property_names(hit.snippet))
+                 or ((identifier := str(hit.extra.get("requirement_id") or "")) and
+                     re.search(r"(?<![\w.-])" + re.escape(identifier) + r"(?![\w.-])", query, re.I))]
+        keys = fuse_rankings([[hit.source_path for hit in hits] for hits in (lexical, *dense_rankings, insights)],
+                             limit=limit, exact_keys=exact)
         for rank, key in enumerate(keys):
             pool[key].score = -float(rank)
         return [pool[key] for key in keys], status
 
-    def _lexical_search(self, query, *, limit=5, android_api_level=None, public_cdd_only=False):
+    def _lexical_search(self, query, *, limit=5, android_api_level=None, public_cdd_only=False, public_only=False):
         if not self._path().is_file():
             return []
-        terms = _match_terms(search_terms(query))
+        properties = android_property_names(query)
+        terms = list(dict.fromkeys([*sorted(properties), *_match_terms(search_terms(query))]))
         match = ' OR '.join('"' + term.replace('"', '""') + '"' for term in terms)
         if not match:
             return []
@@ -599,14 +656,23 @@ class WebKnowledgeProvider:
         limit = min(max(limit, 1), 20)
         ranking_terms = _ranking_terms(terms)
         with self._db() as db:
-            candidates = db.execute(
-                """SELECT c.rowid AS rowid,c.source_id,c.revision,c.section,bm25(clauses) AS rank
-                   FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
-                   WHERE clauses MATCH ? AND s.enabled=1 AND
-                     (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
-                     AND (?=0 OR (s.kind='cdd' AND s.error=''))
-                   ORDER BY rank,c.token LIMIT ?""",
-                (match, version, version, int(public_cdd_only), max(limit * 20, 60))).fetchall()
+            db.execute("BEGIN")
+
+            def matching_sections(expression):
+                return db.execute(
+                    """SELECT c.source_id,c.revision,c.section
+                       FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
+                       WHERE clauses MATCH ? AND s.enabled=1 AND
+                         (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
+                         AND (?=0 OR (s.kind='cdd' AND s.error=''))
+                         AND (?=0 OR (s.url GLOB ? AND s.error=''))
+                       ORDER BY bm25(clauses),c.token LIMIT ?""",
+                    (expression, version, version, int(public_cdd_only), int(public_only), _AOSP_DOC_PREFIX + "*",
+                     max(limit * 20, 60))).fetchall()
+
+            exact_match = ' OR '.join(f'"{name}"' for name in sorted(properties))
+            candidates = matching_sections(exact_match) if exact_match else []
+            candidates.extend(matching_sections(match))
             # 命中按章节成组：表格/列表往往只有条件行或说明行命中，单独返回
             # 它们回答不了问题（问内存门槛却只拿到"声明 ram.low"这类标志位）。
             # 章节优先序沿用 bm25 的最佳名次，章内再按「MUST/SHOULD 强度 →
@@ -625,13 +691,19 @@ class WebKnowledgeProvider:
                        WHERE c.source_id=? AND c.revision=? AND c.section=? ORDER BY c.rowid""",
                     (source_id, revision, section)).fetchall()
                 ranked_sections.append(sorted(rows, key=lambda item: _strength_order(item, ranking_terms)))
-        ordered: list = []
+        ordered = [row for ranked in ranked_sections for row in ranked
+                   if properties and properties.intersection(android_property_names(row["original"]))]
+        exact_rows = {row["rowid"] for row in ordered}
         for ranked in ranked_sections:
             if len(ordered) >= limit:
                 break
-            ordered.extend(ranked[:limit - len(ordered)])
+            ordered.extend(row for row in ranked if row["rowid"] not in exact_rows)
         return [_clause_hit(dict(row), score=-float(position))
                 for position, row in enumerate(ordered[:limit])]
+
+
+def android_property_names(text):
+    return {value.casefold() for value in _PROPERTY_RE.findall(text or "")}
 
 
 def _match_terms(terms: list[str]) -> list[str]:
@@ -700,15 +772,13 @@ def recall_web_references(query: str, *, android_version=None):
                     (android_version is None or r["android_version"] in (None, android_version))]
         if not selected:
             return None
-        api = next((k for k, v in API_TO_ANDROID.items() if v == android_version), None)
-        if android_version is not None and api is None:
-            return {"status": "unavailable", "coverage_complete": False, "items": [],
-                    "reason": "Android version mapping not configured"}
+        api = next((k for k, v in API_TO_ANDROID.items() if v == android_version),
+                   -1 if android_version is not None else None)
         hits, retrieval = provider.search_with_status(query[:512], limit=5, android_api_level=api)
         # Redmine preflight and MCP use the same optional local-model public recall.
         from ..model_context import model_planned_cdd_hits
 
-        planned = model_planned_cdd_hits(query[:512], android_api_level=api, limit=5)
+        planned = model_planned_cdd_hits(query[:512], android_api_level=api, limit=5) if api != -1 else []
         if planned:
             current = []
             for candidate in planned:
@@ -719,7 +789,9 @@ def recall_web_references(query: str, *, android_version=None):
                     current.append(_clause_hit(row))
             if current:
                 pool = {hit.source_path: hit for hit in [*hits, *current]}
-                ordered = list(dict.fromkeys(hit.source_path for hit in [*current, *hits]))
+                properties = android_property_names(query[:512])
+                exact = [hit for hit in hits if properties.intersection(android_property_names(hit.snippet))]
+                ordered = list(dict.fromkeys(hit.source_path for hit in [*exact, *current, *hits]))
                 hits = [pool[token] for token in ordered[:5]]
                 retrieval = {**retrieval, "local_model_planned": True, "coverage_complete": False}
         items = [{"reference": h.source_path, "source_url": h.extra["source_url"],

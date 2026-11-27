@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
 from features.kkagent import model_catalog_fingerprint
+from foundation.config import config_manager
 
 from .api import page_router, router
 from .external import (
@@ -17,10 +20,14 @@ from .external import (
 )
 from .external.web_sources import (
     WebKnowledgeProvider,
+    android_property_names,
     recall_web_references,
 )
 from .model_context import public_cdd_context, retrieve_public_cdd_context
 from .policy_imports import owner_policy_imports_current, recall_owner_policy_imports
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -30,6 +37,7 @@ __all__ = [
     "ExternalSearchRequest",
     "KnowledgeHit",
     "ProviderStatus",
+    "android_property_names",
     "federated_reindex",
     "federated_search",
     "federated_status",
@@ -64,11 +72,29 @@ def __getattr__(name: str):
     return value
 
 
-def sync_due_web_sources():
-    provider = WebKnowledgeProvider()
-    outcomes = provider.sync_due()
-    outcomes.extend(provider.sync_due_semantic())
+def sync_due_web_sources(*, owners=(), owner_index_jobs=None):
+    from .indexing import personal_index_jobs, sync_approved_wiki
     from .service import sync_due_cdd_understanding, wiki_document_understanding
+
+    provider = WebKnowledgeProvider()
+    config = (config_manager.load_config() or {}).get("retrieval")
+    config = config if isinstance(config, dict) else {}
+    if config.get("auto_register_public_web_sources", True) is True:
+        provider.register_defaults()
+    outcomes = provider.sync_due()
+    try:
+        outcomes.extend(sync_approved_wiki(config))
+    except Exception:
+        logger.warning("Approved Wiki indexing failed", exc_info=True)
+    owners = set(owners)
+    jobs = {}
+    for discover in (personal_index_jobs, owner_index_jobs):
+        if discover is not None:
+            try:
+                jobs.update(discover(owners, config))
+            except Exception:
+                logger.warning("Owner knowledge index discovery failed", exc_info=True)
+    outcomes.extend(provider.sync_due_semantic(max_sources=2, additional_jobs=jobs))
 
     outcomes.extend(sync_due_cdd_understanding())
     try:

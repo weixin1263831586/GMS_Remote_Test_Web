@@ -16,6 +16,7 @@ from .cases.case_extractor import RedmineCaseExtractor
 from .client import RedmineClient
 from .config import config_manager
 from .failure_identity import failure_identity
+from .indexing import redmine_index_jobs
 from .org_chart import load_redmine_user_map_for_owner
 from .repository import (
     display_names_from_mapping,
@@ -122,6 +123,7 @@ __all__ = [
     "load_redmine_user_map_for_owner",
     "name_keys",
     "norm_name",
+    "redmine_index_jobs",
     "redmine_service",
     "resolve_owner_names",
     "strip_redmine_report_prefix",

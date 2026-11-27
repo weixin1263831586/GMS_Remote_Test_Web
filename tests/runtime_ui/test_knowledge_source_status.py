@@ -194,12 +194,15 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
             page.evaluate("window.showConfirmDialog = async () => true")
             row = page.locator(".kb-source-table tr").filter(has_text="Android Internals Wiki")
             button = row.get_by_role("button", name="语义索引", exact=True)
-            button.click()
+            with page.expect_response(lambda response: response.url.endswith("?batch_size=128")
+                                      and state["coverage_complete"]):
+                button.click()
             expect(button).to_be_enabled(timeout=10000)
             self.assertEqual(calls, ["POST", "POST", "POST"])
             self.assertTrue(state["coverage_complete"])
             state.update(status="partial", indexed=128, coverage_complete=False)
-            button.click()
+            with page.expect_response("**/api/knowledge/external/wiki-semantic-index?batch_size=128"):
+                button.click()
             expect(button).to_be_enabled(timeout=10000)
             self.assertEqual(len(calls), 4)
         finally:

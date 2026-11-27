@@ -184,7 +184,7 @@ def personal_source(store, owner, *, space_id="", approved_only=False, catalog_h
                              search, current, read, inventory, manifest, resolve)
 
 
-def web_source(*, android_api_level=None, cdd_only=False):
+def web_source(*, android_api_level=None, cdd_only=False, public_only=False):
     provider = WebKnowledgeProvider()
 
     def permitted(row):
@@ -196,8 +196,9 @@ def web_source(*, android_api_level=None, cdd_only=False):
         if row["kind"] == "cdd":
             return (url.netloc == "source.android.com"
                     and bool(re.fullmatch(r"/docs/compatibility/(\d+)/android-\1-cdd/?", url.path)))
-        return not cdd_only and (row["license"].startswith("Administrator-approved content use")
-                                 or (url.netloc == "source.android.com" and url.path.startswith("/docs/")))
+        return not cdd_only and (
+            (url.netloc == "source.android.com" and url.path.startswith("/docs/"))
+            or (not public_only and row["license"].startswith("Administrator-approved content use")))
 
     def from_row(row):
         if not permitted(row):
@@ -207,6 +208,7 @@ def web_source(*, android_api_level=None, cdd_only=False):
                             {"title": redact_sensitive_text(row["name"])[:160],
                              "section": redact_sensitive_text(row["section"])[:300],
                              "source_url": row["url"], "android_version": row["android_version"],
+                             "source_kind": row["kind"],
                              "requirement_id": row["requirement_id"], "requirement_level": row["level"],
                              "condition": redact_sensitive_text(row["condition"])[:1500],
                              "applicability_verified": False})
@@ -219,7 +221,7 @@ def web_source(*, android_api_level=None, cdd_only=False):
 
     def search(query, limit):
         hits, _ = provider.search_with_status(query, limit=limit, android_api_level=android_api_level,
-                                              public_cdd_only=cdd_only)
+                                              public_cdd_only=cdd_only, public_only=public_only)
         rows = []
         for hit in hits:
             row = provider.read_requirement(hit.source_path)
@@ -242,8 +244,10 @@ def web_source(*, android_api_level=None, cdd_only=False):
                 rows.append(row)
         return RetrievalResult(rows, data["status"])
 
-    return IntelligentSource("web_documents", "公开 CDD 及经管理员批准的本地网页索引" if not cdd_only else "公开 Android CDD",
-                             search, current, read)
+    label = "公开 Android CDD" if cdd_only else "公开 AOSP 文档与 Android CDD"
+    if not cdd_only and not public_only:
+        label += "及经管理员批准的网页"
+    return IntelligentSource("web_documents", label, search, current, read)
 
 
 def wiki_source(*, android_api_level=None):

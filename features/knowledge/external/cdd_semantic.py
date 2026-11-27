@@ -1,4 +1,4 @@
-"""Local semantic recall of current, enabled public CDD clauses only."""
+"""Local semantic recall of current, enabled web document revisions."""
 
 from __future__ import annotations
 
@@ -11,20 +11,24 @@ MAX_CORPUS = 30000
 MAX_BATCH = 128
 
 
-class CddSemantic:
-    def __init__(self, provider, *, embedder=None):
+class WebSemantic:
+    def __init__(self, provider, *, embedder=None, kind="cdd", public_only=False):
         self.provider = provider
-        self.embedder = embedder if embedder is not None else local_embedding()
+        self.kind = kind
+        self.public_only = public_only
+        scope = "cdd" if kind == "cdd" else "web_documents"
+        self.embedder = embedder if embedder is not None else local_embedding(scope)
         path = provider._path()
         self.index = VectorIndex(path.parent / "cdd_vectors.sqlite3")
         self.namespace = hashlib.sha256(str(path.resolve()).encode()).hexdigest()
 
     def _sources(self, source_id=None, version=None, *, fresh_only=False):
         return [row for row in self.provider.list_sources()
-                if row["enabled"] and row["kind"] == "cdd" and row["revision"]
+                if row["enabled"] and row["kind"] == self.kind and row["revision"]
+                and (not self.public_only or row["url"].startswith("https://source.android.com/docs/"))
                 and (not fresh_only or not row["error"])
                 and (source_id is None or row["id"] == source_id)
-                and (version is None or row["android_version"] == version)]
+                and (version is None or row["android_version"] in (None, version))]
 
     def _rows(self, source, tokens):
         if not tokens:
@@ -34,9 +38,9 @@ class CddSemantic:
             return [dict(row) for row in db.execute(
                 """SELECT c.token,c.section,c.requirement_id,c.condition,c.original
                    FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
-                   WHERE s.id=? AND s.enabled=1 AND s.kind='cdd' AND s.revision=?
+                   WHERE s.id=? AND s.enabled=1 AND s.kind=? AND s.revision=?
                    AND c.token IN (""" + placeholders + ") ORDER BY c.token",
-                (source["id"], source["revision"], *tokens)
+                (source["id"], self.kind, source["revision"], *tokens)
             )]
 
     def _scope(self, source):
@@ -46,11 +50,11 @@ class CddSemantic:
         with self.provider._db() as db:
             rows = db.execute("""SELECT c.token FROM clauses c JOIN sources s
                 ON c.source_id=s.id AND c.revision=s.revision
-                WHERE s.id=? AND s.enabled=1 AND s.kind='cdd' AND s.revision=?
-                ORDER BY c.token LIMIT ?""", (source["id"], source["revision"], MAX_CORPUS + 1)).fetchall()
+                WHERE s.id=? AND s.enabled=1 AND s.kind=? AND s.revision=?
+                ORDER BY c.token LIMIT ?""", (source["id"], self.kind, source["revision"], MAX_CORPUS + 1)).fetchall()
         tokens = [row[0] for row in rows]
         if len(tokens) > MAX_CORPUS:
-            raise ValueError("CDD corpus exceeds semantic index limit")
+            raise ValueError("Web document corpus exceeds semantic index limit")
         return tokens
 
     def status(self, source_id=None):
@@ -68,7 +72,7 @@ class CddSemantic:
             raise ValueError("Local embedding model not configured")
         sources = self._sources(source_id)
         if len(sources) != 1:
-            raise ValueError("Enabled public CDD source required")
+            raise ValueError("Enabled web source required")
         source = sources[0]
         with self.index.sync_lock(self._scope(source)) as acquired:
             if not acquired:
@@ -96,12 +100,12 @@ class CddSemantic:
 
     def search(self, query, *, version=None, limit=20, fresh_only=False):
         if self.embedder is None:
-            return [], self.status()
+            return [], {"status": "disabled", "coverage_complete": False, "indexed": 0, "total": 0}
         sources = self._sources(version=version, fresh_only=fresh_only)
         manifest = [(source, self._manifest(source)) for source in sources]
         total = sum(len(tokens) for _, tokens in manifest)
         if total > MAX_CORPUS:
-            raise ValueError("Combined CDD corpus exceeds semantic search limit")
+            raise ValueError("Combined web document corpus exceeds semantic search limit")
         indexed = sum(len(self.index.indexed(self._scope(source), self.embedder.identity, tokens))
                       for source, tokens in manifest)
         status = semantic_coverage(total, indexed)
@@ -119,9 +123,10 @@ class CddSemantic:
             for token, score in ranked:
                 row = db.execute("""SELECT c.*,s.name,s.android_version,s.license,s.kind,s.synced_at,s.error
                     FROM clauses c JOIN sources s ON c.source_id=s.id AND c.revision=s.revision
-                    WHERE c.token=? AND s.enabled=1 AND s.kind='cdd'
-                    AND (? IS NULL OR s.android_version=?) AND (?=0 OR s.error=\'\')""",
-                                 (token, version, version, int(fresh_only))).fetchone()
+                    WHERE c.token=? AND s.enabled=1 AND s.kind=?
+                    AND (? IS NULL OR s.android_version IS NULL OR s.android_version=?)
+                    AND (?=0 OR s.error='')""",
+                                 (token, self.kind, version, version, int(fresh_only))).fetchone()
                 if row:
                     hits.append((dict(row), score))
         current = [(source, self._manifest(source)) for source in self._sources(version=version, fresh_only=fresh_only)]
