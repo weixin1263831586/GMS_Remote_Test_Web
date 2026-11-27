@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh-CN" class="loading-orbit-page" data-ui-type-root="gerrit">
+<html lang="zh-CN" class="loading-orbit-page ui-dashboard" data-ui-type-root="gerrit">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -39,12 +39,6 @@
     .tab-content { display:none; }
     .tab-content.active { display:block; }
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:var(--ui-spacing-md); }
-    .stat-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); height:var(--ui-stat-height); min-height:var(--ui-stat-height); padding:14px; text-align:center; }
-    .stat-card .value {   color:var(--primary); }
-    .stat-card .label { color:var(--muted);  margin-top:4px; }
-    .stat-card.ok .value { color:var(--ok); }
-    .stat-card.warn .value { color:var(--warn); }
-    .stat-card.bad .value { color:var(--bad); }
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
@@ -151,7 +145,7 @@
 
 /* Gerrit 保留已有各视图/列表/对话框交互，只对齐公共视觉。 */
 
-:where(.stat-card, .trend-panel, .wrap, .dept-table-wrap) {
+:where(.trend-panel, .wrap, .dept-table-wrap) {
     background: var(--panel); border-color: var(--border); border-radius: 8px; box-shadow: none;
 }
 :where(table) th { background: var(--panel2); color: var(--muted); }
