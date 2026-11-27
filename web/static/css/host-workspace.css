@@ -1,9 +1,4 @@
 /* Shared host workspace controls. Each viewer owns only its renderer and width exceptions. */
-.host-workspace-pane {
-    min-width: 0; min-height: 0; display: flex; flex-direction: column;
-    overflow: hidden; background: var(--card-bg);
-    border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
-}
 .host-workspace-pane:focus-within {
     border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
 }
@@ -55,6 +50,7 @@ body.workspace-scope-single .host-workspace-surface .host-pane-single-name {
 
 .host-workspace-surface .host-pane-status {
     margin-left: 0;
+    color: var(--text-secondary);
     box-sizing: border-box;
     display: inline-flex;
     align-items: center;
