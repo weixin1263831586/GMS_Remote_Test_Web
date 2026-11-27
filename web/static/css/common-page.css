@@ -32,8 +32,6 @@
     height: var(--ui-control-height-small);
 }
 
-.analysis-upload-title { height: 22px; line-height: 22px; }
-.analysis-upload-copy .upload-instructions { margin-top: 4px; color: var(--text-secondary); line-height: 1.6; }
 
 #apk-analysis-status .section-title {
 
