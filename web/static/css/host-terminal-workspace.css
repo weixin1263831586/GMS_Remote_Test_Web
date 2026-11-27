@@ -2,45 +2,10 @@
  * Host Terminal pane skin. Mirrors Host Desktop's single-row control template
  * without altering xterm dimensions, font settings, input, or session lifecycle.
  */
-#page-terminal.page-ui-rework .host-workspace-pane {
-    background: var(--card-bg);
-    border-color: var(--border-color);
-    border-radius: 8px;
-}
-#page-terminal.page-ui-rework .host-workspace-pane:focus-within {
-    border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
-}
-body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-pane {
-    border: 0;
-    border-radius: 0;
-}
 /* Use the in-pane toolbar on single-host pages as well. The legacy title-bar
    controls remain in the DOM for compatibility but are not duplicated visually. */
-body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-pane-header {
-    display: flex !important;
-}
 body.workspace-scope-single #page-terminal.page-ui-rework .host-workspace-single-bar {
     display: none !important;
-}
-body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-header,
-#page-terminal.page-ui-rework .host-workspace-pane-header {
-    display: flex;
-    flex: 0 0 34px;
-    box-sizing: border-box;
-    align-items: center;
-    height: 34px;
-    padding: 2px 8px;
-    gap: 7px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--card-bg);
-}
-#page-terminal.page-ui-rework .host-terminal-identity {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex: 1 1 auto;
-    min-width: 0;
-    white-space: nowrap;
 }
 #page-terminal.page-ui-rework .host-terminal-label {
     display: inline-flex;
@@ -49,100 +14,17 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     white-space: nowrap;
     color: var(--text-secondary);
 }
-#page-terminal.page-ui-rework .host-terminal-single-name {
-    display: none;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text-primary);
-}
-body.workspace-scope-single #page-terminal.page-ui-rework .host-terminal-single-name {
-    display: block;
-}
-body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-header .host-terminal-select,
-#page-terminal.page-ui-rework .host-workspace-pane-header .host-terminal-select {
-    box-sizing: border-box;
-    flex: 0 1 210px;
-    min-width: 105px;
-    max-width: 210px;
-    height: var(--ui-control-height-dense);
-    padding: 2px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: var(--text-primary);
-    background: var(--light-bg);
-}
 #page-terminal.page-ui-rework .host-terminal-status {
-    display: inline-flex;
-    align-items: center;
     flex: 0 1 auto;
-    box-sizing: border-box;
     min-width: 0;
-    height: var(--ui-control-height-small);
-    margin-left: 0;
     max-width: 180px;
-    padding: 2px 8px;
-    border: 1px solid color-mix(in srgb, var(--text-secondary) 22%, transparent);
-    border-radius: 6px;
     color: var(--text-secondary);
-    background: color-mix(in srgb, var(--text-secondary) 10%, var(--card-bg));
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 }
+
 #page-terminal.page-ui-rework .host-terminal-status::before {
-    content: "";
-    display: inline-block;
     flex: 0 0 6px;
-    width: 6px;
-    height: 6px;
-    margin-right: 7px;
-    border-radius: 50%;
-    background: currentColor;
 }
-#page-terminal.page-ui-rework .host-terminal-status.is-connected {
-    background: color-mix(in srgb, var(--success-color) 12%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--success-color) 26%, var(--border-color));
-}
-#page-terminal.page-ui-rework .host-terminal-status.is-pending {
-    background: color-mix(in srgb, var(--primary-color) 12%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--primary-color) 25%, var(--border-color));
-}
-#page-terminal.page-ui-rework .host-terminal-status.is-error {
-    color: var(--danger-color) !important;
-    background: color-mix(in srgb, var(--danger-color) 10%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--danger-color) 25%, var(--border-color));
-}
-#page-terminal.page-ui-rework .host-terminal-pane-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    flex: 0 0 auto;
-    margin-left: auto;
-}
-body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-header .host-terminal-icon-button,
-#page-terminal.page-ui-rework .host-workspace-pane-header .host-terminal-icon-button,
-body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-header .host-workspace-refresh-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex: 0 0 28px;
-    box-sizing: border-box;
-    width: 28px;
-    min-width: 28px;
-    height: var(--ui-control-height-dense);
-    padding: 0;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    background: var(--light-bg);
-    cursor: pointer;
-}
-#page-terminal.page-ui-rework .host-terminal-icon-button .ui-icon {
-    width: 15px;
-    height: 15px;
-}
+
 #page-terminal.page-ui-rework .host-terminal-icon-button:hover:not(:disabled),
 #page-terminal.page-ui-rework .host-terminal-return-button:hover:not(:disabled) {
     color: var(--primary-light);
@@ -170,10 +52,6 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
     width: 14px;
     height: 14px;
 }
-#page-terminal.page-ui-rework .host-workspace-pane-body {
-    min-height: 0;
-    background: var(--darker-bg);
-}
 #page-terminal.page-ui-rework .host-workspace-terminal {
     width: 100%;
     height: 100%;
@@ -189,73 +67,18 @@ body.workspace-scope-cluster #page-terminal.page-ui-rework .host-workspace-pane-
         color-mix(in srgb, var(--primary-color) 8%, var(--darker-bg)),
         var(--darker-bg) 68%);
 }
-#page-terminal.page-ui-rework .host-terminal-placeholder-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    max-width: 360px;
-    min-width: 0;
-    text-align: center;
-}
 #page-terminal.page-ui-rework .host-terminal-placeholder-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
     width: 54px;
     height: 54px;
-    border: 1px solid color-mix(in srgb, var(--primary-color) 36%, var(--border-color));
-    border-radius: 12px;
-    color: var(--primary-light);
-    background: color-mix(in srgb, var(--primary-color) 11%, var(--light-bg));
 }
+
 #page-terminal.page-ui-rework .host-terminal-placeholder-icon .ui-icon {
     width: 27px;
     height: 27px;
 }
-#page-terminal.page-ui-rework .host-terminal-placeholder-title {
-    color: var(--text-primary);
-}
-#page-terminal.page-ui-rework .host-terminal-placeholder-hint {
-    color: var(--text-secondary);
-    line-height: 1.5;
-    overflow-wrap: anywhere;
-}
-#page-terminal.page-ui-rework .host-terminal-connect-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 6px 16px;
-    border: 1px solid var(--primary-color);
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--primary-color) 22%, var(--card-bg));
-    color: var(--text-primary);
-    cursor: pointer;
-}
-#page-terminal.page-ui-rework .host-terminal-connect-button .ui-icon {
-    width: 15px;
-    height: 15px;
-}
-#page-terminal.page-ui-rework .host-terminal-connect-button:hover {
-    background: color-mix(in srgb, var(--primary-color) 36%, var(--card-bg));
-}
 #page-terminal.page-ui-rework .host-terminal-placeholder-connecting .host-terminal-placeholder-icon .ui-icon,
 #page-terminal.page-ui-rework .host-terminal-placeholder-adb .host-terminal-placeholder-icon .ui-icon {
     animation: host-desktop-rotate 1.4s linear infinite;
-}
-#page-terminal.page-ui-rework .layout-quad .host-terminal-placeholder-content {
-    gap: 7px;
-}
-#page-terminal.page-ui-rework .layout-quad .host-terminal-placeholder-icon {
-    width: 44px;
-    height: 44px;
-}
-#page-terminal.page-ui-rework .layout-quad .host-terminal-placeholder-icon .ui-icon {
-    width: 23px;
-    height: 23px;
 }
 @media (max-width: 960px) {
     #page-terminal.page-ui-rework .host-terminal-status {
