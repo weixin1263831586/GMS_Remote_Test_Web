@@ -10,7 +10,7 @@
             {% include 'components/page-header-end.html' %}
 
             <!-- 上传与当前任务：空状态占整行，分析时变为紧凑双栏 -->
-            <div class="apk-intake-row">
+            <div class="apk-intake-row analysis-intake">
             <div class="analysis-upload-frame">
                 <div id="apk-upload-zone" class="apk-upload-zone analysis-upload-surface upload-empty">
                     <input type="file" id="apk-file-input" accept=".apk,.jar" style="display: none;" />
@@ -34,12 +34,12 @@
 
             <!-- 分析状态 -->
             <div id="apk-analysis-status" style="display: none;">
-                <div class="apk-status-card">
-                    <div class="apk-status-row">
-                        <div class="apk-status-main">
-                            <span class="apk-active-artifact-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg></span>
-                            <div id="apk-file-name">-</div>
-                            <div id="apk-analysis-state" aria-live="polite">准备分析...</div>
+                <div class="apk-status-card analysis-status-card">
+                    <div class="apk-status-row analysis-status-row">
+                        <div class="apk-status-main analysis-status-main">
+                            <span class="apk-active-artifact-icon analysis-upload-symbol" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg></span>
+                            <div id="apk-file-name" class="analysis-status-name">-</div>
+                            <div id="apk-analysis-state" class="analysis-status-text" aria-live="polite">准备分析...</div>
                         </div>
                         <div class="apk-status-actions">
                             <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 开始分析</button>
@@ -47,9 +47,9 @@
                             <button class="btn-xs" data-click="resetApkAnalysis">关闭</button>
                         </div>
                     </div>
-                    <div id="apk-analysis-progress-container" style="display: none;">
-                        <div class="apk-progress-track">
-                            <div id="apk-analysis-progress-bar"></div>
+                    <div id="apk-analysis-progress-container" class="analysis-status-progress" style="display: none;">
+                        <div class="apk-progress-track analysis-status-track">
+                            <div id="apk-analysis-progress-bar" class="analysis-status-fill"></div>
                         </div>
                     </div>
                 </div>
