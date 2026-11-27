@@ -8,6 +8,8 @@ function resetSystemSettings() {
     systemSettingsGeneration++;
     systemConfigGeneration++;
     modelCatalogRequest++;
+    const catalog = document.getElementById('system-model-catalog');
+    if (catalog) { catalog.replaceChildren(); catalog.removeAttribute('aria-busy'); }
     systemSettingsLoad = null;
     const panel = document.getElementById('sidebar-settings-panel-system');
     if (panel) panel.scrollTop = 0;
@@ -41,50 +43,94 @@ async function scrollSystemSettingsTo(sectionName) {
     panel.scrollTop += section.getBoundingClientRect().top - panel.getBoundingClientRect().top;
 }
 
+function renderSystemModelCatalog(output, data) {
+    const status = data.status || {};
+    const routes = status.routes || {};
+    const providers = Array.isArray(status.providers) ? status.providers : [];
+    const summary = document.createElement('dl');
+    summary.className = 'model-catalog-summary';
+    for (const [label, value] of [
+        ['默认 Provider', status.primary_provider], ['本地 Provider', status.local_provider],
+        ['KKAgent', status.kkagent_installed ? '已安装（不代表在线）' : '未检测到可执行文件'],
+        ['默认文本', routes.default_text], ['本地 RAG', routes.local_rag], ['私有图片', routes.private_vision],
+    ]) {
+        const item = document.createElement('div');
+        const name = document.createElement('dt');
+        const detail = document.createElement('dd');
+        name.textContent = label;
+        detail.textContent = value || '未配置';
+        item.append(name, detail);
+        summary.append(item);
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className = 'model-catalog-table-wrap';
+    const table = document.createElement('table');
+    table.className = 'ui-table model-catalog-table';
+    table.setAttribute('aria-label', '模型目录及检测状态');
+    const header = table.createTHead().insertRow();
+    for (const label of ['Provider', '模型', '状态', '响应耗时', '操作']) {
+        const cell = document.createElement('th');
+        cell.scope = 'col';
+        cell.textContent = label;
+        header.append(cell);
+    }
+    const body = table.createTBody();
+    const labels = {disabled:'未启用', incomplete:'配置不完整', credential_missing:'缺少凭据', ready_to_probe:'待检测', available:'检测成功', unavailable:'检测失败'};
+    for (const provider of providers) {
+        const row = body.insertRow();
+        row.insertCell().textContent = provider.provider || '—';
+        row.insertCell().textContent = provider.model || '—';
+        const state = document.createElement('span');
+        state.className = 'model-catalog-state';
+        state.dataset.modelState = provider.state || '';
+        state.textContent = labels[provider.state] || provider.state || '未知';
+        row.insertCell().append(state);
+        row.insertCell().textContent = provider.checked && Number.isFinite(provider.latency_ms) ? provider.latency_ms + ' ms' : '—';
+        const probe = document.createElement('button');
+        probe.type = 'button';
+        probe.className = 'btn-xxs';
+        probe.textContent = '检测';
+        probe.setAttribute('aria-label', '检测 ' + provider.provider);
+        probe.disabled = !provider.enabled || !provider.configured || !provider.credential_configured;
+        probe.addEventListener('click', () => { void loadSystemModelCatalog(provider.provider); });
+        row.insertCell().append(probe);
+    }
+    if (!providers.length) {
+        const cell = body.insertRow().insertCell();
+        cell.colSpan = 5;
+        cell.className = 'settings-empty-state';
+        cell.textContent = '未配置模型。';
+    }
+    wrapper.append(table);
+    const message = document.createElement('div');
+    message.className = 'model-catalog-message';
+    message.setAttribute('role', 'status');
+    output.replaceChildren(summary, wrapper, message);
+}
+
 async function loadSystemModelCatalog(probeProvider = '') {
     const output = document.getElementById('system-model-catalog');
-    if (!output) return;
+    if (!output || output.getAttribute('aria-busy') === 'true') return;
     const request = ++modelCatalogRequest;
-    output.textContent = '正在读取统一模型目录…';
+    const message = output.querySelector('.model-catalog-message');
+    const buttons = [...output.querySelectorAll('button')].map(button => [button, button.disabled]);
+    buttons.forEach(([button]) => { button.disabled = true; });
+    output.setAttribute('aria-busy', 'true');
+    if (message) message.textContent = probeProvider ? '正在检测 ' + probeProvider + '…' : '正在刷新模型状态…';
+    else output.textContent = '正在读取统一模型目录…';
     try {
         const query = probeProvider ? '?probe=true&provider=' + encodeURIComponent(probeProvider) : '';
         const result = await apiCall('/api/config/ai' + query, 'GET', null, {silentToast: true});
         if (request !== modelCatalogRequest) return;
-        const data = result?.data || result || {};
-        const providers = data.status?.providers || [];
-        output.replaceChildren();
-        const summary = document.createElement('p');
-        summary.textContent = '默认 Provider：' + (data.status?.primary_provider || '未配置')
-            + '；本地 Provider：' + (data.status?.local_provider || '未配置');
-        output.append(summary);
-        const engine = document.createElement('p');
-        engine.textContent = 'KKAgent：' + (data.status?.kkagent_installed ? '已安装（不代表模型在线）' : '未检测到可执行文件');
-        output.append(engine);
-        const routes = data.status?.routes || {};
-        for (const [label, route] of [['默认文本', routes.default_text], ['本地 RAG', routes.local_rag], ['私有图片', routes.private_vision]]) {
-            const row = document.createElement('p');
-            row.textContent = label + '：' + (route || '未配置合格路由');
-            output.append(row);
-        }
-        const stateLabels = {disabled:'未启用', incomplete:'配置不完整', credential_missing:'缺少凭据', ready_to_probe:'待检测', available:'检测成功', unavailable:'检测失败'};
-        for (const provider of providers) {
-            const row = document.createElement('div');
-            row.className = 'modal-form-row';
-            const label = document.createElement('span');
-            label.textContent = [provider.provider, provider.model, stateLabels[provider.state] || provider.state,
-                provider.checked && Number.isFinite(provider.latency_ms) ? provider.latency_ms + ' ms' : ''].filter(Boolean).join(' · ');
-            const probe = document.createElement('button');
-            probe.type = 'button';
-            probe.className = 'btn-xxs';
-            probe.textContent = '检测';
-            probe.disabled = !provider.enabled || !provider.configured || !provider.credential_configured;
-            probe.addEventListener('click', () => { void loadSystemModelCatalog(provider.provider); });
-            row.append(label, probe);
-            output.append(row);
-        }
-        if (!providers.length) output.append(document.createTextNode('未配置模型。'));
+        renderSystemModelCatalog(output, result?.data || result || {});
     } catch (error) {
-        if (request === modelCatalogRequest) output.textContent = '模型目录读取失败：' + error.message;
+        if (request !== modelCatalogRequest) return;
+        (output.querySelector('.model-catalog-message') || output).textContent = '模型目录读取失败：' + error.message;
+    } finally {
+        if (request === modelCatalogRequest) {
+            output.removeAttribute('aria-busy');
+            buttons.forEach(([button, disabled]) => { if (button.isConnected) button.disabled = disabled; });
+        }
     }
 }
 

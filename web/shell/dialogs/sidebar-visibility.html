@@ -27,8 +27,10 @@
                         <section data-system-settings-section="models">
                             <div class="config-section">
                                 <div class="config-section-title">统一模型目录</div>
-                                <p class="modal-info-text">模型由 Controller 的 configs/local/config.json 中 ai_models 统一管理。对话 Agent、报告分析、Redmine 和检索分别使用授权的模型能力及路由，凭据不在页面回显。</p>
-                                <button type="button" class="btn-xxs" data-click="loadSystemModelCatalog">刷新模型状态</button>
+                                <div class="settings-action-row model-catalog-toolbar">
+                                    <small>模型由 Controller 的 <code>configs/local/config.json</code> 中 <code>ai_models</code> 统一管理；各业务按授权路由使用，凭据不回显。</small>
+                                    <button type="button" class="btn-xxs" data-click="loadSystemModelCatalog">刷新模型状态</button>
+                                </div>
                                 <div id="system-model-catalog" aria-live="polite"></div>
                             </div>
                         </section>

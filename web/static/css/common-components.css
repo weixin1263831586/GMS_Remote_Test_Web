@@ -1585,3 +1585,44 @@ select option {
 @keyframes embedded-frame-loading-spin {
     to { transform: rotate(360deg); }
 }
+
+
+/* Model routing overview and the shared data-table geometry. */
+.model-catalog-toolbar { margin-bottom: var(--ui-spacing-sm); }
+.model-catalog-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--ui-spacing-xs) var(--ui-spacing-md);
+    margin: 0 0 var(--ui-spacing-sm);
+}
+.model-catalog-summary > div {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--ui-spacing-xs) var(--ui-spacing-sm);
+    min-width: 0;
+}
+.model-catalog-summary dt { color: var(--text-secondary); }
+.model-catalog-summary dd { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.model-catalog-table-wrap { max-width: 100%; overflow-x: auto; }
+.model-catalog-table { width: 100%; min-width: 520px; table-layout: fixed; border-collapse: collapse; }
+.model-catalog-table :is(th,td) {
+    padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
+    text-align: left;
+    vertical-align: middle;
+    overflow-wrap: anywhere;
+}
+.model-catalog-table th { height: var(--ui-table-header-height); background: var(--darker-bg); }
+.model-catalog-table td { height: var(--ui-table-row-height); }
+.model-catalog-table th:nth-child(1) { width: 26%; }
+.model-catalog-table th:nth-child(3) { width: 110px; }
+.model-catalog-table th:nth-child(4) { width: 100px; }
+.model-catalog-table th:last-child { width: 100px; }
+.model-catalog-table :is(th,td):last-child { text-align: right; }
+.model-catalog-table :is(th,td):nth-child(4) { text-align: right; }
+.model-catalog-state[data-model-state="available"] { color: var(--success-color); }
+.model-catalog-state[data-model-state="unavailable"] { color: var(--danger-color); }
+.model-catalog-state:is([data-model-state="incomplete"],[data-model-state="credential_missing"]) { color: var(--warning-color); }
+.model-catalog-message:not(:empty) { margin-top: var(--ui-spacing-xs); color: var(--text-secondary); }
+@media (max-width: 900px) { .model-catalog-summary { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 560px) { .model-catalog-summary { grid-template-columns: minmax(0,1fr); } }
