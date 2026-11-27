@@ -192,12 +192,6 @@
 
     /* Stats */
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:var(--ui-spacing-md); }
-    .stat-card { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); height:var(--ui-stat-height); min-height:var(--ui-stat-height); padding:14px; text-align:center; }
-    .stat-card .value {   color:var(--primary); }
-    .stat-card .label {  color:var(--muted); margin-top:4px; }
-    .stat-card.warn .value { color:var(--warn); }
-    .stat-card.bad .value { color:var(--bad); }
-    .stat-card.ok .value { color:var(--ok); }
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .stats-section { margin-bottom:var(--ui-spacing-lg); }
@@ -555,7 +549,7 @@
 
 /* Redmine：不改变现有七个 tab / 工单/晨报数据视图。 */
 
-:where(.panel, .issue-card, .stat-card, .trend-panel) {
+:where(.panel, .issue-card, .trend-panel) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: none;
 }
