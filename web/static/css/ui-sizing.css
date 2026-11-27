@@ -57,6 +57,7 @@
     display: flex;
     align-items: center;
     flex-shrink: 0;
+    gap: var(--ui-spacing-sm);
     min-height: var(--ui-workspace-toolbar-height);
     padding: 3px var(--ui-spacing-sm);
 }
