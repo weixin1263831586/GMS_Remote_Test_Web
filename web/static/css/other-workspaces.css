@@ -32,37 +32,6 @@
 }
 /* 设备管理同构 KPI：复用 page-stat-* 字段，按钮筛选交互保持原样。 */
 .page-ui-rework .page-stat-row { gap: 10px; }
-/* 与设备管理 inventory-stat 模板同规格：padding 14/15、value 行高 1.3、
-   图标 25px；devices 卡多一行 small 副标题，min-height 95px 对齐卡高。 */
-.page-ui-rework .page-stat-card.workbench-stat {
-    display: flex; flex: 1 1 0; align-items: center; gap: 12px;
-    padding: 14px 15px; min-height: var(--ui-stat-height); min-width: 0; text-align: left;
-    background: var(--card-bg); border: 1px solid var(--border-color);
-    border-radius: 8px; box-shadow: none; line-height: 1.45;
-}
-.page-ui-rework button.page-stat-card.workbench-stat:hover { border-color: var(--primary-color); }
-.page-ui-rework .workbench-stat-icon {
-    display: inline-flex; align-items: center; justify-content: center;
-    flex: none; width: 42px; height: 42px; border-radius: 9px;
-    background: var(--lighter-bg); color: var(--primary-light);
-}
-.page-ui-rework .workbench-stat-icon .ui-icon { width: 25px; height: 25px; margin: 0; }
-.page-ui-rework .workbench-stat-copy {
-    display: flex; flex-direction: column; align-items: flex-start;
-    justify-content: center; min-width: 0; gap: 3px;
-}
-.page-ui-rework .workbench-stat .page-stat-value {
-    order: 2; display: block;
-    font-variant-numeric: tabular-nums; line-height: 1.3;
-}
-.page-ui-rework .workbench-stat .page-stat-label {
-    order: 1; display: block; margin: 0;
-    color: var(--text-secondary);
-}
-.page-ui-rework .workbench-stat.active {
-    background: color-mix(in srgb, var(--primary-color) 7%, var(--card-bg));
-    border-color: var(--primary-color);
-}
 /* 表格和日志：同设备库存 42-44px 行、高亮悬浮、sticky 表头。 */
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) {
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
@@ -281,9 +250,7 @@
     #page-test.page-ui-rework .middle-row { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-    .page-ui-rework .workbench-stat-icon { width: 34px; height: 34px; }
-    .page-ui-rework .workbench-stat-icon .ui-icon { width: 19px; height: 19px; }
-    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 45%; padding: 10px; }
+    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 45%; }
     .page-ui-rework :is(.list-table-wrap, .users-table-wrap, .audit-table-wrap) { overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -319,11 +286,7 @@
     margin:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
     flex:0 0 auto;
 }
-#page-security-audit.page-ui-rework .audit-stat-card.workbench-stat {
-    position:relative; overflow:hidden; min-height:var(--ui-stat-height); height:var(--ui-stat-height); padding:14px 15px;
-    border-radius:8px; gap:12px; border-color:var(--audit-edge);
-    background: linear-gradient(125deg, color-mix(in srgb, var(--audit-accent) 13%, var(--card-bg)), var(--card-bg) 75%);
-}
+#page-security-audit .audit-stat-card { position: relative; overflow: hidden; }
 #page-security-audit .audit-stat-primary { --audit-accent: #a57df2; }
 #page-security-audit .audit-stat-web { --audit-accent: #65abfc; }
 #page-security-audit .audit-stat-cli { --audit-accent: #4bcbb6; }
@@ -333,10 +296,9 @@
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--audit-accent) 20%, transparent);
 }
 #page-security-audit .audit-stat-card .page-stat-value {
-    order:0;  line-height:1.2;  color:var(--text-primary);
-    font-variant-numeric: tabular-nums;
+    order:0; color:var(--text-primary);
 }
-#page-security-audit .audit-stat-card .page-stat-label { order:0;  line-height:1.25; color:var(--text-secondary); }
+#page-security-audit .audit-stat-card .page-stat-label { order:0; }
 #page-security-audit .audit-stat-note {  line-height:1.2; color:var(--text-muted); white-space:nowrap; }
 #page-security-audit.page-ui-rework .audit-filter-bar {
     flex-wrap: nowrap; margin: 0; padding: 10px 12px;
@@ -532,7 +494,6 @@
 }
 @media (max-width: 560px) {
     #page-security-audit .audit-stats.page-stat-row { gap: 8px; }
-    #page-security-audit.page-ui-rework .audit-stat-card.workbench-stat { min-height:var(--ui-stat-height); height:var(--ui-stat-height); gap:8px; padding:11px 9px; }
     #page-security-audit .audit-mail-scope { display:none; }
 }
 
