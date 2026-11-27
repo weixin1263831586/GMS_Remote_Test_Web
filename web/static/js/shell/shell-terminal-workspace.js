@@ -158,13 +158,13 @@
             };
             const view = variants[kind] || variants.connecting;
             const action = view.button
-                ? `<button type="button" class="btn-xs host-terminal-connect-button" data-click="refreshTerminalWorkspacePane" data-a0="${index}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg>${view.button}</button>`
+                ? `<button type="button" class="btn-xs host-terminal-connect-button host-pane-connect-button" data-click="refreshTerminalWorkspacePane" data-a0="${index}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#link"></use></svg>${view.button}</button>`
                 : '';
             return `<div class="host-workspace-empty host-terminal-placeholder host-terminal-placeholder-${kind}">
-                <div class="host-terminal-placeholder-content">
-                    <span class="host-terminal-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
-                    <strong class="host-terminal-placeholder-title">${view.title}</strong>
-                    <span class="host-terminal-placeholder-hint">${view.hint}</span>
+                <div class="host-terminal-placeholder-content host-pane-placeholder-content">
+                    <span class="host-terminal-placeholder-icon host-pane-placeholder-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#${view.icon}"></use></svg></span>
+                    <strong class="host-terminal-placeholder-title host-pane-placeholder-title">${view.title}</strong>
+                    <span class="host-terminal-placeholder-hint host-pane-placeholder-hint">${view.hint}</span>
                     ${action}
                 </div>
             </div>`;
@@ -237,16 +237,16 @@
                 const hostName=host?.name||'请选择主机';
                 return `<section class="host-workspace-pane${terminalWorkspace.maximized===i?' maximized':''}" data-terminal-pane="${i}" aria-label="终端 ${i+1}">
                     <div class="host-workspace-pane-header host-terminal-pane-header">
-                        <div class="host-terminal-identity">
+                        <div class="host-terminal-identity host-pane-identity">
                             <span class="host-terminal-label" data-terminal-pane-mode-label>🐧 终端</span>
-                            <span class="host-terminal-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
-                            <select class="host-terminal-select" data-multi-host-control aria-label="主机" data-change="changeTerminalWorkspaceHost" data-a0="${i}" data-r1="value">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
+                            <span class="host-terminal-single-name host-pane-single-name" title="${escapeHtml(hostName)}">${escapeHtml(hostName)}</span>
+                            <select class="host-terminal-select host-pane-select" data-multi-host-control aria-label="主机" data-change="changeTerminalWorkspaceHost" data-a0="${i}" data-r1="value">${hostWorkspaceHostOptions(p.hostId,terminalWorkspace.panes,i)}</select>
                         </div>
-                        <span class="host-workspace-pane-status host-terminal-status" id="terminal-workspace-status-${i}" role="status" aria-live="polite" title="终端连接状态">准备中</span>
-                        <div class="host-terminal-pane-actions">
+                        <span class="host-workspace-pane-status host-terminal-status host-pane-status" id="terminal-workspace-status-${i}" role="status" aria-live="polite" title="终端连接状态">准备中</span>
+                        <div class="host-terminal-pane-actions host-pane-actions">
                             <button data-terminal-pane-host-mode class="btn-xs host-terminal-return-button" type="button" data-click="restoreHostTerminalWorkspacePane" data-a0="${i}" title="关闭当前 ADB Shell，返回这台主机的 SSH 终端" style="${p.mode==='adb'?'':'display:none'}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#back"></use></svg>主机终端</button>
-                            <button class="btn-xs host-workspace-refresh-btn host-terminal-icon-button" type="button" data-click="refreshTerminalWorkspacePane" data-a0="${i}" title="重新连接终端" aria-label="重新连接终端 ${i+1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
-                            <button class="btn-xs host-terminal-icon-button" data-multi-host-control type="button" data-click="maximizeTerminalWorkspacePane" data-a0="${i}" title="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦当前终端'}" aria-label="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦终端 '+(i+1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
+                            <button class="btn-xs host-workspace-refresh-btn host-terminal-icon-button host-pane-icon-button" type="button" data-click="refreshTerminalWorkspacePane" data-a0="${i}" title="重新连接终端" aria-label="重新连接终端 ${i+1}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#refresh"></use></svg></button>
+                            <button class="btn-xs host-terminal-icon-button host-pane-icon-button" data-multi-host-control type="button" data-click="maximizeTerminalWorkspacePane" data-a0="${i}" title="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦当前终端'}" aria-label="${terminalWorkspace.maximized===i?'恢复多屏布局':'聚焦终端 '+(i+1)}"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#layout"></use></svg></button>
                         </div>
                     </div>
                     <div class="host-workspace-pane-body" id="terminal-workspace-body-${i}">${hostTerminalEmptyView(i,p.mode==='adb'?'adb':'connecting')}</div>
