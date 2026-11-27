@@ -178,7 +178,6 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
 .device-sort { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 2px 0; background: none; color: inherit;  cursor: pointer; white-space: nowrap; min-height: 24px; }
 .device-sort + .device-sort { display: inline-flex; margin-top: 0; margin-left: 8px; color: var(--text-secondary);  }
 .device-sort:hover { color: var(--primary-light); }
-.device-row-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
 .device-row-actions .btn-xxs { flex: 1 1 0; width: auto; min-width: 0; min-height: var(--ui-control-height-small); max-height: var(--ui-control-height-small); padding: 2px 6px;  overflow: hidden; }
 .device-row-actions .device-release-action { flex: 0 1 auto; width: auto; }
 .device-battery { display: inline-flex; align-items: center; gap: 4px; font-variant-numeric: tabular-nums; }
@@ -383,4 +382,61 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
 }
 @media (max-width: 800px) {
     .ui-dashboard .header-toolbar .btn-group { border-left: 0; padding-left: 0; margin-left: 0; }
+}
+
+/* Dense data table actions and pagination. Column width and business action order are local. */
+.ui-table-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: var(--ui-spacing-xs);
+    min-width: 0;
+    max-width: 100%;
+}
+.ui-table-actions--end { justify-content: flex-end; }
+.ui-table-actions > button { white-space: nowrap; }
+.ui-pagination {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: var(--ui-spacing-xs);
+    min-width: 0;
+}
+.ui-pagination--center { justify-content: center; }
+.ui-pagination button {
+    box-sizing: border-box;
+    height: var(--ui-control-height-dense);
+    min-height: var(--ui-control-height-dense);
+    min-width: var(--ui-control-height-dense);
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-control);
+    background: var(--light-bg);
+    color: var(--text-primary);
+    white-space: nowrap;
+    cursor: pointer;
+}
+.ui-pagination button.active {
+    border-color: var(--primary-color);
+    background: color-mix(in srgb, var(--primary-color) 19%, var(--card-bg));
+    color: var(--primary-light);
+}
+.ui-pagination button:disabled { opacity: .45; cursor: not-allowed; }
+.ui-pagination button.active:disabled { opacity: 1; cursor: default; }
+.ui-pagination-footer select {
+    box-sizing: border-box;
+    height: var(--ui-control-height-dense);
+    min-height: var(--ui-control-height-dense);
+    padding: 2px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-control);
+    background: var(--darker-bg);
+    color: var(--text-primary);
+}
+@media (max-width: 560px) {
+    .ui-pagination button, .ui-pagination-footer select {
+        min-height: var(--ui-touch-target-height);
+        min-width: var(--ui-touch-target-height);
+    }
 }
