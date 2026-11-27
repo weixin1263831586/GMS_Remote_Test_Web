@@ -200,3 +200,56 @@ button[data-busy-size="short"] { width:64px; flex-shrink:0; white-space:nowrap; 
 button[data-busy-size="plain"] { width:76px; flex-shrink:0; white-space:nowrap; }
 button[data-busy-size="icon"] { width:82px; flex-shrink:0; white-space:nowrap; }
 button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }
+
+/* Surface chrome is independent of flow and scroll ownership. */
+.ui-panel-frame,
+.ui-workspace-panel {
+    min-width: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-card);
+    background: var(--card-bg);
+    box-shadow: none;
+}
+/* Shared stacked workspace: framed toolbar, content and optional subpanels. */
+.ui-workspace-stack:not([hidden]) {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    gap: var(--ui-spacing-sm);
+}
+.ui-workspace-panel {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+.ui-workspace-toolbar-panel { flex: 0 0 auto; }
+.ui-workspace-toolbar-panel > .ui-workspace-toolbar {
+    min-height: calc(var(--ui-workspace-toolbar-height) - 2px);
+}
+.ui-workspace-content { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.ui-workspace-panel--scroll { overflow: auto; }
+.ui-workspace-grid {
+    display: grid;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    gap: var(--ui-spacing-sm);
+}
+.ui-workspace-scroll {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+    overflow: auto;
+}
+.ui-workspace-divider {
+    border-bottom: 1px solid var(--border-color);
+}
+.ui-workspace-heading {
+    background: var(--light-bg);
+}
+
