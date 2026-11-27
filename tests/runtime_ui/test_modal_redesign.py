@@ -526,7 +526,7 @@ class ModalRedesignTests(RuntimeUiHarness):
                                 return Boolean(status?.textContent.trim())
                                     || el.clientHeight <= el.querySelector('button').offsetHeight + 4;
                             }"""))
-                    rows = page.locator("#redmine-system-settings fieldset > .tech-field-stack").evaluate_all(
+                    rows = page.locator("#redmine-system-settings .settings-field-row").evaluate_all(
                         """nodes => nodes.map(node => {
                           const parent = node.getBoundingClientRect();
                           const children = [...node.children]
@@ -534,12 +534,17 @@ class ModalRedesignTests(RuntimeUiHarness):
                             .map(el => el.getBoundingClientRect());
                           return {label: node.querySelector('label')?.textContent?.trim(),
                                   top: parent.top, bottom: parent.bottom,
-                                  childBottom: Math.max(...children.map(box => box.bottom))};
+                                  childBottom: Math.max(...children.map(box => box.bottom)),
+                                  childRight: Math.max(...children.map(box => box.right)),
+                                  right: parent.right,
+                                  columns: getComputedStyle(node).gridTemplateColumns.split(' ').length};
                         })"""
                     )
                     self.assertGreaterEqual(len(rows), 8, rows)
                     for row in rows:
                         self.assertLessEqual(row["childBottom"], row["bottom"] + 1, row)
+                        self.assertLessEqual(row["childRight"], row["right"] + 1, row)
+                        self.assertEqual(row["columns"], 3 if viewport["width"] > 900 else 2 if viewport["width"] > 560 else 1, row)
                     for above, below in itertools.pairwise(rows):
                         self.assertLessEqual(above["bottom"], below["top"] + 1, [above, below])
                     scrolling = page.locator("html").evaluate(
@@ -547,8 +552,10 @@ class ModalRedesignTests(RuntimeUiHarness):
                           scrollTop: el.scrollTop, scrollHeight: el.scrollHeight,
                           clientHeight: el.clientHeight}; }"""
                     )
-                    self.assertGreater(scrolling["scrollHeight"], scrolling["clientHeight"])
-                    self.assertGreater(scrolling["scrollTop"], 0)
+                    if scrolling["scrollHeight"] > scrolling["clientHeight"]:
+                        self.assertGreater(scrolling["scrollTop"], 0)
+                    else:
+                        self.assertEqual(scrolling["scrollTop"], 0)
         finally:
             page.close()
 

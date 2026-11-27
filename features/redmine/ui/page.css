@@ -60,8 +60,9 @@
         min-height:0;
     }
     #redmine-system-settings label { color:var(--muted); }
-    #redmine-system-settings input:not([type=checkbox]),
-    #redmine-system-settings select { width:100%; min-width:0; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; }
+    html.embedded-system-settings body { background:var(--card-bg); }
+    html.embedded-system-settings #redmine-system-settings { padding:0; }
+    #redmine-system-settings .settings-field-row > label { color:var(--text-secondary); }
     #redmine-system-settings > * {
         flex:0 0 auto;
     }
@@ -534,14 +535,16 @@
 
 .redmine-settings-fields {
   min-width: 0;
-  border: 1px solid var(--border);
+  border: 0;
+  border-top: 1px solid var(--border);
   margin: 0;
-  padding: var(--ui-spacing-sm, 8px);
+  padding: var(--ui-spacing-xs) 0 var(--ui-spacing-sm);
 }
 .redmine-settings-fields legend {
-  padding: 0 6px;
-  font-weight: 600;
+  padding: 0 var(--ui-spacing-sm) 0 0;
+  font-weight: var(--ui-type-weight-semibold);
+  color: var(--text-primary);
 }
 .redmine-settings-fields p[role="status"]:empty { display: none; }
-.redmine-settings-fields .settings-action-row > select { width: auto; }
+.redmine-settings-fields .settings-action-row > select { width: auto; min-width: 0; }
 .redmine-settings-mail-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }

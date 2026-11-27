@@ -15,7 +15,7 @@
 <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261127-shared-components">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action">
-<link rel="stylesheet" href="/static/css/form-controls.css?v=20261127-settings-compact">
+<link rel="stylesheet" href="/static/css/form-controls.css?v=20261127-model-settings-grid">
 <script src="/static/js/password-controls.js?v=20261125-unified-password-control" defer></script>
 <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261127-shared-components">
 <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261126-table-geometry">
@@ -28,67 +28,67 @@
                         <link rel="stylesheet" href="/static/css/typography.css?v=20261120-type-size-dedup-v2">
 </head>
 <body>
-<main id="redmine-system-settings" class="config-section">
+<main id="redmine-system-settings">
 
 <form id="redmine-stats-form" autocomplete="off">
 <fieldset id="redmine-stats-fields" class="redmine-settings-fields" disabled>
 <legend>统计与地址</legend>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-        <label for="settingStaleDays">未回复天数阈值 (stale_days)</label>
+      <div class="settings-field-row">
+        <label for="settingStaleDays"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>未回复天数阈值 (stale_days)</label>
         <input type="number" id="settingStaleDays" min="1" max="30" placeholder="默认 20">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">超过/达到此天数未回复的工单标记为过期</div>
+        <div class="settings-field-help" data-ui-type-size="compact">超过/达到此天数未回复的工单标记为过期</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
-        <label for="settingWindowDays">统计时间窗口 (window_days)</label>
+      <div class="settings-field-row">
+        <label for="settingWindowDays"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg>统计时间窗口 (window_days)</label>
         <input type="number" id="settingWindowDays" min="0" max="365" placeholder="0 = 不限制">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">只统计最近 N 天内有活动的工单，0 表示不限制</div>
+        <div class="settings-field-help" data-ui-type-size="compact">只统计最近 N 天内有活动的工单，0 表示不限制</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
-        <label for="settingCacheTtl">缓存有效期 (秒)</label>
+      <div class="settings-field-row">
+        <label for="settingCacheTtl"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg>缓存有效期 (秒)</label>
         <input type="number" id="settingCacheTtl" min="0" max="3600" placeholder="600">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">统计数据缓存时间，期间内重复访问直接返回缓存</div>
+        <div class="settings-field-help" data-ui-type-size="compact">统计数据缓存时间，期间内重复访问直接返回缓存</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-        <label for="settingFreshnessDays">趋势实时拉新窗口 (freshness_days)</label>
+      <div class="settings-field-row">
+        <label for="settingFreshnessDays"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>趋势实时拉新窗口 (freshness_days)</label>
         <input type="number" id="settingFreshnessDays" min="1" max="3650" placeholder="默认 180">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
+        <div class="settings-field-help" data-ui-type-size="compact">近 N 天的已解决趋势每次实时拉取；更早的趋势走 7 天长期缓存，加快首屏。设大（如 3650）即全部实时</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg></span>
-        <label for="settingRedmineBaseUrl">Redmine 地址</label>
+      <div class="settings-field-row">
+        <label for="settingRedmineBaseUrl"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#server"></use></svg>Redmine 地址</label>
         <input type="url" id="settingRedmineBaseUrl" placeholder="例如：https://redmine.example.com">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
+        <div class="settings-field-help" data-ui-type-size="compact">请输入包含协议的完整地址，不要填写 /issues 等路径</div>
       </div>
 <div class="settings-action-row"><p role="status"></p><button type="submit">保存统计与地址</button></div>
 </fieldset>
 </form>
 <fieldset id="redmine-binding-fields" class="redmine-settings-fields" disabled>
 <legend>个人身份</legend>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-        <label for="settingSelfBinding">个人身份绑定（我是谁）</label>
+      <div class="settings-field-row">
+        <label for="settingSelfBinding"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>个人身份绑定（我是谁）</label>
         <div class="settings-action-row">
           <select id="settingSelfBinding"></select>
           <button class="secondary" type="button" data-click="submitSelfBinding">保存绑定</button>
         </div>
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
+        <div class="settings-field-help" data-ui-type-size="compact">从共享组织架构中绑定自己的 Redmine 身份；绑定后个人看板/每日晨报直接认人，不依赖姓名模糊匹配。别名/成员维护见「添加用户」（需管理员）。</div>
       </div>
 <p role="status"></p>
 </fieldset>
 <form id="redmine-credentials-form" autocomplete="off">
 <fieldset id="redmine-credential-fields" class="redmine-settings-fields" disabled>
 <legend>Redmine 凭据</legend>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg></span>
-        <label for="settingRedmineUser">Redmine 账号</label>
+      <div class="settings-field-row">
+        <label for="settingRedmineUser"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#user"></use></svg>Redmine 账号</label>
         <input type="text" id="settingRedmineUser" placeholder="Redmine 登录用户名">
-        <div style="color:var(--muted);margin-top:2px" data-ui-type-size="compact">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
+        <div class="settings-field-help" data-ui-type-size="compact">凭据按当前登录账号隔离保存；每日晨报和该账号绑定的 Agent 读取同一份凭据</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg></span>
-        <label for="settingRedminePass">Redmine 密码</label>
+      <div class="settings-field-row">
+        <label for="settingRedminePass"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg>Redmine 密码</label>
         <span class="password-input-wrap"><input type="password" id="settingRedminePass" placeholder="留空则不修改"><button type="button" class="password-visibility-toggle" data-click="togglePasswordVisibility" data-r0="el" aria-controls="settingRedminePass" aria-label="显示密码" title="显示密码"></button></span>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-        <label for="settingRedmineApiKey">Redmine API Key（可选）</label>
+      <div class="settings-field-row">
+        <label for="settingRedmineApiKey"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>Redmine API Key（可选）</label>
         <input type="password" class="password-input-secret" id="settingRedmineApiKey" placeholder="可替代账号密码；留空则不修改">
-        <div class="setting-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
+        <div class="settings-field-help" id="settingRedmineCredentialStatus">正在检查当前账号的 Redmine 凭据状态…</div>
       </div>
 <div class="settings-action-row"><p role="status"></p><button type="submit">保存 Redmine 凭据</button></div>
 </fieldset>
@@ -96,44 +96,34 @@
 <form id="redmine-brief-form" autocomplete="off">
 <fieldset id="redmine-brief-fields" class="redmine-settings-fields" disabled>
 <legend>每日晨报</legend>
-      <label class="setting-checkbox-row">
-        <input type="checkbox" data-daily-brief-setting="enabled">
-        <span>启用每日晨报</span>
-      </label>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
-        <label>触发时间</label>
-        <input type="time" data-daily-brief-setting="trigger_time" value="00:00" required aria-describedby="dailyBriefTriggerTimeHelp">
-        <div class="setting-help" id="dailyBriefTriggerTimeHelp">按 Controller 服务器本地时间每天触发；默认凌晨 00:00。</div>
+      <div class="settings-field-row">
+        <label class="setting-checkbox-row"><input type="checkbox" data-daily-brief-setting="enabled"><span>启用每日晨报</span></label>
+        <input type="time" data-daily-brief-setting="trigger_time" aria-label="晨报触发时间" value="00:00" required aria-describedby="dailyBriefTriggerTimeHelp">
+        <div class="settings-field-help" id="dailyBriefTriggerTimeHelp">按 Controller 服务器本地时间每天触发；默认凌晨 00:00。</div>
       </div>
-      <label class="setting-checkbox-row">
-        <input type="checkbox" data-daily-brief-setting="delta_enabled">
-        <span>启用晨报增量刷新</span>
-      </label>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#clock"></use></svg></span>
-        <label>增量刷新时间</label>
-        <input type="time" data-daily-brief-setting="delta_trigger_time" value="06:00" required aria-describedby="dailyBriefDeltaTriggerTimeHelp">
-        <div class="setting-help" id="dailyBriefDeltaTriggerTimeHelp">仅分析凌晨晨报之后有变化的事项；按 Controller 服务器本地时间每天触发，默认 06:00。</div>
+      <div class="settings-field-row">
+        <label class="setting-checkbox-row"><input type="checkbox" data-daily-brief-setting="delta_enabled"><span>启用晨报增量刷新</span></label>
+        <input type="time" data-daily-brief-setting="delta_trigger_time" aria-label="增量刷新时间" value="06:00" required aria-describedby="dailyBriefDeltaTriggerTimeHelp">
+        <div class="settings-field-help" id="dailyBriefDeltaTriggerTimeHelp">仅分析凌晨晨报之后有变化的事项；按 Controller 服务器本地时间每天触发，默认 06:00。</div>
       </div>
-      <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-        <label>取证 Agent Profile</label>
-        <select data-daily-brief-setting="agent_profile" aria-describedby="dailyBriefProfileHelp">
+      <div class="settings-field-row">
+        <label><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>取证 Agent Profile</label>
+        <select data-daily-brief-setting="agent_profile" aria-label="取证 Agent Profile" aria-describedby="dailyBriefProfileHelp">
           <option value="">正在读取本机 kkagent Profile…</option>
         </select>
-        <div class="setting-help" id="dailyBriefProfileHelp">仅列出 gms-agent profile list 中的 kkagent Profile；多个 Profile 必须明确选择。</div>
+        <div class="settings-field-help" id="dailyBriefProfileHelp">仅列出 gms-agent profile list 中的 kkagent Profile；多个 Profile 必须明确选择。</div>
       </div>
-      <div class="setting-inline-grid">
-        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-          <label>分析模型</label>
-          <select data-daily-brief-setting="model" aria-describedby="dailyBriefModelHelp">
+      <div class="settings-field-row">
+        <label><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>分析模型</label>
+          <select data-daily-brief-setting="model" aria-label="分析模型" aria-describedby="dailyBriefModelHelp">
             <option value="">正在读取系统模型…</option>
           </select>
-          <div class="setting-help" id="dailyBriefModelHelp">自动列出系统中已启用且可供 kkagent 使用的模型；保存后每日晨报会将所选模型传给 kkagent。</div>
+          <div class="settings-field-help" id="dailyBriefModelHelp">自动列出系统中已启用且可供 kkagent 使用的模型；保存后每日晨报会将所选模型传给 kkagent。</div>
         </div>
-        <div class="tech-field-card tech-field-stack"><span class="tech-field-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></span>
-          <label>并发分析数</label>
-          <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" value="1">
+        <div class="settings-field-row">
+        <label><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg>并发分析数</label>
+          <input type="number" min="1" max="4" data-daily-brief-setting="max_parallel_issues" aria-label="并发分析数" value="1">
         </div>
-      </div>
 <div class="settings-action-row"><p role="status"></p><button type="submit" id="save-redmine-settings">保存每日晨报</button></div>
 </fieldset>
 </form>
