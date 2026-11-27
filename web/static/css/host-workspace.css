@@ -203,3 +203,18 @@ body.workspace-scope-single .host-workspace-surface .host-pane-single-name {
     .host-workspace-surface .host-workspace-pane-header,
     .host-workspace-surface .host-pane-identity { gap: 5px; }
 }
+
+.host-pane-placeholder {
+    box-sizing: border-box;
+    padding: var(--ui-spacing-lg);
+    background: radial-gradient(ellipse at 50% 42%,
+        color-mix(in srgb, var(--primary-color) 8%, var(--darker-bg)),
+        var(--darker-bg) 68%);
+}
+.host-pane-placeholder-busy .host-pane-placeholder-icon .ui-icon {
+    animation: host-pane-rotate 1.4s linear infinite;
+}
+@keyframes host-pane-rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .host-pane-placeholder-busy .host-pane-placeholder-icon .ui-icon { animation: none; }
+}
