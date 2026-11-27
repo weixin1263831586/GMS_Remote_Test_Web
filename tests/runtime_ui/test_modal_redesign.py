@@ -489,6 +489,48 @@ class ModalRedesignTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_system_model_catalog_table_and_probe_layout(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            self.close_initial_modals(page)
+            def model_fixture(route):
+                checked = "probe=true" in route.request.url
+                route.fulfill(json={"success": True, "data": {"status": {
+                    "primary_provider": "local_fixture", "local_provider": "local_fixture",
+                    "kkagent_installed": True,
+                    "routes": {"default_text": "local_fixture", "local_rag": "local_fixture",
+                               "private_vision": "local_fixture"},
+                    "providers": [
+                        {"provider": "local_fixture", "model": "local-model",
+                         "enabled": True, "configured": True, "credential_configured": True,
+                         "checked": checked, "latency_ms": 42 if checked else None,
+                         "state": "available" if checked else "ready_to_probe"},
+                        {"provider": "remote_fixture", "model": "remote-model",
+                         "enabled": True, "configured": True, "credential_configured": False,
+                         "state": "credential_missing"},
+                    ],
+                }}})
+            page.route("**/api/config/ai*", model_fixture)
+            for viewport in [{"width": 1672, "height": 941}, {"width": 390, "height": 844}]:
+                with self.subTest(viewport=viewport):
+                    page.set_viewport_size(viewport)
+                    page.evaluate("openSidebarVisibilityModal('system', 'models')")
+                    catalog = page.locator("#system-model-catalog")
+                    expect(catalog.locator(".model-catalog-summary > div")).to_have_count(6)
+                    expect(catalog.locator("table thead th")).to_have_count(5)
+                    expect(catalog.locator("tbody tr")).to_have_count(2)
+                    expect(catalog.get_by_role("button", name="检测 remote_fixture")).to_be_disabled()
+                    self.assertTrue(catalog.locator(".model-catalog-table-wrap").evaluate(
+                        "el => el.getBoundingClientRect().right <= el.parentElement.getBoundingClientRect().right + 1"
+                    ))
+                    catalog.get_by_role("button", name="检测 local_fixture").click()
+                    expect(catalog.locator("tbody tr").first).to_contain_text("检测成功")
+                    expect(catalog.locator("tbody tr").first).to_contain_text("42 ms")
+                    page.evaluate("closeSidebarVisibilityModal()")
+        finally:
+            page.close()
+
     def test_redmine_settings_field_cards_never_overlap(self):
         """Each tall settings card must keep its controls inside its own border.
 
