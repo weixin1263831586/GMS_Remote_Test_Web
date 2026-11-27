@@ -40,7 +40,6 @@ h1,h2,h3,p{margin:0}
 .notice.success{color:#78d7a5;border-color:rgba(69,196,134,.55)}
 @keyframes toast-in{from{opacity:0;transform:translate(-50%,-50%) scale(.9)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
 .console-heading{align-items:flex-start}.console-actions{flex-wrap:wrap;justify-content:flex-end}
-.console-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:12px}
 .terminal-column{min-width:0}
 .terminal,.history-output{margin:0;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);}
 .terminal{height:min(58vh,650px);padding:6px;overflow:hidden}
@@ -62,7 +61,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 
 .modal-hint{color:var(--muted);margin:0}
 #binding-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);}#binding-form label input,#binding-form label textarea,#binding-form label select{color:var(--text)}
 #binding-form .switch-row{flex-direction:row;align-items:center}.switch-row input{width:auto}.spacer{flex:1}
-@media(max-width:850px){.console-layout{grid-template-columns:1fr}.history-output{height:220px}.terminal{height:48vh}}
+@media(max-width:850px){.history-output{height:220px}.terminal{height:48vh}}
 @media(max-width:600px){.toolbar,.section-heading{align-items:flex-start}.toolbar-actions{flex-direction:column;align-items:flex-end}.ports-grid{grid-template-columns:1fr}.input-row{flex-wrap:wrap}.input-row input{flex-basis:100%}}
 
 /* iframe 内采用单层工作区：Tab 切换列表/控制台，控制台自身填满可视高度。 */
@@ -71,14 +70,13 @@ html,body{height:100%;min-height:0;overflow:hidden}
 
 .view-panel{flex:1;min-height:0;overflow:auto}
 .console-panel{display:flex;min-height:0;flex-direction:column;overflow:hidden}
-.console-layout{display:grid;grid-template-columns:minmax(0,1fr) 270px;gap:8px;flex:1;min-height:0}
 .terminal-column{display:grid;grid-template-rows:minmax(0,1fr) auto;min-height:0}
 .terminal{height:100%;min-height:220px;border-radius:6px}
 .input-dock{position:relative;z-index:5;padding:6px 0 0;background:var(--page-background)}
 .input-row{margin-top:0}
 .history-column{min-height:0;gap:7px;padding:8px;border:0;border-left:1px solid var(--border);border-radius:0;background:var(--card-bg)}
 .history-output{height:auto;min-height:120px;flex:1;padding:8px}.history-actions{margin-top:0}
-@media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.console-layout{grid-template-columns:1fr}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
+@media(max-width:850px){html,body{overflow:auto}.page-shell{height:auto;min-height:100%}.history-column{border-left:0;border-top:1px solid var(--border)}.history-output{height:220px;flex:none}.terminal{height:55vh}.input-dock{position:sticky;bottom:0;padding-bottom:4px}}
 @media(max-width:600px){.toolbar-actions{flex-direction:column;align-items:flex-end}}
 
 /* 标题与说明同行显示；过长时允许折行，不挤压右侧操作按钮。 */
@@ -94,8 +92,6 @@ html,body{height:100%;min-height:0;overflow:hidden}
 /* 每个控制台会话面板独立占满 console-panel，保证输入行不被 overflow 裁掉。 */
 .console-session{flex:1;min-height:0;display:flex;flex-direction:column}
 
-/* Terminal workspace: live output stays primary; metadata and retained logs stay adjacent. */
-.console-layout{grid-template-columns:minmax(0,1fr) minmax(280px,340px);gap:12px}
 /* 控制台操作区上移 header（Redmine 同构）：状态 + 按钮组右对齐单行。 */
 
 .toolbar-actions,#console-toolbar{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
@@ -119,8 +115,8 @@ html,body{height:100%;min-height:0;overflow:hidden}
 .console-sidebar .history-output{min-height:100px;height:120px;color:var(--muted)}
 .console-other-list{display:grid;gap:8px}.console-other-port{display:flex;align-items:center;justify-content:space-between;gap:8px;}
 .console-other-port>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.console-other-port button{flex-shrink:0;}
-@media(max-width:1000px){#console-toolbar .btn-group{gap:4px}.console-layout{grid-template-columns:minmax(0,1fr) 280px}}
-@media(max-width:850px){.console-layout{grid-template-columns:1fr}.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.input-dock{position:static}}
+@media(max-width:1000px){#console-toolbar .btn-group{gap:4px}}
+@media(max-width:850px){.console-sidebar{overflow:visible}.console-sidebar .history-column{flex:none}.terminal{height:55vh}.input-dock{position:static}}
 
 button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 

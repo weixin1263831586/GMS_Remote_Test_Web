@@ -207,6 +207,12 @@ class UiSizingContractTests(unittest.TestCase):
             css = (CSS / name).read_text(encoding="utf-8")
             self.assertNotRegex(css, re.escape(selector) + r"\s*\{[^}]*grid-template-columns")
 
+    def test_console_uses_shared_auxiliary_column(self):
+        markup = (ROOT / "features/devices/ui/page.js").read_text(encoding="utf-8")
+        self.assertIn('class="console-layout ui-workspace-grid ui-workspace-grid--aside ui-workspace-grid--aside-persistent"', markup)
+        source = (ROOT / "features/devices/ui/page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(source, r"\.console-layout\s*\{[^}]*grid-template-columns")
+
     def test_global_size_roles(self):
         data = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
         for key, px in {

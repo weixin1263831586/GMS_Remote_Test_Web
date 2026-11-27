@@ -267,7 +267,11 @@ button[data-busy-size="long"] { width:92px; flex-shrink:0; white-space:nowrap; }
     }
 }
 @media (max-width: 1150px) {
-    .ui-workspace-grid--aside { grid-template-columns: minmax(0, 1fr); }
+    .ui-workspace-grid--aside:not(.ui-workspace-grid--aside-persistent) { grid-template-columns: minmax(0, 1fr); }
+}
+/* Live console keeps its history next to output until the smaller breakpoint. */
+@media (max-width: 850px) {
+    .ui-workspace-grid--aside-persistent { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Standard panel heading and distribution chart geometry. */

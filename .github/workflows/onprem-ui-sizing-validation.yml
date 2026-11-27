@@ -5,6 +5,13 @@ on:
     branches: [main, 'audit/**', 'ui/**']
     paths:
       - 'web/static/css/ui-sizing.css'
+      - 'web/static/css/ui-foundations.css'
+      - 'web/static/css/form-controls.css'
+      - 'web/shell/pages/api-docs.html'
+      - 'features/devices/ui/page.html'
+      - 'features/devices/ui/page.js'
+      - 'features/redmine/ui/settings.html'
+      - 'tests/runtime_ui/test_system_settings.py'
       - 'web/static/css/aoa-workbench.css'
       - 'tests/runtime_ui/test_aoa_workbench.py'
       - 'tests/runtime_ui/test_aoa_calibrate_locate.py'
@@ -131,6 +138,7 @@ jobs:
             tests/runtime_ui/test_apk_workbench.py \
             tests/runtime_ui/test_report_workbench.py \
             tests/runtime_ui/test_api_catalog.py \
+            tests/runtime_ui/test_system_settings.py \
             tests/runtime_ui/test_outbox_detail_races.py \
             tests/runtime_ui/test_disk_audit_refresh.py \
             tests/runtime_ui/test_suite_browser_search_race.py \

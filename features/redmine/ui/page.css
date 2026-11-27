@@ -249,7 +249,7 @@
 
     /* ---- Knowledge base: case cards + actions ---- */
     .knowledge-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
-    .ka-btn {  padding:4px 8px; border-radius:5px; border:1px solid var(--border); background:var(--lighter-bg); color:var(--text-secondary); cursor:pointer; }
+    .ka-btn {  padding:4px 8px; border-radius:var(--ui-radius-control); border:1px solid var(--border); background:var(--lighter-bg); color:var(--text-secondary); cursor:pointer; }
     .ka-btn.primary { background:var(--primary-gradient); border-color:var(--primary-color); color:#fff; }
     .ka-btn:hover { background:var(--border-light); color:#fff; }
     .settings-subsection-title {   color:var(--primary-light); }
@@ -268,10 +268,10 @@
     .daily-brief-card[data-device-picker-open] .daily-brief-single-section > .daily-brief-toolbar { z-index:6; }
     .daily-brief-head { padding:8px 16px; background:linear-gradient(135deg,color-mix(in srgb, var(--primary-color) 10%, transparent),rgba(124,58,237,.08)); }
     .daily-brief-titlebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
-    .daily-brief-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px 16px; border-bottom:1px solid var(--border);
+    .daily-brief-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--ui-spacing-sm); min-height:var(--ui-card-heading-height); padding:var(--ui-spacing-xs) var(--ui-spacing-md); border-bottom:1px solid var(--border);
       /* 滚动晨报 tab 时两个区块标题保持可见：工具栏吸附在页头（tabs+筛选
          行）下方；--daily-brief-sticky-top 由 JS 按页头实测高度写入。 */
-      position:sticky; top:var(--daily-brief-sticky-top, 44px); z-index:5; background:var(--panel); }
+      position:sticky; top:var(--daily-brief-sticky-top, var(--ui-tab-height)); z-index:5; background:var(--panel); }
     .daily-brief-toolbar .daily-brief-title { white-space:nowrap; }
     .daily-brief-single-form, .daily-brief-run-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     /* Keep the multi-device list above the following daily-brief summary. */
@@ -279,20 +279,20 @@
     .daily-brief-toolbar-right { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; min-width:0; }
     .daily-brief-toolbar-right .daily-brief-single-form { justify-content:flex-end; }
     .daily-brief-run-controls { justify-content:flex-end; }
-    .daily-brief-toolbar .ka-btn { height:var(--ui-control-height-dialog-field); padding:0 12px; white-space:nowrap; border-radius:8px; }
+    .daily-brief-toolbar .ka-btn { white-space:nowrap; }
     .daily-brief-toolbar .ka-btn.primary:hover { background:var(--primary-gradient-hover); }
-    #singleIssueAnalysisId { width:200px; height:36px; box-sizing:border-box; flex:0 0 200px; padding:0 12px; border-radius:8px; }
+    #singleIssueAnalysisId { width:200px; max-width:100%; flex:0 1 200px; }
     .single-issue-analysis-hint-modal textarea { min-height:300px; height:min(52vh, 440px); resize:vertical; line-height:1.55; }
     .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }
     .daily-brief-run-controls .daily-brief-status { padding:5px 10px; white-space:nowrap; }
     .daily-brief-run-controls .daily-brief-action { display:flex; align-items:center; gap:8px; margin-left:0; }
     .daily-brief-toolbar-right .daily-brief-action { width:auto; }
     .daily-brief-toolbar .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
-    #singleIssueAnalysisMode { width:108px; height:36px; box-sizing:border-box; flex:0 0 108px; border-radius:8px; }
-    #singleIssueAnalysisDevice { position:relative; width:190px; min-width:190px; height:36px; box-sizing:border-box; flex:0 0 190px; margin:0; }
-    #singleIssueAnalysisDevice [data-device-toggle] { display:flex; align-items:center; justify-content:space-between; width:100%; height:36px; padding:0 10px; border:1px solid var(--border); border-radius:8px; background:var(--panel); color:var(--text); cursor:pointer;   text-align:left; }
+    #singleIssueAnalysisMode { width:108px; flex:0 0 108px; }
+    #singleIssueAnalysisDevice { position:relative; width:190px; min-width:190px; flex:0 0 190px; margin:0; }
+    #singleIssueAnalysisDevice [data-device-toggle] { display:flex; align-items:center; justify-content:space-between; width:100%; padding:0 10px; border:1px solid var(--border); background:var(--panel); color:var(--text); cursor:pointer;   text-align:left; }
     #singleIssueAnalysisDevice [data-device-toggle]:hover { background:var(--lighter-bg); }
-    #singleIssueAnalysisDevice [data-device-options] { position:absolute; top:40px; left:0; z-index:30; display:flex; flex-direction:column; gap:6px; width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); box-shadow:0 10px 24px rgba(0,0,0,.35); }
+    #singleIssueAnalysisDevice [data-device-options] { position:absolute; top:calc(100% + var(--ui-spacing-xs)); left:0; z-index:30; display:flex; flex-direction:column; gap:6px; width:100%; box-sizing:border-box; padding:8px; border:1px solid var(--border); border-radius:8px; background:var(--card-bg); box-shadow:0 10px 24px rgba(0,0,0,.35); }
     #singleIssueAnalysisDevice [data-device-options][hidden] { display:none; }
     #singleIssueAnalysisDevice [data-device-options] label { display:flex; align-items:center; gap:6px;  line-height:18px; cursor:pointer; white-space:nowrap; }
     #singleIssueAnalysisDevice [data-device-options] input { margin:0; }

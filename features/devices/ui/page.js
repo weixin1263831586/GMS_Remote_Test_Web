@@ -705,7 +705,7 @@
         pane.setAttribute('role', 'tabpanel');
         pane.hidden = true;
         pane.innerHTML = `
-            <div class="console-layout">
+            <div class="console-layout ui-workspace-grid ui-workspace-grid--aside ui-workspace-grid--aside-persistent">
                 <div class="terminal-column">
                     <div class="terminal-output terminal" tabindex="0" aria-label="串口输出"></div>
                     <div class="input-dock">

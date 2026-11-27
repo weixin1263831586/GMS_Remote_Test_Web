@@ -257,6 +257,25 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_redmine_daily_brief_uses_regular_form_control_height(self):
+        page = self.new_page()
+        try:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            page.route("**/api/redmine-agent/**", lambda route: route.fulfill(
+                status=200, content_type="application/json", body='{"success":true,"data":{}}',
+            ))
+            page.goto(f"{self.base_url}/redmine-agent", wait_until="domcontentloaded")
+            page.evaluate("switchTab('daily-brief')")
+            for selector in ("#singleIssueAnalysisId", "#singleIssueAnalysisMode",
+                             "#singleIssueAnalysisDevice [data-device-toggle]",
+                             "#singleIssueAnalysisStart"):
+                control = page.locator(selector)
+                control.wait_for(state="visible")
+                with self.subTest(selector=selector):
+                    self.assertAlmostEqual(control.bounding_box()["height"], 32, delta=1)
+        finally:
+            page.close()
+
     def test_full_height_workspaces_have_one_top_boundary(self):
         """Full-height workspaces and their first panes meet the shell frame without a second seam."""
         page = self.new_page()
