@@ -35,13 +35,6 @@
 .analysis-upload-title { height: 22px; line-height: 22px; }
 .analysis-upload-copy .upload-instructions { margin-top: 4px; color: var(--text-secondary); line-height: 1.6; }
 
-.apk-status-card {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 10px 12px;
-    margin-bottom: 10px;
-}
 #apk-analysis-status .section-title {
 
 
@@ -67,15 +60,7 @@
 }
 
 /* APK 分析进度条 */
-#apk-analysis-progress-container {
-    margin-top: 12px;
-}
-#apk-analysis-progress-bar {
-    width: 0%;
-    height: 100%;
-    background: var(--success-color);
-    transition: width 0.3s ease;
-}
+#apk-analysis-progress-bar { width: 0%; }
 
 /* APK 分析结果 Tab */
 .apk-tab-actions {
@@ -1164,8 +1149,6 @@ body.apk-resizing {
 
     .test-btn-frame,
     .log-frame-header,
-    .report-upload-content,
-    .apk-upload-content,
     .suite-browser-header,
     .suite-search-bar {
         flex-wrap: wrap;
@@ -1177,11 +1160,6 @@ body.apk-resizing {
         max-width: 100%;
     }
 
-    .report-upload-content .analysis-upload-copy,
-    .apk-upload-content .analysis-upload-copy {
-        min-width: 0;
-        flex: 1 1 180px;
-    }
 
     .suite-download-row > div,
     .suite-download-row > button {
