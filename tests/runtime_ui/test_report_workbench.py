@@ -346,6 +346,85 @@ class RuntimeReportWorkbenchTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_apk_and_report_share_empty_and_active_intake_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1792, "height": 960})
+
+            def measure(name, active):
+                return page.evaluate("""({name, active}) => {
+                    const root = document.getElementById('page-' + name);
+                    const lane = root.querySelector('.analysis-intake');
+                    const zone = lane.querySelector('.analysis-upload-surface');
+                    const row = zone.querySelector('.analysis-upload-row');
+                    const symbol = row.querySelector('.analysis-upload-symbol');
+                    const button = row.querySelector('button');
+                    const card = lane.querySelector('.analysis-status-card');
+                    const z = zone.getBoundingClientRect();
+                    const r = row.getBoundingClientRect();
+                    const c = card.getBoundingClientRect();
+                    const rect = el => el.getBoundingClientRect();
+                    const style = getComputedStyle(zone);
+                    return {
+                        height: z.height, width: z.width,
+                        centerX: Math.abs((z.left + z.right - r.left - r.right) / 2),
+                        centerY: Math.abs((z.top + z.bottom - r.top - r.bottom) / 2),
+                        iconHeight: rect(symbol).height, buttonHeight: rect(button).height,
+                        border: style.border, radius: style.borderRadius,
+                        columns: getComputedStyle(lane).gridTemplateColumns,
+                        instructionsVisible: getComputedStyle(row.querySelector('.upload-instructions')).display !== 'none',
+                        statusHeight: active ? c.height : null,
+                        statusTopDelta: active ? Math.abs(z.top - c.top) : null,
+                        gap: active ? c.left - z.right : null,
+                        statusIcon: active ? rect(card.querySelector('.analysis-upload-symbol')).height : null
+                    };
+                }""", {"name": name, "active": active})
+
+            empty = {}
+            active = {}
+            for name in ("apk-analysis", "report-analysis"):
+                page.evaluate("(name) => switchPage(name, null)", name)
+                expect(page.locator(f"#page-{name} .analysis-upload-surface.upload-empty")).to_be_visible()
+                empty[name] = measure(name, False)
+                if name == "apk-analysis":
+                    page.evaluate("""() => {
+                        setApkUploadEmpty(false);
+                        document.getElementById('apk-analysis-status').style.display = 'block';
+                        document.getElementById('apk-file-name').textContent = 'sample.apk';
+                        document.getElementById('apk-analysis-state').textContent = '分析完成';
+                        document.getElementById('apk-analysis-progress-container').style.display = 'block';
+                    }""")
+                else:
+                    page.evaluate("""() => displayReportAnalysis({
+                        report_name: 'sample.xml',
+                        summary: {total: 1, pass: 1, fail: 0, pass_rate: '100.00%'},
+                        failures: []
+                    })""")
+                expect(page.locator(f"#page-{name} .analysis-status-card")).to_be_visible()
+                active[name] = measure(name, True)
+
+            for geometry in empty.values():
+                self.assertLessEqual(geometry["centerX"], 1, geometry)
+                self.assertLessEqual(geometry["centerY"], 1, geometry)
+                self.assertTrue(geometry["instructionsVisible"], geometry)
+            for geometry in active.values():
+                self.assertAlmostEqual(geometry["height"], 84, delta=1, msg=geometry)
+                self.assertAlmostEqual(geometry["statusHeight"], geometry["height"], delta=1, msg=geometry)
+                self.assertLessEqual(geometry["statusTopDelta"], 1, geometry)
+                self.assertLessEqual(geometry["centerY"], 1, geometry)
+                self.assertAlmostEqual(geometry["gap"], 8, delta=1, msg=geometry)
+                self.assertEqual(geometry["statusIcon"], 36)
+                self.assertFalse(geometry["instructionsVisible"], geometry)
+            for states in (empty, active):
+                apk, report = states["apk-analysis"], states["report-analysis"]
+                for key in ("height", "width", "iconHeight", "buttonHeight"):
+                    self.assertAlmostEqual(apk[key], report[key], delta=1, msg=(key, apk, report))
+                for key in ("columns", "border", "radius"):
+                    self.assertEqual(apk[key], report[key], (key, apk, report))
+        finally:
+            page.close()
+
     def test_all_passed_report_keeps_single_column_and_no_stale_failure(self):
         page = self.new_page()
         try:
