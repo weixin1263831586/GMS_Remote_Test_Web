@@ -1044,7 +1044,7 @@
 
 /* ==================== Test Suite Browser ==================== */
 .suite-browser-layout {
-    grid-template-columns: minmax(20px, 320px) minmax(0, 1fr);
+    grid-template-columns: var(--ui-workspace-navigation-width) minmax(0, 1fr);
     overflow: hidden;
 }
 .suite-browser-toolbar,
