@@ -49,6 +49,8 @@ on:
       - 'features/redmine/ui/page.html'
       - 'features/gms/radar/ui/page.html'
       - 'features/**/ui/*.css'
+      - 'features/**/ui/*.html'
+      - 'features/**/ui/*.js'
       - 'tests/test_typography_contract.py'
       - 'tests/test_ui_sizing_contract.py'
       - 'tests/runtime_ui/test_ui_sizing_rendered.py'
