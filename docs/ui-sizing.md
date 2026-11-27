@@ -7,7 +7,8 @@
 | --- | --- | --- |
 | 页面外围四边（所有 Shell 页面，桌面与移动端） | `--ui-page-edge` | 8px |
 | 普通按钮、筛选输入、选择框 | `--ui-control-height` | 32px |
-| 表格行内操作 | `--ui-control-height-dense` | 28px |
+| 表格行内操作 / 紧凑工作区工具栏控件 | `--ui-control-height-dense` | 28px |
+| 紧凑工作区单行工具栏 | `--ui-workspace-toolbar-height` | 36px |
 | Shell 页头/密集微控件 | `--ui-control-height-small` | 26px |
 | 内联图标/面包屑 | `--ui-control-height-icon` | 24px |
 | 紧凑弹框操作 | `--ui-control-height-dialog` | 34px |
@@ -38,6 +39,7 @@
    优先采用 `white-space: nowrap`、局部 `overflow-x: auto`、合理列宽和
    `text-overflow: ellipsis`；不能通过缩小字号压缩内容。
 2. **同角色同高度**：同一行的普通搜索输入、过滤下拉和动作按钮都用 32px。
+   紧凑分栏工具区使用 `.ui-workspace-toolbar` 和 `.ui-workspace-control`，统一 36px 单行栏及 28px 控件；窄屏允许工具栏内容换行扩展。
    Shell 顶部标题动作区沿用 26px，避免增加整页头部高度。
 3. **卡片内容优先**：用户、设备、审计、系统接口四页的 KPI 统一 95px。
    大量数据/趋势图的卡片由内容决定高度；70px 紧凑 KPI 只供显式独立小卡片选用。例外基于组件角色，不能根据页面
