@@ -83,6 +83,10 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                     groupHeight = group.getBoundingClientRect().height;
                                 }
                                 results.push({
+                                    headerTheme: [...head.rows[0].cells].every(cell => {
+                                        const style = getComputedStyle(cell);
+                                        return style.backgroundColor === 'rgb(112, 93, 135)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
+                                    }),
                                     groupHeight,
                                     name: selector,
                                     header: head.rows[0].getBoundingClientRect().height,
@@ -109,6 +113,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                         suites.append(host);
                         try {
                             results.push({
+                                headerTheme: getComputedStyle(host.firstElementChild).backgroundColor === 'rgb(112, 93, 135)' && getComputedStyle(host.firstElementChild).color === 'rgb(255, 255, 255)',
                                 name: 'suite-file-table',
                                 header: host.firstElementChild.getBoundingClientRect().height,
                                 row: host.lastElementChild.getBoundingClientRect().height,
@@ -131,6 +136,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                         self.assertAlmostEqual(item['row'], 36, delta=1, msg=str(item))
                         self.assertTrue(item['middle'], item)
                         self.assertTrue(item['padding'], item)
+                        self.assertTrue(item['headerTheme'], item)
                         if item.get('groupHeight') is not None:
                             self.assertAlmostEqual(item['groupHeight'], 36, delta=1, msg=str(item))
         finally:
@@ -155,12 +161,17 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                 header: table.tHead.rows[0].getBoundingClientRect().height,
                                 row: table.tBodies[0].rows[0].getBoundingClientRect().height,
                                 align: getComputedStyle(table.tBodies[0].rows[0].cells[0]).verticalAlign,
+                                headerTheme: [...table.tHead.rows[0].cells].every(cell => {
+                                    const style = getComputedStyle(cell);
+                                    return style.backgroundColor === 'rgb(112, 93, 135)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
+                                }),
                             };
                         } finally { table.remove(); }
                     }""")
                     self.assertAlmostEqual(result['header'], 36, delta=1, msg=str(result))
                     self.assertAlmostEqual(result['row'], 36, delta=1, msg=str(result))
                     self.assertEqual(result['align'], 'middle')
+                    self.assertTrue(result['headerTheme'], result)
         finally:
             page.close()
 

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Gerrit 看板</title>
-  <script src="/static/js/utils.js?v=20261128-ui-role-audit"></script>
-  <link rel="stylesheet" href="/static/css/theme.css?v=20261128-ui-role-audit">
+  <script src="/static/js/utils.js?v=20261128-table-header-theme"></script>
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261128-table-header-theme">
   <style>
     :root { color-scheme: dark; --bg:var(--dark-bg); --panel:var(--card-bg); --panel2:var(--light-bg); --border:var(--border-color); --text:var(--text-primary); --muted:var(--text-secondary); --primary:var(--primary-color); --ok:var(--success-color); --warn:var(--warning-color); --bad:var(--danger-color); --surface:var(--light-bg); --accent:var(--lighter-bg); }
     * { box-sizing:border-box; }
@@ -49,14 +49,13 @@
     .owner-title h2 { margin:0;  }
     table { width:100%; border-collapse:collapse; min-width:820px; }
     th,td { border-bottom:1px solid var(--border); text-align:left; }
-    th { color:var(--muted); background:var(--panel2); }
     a { color:var(--primary-light); text-decoration:none;  }
     a.member-link:hover { text-decoration:underline; }
     .muted { color:var(--muted);  line-height:1.6; }
     .wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--ui-radius-card); }
     .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--ui-radius-card); margin-bottom:18px; }
     .dept-table { width:100%; border-collapse:collapse; min-width:760px;  }
-    .dept-table th { text-align:left; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
+    .dept-table th { text-align:left;   border-bottom:1px solid var(--border); white-space:nowrap; }
     .dept-table td { white-space:nowrap; }
     .dept-table tbody tr:hover { background:var(--light-bg); }
     .dept-action-btn { width:48px; min-width:48px; max-width:48px; padding:0; text-align:center; overflow:hidden; white-space:nowrap; }
@@ -122,7 +121,6 @@
 :where(section, .panel, .card, .stat-card, .table-wrap) {
     border-color: var(--border); box-shadow: none;
 }
-:where(th) { color: var(--muted);  }
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
@@ -131,24 +129,23 @@
 :where(.wrap, .dept-table-wrap) {
     background: var(--panel); border-color: var(--border); border-radius: 8px; box-shadow: none;
 }
-:where(table) th { background: var(--panel2); color: var(--muted); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 </style>
-<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/modal.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/form-controls.css?v=20261128-ui-role-audit">
-<script src="/static/js/password-controls.js?v=20261128-ui-role-audit" defer></script>
-<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261128-ui-role-audit">
-<script src="/static/js/workspace-tabs.js?v=20261128-ui-role-audit" defer></script>
-<script src="/static/js/dialog-prompts.js?v=20261128-ui-role-audit"></script>
-<script src="/static/js/dialog-frame.js?v=20261128-ui-role-audit"></script>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-ui-role-audit">
-                        <link rel="stylesheet" href="/static/css/typography.css?v=20261128-ui-role-audit">
+<link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/modal.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/form-controls.css?v=20261128-table-header-theme">
+<script src="/static/js/password-controls.js?v=20261128-table-header-theme" defer></script>
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261128-table-header-theme">
+<link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261128-table-header-theme">
+<script src="/static/js/workspace-tabs.js?v=20261128-table-header-theme" defer></script>
+<script src="/static/js/dialog-prompts.js?v=20261128-table-header-theme"></script>
+<script src="/static/js/dialog-frame.js?v=20261128-table-header-theme"></script>
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-table-header-theme">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261128-table-header-theme">
 </head>
 <body>
 <header class="workspace-header">
@@ -277,9 +274,9 @@
     <div class="modal-body" id="routeCheckBody"><div class="muted">正在探测 Gerrit 服务器可达性…</div></div>
   </div>
 </div>
-<script src="/static/js/shell/act-bridge.js?v=20261128-ui-role-audit" defer></script>
-<script src="/static/js/embedded-workspace.js?v=20261128-ui-role-audit"></script>
-<script src="/static/js/embedded-ui/modal-controller.js?v=20261128-ui-role-audit"></script>
+<script src="/static/js/shell/act-bridge.js?v=20261128-table-header-theme" defer></script>
+<script src="/static/js/embedded-workspace.js?v=20261128-table-header-theme"></script>
+<script src="/static/js/embedded-ui/modal-controller.js?v=20261128-table-header-theme"></script>
 <script src="/gerrit-dashboard/render.js?v=20261128-shared-status"></script>
 <script src="/gerrit-dashboard/page.js?v=20261126-query-auth-status"></script>
 </body>

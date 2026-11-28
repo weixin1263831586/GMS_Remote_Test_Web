@@ -661,8 +661,8 @@ body.apk-resizing {
 
 .users-table th {
     border-bottom: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    background: var(--darker-bg);
+    
+    
 
     text-align: center;
 }

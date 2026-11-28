@@ -196,7 +196,7 @@
     .issue-mini-meta { color:var(--muted);  text-align:right; line-height:1.5; }
     .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:18px; }
     .dept-table { width:100%; border-collapse:collapse; min-width:760px;  }
-    .dept-table th { text-align:left; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
+    .dept-table th { text-align:left;   border-bottom:1px solid var(--border); white-space:nowrap; }
     .dept-table td { white-space:nowrap; }
     .dept-table tbody tr:hover { background:var(--light-bg); }
     .dept-table a { color:var(--primary-light); text-decoration:none;  }
@@ -305,7 +305,6 @@
     .daily-brief-stat-table { width:100%; border-collapse:collapse;  }
     .daily-brief-stat-table th, .daily-brief-stat-table td { border:1px solid var(--border); text-align:left; overflow-wrap:anywhere; }
     .daily-brief-stat-table th:not(:first-child), .daily-brief-stat-table td:not(:first-child) { white-space:nowrap; font-variant-numeric:tabular-nums; }
-    .daily-brief-stat-table th { color:var(--text-secondary); background:color-mix(in srgb, var(--lighter-bg) 50%, transparent);  }
     .daily-brief-tool-failed { color:#fca5a5;  }
     .daily-brief-tool-recommendations { margin:0; padding-left:20px; color:#fde68a; line-height:1.65; }
     .daily-brief-tool-recommendations code { color:var(--primary-light); }
@@ -463,7 +462,6 @@
 :where(section, .panel, .card, .stat-card, .table-wrap) {
     border-color: var(--border); box-shadow: none;
 }
-:where(th) { color: var(--muted);  }
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
@@ -486,7 +484,7 @@
     background: var(--panel); border: 1px solid var(--border);
     border-radius: var(--ui-radius-card);
 }
-:where(table) th { position: sticky; top: 0; z-index: 1; background: var(--panel2); }
+:where(table) th { position: sticky; top: 0; z-index: 1;  }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }
 
 .redmine-settings-fields {

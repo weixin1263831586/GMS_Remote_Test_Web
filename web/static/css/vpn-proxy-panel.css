@@ -36,7 +36,6 @@
   text-align: left; border-bottom: 1px solid var(--tech-edge-soft);
    white-space: nowrap;
 }
-.tech-dialog--vpn-proxy th { color: var(--text-secondary);  }
 .tech-dialog--vpn-proxy .vpn-proxy-client-state.is-disabled { color:var(--danger-color); }
 .tech-dialog--vpn-proxy .vpn-proxy-client-state.is-enabled { color:var(--success-color); }
 .tech-dialog--vpn-proxy .vpn-proxy-client-toggle {

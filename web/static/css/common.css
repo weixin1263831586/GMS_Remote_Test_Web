@@ -1,7 +1,7 @@
 /* ==================== Reset & Base ==================== */
-@import url("/static/css/theme.css?v=20261128-ui-role-audit");
-@import url("/static/css/apk-analysis.css?v=20261128-ui-role-audit");
-@import url("/static/css/form-controls.css?v=20261128-ui-role-audit");
+@import url("/static/css/theme.css?v=20261128-table-header-theme");
+@import url("/static/css/apk-analysis.css?v=20261128-table-header-theme");
+@import url("/static/css/form-controls.css?v=20261128-table-header-theme");
 
 * {
     margin: 0;
@@ -898,8 +898,8 @@ body {
 }
 .list-table th {
     border-bottom: 1px solid var(--border-color);
-    background: var(--darker-bg);
-    color: var(--text-secondary);
+    
+    
 
     text-align: center;
 }

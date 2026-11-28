@@ -908,7 +908,6 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 :where(section, .panel, .card, .stat-card, .table-wrap) {
     border-color: var(--border); box-shadow: none;
 }
-:where(th) { color: var(--muted);  }
 :where(td) { border-color: var(--border); }
 ::selection { background: rgba(139,116,232,.25); color: var(--text); }
 
@@ -919,6 +918,4 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
     border-radius: var(--ui-radius-card); box-shadow: none;
 }
 :where(.panel-header, .section-head) { background: var(--panel2); }
-
-table th { color: var(--muted); background: var(--panel2);  }
 table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }

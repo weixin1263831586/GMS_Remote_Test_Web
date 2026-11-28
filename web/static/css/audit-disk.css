@@ -13,7 +13,7 @@
 #page-security-audit .audit-disk-table { min-width: 1010px; table-layout: fixed; }
 #page-security-audit .audit-disk-table thead th {
     position: sticky; top: 0; z-index: 2;
-    text-align: left; background: var(--light-bg);
+    text-align: left; 
     border-bottom: 1px solid var(--border-color);
 }
 #page-security-audit .audit-disk-table :is(th:nth-child(3),th:nth-child(4),th:nth-child(6)),

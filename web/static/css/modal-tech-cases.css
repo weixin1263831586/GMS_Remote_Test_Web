@@ -421,7 +421,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 }
 #firmware-share-modal .firmware-share-table thead th {
   position: sticky; top: 0; z-index: 2;
-  background: var(--tech-panel);  color: var(--text-primary);
+    
   text-align: left;
 }
 /* Desktop: all five fields remain visible. Full paths and names stay available in title tooltips. */

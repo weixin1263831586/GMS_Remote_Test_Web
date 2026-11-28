@@ -143,6 +143,8 @@
 .suite-file-table-head {
     box-sizing: border-box;
     height: var(--ui-table-header-height);
+    background: var(--ui-table-header-bg);
+    color: var(--ui-table-header-text);
     padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
     vertical-align: middle;
     white-space: nowrap;

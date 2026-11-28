@@ -818,6 +818,12 @@ class UiSizingContractTests(unittest.TestCase):
             with self.subTest(selector=selector):
                 rule = source.split(selector, 1)[1].split("{", 1)[1].split("}", 1)[0]
                 self.assertIn("var(--ui-" + role + ")", rule)
+        theme = (CSS / "theme.css").read_text(encoding="utf-8")
+        self.assertIn("--ui-table-header-bg: #705d87;", theme)
+        self.assertIn("--ui-table-header-text: var(--text-on-accent);", theme)
+        header_rule = source.split("> thead > tr > :is(th, td)", 1)[1].split("{", 1)[1].split("}", 1)[0]
+        self.assertIn("background: var(--ui-table-header-bg);", header_rule)
+        self.assertIn("color: var(--ui-table-header-text);", header_rule)
         self.assertNotIn("--ui-table-header-height-dense", source)
         self.assertNotIn("--ui-table-row-height-dense", source)
         for name in (

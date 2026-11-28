@@ -28,8 +28,8 @@
 }
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) thead th {
     position: sticky; top: 0; z-index: 1;
-    background: var(--light-bg); border-bottom: 1px solid var(--border-color);
-    color: var(--text-secondary);
+     border-bottom: 1px solid var(--border-color);
+    
 }
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody td {
     border-bottom: 1px solid var(--border-color);
@@ -285,7 +285,7 @@
 #page-security-audit .audit-log-table thead th {
     position: sticky; top: 0; z-index: 2;
     text-align: left;  border-bottom: 1px solid var(--border-color);
-    background: var(--light-bg);
+    
 }
 #page-security-audit .audit-log-table :is(th:nth-child(2),th:nth-child(3),th:nth-child(6)),
 #page-security-audit .audit-log-table :is(td:nth-child(2),td:nth-child(3),td:nth-child(6)) { text-align: center; }
@@ -365,7 +365,7 @@
 #page-security-audit .audit-mail-table thead th {
     position:sticky; top:0; z-index:2;
     text-align:left;
-    border-bottom:1px solid var(--border-color); background:var(--light-bg);
+    border-bottom:1px solid var(--border-color); 
 }
 #page-security-audit .audit-mail-table th:last-child,
 #page-security-audit .audit-mail-table td:last-child { text-align:center; }
@@ -567,8 +567,8 @@
 }
 #page-test-suites .suite-file-table-head {
     flex: 0 0 auto;
-    background: var(--light-bg); border-bottom: 1px solid var(--border-color);
-    color: var(--text-muted);
+     border-bottom: 1px solid var(--border-color);
+    
 }
 #page-test-suites .suite-file-list { min-height: 0; overflow-y: auto; overflow-x: hidden; }
 #page-test-suites.page-ui-rework .suite-file-row {

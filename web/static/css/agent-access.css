@@ -120,7 +120,7 @@
 
 
 .agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
-.agent-access-table th { position: sticky; top: 0; z-index: 1; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg);   text-align: left; }
+.agent-access-table th { position: sticky; top: 0; z-index: 1; border-bottom: 1px solid var(--border-color);     text-align: left; }
 .agent-access-table td { color: var(--text-primary);  line-height: 1.5; white-space: nowrap; }
 .agent-access-table th { white-space: nowrap; }
 .agent-access-table :is(th,td):last-child { text-align: center; }

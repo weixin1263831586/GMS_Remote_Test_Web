@@ -833,6 +833,10 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 Math.max(Math.abs(rect(cell).left - rect(cells[j]).left),
                     Math.abs(rect(cell).right - rect(cells[j]).right))));
             return [{name: table.id || table.className || 'table-' + i,
+                headerTheme: header.flatMap(row => [...row.cells]).filter(visible).every(c => {
+                    const css = getComputedStyle(c);
+                    return css.backgroundColor === 'rgb(112, 93, 135)' && css.color === 'rgb(255, 255, 255)' && css.backgroundImage === 'none';
+                }),
                 columns: cells.map(c => ({label:c.textContent.trim(),align:getComputedStyle(c).textAlign,
                     x:rect(c).left,width:rect(c).width})),
                 rows: rows.length, blankDom: blank.length, blankVisible: blank.filter(visible).length,
@@ -863,7 +867,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     evidence[key] = tables
                     component_evidence[key] = components
                     for table in tables:
-                        if table["blankVisible"] or table["maxColumnDelta"] > 2:
+                        if table["blankVisible"] or table["maxColumnDelta"] > 2 or not table["headerTheme"]:
                             failures.append(f"{key}: {table}")
                     target = os.getenv("GMS_UI_PREVIEW_DIR")
                     if target:
