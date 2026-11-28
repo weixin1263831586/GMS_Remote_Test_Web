@@ -599,6 +599,13 @@ class UiSizingContractTests(unittest.TestCase):
         controls = (CSS / "form-controls.css").read_text(encoding="utf-8")
         self.assertIn(".ui-segmented", foundation)
         self.assertIn(".ui-standalone-controls", controls)
+        self.assertIn(".ui-data-table-controls", controls)
+        gms = (ROOT / "features/gms/ui/page.html").read_text(encoding="utf-8")
+        self.assertIn('class="ui-data-table-controls"', gms)
+        self.assertIn("/static/css/form-controls.css", gms)
+        gms_style = (CSS / "data-table-page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(gms_style, r"(?m)^button\s*\{")
+        self.assertNotRegex(gms_style, r"(?m)^input, select\s*\{")
         for page in ("users.html", "security-audit.html", "desktop.html", "terminal.html"):
             self.assertIn("ui-segmented", (ROOT / "web/shell/pages" / page).read_text(encoding="utf-8"))
         apk = (ROOT / "web/shell/pages/apk-analysis.html").read_text(encoding="utf-8")
@@ -620,7 +627,7 @@ class UiSizingContractTests(unittest.TestCase):
             "form-controls.css": ("--ui-control-height", "--ui-control-height-dense"),
             "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),
-            "data-table-page.css": ("--ui-control-height",),
+            "data-table-page.css": ("--ui-control-height-dense",),
             "ui-sizing.css": ("--ui-table-header-height", "--ui-table-row-height", "--ui-table-cell-padding-block", "--ui-table-cell-padding-inline"),
         }
         for name, roles in mapping.items():

@@ -14,10 +14,6 @@ main > :is(.filters,.pager) { flex:0 0 auto; }
 .tabs button { background:var(--head);  }
 .tabs button.active { background:var(--primary); }
 .section-badge { flex:1; min-width:0; text-align:right;  color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-button { box-sizing:border-box; height:var(--ui-control-height); border:1px solid var(--primary-color); border-radius:var(--ui-radius-control); padding:0 11px; background:var(--primary-strong); color:var(--text-on-accent); cursor:pointer; }
-button.secondary { background:var(--light-bg); border-color:var(--border-light); color:var(--text-primary); }
-button.secondary:hover:not(:disabled) { background:var(--lighter-bg); border-color:var(--primary-light); }
-input, select { height:var(--ui-control-height); border:1px solid var(--border); border-radius:6px; padding:0 10px; background:var(--card); color:var(--text);   }
 input::placeholder { color:var(--muted); }
 select { appearance:auto; }
 table { width:100%; border-collapse:separate; border-spacing:0; background:var(--card); border:1px solid var(--border);  table-layout:fixed; }

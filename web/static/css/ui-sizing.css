@@ -13,6 +13,10 @@
     --ui-control-height-small: 26px;
     --ui-segmented-inner-height: 24px; /* 26px capsule + borders */
     --ui-control-height-large: 40px;
+    --ui-action-width-short: 64px;
+    --ui-action-width-plain: 76px;
+    --ui-action-width-icon: 82px;
+    --ui-action-width-long: 92px;
     /* Component roles preserve intentional density without page-local magic numbers. */
     --ui-control-height-icon: 24px; /* inline icon/breadcrumb, not ordinary button */
     --ui-control-height-dialog: 34px; /* compact modal actions */

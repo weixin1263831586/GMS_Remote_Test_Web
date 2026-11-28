@@ -227,24 +227,6 @@ select option {
 }
 
 /* ==================== Buttons ==================== */
-.btn-xxs, .btn-xs, .btn-small {
-    padding: 5px 10px;
-    border: 1px solid var(--border-light);
-    border-radius: var(--ui-radius-control);
-    cursor: pointer;
-
-
-    background: var(--light-bg);
-    color: var(--text-primary);
-    transition: color .15s ease, border-color .15s ease, background-color .15s ease;
-    box-shadow: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1.4;
-    white-space: nowrap;
-    flex-shrink: 0;
-}
 
 .btn-xxs {
     min-height: var(--ui-control-height-small);
@@ -253,7 +235,6 @@ select option {
 
 .btn-xs {
     padding: 4px 10px;
-    color: var(--text-primary);
     min-height: var(--ui-control-height-dense);
 }
 
