@@ -219,7 +219,6 @@
   margin:12px;max-width:calc(100% - 24px);
 }
 .architecture-v2 .arch-scene-canonical:not([open])>.arch-v2-svg-frame{display:none}
-.architecture-v2 .arch-scene-canonical[open] .topology-viewport{overflow-x:auto}
 @media(max-width:1380px){
   .architecture-v2 .arch-scene-layout{grid-template-columns:minmax(0,1fr)}
   .architecture-v2 .arch-scene-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -233,7 +232,6 @@
 @media(prefers-reduced-motion:reduce){
   .architecture-v2 .arch-scene-node{transition:none;animation:none}
 }
-
 
 /* Controller 中心节点与路径线条的层次样式。 */
 .architecture-v2 .arch-scene-controller-emblem{
@@ -304,10 +302,6 @@
 .architecture-v2 .arch-scene-canvas--agent-analysis .arch-scene-controller-emblem{
   top:-31px;
 }
-@media(max-width:1190px){
-  .architecture-v2 .arch-scene-layout{grid-template-columns:minmax(0,1fr)}
-  .architecture-v2 .arch-scene-sidebar{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}
-}
 
 
 /* Viewport-fit architecture scenes: no redundant title rows or page-level scroll
@@ -339,7 +333,6 @@
   .architecture-v2 main{padding:7px}
   .architecture-v2 .arch-scene-sidebar{grid-template-columns:1fr}
 }
-
 
 /* Scene v3: improve hierarchy, legibility, physical channel distinctions. */
 .architecture-v2 .arch-scene-canvas{
@@ -374,9 +367,6 @@
 ) .arch-scene-swatch--worker{--swatch:#4abfff}
 /* Do not let a gold execution legend identify a blue device-worker node. */
 .architecture-v2 .arch-scene-layout[data-scene-view="agent-analysis"] .arch-scene-swatch--resource{--swatch:#3cddaf}
-@media(max-width:760px){
-}
-
 
 /* Allocate a more useful legend column on wide screens; the scene scales inside
    its own scroll region and the shared Tab geometry remains untouched. */
@@ -388,7 +378,6 @@
 
 /* Keep visual legend semantics in sync with data / ACK / command line colors. */
 .architecture-v2 .arch-scene-line--report{border-top-color:#3ce3b7}
-
 
 /* Crisp orthogonal routes without blurred underlays. */
 .architecture-v2 .arch-scene-path{
@@ -402,7 +391,6 @@
 .architecture-v2 .arch-scene-controller-emblem{top:-49px}
 .architecture-v2 .arch-scene-canvas--test-flow .arch-scene-controller-emblem{top:-44px}
 .architecture-v2 .arch-scene-canvas--agent-analysis .arch-scene-controller-emblem{top:-31px}
-
 
 /* Topology labels are short semantic names. Keep them on one line, and
    preserve the full text in each chip's accessible title attribute. */

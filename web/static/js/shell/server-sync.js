@@ -142,7 +142,6 @@ function renderToolCard(tool, category, index, cardColor) {
         category,
         index,
         cardColor,
-        cardClass: 'sync-card',
         clickAttrs: `data-tools-action="open-tool" data-url="${escapeIconAttr(tool?.url || '')}"`,
         dragAttrs: 'data-dragstart="handleToolDragStart" data-r0="event"'
             + ' data-dragend="handleToolDragEnd" data-r1="event"'

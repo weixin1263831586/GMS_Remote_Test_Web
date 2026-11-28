@@ -1202,17 +1202,6 @@ body.apk-resizing {
     }
 }
 
-/* ==================== server-sync 声明式 hover ==================== */
-.hover-dim:hover {
-    opacity: 0.85;
-}
-
-.tool-card.sync-card:hover {
-    transform: translateY(-2px);
-    box-shadow: var(--shadow-md);
-    border-color: var(--card-accent, var(--border-color));
-}
-
 /* api-docs 复制交互 */
 .api-skill-copy {
     color: var(--primary-color);

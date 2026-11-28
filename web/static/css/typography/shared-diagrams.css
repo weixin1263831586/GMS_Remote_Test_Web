@@ -131,46 +131,12 @@ html[data-ui-type-root="shell"] #review-login-modal .modal-content input { font-
 /* === Canonical typography ownership: diagrams and independent data tables === */
 /* web/static/css/architecture-layers.css */
 html[data-ui-type-root="architecture"] body { font-family: var(--ui-type-font-sans); }
-html[data-ui-type-root="architecture"] .lead { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="architecture"] h2 { font-size: var(--ui-type-size-page); }
 html[data-ui-type-root="architecture"] .card h3 { font-size: var(--ui-type-size-section); }
 html[data-ui-type-root="architecture"] .card p,
 html[data-ui-type-root="architecture"] .card li { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="architecture"] .topology svg { font-family: var(--ui-type-font-sans); }
 html[data-ui-type-root="architecture"] .note { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .layers-section { font-family: var(--ui-type-font-sans); }
-html[data-ui-type-root="architecture"] .layers-section .layers-intro { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-layer-label strong { font-size: var(--ui-type-size-section); }
-html[data-ui-type-root="architecture"] .arch-layer-label span { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-layer-label small { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-layer-item h3 { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-layer-item p { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .arch-layer-bridge { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-layer-bridge strong { font-weight: var(--ui-type-weight-medium); }
-html[data-ui-type-root="architecture"] .arch-integration h3 { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-integration p { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .architecture-layers figcaption { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .arch-flow-intro { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .arch-legend { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-details > summary { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-system-map h2,
-html[data-ui-type-root="architecture"] .arch-system-bottom h2 { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="architecture"] .arch-system-stage:not(:last-child)::after { font-size: var(--ui-type-size-stat); }
-html[data-ui-type-root="architecture"] .arch-system-stage h3 { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="architecture"] .arch-system-stage h3 small { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-regular); }
-html[data-ui-type-root="architecture"] .arch-system-stage>div span { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-system-paths { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-system-channel strong { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .arch-system-channel span { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-system-support>div span { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .arch-system-sidebar h3 { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .arch-system-sidebar p { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-system-modules td:first-child { font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="architecture"] .arch-system-events li { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="architecture"] .arch-system-events li::before { font-size: var(--ui-type-size-body); }
-
-/* web/static/css/architecture-v2.css */
-html[data-ui-type-root="architecture"] .architecture-v2 .lead { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-heading h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-hint { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-intro { font-size: var(--ui-type-size-body); }
@@ -187,8 +153,6 @@ html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li { f
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-timeline li::before { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-mini p { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-step { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-legend>span { font-size: var(--ui-type-size-compact); }
-html[data-ui-type-root="architecture"] .architecture-v2 .arch-details>summary { font-size: var(--ui-type-size-body); }
 
 /* web/static/css/architecture-scenes.css */
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-scene-edge-label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
@@ -226,7 +190,6 @@ html[data-ui-type-root="data-table"] .pager { font-size: var(--ui-type-size-smal
 html[data-ui-type-root="data-table"] .pager button { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="data-table"] .pager .muted { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="data-table"] code { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
-
 
 /* Dynamic AI report dialog text: copy targets semantic classes, not inline font styles. */
 .tech-dialog--report-ai .ai-report-chip,

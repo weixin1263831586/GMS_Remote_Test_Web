@@ -362,7 +362,6 @@
 }
 
 @container (max-width: 340px) {
-
     .aoa-screen-column .aoa-device-selectors { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -386,7 +385,6 @@
     .aoa-column-heading { align-items: flex-start; flex-wrap: wrap; }
     .aoa-device-selectors, .aoa-form-grid, .aoa-replay-runner { grid-template-columns: minmax(0, 1fr); }
     .aoa-replay-actions { justify-content: flex-start; }
-    .aoa-screen-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 }
 
