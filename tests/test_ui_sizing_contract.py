@@ -229,7 +229,7 @@ class UiSizingContractTests(unittest.TestCase):
             "workspace-aside-max": 350,
             "control-height-small": 26,
             "segmented-inner-height": 24,
-            "table-header-height": 38,
+            "table-header-height": 42,
             "table-row-height": 36,
             "table-cell-padding-block": 2,
             "table-cell-padding-inline": 10,
