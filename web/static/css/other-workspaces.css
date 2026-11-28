@@ -201,7 +201,7 @@
     overflow: hidden; text-overflow: ellipsis;
 }
 #page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
-#page-notes .kb-source-table td:last-child { text-align: right; }
+#page-notes .kb-source-table :is(th, td):last-child { text-align: right; }
 #page-notes .kb-source-actions > button { flex-shrink: 0; }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
