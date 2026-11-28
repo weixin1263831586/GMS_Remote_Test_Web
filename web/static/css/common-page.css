@@ -845,18 +845,6 @@ body.apk-resizing {
     box-shadow: none;
 }
 
-#users-main-view,
-#agent-access-panel,
-#sdk-config-panel,
-#audit-main-view,
-#audit-outbox-panel,
-#audit-disk-panel {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    min-width: 0;
-}
 
 /* Agent 接入统计卡已并入 page-stat-row/workbench-stat 模板
    （与用户列表/设备/审计页同源），本页无专属统计卡规则。 */
@@ -1006,8 +994,6 @@ body.apk-resizing {
 .filter-btn.tone-primary { background: var(--primary-gradient); color: #fff; }
 .filter-btn.tone-success { background: var(--success-color); color: #fff; }
 #suite-download-url { width: 100%; }
-#btn-download-suite,
-#btn-extract-suite { min-width: 100px; white-space: nowrap; }
 .suite-progress-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .suite-progress-status { min-width: 80px; color: var(--text-muted);  }
 .suite-progress-track { flex: 1; height: 6px; overflow: hidden; border-radius: 4px; background: var(--border-color); }

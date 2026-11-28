@@ -9,10 +9,6 @@
 #page-api-docs .api-stat .page-stat-value { color:var(--api-accent); }
 #page-api-docs .api-stat-hint { display:none;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis; }
 #page-api-docs .api-category-toolbar { flex:0 0 auto;padding:5px 10px; }
-#page-api-docs .api-search-box { display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;height:var(--ui-control-height);padding:0 9px;border:1px solid var(--border-color);border-radius:6px;background:var(--darker-bg); }
-#page-api-docs .api-search-box .ui-icon { width:16px;height:16px;flex:none;color:var(--primary-light); }
-#page-api-docs #api-search-input.entry-field { flex:1 1 auto;width:100%;min-width:0;height:calc(var(--ui-control-height) - 2px);margin:0;padding:0;border:0;outline:0;background:transparent; }
-#page-api-docs .api-search-box:focus-within { outline:2px solid var(--primary-color);outline-offset:1px; }
 #page-api-docs .api-category-toolbar .filter-btn { display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:var(--ui-control-height-small);height:var(--ui-control-height-small);max-height:var(--ui-control-height-small);padding:3px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);box-shadow:none;color:var(--text-secondary);white-space:nowrap;cursor:pointer; }
 /* The search action shares 32px with its adjacent input; category chips remain
    26px to preserve the existing single-row density and wrap breakpoints. */
@@ -59,6 +55,6 @@
 #page-api-docs .api-notes li { padding:3px 1px;color:var(--text-secondary);line-height:1.5; }
 #page-api-docs .api-notes li::marker { color:var(--primary-light); }
 @media (max-width:1150px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } #page-api-docs .api-side-panels { display:grid;grid-template-columns:repeat(3,minmax(0,1fr)); } }
-@media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-search-toolbar,#page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-search-box { flex-basis:100%; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }
+@media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }
 
 .api-reply-actions { justify-content: flex-end; }

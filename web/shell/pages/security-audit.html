@@ -16,7 +16,7 @@
 
 
             <!-- 审计日志：统计、真实筛选及日志明细；视图切换仍在标题栏右上角。 -->
-            <div id="audit-main-view" class="audit-dashboard">
+            <div id="audit-main-view" class="audit-dashboard ui-workspace-stack">
                 <div class="audit-stats page-stat-row" aria-label="已保留审计日志统计">
                     <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
                         <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#shield"></use></svg></span>
@@ -37,18 +37,18 @@
                 </div>
 
                 <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-log-filters" role="search" aria-label="筛选审计日志">
-                    <select id="audit-source-filter" class="combo-box" aria-label="来源" data-change="loadSecurityAudit" data-a0="true">
+                    <select id="audit-source-filter" class="combo-box ui-toolbar-select--regular" aria-label="来源" data-change="loadSecurityAudit" data-a0="true">
                         <option value="">全部来源</option>
                         <option value="web">Web</option>
                         <option value="cli">CLI</option>
                     </select>
-                    <select id="audit-type-filter" class="combo-box" aria-label="操作类型" data-change="loadSecurityAudit" data-a0="true">
+                    <select id="audit-type-filter" class="combo-box ui-toolbar-select--regular" aria-label="操作类型" data-change="loadSecurityAudit" data-a0="true">
                         <option value="">全部类型</option>
                         <option value="page_view">页面访问</option>
                         <option value="api">接口操作</option>
                         <option value="page_visit">入口访问</option>
                     </select>
-                    <input id="audit-search-input" class="entry-field" type="search" aria-label="搜索审计日志" placeholder="搜索用户 / IP / 接口 / 页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
+                    <input id="audit-search-input" class="entry-field ui-toolbar-search--grow" type="search" aria-label="搜索审计日志" placeholder="搜索用户 / IP / 接口 / 页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
                     <button class="btn-xs audit-toolbar-button" type="button" data-click="loadSecurityAudit" data-a0="true" data-busy-size="short">刷新</button>
                     <button class="btn-xs audit-toolbar-button audit-toolbar-export" type="button" data-click="exportSecurityAudit" data-busy-size="short">导出</button>
                 </div>
@@ -115,7 +115,7 @@
             </div>
 
             <!-- 邮件台账复用审计日志的统计卡、筛选栏、左右分栏及侧栏模板。 -->
-            <div id="audit-outbox-panel" class="audit-mail-workspace audit-dashboard" style="display: none;">
+            <div id="audit-outbox-panel" class="audit-mail-workspace audit-dashboard ui-workspace-stack" style="display: none;">
                 <div class="audit-stats page-stat-row" aria-label="当前筛选条件下的邮件统计">
                     <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
                         <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#mail"></use></svg></span>
@@ -135,7 +135,7 @@
                     </div>
                 </div>
                 <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-mail-filters" role="search" aria-label="筛选历史邮件">
-                    <select id="email-outbox-channel-filter" class="combo-box" aria-label="邮件通道" data-change="loadAuditOutbox" data-a0="true">
+                    <select id="email-outbox-channel-filter" class="combo-box ui-toolbar-select--regular" aria-label="邮件通道" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
                         <option value="automation">自动化通知</option>
@@ -143,12 +143,12 @@
                         <option value="redmine_reminder">Redmine 提醒</option>
                         <option value="update_radar">更新雷达</option>
                     </select>
-                    <select id="email-outbox-sent-filter" class="combo-box" aria-label="发送结果" data-change="loadAuditOutbox" data-a0="true">
+                    <select id="email-outbox-sent-filter" class="combo-box ui-toolbar-select--regular" aria-label="发送结果" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部结果</option>
                         <option value="true">成功</option>
                         <option value="false">失败</option>
                     </select>
-                    <input id="email-outbox-search-input" class="entry-field" type="search" aria-label="搜索邮件收件人或主题" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
+                    <input id="email-outbox-search-input" class="entry-field ui-toolbar-search--grow" type="search" aria-label="搜索邮件收件人或主题" placeholder="搜索收件人、主题" data-keydown="loadAuditOutbox" data-key="Enter" data-a0="true" />
                     <label id="email-outbox-all-users-label" style="display: none;">
                         <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户
@@ -213,7 +213,7 @@
             </div>
 
             <!-- 运行产物磁盘审计：只读快照；沿用审计日志 / 历史邮件的布局组件。 -->
-            <div id="audit-disk-panel" class="audit-dashboard audit-disk-workspace" style="display: none;">
+            <div id="audit-disk-panel" class="audit-dashboard audit-disk-workspace ui-workspace-stack" style="display: none;">
                 <div class="audit-stats page-stat-row" aria-label="运行产物磁盘审计统计">
                     <div class="page-stat-card workbench-stat audit-stat-card audit-stat-primary">
                         <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon"><use href="/static/icons/ui.svg#chart"></use></svg></span>
@@ -233,7 +233,7 @@
                     </div>
                 </div>
                 <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-disk-filters" role="search" aria-label="筛选磁盘产物">
-                    <select id="audit-disk-group" class="combo-box" aria-label="产物类别" data-change="filterDiskArtifactsByControls">
+                    <select id="audit-disk-group" class="combo-box ui-toolbar-select--regular" aria-label="产物类别" data-change="filterDiskArtifactsByControls">
                         <option value="">全部类别</option>
                         <option value="固件">固件</option>
                         <option value="APK">APK</option>
@@ -243,13 +243,13 @@
                         <option value="日志">日志</option>
                         <option value="其他">其他</option>
                     </select>
-                    <select id="audit-disk-priority" class="combo-box" aria-label="风险关注级别" data-change="filterDiskArtifactsByControls">
+                    <select id="audit-disk-priority" class="combo-box ui-toolbar-select--regular" aria-label="风险关注级别" data-change="filterDiskArtifactsByControls">
                         <option value="">全部级别</option>
                         <option value="高">高关注</option>
                         <option value="中">中关注</option>
                         <option value="低">低关注</option>
                     </select>
-                    <input id="audit-disk-search" class="entry-field" type="search" aria-label="搜索产物和目录" placeholder="搜索产物名称 / 目录 / 策略" data-input="filterDiskArtifactsByControls" />
+                    <input id="audit-disk-search" class="entry-field ui-toolbar-search--grow" type="search" aria-label="搜索产物和目录" placeholder="搜索产物名称 / 目录 / 策略" data-input="filterDiskArtifactsByControls" />
                     <button id="audit-disk-refresh-btn" data-busy-size="short" class="btn-xs audit-toolbar-button" type="button" data-click="loadDiskArtifactAudit" data-a0="true" aria-busy="false">刷新</button>
                 </div>
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">

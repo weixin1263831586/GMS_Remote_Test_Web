@@ -30,9 +30,9 @@
 
                 <!-- 用户列表：与设备库存相同的紧凑筛选条。 -->
                 <div class="users-list-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter" role="search" aria-label="筛选用户列表">
-                    <div class="users-list-filters ui-toolbar-fields">
-                        <input id="users-list-search" class="combo-box" type="search" placeholder="搜索用户 / IP / 设备" aria-label="搜索用户、IP或设备" data-input="filterUsersList">
-                        <select id="users-list-status-filter" class="combo-box" aria-label="筛选用户状态" data-change="filterUsersList">
+                    <div class="users-list-filters ui-toolbar-fields ui-toolbar-fields--search">
+                        <input id="users-list-search" class="combo-box ui-toolbar-search--bounded" type="search" placeholder="搜索用户 / IP / 设备" aria-label="搜索用户、IP或设备" data-input="filterUsersList">
+                        <select id="users-list-status-filter" class="combo-box ui-toolbar-select--compact" aria-label="筛选用户状态" data-change="filterUsersList">
                             <option value="">全部状态</option><option value="online">空闲在线</option>
                             <option value="testing">正在测试</option><option value="offline">离线</option>
                         </select>
@@ -42,7 +42,7 @@
                         <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList" data-busy-size="short">刷新</button>
                     </div>
                 </div>
-                <div class="users-table-wrap ui-workspace-content">
+                <div class="users-table-wrap ui-workspace-content ui-workspace-panel--scroll">
                     <table class="users-table">
                         <thead>
                             <tr>
@@ -88,9 +88,9 @@
 
                 <section class="agent-access-list-section ui-workspace-stack" aria-label="已接入的 Agent">
                     <div class="agent-access-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter">
-                        <div class="users-list-filters ui-toolbar-fields">
-                            <input id="agent-access-search" class="combo-box" type="search" placeholder="搜索 Agent、Token ID 或设备" aria-label="搜索 Agent Token" data-input="agentAccessFilterTokens">
-                            <select id="agent-access-status-filter" class="combo-box" aria-label="按状态筛选 Agent Token" data-change="agentAccessFilterTokens">
+                        <div class="users-list-filters ui-toolbar-fields ui-toolbar-fields--search">
+                            <input id="agent-access-search" class="combo-box ui-toolbar-search--bounded" type="search" placeholder="搜索 Agent、Token ID 或设备" aria-label="搜索 Agent Token" data-input="agentAccessFilterTokens">
+                            <select id="agent-access-status-filter" class="combo-box ui-toolbar-select--compact" aria-label="按状态筛选 Agent Token" data-change="agentAccessFilterTokens">
                                 <option value="">全部状态</option><option value="active">有效</option>
                                 <option value="inactive">已失效</option><option value="expired">已过期</option>
                                 <option value="revoked">已吊销</option>
@@ -105,7 +105,7 @@
                             <button id="agent-access-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">刷新</button>
                         </div>
                     </div>
-                    <div class="agent-access-table-wrap ui-workspace-content">
+                    <div class="agent-access-table-wrap ui-workspace-content ui-workspace-panel--scroll">
                     <table class="agent-access-table agent-token-table">
                         <thead>
                             <tr>
@@ -137,7 +137,7 @@
                             <button id="agent-sdk-sources-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el">刷新</button>
                         </div>
                     </div>
-                    <div class="agent-access-table-wrap ui-workspace-content">
+                    <div class="agent-access-table-wrap ui-workspace-content ui-workspace-panel--scroll">
                     <table class="agent-access-table sdk-source-table">
                         <colgroup><col><col><col><col><col><col><col><col></colgroup>
                         <thead>

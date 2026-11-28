@@ -187,7 +187,6 @@
     flex: 0 1 300px; width: 300px; max-width: 300px; min-width: 0;
 }
 #page-notes [data-kb-source-form] > input[name="url"] { flex: 1 1 400px; min-width: 0; }
-#page-notes [data-kb-source-form] > button { flex-shrink: 0; }
 #page-notes .kb-source-table { table-layout: fixed; min-width: 1360px; }
 #page-notes .kb-source-table col:nth-child(1) { width: 300px; }
 #page-notes .kb-source-table col:nth-child(3) { width: 90px; }
@@ -261,10 +260,6 @@
 #page-security-audit .audit-integrity-check:focus-visible {
     outline:2px solid var(--primary-light); outline-offset:2px;
 }
-#page-security-audit .audit-dashboard {
-    display:flex; flex:1 1 auto; flex-direction:column; gap:10px;
-    min-width:0; min-height:0;
-}
 #page-security-audit .audit-stats.page-stat-row {
     margin:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
     flex:0 0 auto;
@@ -283,8 +278,6 @@
 }
 #page-security-audit .audit-stat-card .page-stat-label { order:0; }
 #page-security-audit .audit-stat-note {  line-height:1.2; color:var(--text-muted); white-space:nowrap; }
-#page-security-audit .audit-log-filters > .combo-box { flex: 0 1 185px; min-width: 125px; max-width: 210px; }
-#page-security-audit .audit-filter-bar > .entry-field { flex: 1 1 240px; min-width: 150px; }
 #page-security-audit .audit-log-panel,
 #page-security-audit .audit-side-card {
     min-width: 0; border: 1px solid var(--audit-edge); border-radius: var(--ui-radius-card);
@@ -363,8 +356,6 @@
 #page-security-audit .audit-notes-list li::marker { color: var(--primary-light); }
 /* Historical mail uses the same dashboard/panel/toolbar components as audit logs. */
 #page-security-audit #audit-outbox-panel { min-height:0; }
-#page-security-audit .audit-mail-filters > .combo-box { flex:0 1 190px; min-width:125px; max-width:210px; }
-#page-security-audit .audit-mail-filters > .entry-field { flex:1 1 240px; min-width:150px; }
 #page-security-audit .audit-mail-filters > label {
     display:inline-flex; align-items:center; gap:6px; flex:0 0 auto;
      color:var(--text-secondary); white-space:nowrap;
@@ -423,9 +414,9 @@
 @media (max-width: 800px) {
     /* Match the desktop selector specificity so narrow screens can wrap controls. */
     #page-security-audit .audit-side-panels { grid-template-columns: minmax(0,1fr); }
-    #page-security-audit .audit-log-filters > .combo-box { flex: 1 1 140px; }
-    #page-security-audit .audit-filter-bar > .entry-field { flex-basis: 100%; }
-    #page-security-audit .audit-mail-filters > .entry-field { min-width:0; }
+
+
+
 }
 @media (max-width: 560px) {
     #page-security-audit .audit-mail-scope { display:none; }
@@ -454,11 +445,6 @@
 }
 #page-test-suites .suite-download-label small {
      color: var(--text-muted);
-}
-#page-test-suites .suite-download-field { flex: 1 1 auto; min-width: 0; }
-#page-test-suites #btn-extract-suite {
-    background: var(--lighter-bg); border: 1px solid var(--border-light);
-    color: var(--text-primary);
 }
 #page-test-suites .suite-sidebar-heading {
     display: inline-flex; align-items: center; gap: 7px;
@@ -680,21 +666,14 @@
     #page-test-suites .suite-context-actions { justify-content: flex-start; flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
-    #page-test-suites .suite-download-field { flex: 1 1 100%; }
+
     #page-test-suites .suite-file-table { --suite-table-cols: minmax(150px,1.7fr) 54px minmax(160px,1fr); }
     #page-test-suites .suite-file-table-head > :nth-child(2),
     #page-test-suites .suite-file-description { display: none; }
 }
 /* Users workspace: one record per fixed-height row, aligned with inventory and audit.
    Horizontal scrolling belongs to the table, never the whole shell. */
-#page-users .users-list-filters {flex:1 1 420px}
-#page-users #users-list-search {flex:1 1 240px;min-width:155px;max-width:420px}
-#page-users #users-list-status-filter {flex:0 0 128px;min-width:116px}
 #page-users #users-list-visible-count {color:var(--text-secondary);white-space:nowrap}
-#page-users :is(.users-table-wrap,.agent-access-table-wrap) {
-    min-width:0;overflow:auto;
-}
-#page-users .users-table-wrap {flex:1 1 auto}
 #page-users .users-table {width:100%;min-width:1320px;table-layout:fixed}
 #page-users .users-col-identity {width:155px}
 #page-users .users-col-ip {width:140px}
@@ -724,19 +703,10 @@
     display:inline-block;max-width:100%;margin:0;overflow:hidden;
     text-overflow:ellipsis;vertical-align:middle;white-space:nowrap;
 }
-#page-users .sdk-source-table {width:100%;min-width:1290px;table-layout:fixed}
-#page-users .sdk-source-table th:nth-child(1) {width:170px}
-#page-users .sdk-source-table th:nth-child(2) {width:175px}
-#page-users .sdk-source-table th:nth-child(3) {width:250px}
-#page-users .sdk-source-table th:nth-child(4) {width:165px}
-#page-users .sdk-source-table th:nth-child(5) {width:132px}
-#page-users .sdk-source-table th:nth-child(6) {width:165px}
-#page-users .sdk-source-table th:nth-child(7) {width:155px}
-#page-users .sdk-source-table th:nth-child(8) {width:90px}
 #page-users .sdk-source-table .agent-access-status-badge {
     max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
 }
 @media(max-width:680px) {
-    #page-users :is(#users-list-search, #agent-access-search) {max-width:none}
+
     #page-users .users-list-actions {width:100%;justify-content:space-between}
 }

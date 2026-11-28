@@ -71,13 +71,10 @@
 /* Standalone search, filter and action bars share the same compact frame.
    Heading bars retain the existing 28px controls. */
 .ui-workspace-toolbar.ui-workspace-toolbar--filter {
-    flex: 0 0 auto;
     min-height: calc(var(--ui-control-height) + 2 * var(--ui-spacing-xs));
     min-width: 0;
     padding: var(--ui-spacing-xs) var(--ui-spacing-sm);
-    gap: var(--ui-spacing-sm);
     flex-wrap: wrap;
-    align-items: center;
 }
 .ui-toolbar-fields, .ui-toolbar-actions {
     display: flex;
@@ -90,21 +87,38 @@
 .ui-toolbar-actions { flex: 0 0 auto; margin-inline-start: auto; flex-wrap: wrap; }
 .ui-workspace-toolbar--filter > :is(input, select, button, .ui-workspace-control),
 .ui-workspace-toolbar--filter :is(.ui-toolbar-fields, .ui-toolbar-actions) > :is(input, select, button),
-.ui-workspace-toolbar--filter :is(.ui-toolbar-fields, .ui-toolbar-grow) input,
-.ui-workspace-toolbar--filter .ui-toolbar-fields select {
+.ui-workspace-toolbar--filter :is(.ui-toolbar-fields, .ui-toolbar-grow) :is(input:not([type=checkbox]), select),
+.ui-workspace-toolbar--filter .ui-search-field > input {
     box-sizing: border-box;
     height: var(--ui-control-height);
     min-height: var(--ui-control-height);
     max-height: var(--ui-control-height);
     margin-block: 0;
 }
-.ui-workspace-toolbar--filter button { white-space: nowrap; }
+/* Field sizing variants describe layout, not the business page. */
+.ui-toolbar-fields--search { flex-basis: 420px; }
+.ui-toolbar-search--bounded { flex: 1 1 240px; min-width: 155px; max-width: 420px; }
+.ui-toolbar-select--compact { flex: 0 0 128px; min-width: 116px; }
+.ui-toolbar-select--regular { flex: 0 1 185px; min-width: 125px; max-width: 210px; }
+.ui-toolbar-search--grow { flex: 1 1 240px; min-width: 150px; }
+.ui-workspace-toolbar--filter > button,
+.ui-workspace-toolbar--filter .ui-toolbar-actions > button { flex-shrink: 0; white-space: nowrap; }
+.ui-search-field { position: relative; display: flex; align-items: center; flex: 1 1 180px; min-width: 0; }
+.ui-search-field > .ui-icon { position: absolute; left: 9px; width: 16px; height: 16px; color: var(--text-muted); pointer-events: none; }
+.ui-search-field > input { width: 100%; min-width: 0; padding-inline-start: 30px; }
+@media (max-width: 800px) {
+    .ui-toolbar-select--regular { flex: 1 1 140px; }
+    .ui-toolbar-search--grow { flex-basis: 100%; }
+}
+
 .ui-workspace-stack > .page-stat-row { flex-shrink: 0; margin: 0; }
 @media (max-width: 680px) {
     .ui-toolbar-fields { flex-basis: 100%; }
     .ui-toolbar-actions { max-width: 100%; }
     .ui-workspace-toolbar--filter > :is(input, select) { max-width: 100%; }
-    .ui-toolbar-grow { flex-basis: 100%; }
+    .ui-toolbar-grow, .ui-search-field { flex-basis: 100%; }
+    .ui-toolbar-search--bounded { max-width: none; }
+    .ui-toolbar-fields--search { flex-basis: 100%; }
 }
 
 /* Do not reserve data-row height for structurally empty placeholder rows.

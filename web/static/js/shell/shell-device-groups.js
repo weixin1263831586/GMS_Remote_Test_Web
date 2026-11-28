@@ -162,8 +162,8 @@
             const ops = isUngrouped ? '' :
                 `<span class="ui-action-group device-group-actions">
                     ${followBtn}
-                    <button class="btn-xxs" data-mgmt-edit="${group.id}">✏️ 编辑</button>
-                    <button class="btn-xxs" data-mgmt-del="${group.id}">🗑️ 删除</button>
+                    <button class="btn-xxs" data-mgmt-edit="${group.id}">编辑</button>
+                    <button class="btn-xxs" data-mgmt-del="${group.id}">删除</button>
                 </span>`;
             return `<tr class="device-group-row" style="background: var(--lighter-bg);">
                 <td colspan="12">

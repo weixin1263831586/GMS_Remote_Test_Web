@@ -44,17 +44,17 @@
                 </div>
                 <div class="inventory-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter">
                     <div class="inventory-filters ui-toolbar-fields" role="search" aria-label="筛选设备库存">
-                        <label>系统<select id="inventory-system" data-change="filterDeviceInventory"><option value="">全部系统</option></select></label>
-                        <label>连接<select id="inventory-connection" data-change="filterDeviceInventory">
+                        <label>系统<select id="inventory-system" class="combo-box" data-change="filterDeviceInventory"><option value="">全部系统</option></select></label>
+                        <label>连接<select id="inventory-connection" class="combo-box" data-change="filterDeviceInventory">
                             <option value="">全部连接</option><option value="usb">USB 直连</option><option value="network">网络 ADB</option><option value="usbip">USB/IP</option><option value="adb_proxy">ADB Proxy</option><option value="unknown">未知连接</option>
                         </select></label>
-                        <label>状态<select id="inventory-runtime" data-change="filterDeviceInventory">
+                        <label>状态<select id="inventory-runtime" class="combo-box" data-change="filterDeviceInventory">
                             <option value="">全部状态</option><option value="online">ADB 在线</option><option value="fastboot">Fastboot</option><option value="loader">Loader</option><option value="usb_only">USB / AOA</option><option value="unresponsive">ADB 无响应</option><option value="unauthorized">未授权</option><option value="offline">离线</option><option value="unknown">连接未知</option>
                         </select></label>
-                        <label>占用<select id="inventory-occupancy" data-change="filterDeviceInventory">
+                        <label>占用<select id="inventory-occupancy" class="combo-box" data-change="filterDeviceInventory">
                             <option value="">全部占用</option><option value="free">未占用</option><option value="occupied">已占用</option><option value="reserved">已预留</option><option value="external">外部占用</option>
                         </select></label>
-                        <label class="inventory-search"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg><input id="inventory-search" type="search" aria-label="搜索设备库存" placeholder="搜索名称 / SN / IP / 主机 / 分组" data-input="filterDeviceInventory"></label>
+                        <label class="inventory-search ui-search-field"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg><input id="inventory-search" class="combo-box" type="search" aria-label="搜索设备库存" placeholder="搜索名称 / SN / IP / 主机 / 分组" data-input="filterDeviceInventory"></label>
                     </div>
                     <div class="inventory-selection-bar ui-toolbar-actions">
                         <span class="inventory-selection-count">已选择 <strong id="inventory-selected-count">0</strong> 台</span>

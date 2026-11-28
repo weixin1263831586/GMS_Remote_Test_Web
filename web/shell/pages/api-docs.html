@@ -9,8 +9,8 @@
       <div class="page-stat-card workbench-stat api-stat api-stat-skill"><span class="workbench-stat-icon"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg></span><span class="workbench-stat-copy"><span class="page-stat-label">Skill 总数</span><strong id="skills-count" class="page-stat-value">-</strong><span class="api-stat-hint">已关联的独立 Skill</span></span></div>
     </div>
     <div class="api-search-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter" role="search" aria-label="查找系统接口">
-      <label class="api-search-box" for="api-search-input"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg>
-        <input id="api-search-input" class="entry-field" type="search" placeholder="搜索 API 路径、接口说明或 Skill..." data-input="debounceFilterApiDocs" aria-label="搜索系统接口">
+      <label class="api-search-box ui-search-field" for="api-search-input"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg>
+        <input id="api-search-input" class="combo-box" type="search" placeholder="搜索 API 路径、接口说明或 Skill..." data-input="debounceFilterApiDocs" aria-label="搜索系统接口">
       </label>
       <button class="btn-xs api-action" type="button" data-click="loadApiDocs" data-a0="true" data-busy-size="short">刷新</button>
       <button class="btn-xs api-action" type="button" data-click="exportApiDocsCsv" data-busy-size="short">导出</button>
