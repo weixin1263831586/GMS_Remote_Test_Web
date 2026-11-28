@@ -39,7 +39,7 @@
                     </div>
                     <div class="users-list-actions">
                         <span id="users-list-visible-count" role="status" aria-live="polite">正在加载用户…</span>
-                        <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList">刷新</button>
+                        <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList" data-busy-size="short">刷新</button>
                     </div>
                 </div>
                 <div class="users-table-wrap">
@@ -100,7 +100,7 @@
                                 <option value="inactive">已失效</option><option value="expired">已过期</option>
                                 <option value="revoked">已吊销</option>
                             </select>
-                            <button id="agent-access-refresh" data-busy-size="plain" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">刷新</button>
+                            <button id="agent-access-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
@@ -132,7 +132,7 @@
                         </div>
                         <div class="agent-access-list-actions">
                             <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">添加SDK</button>
-                            <button id="agent-sdk-sources-refresh" data-busy-size="plain" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el">刷新</button>
+                            <button id="agent-sdk-sources-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el">刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">

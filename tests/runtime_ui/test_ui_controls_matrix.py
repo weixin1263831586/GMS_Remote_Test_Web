@@ -215,3 +215,48 @@ class UiControlsMatrixTests(RuntimeUiHarness):
             target = Path(directory)
             target.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(target / f"button-{name}-1792.png"))
+
+
+    def test_action_width_reserves_longest_label_in_all_states(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            for route in (None, "/redmine-agent", "/gerrit-dashboard", "/cluster"):
+                if route:
+                    page.goto(self.base_url + route, wait_until="domcontentloaded")
+                result = page.evaluate("""() => {
+                    const host = document.createElement('div');
+                    host.style.cssText = 'position:fixed;left:8px;top:8px;display:flex;gap:6px';
+                    document.body.append(host);
+                    const records = [];
+                    for (const [size, idle, busy, done, width] of [
+                        ['short', '刷新', '刷新中', '已刷新', 64],
+                        ['short', '重置', '重置中', '已重置', 64],
+                        ['plain', '下载套件', '下载中', '下载完成', 76],
+                        ['long', '确认并发送', '发送中', '发送成功', 92]
+                    ]) {
+                        const button = document.createElement('button');
+                        button.className = 'btn-xs secondary';
+                        button.dataset.busySize = size;
+                        host.append(button);
+                        const states = [];
+                        for (const label of [idle, busy, done, idle]) {
+                            button.textContent = label;
+                            button.disabled = label === busy;
+                            const rect = button.getBoundingClientRect();
+                            states.push({width:rect.width,height:rect.height,
+                                fits:button.scrollWidth <= button.clientWidth + 1});
+                        }
+                        records.push({expected:width, states});
+                    }
+                    host.remove();
+                    return records;
+                }""")
+                for item in result:
+                    with self.subTest(route=route, width=item["expected"]):
+                        for state in item["states"]:
+                            self.assertAlmostEqual(state["width"], item["expected"], delta=1)
+                            self.assertAlmostEqual(state["height"], item["states"][0]["height"], delta=1)
+                            self.assertTrue(state["fits"], item)
+        finally:
+            page.close()

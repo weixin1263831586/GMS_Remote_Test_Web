@@ -49,8 +49,8 @@
                         <option value="page_visit">入口访问</option>
                     </select>
                     <input id="audit-search-input" class="entry-field" type="search" aria-label="搜索审计日志" placeholder="搜索用户 / IP / 接口 / 页面" data-keydown="loadSecurityAudit" data-key="Enter" data-a0="true" />
-                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadSecurityAudit" data-a0="true">刷新</button>
-                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" type="button" data-click="exportSecurityAudit">导出</button>
+                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadSecurityAudit" data-a0="true" data-busy-size="short">刷新</button>
+                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" type="button" data-click="exportSecurityAudit" data-busy-size="short">导出</button>
                 </div>
 
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
@@ -153,8 +153,8 @@
                         <input type="checkbox" id="email-outbox-all-users" data-change="loadAuditOutbox" data-a0="true" />
                         全部用户
                     </label>
-                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadAuditOutbox" data-a0="true">刷新</button>
-                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" id="audit-mail-export-button" type="button" data-click="exportAuditOutbox">导出</button>
+                    <button class="btn-xs audit-toolbar-button" type="button" data-click="loadAuditOutbox" data-a0="true" data-busy-size="short">刷新</button>
+                    <button class="btn-xs audit-toolbar-button audit-toolbar-export" id="audit-mail-export-button" type="button" data-click="exportAuditOutbox" data-busy-size="short">导出</button>
                 </div>
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
                     <section class="audit-log-panel audit-mail-panel" aria-label="历史邮件台账">
@@ -250,7 +250,7 @@
                         <option value="低">低关注</option>
                     </select>
                     <input id="audit-disk-search" class="entry-field" type="search" aria-label="搜索产物和目录" placeholder="搜索产物名称 / 目录 / 策略" data-input="filterDiskArtifactsByControls" />
-                    <button id="audit-disk-refresh-btn" data-busy-size="plain" class="btn-xs audit-toolbar-button" type="button" data-click="loadDiskArtifactAudit" data-a0="true" aria-busy="false">刷新</button>
+                    <button id="audit-disk-refresh-btn" data-busy-size="short" class="btn-xs audit-toolbar-button" type="button" data-click="loadDiskArtifactAudit" data-a0="true" aria-busy="false">刷新</button>
                 </div>
                 <div class="audit-content-grid ui-workspace-grid ui-workspace-grid--aside">
                     <section class="audit-log-panel audit-disk-table-panel" aria-label="运行产物分类扫描结果">
