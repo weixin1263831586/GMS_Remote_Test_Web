@@ -655,3 +655,108 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             self.assertEqual(geometry["action"], "right", geometry)
         finally:
             page.close()
+
+    def test_policy_evidence_does_not_create_blank_dom_rows(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""() => {
+                const row = values => ({table_index: 0, headers: ['版本', '要求'], values});
+                const render = values => renderGmsPolicyEvidence({
+                    sections: [{title: '测试证据', table_rows: values.map(row)}],
+                });
+                const host = document.createElement('div');
+                document.body.append(host);
+                try {
+                    const counts = [];
+                    for (const values of [
+                        [[], [' ', null], ['16', '3 GB'], ['17', ''], [0, false]],
+                        [[], [' ', null]],
+                        [['16', '3 GB']],
+                    ]) {
+                        host.replaceChildren(render(values));
+                        counts.push({tables: host.querySelectorAll('table').length,
+                            rows: [...host.querySelectorAll('tbody tr')].map(tr =>
+                                [...tr.cells].map(td => td.textContent))});
+                    }
+                    return counts;
+                } finally { host.remove(); }
+            }""")
+            self.assertEqual(result, [
+                {"tables": 1, "rows": [["16", "3 GB"], ["17", ""], ["0", "false"]]},
+                {"tables": 0, "rows": []},
+                {"tables": 1, "rows": [["16", "3 GB"]]},
+            ])
+        finally:
+            page.close()
+
+    def test_visible_workspace_table_geometry_inventory(self):
+        """Record actual tables, including same-origin embedded workspaces."""
+        page = self.new_page()
+        evidence = {}
+        failures = []
+        measure = """() => [...document.querySelectorAll('table')].flatMap((table, i) => {
+            const rect = el => el.getBoundingClientRect();
+            const visible = el => rect(el).width > 0 && rect(el).height > 0
+                && getComputedStyle(el).visibility !== 'hidden';
+            if (!visible(table) || !table.tHead ||
+                table.closest('.md-table,.info-table,.input-table,.analysis-doc,.markdown-body,.aoa-command-table')) return [];
+            const header = [...table.tHead.rows];
+            const rows = [...table.tBodies].flatMap(body => [...body.rows]);
+            const ordinary = header.length === 1 && [...header[0].cells].every(c => c.colSpan === 1 && c.rowSpan === 1);
+            const cells = ordinary ? [...header[0].cells] : [];
+            const blank = rows.filter(row => !row.matches('.group-row,[contenteditable],[aria-busy=true]')
+                && !row.closest('[contenteditable=true]')
+                && !row.textContent.trim()
+                && !row.querySelector('input,select,textarea,button,svg,img,canvas,[role],a,.cluster-skeleton-line,[title],[aria-label],[contenteditable]'));
+            const comparable = ordinary ? rows.filter(row => visible(row)
+                && row.cells.length === cells.length
+                && [...row.cells].every(c => c.colSpan === 1 && c.rowSpan === 1)) : [];
+            const delta = comparable.flatMap(row => [...row.cells].map((cell, j) =>
+                Math.max(Math.abs(rect(cell).left - rect(cells[j]).left),
+                    Math.abs(rect(cell).right - rect(cells[j]).right))));
+            return [{name: table.id || table.className || 'table-' + i,
+                columns: cells.map(c => ({label:c.textContent.trim(),align:getComputedStyle(c).textAlign,
+                    x:rect(c).left,width:rect(c).width})),
+                rows: rows.length, blankDom: blank.length, blankVisible: blank.filter(visible).length,
+                compared: comparable.length, maxColumnDelta: Math.max(0,...delta)}];
+        })"""
+        try:
+            self.goto_shell(page)
+            names = self.visible_sidebar_pages(page)
+            for width in (1440, 1920):
+                page.set_viewport_size({"width": width, "height": 960})
+                for name in names:
+                    page.evaluate("(name) => switchPage(name, null)", name)
+                    page.wait_for_function(
+                        "(name) => document.getElementById('page-' + name)?.classList.contains('active')",
+                        arg=name,
+                    )
+                    page.wait_for_timeout(200)
+                    key = f"{name}-{width}"
+                    tables = page.evaluate(measure)
+                    for frame in page.frames:
+                        if frame == page.main_frame:
+                            continue
+                        owner = frame.frame_element()
+                        if owner.is_visible() and frame.url.startswith(self.base_url):
+                            tables.extend(frame.evaluate(measure))
+                    evidence[key] = tables
+                    for table in tables:
+                        if table["blankVisible"] or table["maxColumnDelta"] > 2:
+                            failures.append(f"{key}: {table}")
+                    target = os.getenv("GMS_UI_PREVIEW_DIR")
+                    if target and tables:
+                        directory = Path(target)
+                        directory.mkdir(parents=True, exist_ok=True)
+                        page.screenshot(path=str(directory / f"table-inventory-{key}.png"))
+            self.assertTrue(any(evidence.values()), "No rendered tables recorded")
+            self.assertEqual(failures, [], "\n".join(failures))
+        finally:
+            target = os.getenv("GMS_UI_PREVIEW_DIR")
+            if target:
+                directory = Path(target)
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / "table-inventory.json").write_text(
+                    json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+            page.close()
