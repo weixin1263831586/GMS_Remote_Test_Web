@@ -564,6 +564,7 @@ class UiSizingContractTests(unittest.TestCase):
         role_sources = {}
         styles = []
         inline_buttons = []
+        inline_geometry = []
         for path in paths:
             source = (ROOT / path).read_text(encoding="utf-8")
             name = path.as_posix()
@@ -581,11 +582,33 @@ class UiSizingContractTests(unittest.TestCase):
                 for match in re.finditer(r"""<button\b[^>]*\bstyle\s*=\s*(["'])(.*?)\1""", source, re.I | re.S):
                     if re.search(r"(?:padding|border-radius|height|background|margin|font-size)\s*:", match[2]):
                         inline_buttons.append({"file": name, "line": source.count("\n", 0, match.start()) + 1})
+                for match in re.finditer(
+                    r"""<(?:button|input|select|textarea|div|span|pre|table)\b[^>]*\bstyle\s*=\s*(["'])(.*?)\1""",
+                    source, re.I | re.S,
+                ):
+                    if re.search(
+                        r"(?:^|;)\s*(?:font(?:-size|-family|-weight)?|(?:min-|max-)?(?:width|height)|padding(?:-[\w-]+)?|border-radius)\s*:",
+                        match[2],
+                    ):
+                        inline_geometry.append({
+                            "file": name, "line": source.count("\n", 0, match.start()) + 1,
+                            "style": match[2][:240], "kind": "inline",
+                        })
+                for match in re.finditer(
+                    r"\.style\.(?:fontSize|fontFamily|fontWeight|minWidth|maxWidth|minHeight|maxHeight|height|width|padding|borderRadius)\s*=",
+                    source,
+                ):
+                    inline_geometry.append({
+                        "file": name, "line": source.count("\n", 0, match.start()) + 1,
+                        "style": match[0], "kind": "dynamic",
+                    })
                 for css in re.findall(r"<style\b[^>]*>(.*?)</style\s*>", source, re.I | re.S):
                     styles.append((name, css))
         unreferenced = []
         dynamic = []
         repeated = []
+        property_candidates = []
+        property_owners = {}
         for name, css in styles:
             seen = set()
             for scope, selector, body, line in _css_leaf_rules(css):
@@ -594,6 +617,25 @@ class UiSizingContractTests(unittest.TestCase):
                 if key in seen:
                     repeated.append(item)
                 seen.add(key)
+                # Same-selector property declarations may be shadowed even when the
+                # full rule bodies differ. Different roots and cascade order need review.
+                for prop, value in re.findall(
+                    r"(?:^|;)\s*([-\w]+)\s*:\s*([^;]+)", body,
+                ):
+                    if not re.fullmatch(
+                        r"font(?:-size|-weight|-family)?|(?:min-|max-)?(?:width|height)|padding(?:-[\w-]+)?|border(?:-radius)?|background(?:-color)?|gap|line-height",
+                        prop,
+                    ):
+                        continue
+                    owner_key = (scope, selector, prop)
+                    current = {**item, "property": prop, "value": value.strip()}
+                    previous = property_owners.get(owner_key)
+                    if previous is not None:
+                        property_candidates.append({
+                            "previous": previous, "current": current,
+                            "same_value": previous["value"] == current["value"],
+                        })
+                    property_owners[owner_key] = current
                 if re.fullmatch(r"[.#][A-Za-z_][\w-]*", selector) and selector[1:] not in source_tokens:
                     if any(selector[1:].startswith(prefix) for prefix in dynamic_prefixes):
                         dynamic.append(item)
@@ -603,6 +645,8 @@ class UiSizingContractTests(unittest.TestCase):
                     "unreferenced_candidates": unreferenced,
                     "dynamic_reference_candidates": dynamic,
                     "repeated_rule_candidates": repeated, "inline_button_candidates": inline_buttons,
+                    "repeated_property_candidates": property_candidates,
+                    "inline_geometry_candidates": inline_geometry,
                     "public_component_sources": {role: sorted(files) for role, files in sorted(role_sources.items())}}
         output = os.getenv("GMS_UI_PREVIEW_DIR")
         if output:

@@ -262,6 +262,39 @@ class UiControlsMatrixTests(RuntimeUiHarness):
             page.close()
 
 
+    def test_dashboard_compound_controls_and_trend_surface_share_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1440, "height": 900})
+            for route in ("/redmine-agent", "/gerrit-dashboard"):
+                page.goto(self.base_url + route, wait_until="domcontentloaded")
+                result = page.evaluate("""() => {
+                    const host = document.createElement('div');
+                    host.innerHTML = '<div class="trend-panel"><h3>趋势</h3></div>' +
+                        '<div class="select-with-add"><select><option>部门</option></select>' +
+                        '<button class="select-add-btn">＋</button></div>';
+                    document.body.append(host);
+                    const panel = getComputedStyle(host.querySelector('.trend-panel'));
+                    const button = getComputedStyle(host.querySelector('.select-add-btn'));
+                    const result = {
+                        panelPadding: panel.paddingTop, panelMinHeight: panel.minHeight,
+                        panelRadius: panel.borderRadius, buttonHeight: button.height,
+                        buttonFont: button.fontSize, buttonPosition: button.position
+                    };
+                    host.remove();
+                    return result;
+                }""")
+                with self.subTest(route=route):
+                    self.assertEqual(result["panelPadding"], "12px", result)
+                    self.assertEqual(result["panelMinHeight"], "180px", result)
+                    self.assertEqual(result["panelRadius"], "8px", result)
+                    self.assertEqual(result["buttonHeight"], "24px", result)
+                    self.assertEqual(result["buttonFont"], "14px", result)
+                    self.assertEqual(result["buttonPosition"], "absolute", result)
+        finally:
+            page.close()
+
     def test_shared_filter_toolbars_use_one_desktop_row(self):
         page = self.new_page()
         samples = {}
