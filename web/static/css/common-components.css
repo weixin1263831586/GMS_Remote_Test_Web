@@ -914,7 +914,7 @@ select option {
     padding: 10px 12px;
     background: var(--bg-color, var(--light-bg));
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     box-shadow: 0 8px 24px rgba(0,0,0,0.32);
 }
 
@@ -1281,7 +1281,7 @@ select option {
     max-height: calc(100vh - 24px);
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     box-shadow: var(--shadow-lg);
     z-index: 10020;
     display: none;

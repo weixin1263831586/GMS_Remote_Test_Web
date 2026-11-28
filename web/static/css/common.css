@@ -69,7 +69,7 @@ body {
     width: min(380px, 100%);
     background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     padding: 20px;
     box-shadow: var(--shadow-lg);
 }
@@ -509,7 +509,7 @@ body {
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: var(--light-bg);
     /* 尺寸容器：骨架屏用 cqh 以本盒高度为基准，与 iframe 内
        .loading-orbit--stage 的 vh 基准（iframe 视口 == 本盒）完全一致，
@@ -660,7 +660,7 @@ body {
     bottom: var(--page-body-frame-inset);
     left: var(--page-body-frame-inset);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     box-shadow: var(--shadow-sm);
     pointer-events: none;
 }

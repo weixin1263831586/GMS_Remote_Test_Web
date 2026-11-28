@@ -73,13 +73,13 @@
 .agent-access-input-suffix b {  color: var(--text-secondary); }
 .agent-access-days-field input { max-width: 120px; }
 
-.agent-access-scope-fieldset { min-width: 0; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--border-color); border-radius: 8px; }
+.agent-access-scope-fieldset { min-width: 0; margin: 20px 0 12px; padding: 14px; border: 1px solid var(--border-color); border-radius: var(--ui-radius-card); }
 .agent-access-scope-fieldset > legend { padding: 0 6px;   }
 
 .agent-access-details > summary { width: fit-content; padding: 10px 0; color: var(--primary-light); cursor: pointer;  }
 .agent-access-details > summary span { margin-left: 8px; color: var(--text-secondary);  }
 .agent-access-details[open] > summary { margin-bottom: 5px; }
-.agent-access-target-details { padding: 0 14px; border: 1px solid var(--border-color); border-radius: 8px; }
+.agent-access-target-details { padding: 0 14px; border: 1px solid var(--border-color); border-radius: var(--ui-radius-card); }
 .agent-access-target-details > summary { width: auto; }
 .agent-access-target-details .agent-access-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-bottom: 14px; }
 .agent-access-scope-heading { justify-content: flex-end; padding: 0 0 12px; }

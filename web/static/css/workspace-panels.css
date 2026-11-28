@@ -8,7 +8,7 @@
 .agent-session-search .entry-field { width: 100%; min-width: 0; }
 #agent-session-list { display: flex; flex-direction: column; gap: 6px; padding: var(--ui-spacing-sm); }
 .agent-session-empty { margin: auto; }
-.agent-session-item { display: flex; align-items: stretch; flex: none; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); overflow: hidden; }
+.agent-session-item { display: flex; align-items: stretch; flex: none; border: 1px solid var(--border-color); border-radius: var(--ui-radius-card); background: var(--card-bg); overflow: hidden; }
 .agent-session-item.active { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color)); background: color-mix(in srgb, var(--primary-color) 8%, var(--card-bg)); }
 .agent-session-item.live .agent-session-status { color: var(--success-color); }
 .agent-session-main { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 7px 10px; border: 0; background: transparent; color: inherit;  text-align: left; cursor: pointer; }

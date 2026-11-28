@@ -360,7 +360,7 @@
 .ping-testing {
     padding: 16px;
     background: var(--light-bg);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     text-align: center;
     color: var(--info-color);
 }
@@ -368,7 +368,7 @@
     padding: 16px;
     background: color-mix(in srgb, var(--success-color) 10%, transparent);
     border: 1px solid var(--success-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
 }
 .ping-success h4 {
     color: var(--success-color);
@@ -385,7 +385,7 @@
     padding: 16px;
     background: color-mix(in srgb, var(--danger-color) 10%, transparent);
     border: 1px solid var(--danger-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
 }
 .ping-failure h4 {
     color: var(--danger-color);
@@ -430,7 +430,7 @@
     padding: 16px;
     background: rgba(251, 191, 36, 0.15);
     border: 2px solid var(--warning-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
 }
 .route-warning p {
     margin: 8px 0;
@@ -486,7 +486,7 @@
     padding: 16px;
     background: color-mix(in srgb, var(--danger-color) 10%, transparent);
     border: 1px solid var(--danger-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     color: var(--danger-color);
 
     text-align: center;
@@ -983,7 +983,7 @@
 .dx-hero {
     padding: 14px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: linear-gradient(135deg, color-mix(in srgb, var(--primary-color) 12%, transparent), color-mix(in srgb, var(--info-color) 8%, transparent));
     display: grid;
     gap: 12px;
@@ -1088,7 +1088,7 @@
 .dx-exempt-item {
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     padding: 8px 10px;
 }
 .dx-exempt-item-head {
@@ -1251,7 +1251,7 @@
     min-width: 0;
     padding: 14px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: var(--darker-bg);
 }
 
@@ -1472,7 +1472,7 @@
 .dx-error {
     padding: 16px;
     border: 1px solid color-mix(in srgb, var(--danger-color) 35%, transparent);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: color-mix(in srgb, var(--danger-color) 10%, transparent);
     color: var(--danger-color);
     text-align: left;
@@ -1491,7 +1491,7 @@
     min-height: 54px;
     padding: 12px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: var(--darker-bg);
     color: var(--text-secondary);
 

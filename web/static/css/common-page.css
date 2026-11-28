@@ -266,7 +266,7 @@ body.apk-resizing {
     min-height: 0;
     overflow-y: auto;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     padding: 8px;
     background: var(--darker-bg);
 }
@@ -392,7 +392,7 @@ body.apk-resizing {
     max-width: min(820px, 88%);
     min-width: 180px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     overflow: hidden;
     box-shadow: var(--shadow-sm);
 }
@@ -577,7 +577,7 @@ body.apk-resizing {
     padding: 7px 12px;
     opacity: 0.82;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: var(--darker-bg);
 }
 

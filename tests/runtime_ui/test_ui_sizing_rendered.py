@@ -310,7 +310,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             self.assertEqual(len(geometry["cards"]), 6)
             for card in geometry["cards"]:
                 self.assertAlmostEqual(card["height"], 70, delta=1, msg=str(geometry))
-                self.assertEqual(card["radius"], 8)
+                self.assertEqual(card["radius"], 6)
         finally:
             page.close()
 
@@ -466,7 +466,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                                 card_height, 95, delta=1, msg=str(geometry),
                             )
                         for radius in geometry['cardRadii']:
-                            self.assertAlmostEqual(radius, 8, delta=1, msg=str(geometry))
+                            self.assertAlmostEqual(radius, 6, delta=1, msg=str(geometry))
                         for icon in geometry['icons']:
                             size = 42 if width > 1200 else 34
                             self.assertAlmostEqual(icon['width'], size, delta=1, msg=str(geometry))
@@ -754,7 +754,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 return value;
             }""")
             self.assertTrue(result["shared"], result)
-            self.assertEqual(result["radius"], "8px", result)
+            self.assertEqual(result["radius"], "6px", result)
             self.assertEqual(result["border"], "2px", result)
             self.assertTrue(result["actions"], result)
             self.assertFalse(any(item["inline"] for item in result["actions"]), result)

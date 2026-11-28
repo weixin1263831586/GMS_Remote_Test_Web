@@ -215,11 +215,11 @@
 #page-tools.page-ui-rework .tools-container {
     /* The full-size page already has a single frame; do not double-frame it. */
     border: 0 !important;
-    border-radius: 8px; background: var(--card-bg); box-shadow: none;
+    border-radius: var(--ui-radius-card); background: var(--card-bg); box-shadow: none;
 }
 .page-ui-rework .embedded-frame-shell {
     min-width: 0; min-height: 0;
-    background: var(--card-bg); border-radius: 8px; overflow: hidden;
+    background: var(--card-bg); border-radius: var(--ui-radius-card); overflow: hidden;
 }
 .page-ui-rework .embedded-frame-loading { background: var(--card-bg); color: var(--text-secondary); }
 /* 宽度回退：不要缩小表格到丢失操作列，使用局部横向滚动。 */
