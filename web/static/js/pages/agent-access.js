@@ -462,7 +462,7 @@ function agentAccessRenderTokens(tokens) {
             <tr>
                 <td class="agent-token-cell-name" title="${agentAccessEscape(token.name || '')}"><strong>${agentAccessEscape(token.name || '未命名 Agent')}</strong></td>
                 <td title="${agentAccessEscape(token.id || '')}"><code class="agent-token-id">${agentAccessEscape(token.id || '—')}</code></td>
-                <td><span class="agent-token-status ${status}">${statusLabels[status]}</span></td>
+                <td><span class="agent-token-status ui-status ${status === 'expired' ? 'is-warning' : status === 'revoked' ? '' : 'is-success'} ${status}">${statusLabels[status]}</span></td>
                 <td title="${agentAccessEscape(scopesText)}"><button class="agent-token-scope-link" type="button" data-click="agentAccessShowScopes" data-a0="${agentAccessEscape(token.id)}">${scopes.length} 项权限</button></td>
                 <td title="${agentAccessEscape(groupLabels.join(' · ') || '未授权')}">${agentAccessEscape(groupLabels.join(' · ') || '未授权')}</td>
                 <td title="${agentAccessEscape(workers)}">${agentAccessEscape(workers)}</td>
