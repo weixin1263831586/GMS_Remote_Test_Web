@@ -835,7 +835,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             return [{name: table.id || table.className || 'table-' + i,
                 headerTheme: header.flatMap(row => [...row.cells]).filter(visible).every(c => {
                     const css = getComputedStyle(c);
-                    return css.backgroundColor === 'rgb(48, 43, 61)' && css.color === 'rgb(255, 255, 255)' && css.backgroundImage === 'none';
+                    return css.backgroundColor === 'rgb(43, 38, 55)' && css.color === 'rgb(255, 255, 255)' && css.backgroundImage === 'none';
                 }),
                 columns: cells.map(c => ({label:c.textContent.trim(),align:getComputedStyle(c).textAlign,
                     x:rect(c).left,width:rect(c).width})),

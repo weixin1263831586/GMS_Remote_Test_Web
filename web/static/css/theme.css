@@ -7,7 +7,7 @@
     --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     --primary-gradient-hover: linear-gradient(135deg, #7b8ef2 0%, #8a5cb8 100%);
     --text-on-accent: #fff;
-    --ui-table-header-bg: #302b3d;
+    --ui-table-header-bg: #2b2637;
     --ui-table-header-text: var(--text-on-accent);
 
     --success-color: #39c994;
