@@ -273,7 +273,9 @@ class TypographyContractTests(unittest.TestCase):
         spaces = (STYLE.parent / "typography/shell-workspaces.css").read_text(encoding="utf-8")
         diagrams = (STYLE.parent / "typography/shared-diagrams.css").read_text(encoding="utf-8")
         exceptions = (STYLE.parent / "typography/inline-and-exceptions.css").read_text(encoding="utf-8")
-        self.assertIn('.category-tab { font-size: var(--ui-type-size-small);', shell)
+        self.assertNotIn('.category-tab {', shell)
+        self.assertIn('.tools-category-count { font-size: var(--ui-type-size-compact);', shell)
+        self.assertIn('.tool-actions button { font-size: var(--ui-type-size-small);', shell)
         self.assertNotRegex(shell, r"@media[^\n]*\.category-tab\s*\{")
         for role in (".file-browser-error-host", ".file-browser-error-help", ".history-mail-count"):
             self.assertIn(role, shell)

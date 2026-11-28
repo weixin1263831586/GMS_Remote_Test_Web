@@ -4,6 +4,8 @@ on:
   push:
     branches: [main, 'audit/**', 'ui/**']
     paths:
+      - 'web/static/css/typography.css'
+      - 'web/static/css/typography/**'
       - 'web/static/css/ui-sizing.css'
       - 'web/static/css/ui-foundations.css'
       - 'web/static/css/form-controls.css'
@@ -64,6 +66,7 @@ on:
       - 'tests/runtime_ui/test_header_action_alignment.py'
       - 'tests/architecture/test_shared_page_edge.py'
       - 'tests/runtime_ui/test_ui_controls_matrix.py'
+      - 'tests/runtime_ui/test_ui_foundations.py'
       - 'tests/architecture/test_ui_icon_semantics.py'
       - 'tests/runtime_ui/test_workspace_tabs.py'
       - 'tests/runtime_ui/test_terminal.py'
@@ -150,6 +153,7 @@ jobs:
             tests/runtime_ui/test_desktop_workspace_visual.py \
             tests/runtime_ui/test_terminal_workspace_visual.py \
             tests/runtime_ui/test_ui_controls_matrix.py \
+            tests/runtime_ui/test_ui_foundations.py::RuntimeUiFoundationsTests::test_suite_refresh_and_test_toggle_have_requested_icons_and_bounds \
             tests/runtime_ui/test_workspace_tabs.py \
             tests/runtime_ui/test_terminal.py::RuntimeTerminalTests::test_devices_console_tabs_keep_multiple_console_sessions \
             tests/runtime_ui/test_automation_history.py::RuntimeAutomationHistoryTests::test_history_controls_use_common_panel_and_pagination_roles \

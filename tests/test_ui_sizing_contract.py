@@ -588,12 +588,29 @@ class UiSizingContractTests(unittest.TestCase):
             for role in roles:
                 self.assertNotRegex(source, rf"\.{re.escape(role)}(?![\w-])", (name, role))
 
+    def test_converged_workspace_roles_have_one_owner(self):
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        controls = (CSS / "form-controls.css").read_text(encoding="utf-8")
+        self.assertIn(".ui-segmented", foundation)
+        self.assertIn(".ui-standalone-controls", controls)
+        for page in ("users.html", "security-audit.html", "desktop.html", "terminal.html"):
+            self.assertIn("ui-segmented", (ROOT / "web/shell/pages" / page).read_text(encoding="utf-8"))
+        apk = (ROOT / "web/shell/pages/apk-analysis.html").read_text(encoding="utf-8")
+        self.assertIn("workspace-header--content", apk)
+        self.assertEqual(len(re.findall(r'class="filter-btn workspace-tab(?: active)?"', apk)), 3)
+        agent = (ROOT / "web/static/js/pages/conversational-agent.js").read_text(encoding="utf-8")
+        self.assertIn("agent-step-card ui-card", agent)
+        self.assertNotIn("#aoa-panel", (CSS / "workspace-panels.css").read_text(encoding="utf-8"))
+        self.assertNotRegex((CSS / "common-page.css").read_text(encoding="utf-8"), r"\.filter-btn\[data-apk-tab\]\s*\{")
+        for path in ("features/automation/ui/page.html", "features/cluster/ui/page.html",
+                     "features/devices/ui/page.html", "features/gms/radar/ui/page.html"):
+            self.assertIn("ui-standalone-controls", (ROOT / path).read_text(encoding="utf-8"), path)
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
-            "common.css": ("--ui-control-height-small", "--ui-stat-height"),
+            "common.css": ("--ui-control-height-small",),
             "common-components.css": ("--ui-control-height-dense", "--ui-control-height-large"),
             "ui-foundations.css": ("--ui-stat-height", "--ui-control-height-dense"),
-            "device-inventory.css": ("--ui-control-height",),
             "form-controls.css": ("--ui-control-height", "--ui-control-height-dense"),
             "analysis-workbench-tokens.css": ("--ui-radius-card",),
             "modal-tech-dialogs.css": ("--ui-modal-actions-min-height",),

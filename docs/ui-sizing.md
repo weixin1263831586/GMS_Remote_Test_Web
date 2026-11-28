@@ -96,3 +96,5 @@ Runner 的页面清单测试输出 `table-inventory.json`、`component-inventory
 CSS 引用扫描生成 `css-reference-inventory.json`，包含孤立字面选择器候选、同文本重复规则候选和内联按钮样式候选。该清单不等于死代码结论：动态类名、媒体查询、主题及状态依赖必须结合运行时证据复核。
 
 CSS 引用审核同时记录媒体查询/容器查询上下文与动态类名前缀，不将动画关键帧、不同断点或 `log-${type}` 等生成类当作可直接删除的重复定义。扫描报告附带公共组件的源码引用文件；运行时 `component-role-coverage.json` 记录每个实际页面及分辨率采样到的公共角色。未激活的 Tab、未打开的弹框与无数据状态之外的动态内容仍须通过相应专项用例验证。
+
+普通独立工作区使用 `ui-standalone-controls` 与 Shell 字段共用基础表单外观；紧凑工具栏和 AOA 专用控件继续使用对应尺寸角色。`ui-segmented` 用于标题级视图切换，`workspace-header--content` 用于内容区 Tab（APK Manifest 长标签允许较宽，常规工作区 Tab 保持 110px）。状态字体由 typography 共享语义规则管理，业务颜色仍由各模块提供。测试启停按钮固定宽度 90px，开始、启动中、停止及停止中保持等宽。
