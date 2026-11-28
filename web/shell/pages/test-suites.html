@@ -16,11 +16,11 @@
                         <div class="suite-download-field">
                             <input type="text" id="suite-download-url" class="combo-box ui-workspace-control" placeholder="测试套件下载地址，如：https://dl.google.com/android/cts/android-cts-14_r1-linux_x86-arm.zip" />
                         </div>
-                        <button id="btn-download-suite" class="btn-primary ui-workspace-control" data-click="downloadTestSuite">
+                        <button id="btn-download-suite" data-busy-size="long" class="btn-primary ui-workspace-control" data-click="downloadTestSuite">
                             下载套件
                         </button>
-                        <button id="btn-extract-suite" class="btn-primary ui-workspace-control" data-click="extractTestSuite">
-                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 解压套件
+                        <button id="btn-extract-suite" data-busy-size="long" class="btn-primary ui-workspace-control" data-click="extractTestSuite">
+                            解压套件
                         </button>
                     </div>
                     <!-- 下载进度 -->

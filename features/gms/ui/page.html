@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GMS 更新中心</title>
   <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261126-table-geometry">
+  <link rel="stylesheet" href="/static/css/data-table-page.css?v=20261128-button-contract">
   <link rel="stylesheet" href="/static/css/modal.css">
   <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-compact-fields">
   <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-compact-fields">
@@ -78,7 +78,6 @@
     #critical-legacy-toggle { flex: 0 0 auto; white-space: nowrap; background: var(--light-bg); color: var(--text-secondary); border: 1px solid var(--border-color); }
     #critical-legacy-toggle[aria-pressed="true"] { color: var(--primary-light); border-color: var(--primary-color); }
     #critical-legacy-toggle:disabled { opacity: .55; cursor: default; }
-    button.secondary { background:var(--lighter-bg); }
     button:disabled { opacity:.55; cursor:not-allowed; }
     .toast { position:fixed; left:50%; bottom:46px; transform:translateX(-50%); max-width:min(720px, calc(100vw - 32px)); background:var(--lighter-bg); color:#fff; border:1px solid var(--border); border-radius:6px; padding:9px 12px; box-shadow:0 8px 24px rgba(0,0,0,.35);  z-index:9999; display:none; }
     .toast.error { background:#3b1118; border-color:#7f1d1d; }
@@ -135,7 +134,7 @@
         <button type="button" class="critical-filter" id="critical_version" aria-label="Android版本" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部版本</button>
         <button type="button" class="critical-filter" id="critical_kind" aria-label="补丁类型" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none">全部类型</button>
         <button type="button" class="critical-filter" id="gerrit_status" aria-label="Gerrit合入状态" aria-expanded="false" aria-controls="critical-filter-panel" style="display:none" disabled>全部状态</button>
-        <button id="gerrit-refresh" style="display:none" data-click="refreshCriticalGerrit">重新核对</button>
+        <button id="gerrit-refresh" style="display:none" class="secondary" data-click="refreshCriticalGerrit">重新核对</button>
         <button id="gms-query-btn" data-busy-size="short" data-click="runQuery" data-a0="true">查询</button>
         <button type="button" id="critical-legacy-toggle" style="display:none" aria-pressed="false" title="显示 Android 14 以下版本列，不改变合入统计">显示历史版本</button>
       </div>

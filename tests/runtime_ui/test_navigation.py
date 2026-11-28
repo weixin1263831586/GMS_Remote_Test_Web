@@ -1302,7 +1302,7 @@ class RuntimeNavigationTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             page.locator(".sidebar-brand").click()
-            tabs = page.locator("#sidebar-visibility-modal [role=tab]")
+            tabs = page.locator("#sidebar-visibility-modal [role=tablist]").first.locator(":scope > [role=tab]")
             visibility_tab, guide_tab = tabs.nth(0), tabs.nth(1)
             backgrounds = "tabs => tabs.map(tab => getComputedStyle(tab).backgroundColor)"
             expect(visibility_tab).to_have_attribute("aria-selected", "true")

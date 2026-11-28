@@ -23,7 +23,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
 
     if (downloadBtn) {
         downloadBtn.disabled = true;
-        downloadBtn.textContent = '⬇️ 下载中...';
+        downloadBtn.textContent = '下载中';
     }
     if (extractBtn) extractBtn.disabled = true;
     if (progressDiv) progressDiv.style.display = 'block';
@@ -119,7 +119,7 @@ window.downloadTestSuite = async function downloadTestSuite() {
         if (!pollingStarted) {
             if (downloadBtn) {
                 downloadBtn.disabled = false;
-                downloadBtn.textContent = '⬇️ 下载套件';
+                downloadBtn.textContent = '下载套件';
             }
             if (extractBtn) extractBtn.disabled = false;
         }
@@ -161,7 +161,7 @@ async function pollDownloadProgress(taskId) {
     const extractBtn = $('btn-extract-suite');
     const urlInput = $('suite-download-url');
 
-    if (downloadBtn) { downloadBtn.disabled = true; downloadBtn.textContent = '⬇️ 下载中...'; }
+    if (downloadBtn) { downloadBtn.disabled = true; downloadBtn.textContent = '下载中'; }
     if (extractBtn) extractBtn.disabled = true;
     if (progressDiv) progressDiv.style.display = 'block';
 
@@ -200,7 +200,7 @@ async function pollDownloadProgress(taskId) {
         if (progressStatus) progressStatus.textContent = `❌ ${error.message}`;
     } finally {
         sessionStorage.removeItem('active_suite_download');
-        if (downloadBtn) { downloadBtn.disabled = false; downloadBtn.textContent = '⬇️ 下载套件'; }
+        if (downloadBtn) { downloadBtn.disabled = false; downloadBtn.textContent = '下载套件'; }
         if (extractBtn) extractBtn.disabled = false;
     }
 }
@@ -401,7 +401,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
 
         if (extractBtn) {
             extractBtn.disabled = true;
-            extractBtn.textContent = '📦 解压中...';
+            extractBtn.textContent = '解压中...';
         }
         if (downloadBtn) downloadBtn.disabled = true;
         if (submitBtn) {
@@ -500,7 +500,7 @@ window.submitExtractSuite = async function submitExtractSuite() {
     } finally {
         if (extractBtn) {
             extractBtn.disabled = false;
-            extractBtn.textContent = '📦 解压套件';
+            extractBtn.textContent = '解压套件';
         }
         if (downloadBtn) downloadBtn.disabled = false;
         if (submitBtn) {

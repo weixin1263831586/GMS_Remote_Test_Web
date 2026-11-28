@@ -292,7 +292,8 @@ def test_six_views_use_one_visual_scene_without_duplicate_expanders():
     assert 'function fitScenes()' in renderer
     assert "canvas.style.zoom" in renderer
     assert 'arch-scene-controller-emblem' in renderer
-    assert 'const blocked=graph.nodes.some' in renderer
+    assert 'graph.nodes.some(node=>intersects(' in renderer
+    assert 'labelBounds.some(other=>intersects(' in renderer
     assert '.workspace-tab{' not in css and '.workspace-tabs{' not in css
 
 
