@@ -941,11 +941,6 @@ body.apk-resizing {
     background: var(--danger-color, #e74c3c);
 }
 
-.users-empty-message {
-    padding: 40px;
-    text-align: center;
-    color: var(--text-secondary);
-}
 
 #agent-chat-messages {
     flex: 1;
