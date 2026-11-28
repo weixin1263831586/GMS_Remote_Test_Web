@@ -141,7 +141,7 @@ async function downloadClusterJobReport(job=selectedClusterJob,artifactId=''){
 function artifactDownloadUrl(jobId,artifact){return `/api/cluster/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifact.id)}/download`}
 function renderJobArtifacts(job,artifacts,report=null){
  const list=Array.isArray(artifacts)?artifacts:[];
- if(!list.length)return '<span class="empty">暂无任务产物</span>';
+ if(!list.length)return '<span class="empty ui-empty-state ui-empty-state--inline">暂无任务产物</span>';
  const stdout=list.find(item=>item.filename==='stdout.log');
  const stderr=list.find(item=>item.filename==='stderr.log');
  const reportFiles=list.filter(item=>item.artifact_type==='report');
