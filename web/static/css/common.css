@@ -40,9 +40,6 @@
     --shadow-lg: 0 16px 36px rgba(0, 0, 0, 0.38);
     --shadow-glow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 28%, transparent);
 
-    --radius-control: var(--ui-radius-control);
-    --radius-surface: var(--ui-radius-card);
-
     --transition-fast: all 0.15s ease;
     --transition-normal: all 0.25s ease;
 }

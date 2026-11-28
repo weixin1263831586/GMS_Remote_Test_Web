@@ -7,7 +7,7 @@
 .agent-conversation-heading .ui-meta { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
 .agent-session-search .entry-field { width: 100%; min-width: 0; }
 #agent-session-list { display: flex; flex-direction: column; gap: 6px; padding: var(--ui-spacing-sm); }
-.agent-session-empty { margin: auto; padding: 16px 10px; color: var(--text-muted);  text-align: center; }
+.agent-session-empty { margin: auto; }
 .agent-session-item { display: flex; align-items: stretch; flex: none; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); overflow: hidden; }
 .agent-session-item.active { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color)); background: color-mix(in srgb, var(--primary-color) 8%, var(--card-bg)); }
 .agent-session-item.live .agent-session-status { color: var(--success-color); }
@@ -51,7 +51,7 @@
 .agent-step[data-status="warning"] { --step-color: var(--warning-color); }
 .agent-step[data-status="error"] { --step-color: var(--danger-color); }
 .agent-step-marker { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; margin-top: 10px; color: var(--step-color); background: var(--card-bg); border: 1px solid var(--step-color); border-radius: 50%; z-index: 1; }
-.agent-step-card { min-width: 0; border: 1px solid var(--border-color); border-radius: 8px; background: var(--card-bg); padding: 11px 12px; }
+.agent-step-card { min-width: 0; border: 1px solid var(--border-color); border-radius: var(--ui-radius-card); background: var(--card-bg); padding: 11px 12px; }
 .agent-step[data-status="running"] .agent-step-card { border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color)); }
 .agent-step[data-status="error"] .agent-step-card { border-color: color-mix(in srgb, var(--danger-color) 45%, var(--border-color)); }
 .agent-step-heading { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 6px; margin-bottom: 5px; }

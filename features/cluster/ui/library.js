@@ -25,7 +25,7 @@ function renderLibrary(){
   // 同时保留 id（library-worker-${i}）与 class：既有冒烟测试与
   // deployArchive 兼容旧 id 选择器；草稿保存/恢复已改用 archive key。
   return `<tr data-archive-key="${esc(key)}"><td title="${esc(a.name)}">${esc(a.name)}${a.complete===false?' <span style="color:#c62828" title="压缩包不完整（可能下载中断），无法下发">不完整</span>':''}</td><td>${formatBytes(a.size)}</td><td>${new Date(a.modified*1000).toLocaleString()}</td><td><select id="library-worker-${i}" class="library-worker">${workers.map(w=>`<option value="${esc(w.id)}">${esc(w.name||w.id)}</option>`).join('')}</select></td><td><input id="library-folder-${i}" class="library-folder" value="${esc(archiveFolder(a.name))}"></td><td><button class="primary" data-action="deploy-archive" data-archive-key="${esc(key)}" ${workers.length&&a.complete!==false?'':'disabled title="没有可接收命令的在线 Worker 或压缩包不完整"'}>下发并解压</button> <span class="progress-wrap"><span class="progress-track"><span class="progress-bar"></span></span><span class="deploy-progress"></span></span></td></tr>`;
- }).join('')||clusterLoadFailureRow('library','测试套件压缩包',6)||'<tr><td colspan="6" class="empty">Controller 套件目录中没有压缩包</td></tr>';
+ }).join('')||clusterLoadFailureRow('library','测试套件压缩包',6)||'<tr><td colspan="6" class="empty table-placeholder">Controller 套件目录中没有压缩包</td></tr>';
  body.setAttribute('aria-busy','false');
  // 恢复草稿：仅当条目仍存在且选项仍然有效。
  Object.keys(drafts).forEach(key=>{

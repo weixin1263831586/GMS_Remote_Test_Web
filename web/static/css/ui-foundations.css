@@ -432,7 +432,7 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     text-align: center;
     padding: var(--ui-spacing-lg) var(--ui-spacing-md);
 }
-.ui-empty-state--inline { padding: 0; text-align: inherit; }
+.ui-empty-state.ui-empty-state--inline { padding: 0; text-align: inherit; }
 :where(.users-empty-message, .agent-access-empty, .table-placeholder) { color: var(--text-secondary); text-align: center; }
 :is(.ui-log-toolbar, .log-frame-header, .build-log-toolbar) {
     display: flex;
@@ -497,6 +497,7 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     max-width: 100%;
 }
 .ui-table-actions--end { justify-content: flex-end; }
+.ui-table-actions--wrap { flex-wrap: wrap; justify-content: center; }
 .ui-table-actions > button { white-space: nowrap; }
 .ui-pagination {
     display: flex;

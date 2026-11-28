@@ -4,8 +4,6 @@
     --analysis-workbench-stage: #17171d;
     --analysis-workbench-surface: var(--card-bg);
     --analysis-compact-upload-height: 84px;
-    --analysis-pane-radius: var(--ui-radius-card);
-    --analysis-pane-gap: var(--ui-spacing-sm);
     background: var(--page-background);
 }
 
@@ -24,9 +22,9 @@
     grid-template-columns: minmax(270px, .38fr) minmax(0, .62fr);
     flex: 0 0 auto;
     align-items: stretch;
-    gap: var(--analysis-pane-gap);
+    gap: var(--ui-spacing-sm);
     min-width: 0;
-    margin: 0 0 var(--analysis-pane-gap);
+    margin: 0 0 var(--ui-spacing-sm);
 }
 .analysis-intake:has(.upload-empty) { grid-template-columns: minmax(0, 1fr); }
 .analysis-intake > .analysis-upload-frame { min-width: 0; display: flex; }

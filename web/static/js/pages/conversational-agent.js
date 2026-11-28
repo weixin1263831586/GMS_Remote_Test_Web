@@ -746,7 +746,7 @@ function renderAgentSessionDirectory() {
     const items = agentSessionDirectory.filter(item =>
         !keyword || String(item.title || '').toLowerCase().includes(keyword));
     if (!items.length) {
-        listEl.innerHTML = `<div class="agent-session-empty">${keyword ? '没有匹配的会话' : '暂无历史会话'}</div>`;
+        listEl.innerHTML = `<div class="agent-session-empty ui-empty-state">${keyword ? '没有匹配的会话' : '暂无历史会话'}</div>`;
         return;
     }
     listEl.innerHTML = items.map(item => {

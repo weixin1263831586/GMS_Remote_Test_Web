@@ -113,7 +113,7 @@
     min-width: 0;
     min-height: 0;
     flex-direction: column;
-    gap: var(--analysis-pane-gap);
+    gap: var(--ui-spacing-sm);
     overflow: hidden;
 }
 #page-report-analysis #report-analysis-result > .report-result-card {
@@ -123,7 +123,7 @@
     margin: 0;
     padding: 0;
     border: 1px solid var(--report-edge);
-    border-radius: var(--analysis-pane-radius);
+    border-radius: var(--ui-radius-card);
     background: var(--report-surface);
     box-shadow: none;
 }
@@ -349,7 +349,7 @@
     padding: 0;
     border: 1px solid var(--report-edge);
     border-left: 2px solid transparent;
-    border-radius: 6px;
+    border-radius: var(--ui-radius-card);
     background: var(--report-raised);
     overflow: hidden;
 }

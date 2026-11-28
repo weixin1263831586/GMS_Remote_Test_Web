@@ -356,7 +356,6 @@ function displayTestReports(reports) {
         const passRateStyle = report.total > 0 ? (report.pass / report.total >= 0.9 ? 'color: var(--success-color);' : 'color: var(--warning-color);') : '';
 
         const tr = document.createElement('tr');
-        tr.style.borderBottom = '1px solid var(--border-color)';
         tr.dataset.timestamp = report.timestamp;
         tr.dataset.testType = report.test_type || '';
         tr.dataset.suitePath = report.suite_path || '';
@@ -381,12 +380,14 @@ function displayTestReports(reports) {
             <td class="reports-metric-cell" style="text-align: center;">${escapeHtml(totalCount)}</td>
             <td class="reports-metric-cell" style="text-align: center; ${passRateStyle}">${escapeHtml(passRate)}</td>
             <td style="text-align: center;">
-                <button class="btn-xxs" data-action="analyze" style="margin: 2px; ">📈 分析</button>
-                <button class="btn-xxs" data-action="retry" style="background: var(--primary-gradient); margin: 2px; ">🔄 retry</button>
-                <button class="btn-xxs" data-action="results" style="background: var(--info-color); margin: 2px; ">results</button>
-                <button class="btn-xxs" data-action="logs" style="background: var(--warning-color); margin: 2px; ">logs</button>
-                <button class="btn-xxs" data-action="download" style="background: var(--success-color); margin: 2px; ">⬇️ 下载</button>
-                <button class="btn-xxs" data-action="delete" style="background: var(--danger-color); margin: 2px; ">🗑️ 删除</button>
+                <div class="ui-table-actions ui-table-actions--wrap">
+                <button class="btn-xxs" data-action="analyze">📈 分析</button>
+                <button class="btn-xxs btn-primary" data-action="retry">🔄 retry</button>
+                <button class="btn-xxs btn-tone-info" data-action="results">results</button>
+                <button class="btn-xxs btn-tone-warning" data-action="logs">logs</button>
+                <button class="btn-xxs btn-tone-success" data-action="download">⬇️ 下载</button>
+                <button class="btn-xxs btn-danger" data-action="delete">🗑️ 删除</button>
+                </div>
             </td>
         `;
 

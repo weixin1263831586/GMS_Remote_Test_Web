@@ -3,7 +3,6 @@
     --workbench-surface: var(--card-bg);
     --workbench-subtle: var(--light-bg);
     --workbench-edge: var(--border-color);
-    --workbench-radius: var(--ui-radius-card);
     min-width: 0;
 }
 .page-ui-rework .page-header-row > .section-title { color: var(--text-primary); }
@@ -38,7 +37,6 @@
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
 }
-.page-ui-rework .table-placeholder { color: var(--text-muted); }
 /* 测试工作台：保留三列配置、设备/操作两列、双日志 Tab 与所有按钮。 */
 #page-test.page-ui-rework :is(.input-container, .adb-frame, .control-frame, .log-frame) {
     background: var(--card-bg); border: 1px solid var(--border-color);

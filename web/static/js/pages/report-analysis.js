@@ -926,7 +926,7 @@ function renderReportDiagnosisLoading(failure, classNames, errorMessage) {
             <div class="dx-hero">
                 <div class="dx-title-row">
                     <div class="dx-title-main">${escapeHtml(failure.name || failure.test_name || '未知用例')}</div>
-                    <span class="dx-status-pill">诊断中</span>
+                    <span class="dx-status-pill ui-status is-warning">诊断中</span>
                 </div>
                 <div class="dx-compact-line">${escapeHtml((errorMessage || '').split('\n').slice(0, 2).join('\n') || '正在提取失败上下文...')}</div>
             </div>
@@ -1196,8 +1196,8 @@ function renderReportDiagnosis(data) {
                 <div class="dx-title-row">
                     <div class="dx-title-main">${escapeHtml(data.test_name || data.report_name || '诊断工作台')}</div>
                     <div class="dx-pill-row">
-                        <span class="dx-status-pill">${escapeHtml(aiStatusLabel)}</span>
-                        <span class="dx-status-pill">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
+                        <span class="dx-status-pill ui-status ${aiFallback || providerFallback ? 'is-warning' : 'is-info'}">${escapeHtml(aiStatusLabel)}</span>
+                        <span class="dx-status-pill ui-status">${escapeHtml(suiteTarget.test_type || data.test_type || '未知类型')}</span>
                         <span class="dx-status-pill">${escapeHtml(suiteTarget.suite_version || data.suite_version || '未知版本')}</span>
                     </div>
                 </div>
@@ -1235,7 +1235,7 @@ function renderReportDiagnosis(data) {
     const exemptionBanner = exemptions.length
         ? `<section class="dx-section dx-exempt-banner">
             <div class="dx-exempt-head">
-                <span class="dx-exempt-badge">✓ 已豁免</span>
+                <span class="dx-exempt-badge ui-status is-success">✓ 已豁免</span>
                 <span class="dx-exempt-title">命中 Google Mainline 已知豁免（通常无需本地修复）</span>
             </div>
             <div class="dx-exempt-list">
@@ -1678,9 +1678,9 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
             <div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg>
                 <div class="tech-title-group"><span class="tech-title-glyph"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><h2 class="modal-title">报错分析</h2></div>
                 <div style="display: flex; align-items: center; gap: 10px;">
-                    ${data.source_code_fetched ? '<span class="ai-report-chip" style="background: var(--primary-gradient); color: var(--text-on-accent); padding: 3px 10px; border-radius: 4px;">✓ 源码已获取</span>' : ''}
-                    ${data.ai_enabled === false ? '<span class="ai-report-chip" style="background: var(--warning-color); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">规则分析</span>' : '<span class="ai-report-chip" style="background: var(--skill-accent); color: var(--text-on-accent); padding: 2px 8px; border-radius: 4px;">AI增强</span>'}
-                    ${data.ai_model ? `<span class="ai-report-chip" style="background: var(--success-color); color: white; padding: 2px 8px; border-radius: 4px;">${escapeHtml(data.ai_model)}</span>` : ''}
+                    ${data.source_code_fetched ? '<span class="ai-report-chip ui-status is-success">✓ 源码已获取</span>' : ''}
+                    ${data.ai_enabled === false ? '<span class="ai-report-chip ui-status is-warning">规则分析</span>' : '<span class="ai-report-chip ui-status is-accent">AI增强</span>'}
+                    ${data.ai_model ? `<span class="ai-report-chip ui-status is-info">${escapeHtml(data.ai_model)}</span>` : ''}
                     <button type="button" class="modal-close" aria-label="关闭" data-click="closeAIAnalysisModal" data-a0="${modalId}">×</button>
                 </div>
             </div>

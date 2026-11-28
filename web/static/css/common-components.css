@@ -277,6 +277,11 @@ select option {
     border-color: var(--primary-light);
 }
 
+.btn-tone-info, .btn-tone-info:hover:not(:disabled) { background: var(--info-color); color: var(--text-on-accent); }
+.btn-tone-warning, .btn-tone-warning:hover:not(:disabled) { background: var(--warning-color); color: var(--text-on-accent); }
+.btn-tone-success, .btn-tone-success:hover:not(:disabled) { background: var(--success-color); color: var(--text-on-accent); }
+:is(.btn-tone-info, .btn-tone-warning, .btn-tone-success):hover:not(:disabled) { filter: brightness(1.12); }
+ 
 /* 共享固件操作列：收窄 .btn-xxs（默认 min-width:80px），作用域限定。 */
 .firmware-share-actions .btn-xxs {
     min-width: 0;
@@ -1004,7 +1009,7 @@ select option {
     background: var(--card-bg);
     border: 1px solid var(--border-color);
     border-left: 3px solid var(--accent, var(--primary-color));
-    border-radius: var(--radius-surface);
+    border-radius: var(--ui-radius-card);
     margin-bottom: var(--ui-spacing-sm, 8px);
     padding: 0 14px var(--ui-spacing-sm, 8px);
     box-shadow: var(--shadow-sm);
