@@ -124,6 +124,36 @@ def _table_geometry_violations(path, source):
     return errors
 
 
+def _css_leaf_rules(css):
+    """Yield rules with their conditional context; never treat keyframes as selectors."""
+    css = re.sub(r"/\*.*?\*/", lambda m: "\n" * m[0].count("\n"), css, flags=re.S)
+    tokens = re.finditer(r"""(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|[{};]""", css)
+    stack = []
+    cursor = 0
+    for token in tokens:
+        value = token[0]
+        if value == "{":
+            heading = " ".join(css[cursor:token.start()].split())
+            if stack:
+                stack[-1]["nested"] = True
+            stack.append({"heading": heading, "start": token.end(),
+                          "line": css.count("\n", 0, cursor) + 1, "nested": False})
+            cursor = token.end()
+        elif value == "}":
+            if not stack:
+                continue
+            rule = stack.pop()
+            scope = tuple(parent["heading"] for parent in stack)
+            if (not rule["nested"] and rule["heading"] and not rule["heading"].startswith("@")
+                    and not any(re.search(r"@(?:-webkit-)?keyframes\b", part) for part in scope)):
+                body = " ".join(css[rule["start"]:token.start()].split())
+                if body:
+                    yield scope, rule["heading"], body, rule["line"]
+            cursor = token.end()
+        elif value == ";" and not stack:
+            cursor = token.end()
+
+
 class UiSizingContractTests(unittest.TestCase):
     def test_entrypoint_loaded_exactly_once_everywhere(self):
         for path in ENTRYPOINTS:
@@ -399,6 +429,8 @@ class UiSizingContractTests(unittest.TestCase):
         """Report candidates conservatively; dynamic selectors require review."""
         paths = list(_tracked_ui_sources())
         source_tokens = set()
+        dynamic_prefixes = set()
+        role_sources = {}
         styles = []
         inline_buttons = []
         for path in paths:
@@ -407,33 +439,40 @@ class UiSizingContractTests(unittest.TestCase):
             if path.suffix == ".css":
                 styles.append((name, source))
             else:
-                source_tokens.update(re.findall(r"[\w-]+", source))
+                tokens = set(re.findall(r"[\w-]+", source))
+                source_tokens.update(tokens)
+                dynamic_prefixes.update(re.findall(r"""([\w-]+-)(?:\$\{|\{[A-Za-z_]|['"]\s*\+)""", source))
+                for role in tokens & {"ui-card", "ui-status", "ui-empty-state", "ui-log-toolbar",
+                                      "ui-log-actions", "ui-log-content", "ui-file-preview",
+                                      "ui-action-group", "ui-table-actions", "ui-panel-heading",
+                                      "ui-workspace-toolbar", "ui-control", "ui-kpi-card--compact"}:
+                    role_sources.setdefault(role, set()).add(name)
                 for match in re.finditer(r"""<button\b[^>]*\bstyle\s*=\s*(["'])(.*?)\1""", source, re.I | re.S):
                     if re.search(r"(?:padding|border-radius|height|background|margin|font-size)\s*:", match[2]):
                         inline_buttons.append({"file": name, "line": source.count("\n", 0, match.start()) + 1})
                 for css in re.findall(r"<style\b[^>]*>(.*?)</style\s*>", source, re.I | re.S):
                     styles.append((name, css))
         unreferenced = []
+        dynamic = []
         repeated = []
         for name, css in styles:
-            css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
             seen = set()
-            for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
-                selector = " ".join(rule[1].split())
-                body = " ".join(rule[2].split())
-                if not body:
-                    continue
-                key = (selector, body)
+            for scope, selector, body, line in _css_leaf_rules(css):
+                key = (scope, selector, body)
+                item = {"file": name, "selector": selector, "scope": list(scope), "line": line}
                 if key in seen:
-                    repeated.append({"file": name, "selector": selector})
+                    repeated.append(item)
                 seen.add(key)
-                # Only report isolated literal class/id selectors. Media scope,
-                # escaped identifiers and dynamically composed tokens need manual review.
                 if re.fullmatch(r"[.#][A-Za-z_][\w-]*", selector) and selector[1:] not in source_tokens:
-                    unreferenced.append({"file": name, "selector": selector})
+                    if any(selector[1:].startswith(prefix) for prefix in dynamic_prefixes):
+                        dynamic.append(item)
+                    else:
+                        unreferenced.append(item)
         evidence = {"source_count": len(paths), "style_blocks": len(styles),
                     "unreferenced_candidates": unreferenced,
-                    "repeated_rule_candidates": repeated, "inline_button_candidates": inline_buttons}
+                    "dynamic_reference_candidates": dynamic,
+                    "repeated_rule_candidates": repeated, "inline_button_candidates": inline_buttons,
+                    "public_component_sources": {role: sorted(files) for role, files in sorted(role_sources.items())}}
         output = os.getenv("GMS_UI_PREVIEW_DIR")
         if output:
             directory = Path(output)
@@ -463,6 +502,31 @@ class UiSizingContractTests(unittest.TestCase):
         renderer = (ROOT / "web/static/js/shell/tools-render.js").read_text(encoding="utf-8")
         for obsolete in ("addButtonBackground", "sectionStyle", "actionsStyle"):
             self.assertNotIn(obsolete, renderer)
+
+    def test_css_reference_scanner_distinguishes_responsive_and_animation_contexts(self):
+        css = (".panel { display: flex; } "
+               "@media(max-width:800px){.panel{display:grid;}} "
+               "@media(max-width:400px){.panel{display:grid;}} "
+               ".panel { display: flex; } "
+               "@keyframes pulse { from {opacity:0;} to {opacity:1;} }")
+        rules = list(_css_leaf_rules(css))
+        self.assertEqual(len(rules), 4)
+        self.assertEqual(rules[0][:3], rules[3][:3])
+        self.assertNotEqual(rules[1][0], rules[2][0])
+        self.assertEqual(rules[1][1:3], rules[2][1:3])
+
+    def test_removed_legacy_ui_selectors_do_not_return(self):
+        cases = {
+            "common.css": ("desktop-container", "vnc-placeholder", "device-scrollable-frame"),
+            "common-layout.css": ("log-progress-container", "report-failure-card-head", "dx-meta-grid", "btn-secondary"),
+            "architecture-layers.css": ("arch-layer", "arch-system-stage", "arch-legend"),
+            "ui-sizing.css": ("ui-control--dense", "ui-stat-card", "ui-card-heading", "ui-nowrap"),
+            "data-table-page.css": ("tabs-row",),
+        }
+        for name, roles in cases.items():
+            source = (CSS / name).read_text(encoding="utf-8")
+            for role in roles:
+                self.assertNotRegex(source, rf"\.{re.escape(role)}(?![\w-])", (name, role))
 
     def test_shared_templates_consume_tokens(self):
         mapping = {

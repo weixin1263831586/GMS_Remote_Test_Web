@@ -797,10 +797,14 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             };
             return [...document.querySelectorAll(
                 'button,input:not([type=hidden]),select,textarea,.ui-status,.ui-empty-state,' +
-                '.ui-log-toolbar,.ui-log-content,.log-frame-header,.log-text,.page-stat-card,.ui-kpi-card--compact'
+                '.ui-log-toolbar,.ui-log-actions,.ui-log-content,.ui-file-preview,.log-frame-header,.log-text,' +
+                '.ui-card,.ui-action-group,.ui-table-actions,.ui-panel-heading,.page-stat-card,.ui-kpi-card--compact'
             )].filter(visible).map(el => {
                 const r = el.getBoundingClientRect(), css = getComputedStyle(el);
                 return {id:el.id, tag:el.tagName, role:String(el.className),
+                    sourceRoot:document.documentElement.dataset.uiTypeRoot || '',
+                    componentRoles:[...el.classList].filter(name => name.startsWith('ui-')),
+                    sourcePath:location.pathname,
                     label:(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0,60),
                     width:r.width,height:r.height,font:css.fontSize,radius:css.borderTopLeftRadius,
                     whiteSpace:css.whiteSpace,overflowX:css.overflowX,overflowY:css.overflowY,
@@ -878,4 +882,8 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
                 (directory / "component-inventory.json").write_text(
                     json.dumps(component_evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+                coverage = {key: sorted({role for item in items for role in item.get("componentRoles", [])})
+                            for key, items in component_evidence.items()}
+                (directory / "component-role-coverage.json").write_text(
+                    json.dumps(coverage, ensure_ascii=False, indent=2), encoding="utf-8")
             page.close()
