@@ -63,7 +63,10 @@ function toast(message){const el=document.querySelector('#toast');el.textContent
 async function confirmAction(title,message){if(typeof window.parent?.showConfirmDialog==='function')return window.parent.showConfirmDialog(title,message);return GmsDialogs.confirm(title, message)}
 function notifyCompletion(title,message){window.parent.postMessage({type:'cluster-notification',title,message,level:'success'},location.origin)}
 const statusLabels={online:'在线',offline:'离线',busy:'忙碌',draining:'停止派发',available:'可用',allocated:'已分配',reserved:'已预留',external_busy:'外部占用',unauthorized:'未授权',unknown:'未知',fastboot:'Fastboot',created:'已创建',queued:'排队',leasing:'分配设备',assigned:'已分配',dispatching:'派发中',running:'运行中',stopping:'停止中',collecting:'收集报告',worker_lost:'主机失联',completed:'完成',failed:'失败',cancelled:'已取消'};
-function badge(s){return `<span class="status ${esc(s)}" title="${esc(s)}">${esc(statusLabels[s]||s)}</span>`}
+function badge(s){
+ const tone=({online:'is-success',available:'is-success',completed:'is-success',busy:'is-warning',draining:'is-warning',allocated:'is-warning',reserved:'is-warning',external_busy:'is-warning',queued:'is-warning',leasing:'is-warning',dispatching:'is-warning',running:'is-warning',stopping:'is-warning',collecting:'is-info',assigned:'is-info',created:'is-info',fastboot:'is-info',offline:'is-danger',unauthorized:'is-danger',worker_lost:'is-danger',failed:'is-danger'})[s]||'';
+ return `<span class="status ui-status ${tone} ${esc(s)}" title="${esc(s)}">${esc(statusLabels[s]||s)}</span>`
+}
 function workerActivity(worker){const reported=Math.max(0,Number(worker.running_jobs||0)),external=Math.max(0,Number(worker.external_jobs||0)),running=Math.max(reported,external);return {running,external:Math.min(running,external),managed:Math.max(0,running-external)}}
 function workerBadge(worker){const activity=workerActivity(worker),status=worker.status==='busy'&&activity.external>0&&!activity.managed?'external_busy':worker.status;return badge(status)}
 function compactDuration(seconds){const value=Math.max(0,Math.floor(Number(seconds)||0)),days=Math.floor(value/86400),hours=Math.floor((value%86400)/3600),minutes=Math.floor((value%3600)/60);if(days)return `${days}天${hours?`${hours}小时`:''}`;if(hours)return `${hours}小时${minutes?`${minutes}分钟`:''}`;if(minutes)return `${minutes}分钟`;return `${value}秒`}
