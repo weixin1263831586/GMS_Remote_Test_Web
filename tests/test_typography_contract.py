@@ -33,13 +33,14 @@ class TypographyContractTests(unittest.TestCase):
     def test_required_tokens_cover_semantic_text_roles(self):
         css = STYLE.read_text(encoding="utf-8")
         for name, value in {
-            "compact": 11, "small": 12, "body": 13, "card": 14,
+            "compact": 11, "small": 12, "card": 14,
             "section": 15, "dialog": 16, "page": 18, "stat": 24,
         }.items():
             with self.subTest(role=name):
                 self.assertRegex(
                     css, rf"--ui-type-size-{name}:\s*{value}px\s*;",
                 )
+        self.assertIn("--ui-type-size-body: var(--ui-type-size-small);", css)
         self.assertIn("--ui-type-font-mono:", css)
         self.assertIn("--ui-type-line-page: 24px", css)
         self.assertIn("button:not(.modal-close)", (STYLE.parent / "typography/roles-and-pages.css").read_text(encoding="utf-8"))

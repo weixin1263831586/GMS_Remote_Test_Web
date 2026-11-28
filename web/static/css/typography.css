@@ -6,7 +6,7 @@
 @import url("/static/css/typography/shell-workspaces.css?v=20261128-table-header-subtle");
 @import url("/static/css/typography/shared-diagrams.css?v=20261128-table-header-subtle");
 @import url("/static/css/typography/inline-and-exceptions.css?v=20261128-table-header-subtle");
-/* Normal UI: buttons/tables/forms 12px, body/descriptions 13px. Only compact
+/* Normal UI: buttons/tables/forms/body/descriptions 12px. Only compact
    status/diagram glyphs, serial/xterm grids, code and icons are approved exceptions.
    Role selectors belong exclusively to the five imported rule files. */
 :root {
@@ -15,7 +15,7 @@
   --ui-type-font-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   --ui-type-size-compact: 11px; /* compact status / diagram annotations */
   --ui-type-size-small: 12px;   /* actions, tables, forms, auxiliary copy */
-  --ui-type-size-body: 13px;    /* body and dialog descriptions */
+  --ui-type-size-body: var(--ui-type-size-small); /* body and dialog descriptions */
   --ui-type-size-card: 14px;    /* card titles */
   --ui-type-size-section: 15px; /* section titles */
   --ui-type-size-dialog: 16px;  /* modal titles */

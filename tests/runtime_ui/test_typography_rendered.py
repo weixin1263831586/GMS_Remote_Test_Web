@@ -196,8 +196,8 @@ class TypographyRenderedTests(RuntimeUiHarness):
                 ("#type-role-fixture th", 12),
                 ("#type-role-fixture .btn-terminal", 12),
                 ("#type-role-fixture .tools-add-category", 12),
-                ("#adb-proxy-assignments .adb-proxy-assignment-info", 13),
-                ("#usbip-assignments .adb-proxy-assignment-info", 13),
+                ("#adb-proxy-assignments .adb-proxy-assignment-info", 12),
+                ("#usbip-assignments .adb-proxy-assignment-info", 12),
             )
             for width, height in ((1440, 900), (390, 844)):
                 with self.subTest(viewport=width):
@@ -213,9 +213,9 @@ class TypographyRenderedTests(RuntimeUiHarness):
         failures = []
         try:
             for route, selector, size in (
-                ("/automation", ".panel-description", 13),
+                ("/automation", ".panel-description", 12),
                 ("/cluster", ".dash-test-row", 12),
-                ("/redmine-agent", ".field-content", 13),
+                ("/redmine-agent", ".field-content", 12),
             ):
                 with self.subTest(route=route):
                     page.goto(self.base_url + route, wait_until="domcontentloaded")
