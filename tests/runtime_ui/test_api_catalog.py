@@ -69,9 +69,9 @@ class ApiCatalogBrowserTests(RuntimeUiHarness):
             self.assertFalse(layout["redundantHeading"])
             self.assertLessEqual(layout["topDelta"], 1, layout)
             self.assertLessEqual(layout["heightDelta"], 1, layout)
-            # The UI geometry standard uses a 42px shared data-grid header.
+            # The UI geometry standard uses a 36px shared data-grid header.
             # The right method-distribution heading must match exactly.
-            self.assertAlmostEqual(layout["leftHeight"], 42, delta=1, msg=str(layout))
+            self.assertAlmostEqual(layout["leftHeight"], 36, delta=1, msg=str(layout))
             self.assertEqual(layout["columns"], 5, layout)
             self.assertIn("共", layout["pager"])
         finally:
@@ -94,7 +94,7 @@ class ApiCatalogBrowserTests(RuntimeUiHarness):
                         return [ring.width, ring.height, center.width, center.height, heading.height];
                     }""")
                     with self.subTest(width=width, route=route):
-                        for actual, expected in zip(geometry, (diameter, diameter, center, center, 42)):
+                        for actual, expected in zip(geometry, (diameter, diameter, center, center, 36)):
                             self.assertAlmostEqual(actual, expected, delta=1, msg=str(geometry))
         finally:
             page.close()

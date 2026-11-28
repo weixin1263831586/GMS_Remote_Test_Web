@@ -22,7 +22,7 @@
     color: var(--text-primary);
 }
 /* 设备管理同构 KPI：复用 page-stat-* 字段，按钮筛选交互保持原样。 */
-/* 表格和日志：同设备库存 42-44px 行、高亮悬浮、sticky 表头。 */
+/* 表格和日志：公共行高、悬浮高亮及 sticky 表头。 */
 .page-ui-rework :is(.list-table, .users-table, .audit-table, .agent-access-table) {
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
 }
@@ -193,7 +193,7 @@
     overflow: hidden; text-overflow: ellipsis;
 }
 #page-notes .kb-source-table :is(th, td):nth-child(-n+2) { text-align: left; }
-#page-notes .kb-source-table :is(th, td):last-child { text-align: right; }
+#page-notes .kb-source-table td:last-child { text-align: right; }
 #page-notes .kb-source-actions > button { flex-shrink: 0; }
 
 /* 个人知识库导航及文档卡片。 */

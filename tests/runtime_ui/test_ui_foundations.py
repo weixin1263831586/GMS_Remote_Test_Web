@@ -127,7 +127,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 self.assertEqual(len(samples), 11, samples)
                 for item in samples:
                     with self.subTest(width=width, table=item['name']):
-                        self.assertAlmostEqual(item['header'], 42, delta=1, msg=str(item))
+                        self.assertAlmostEqual(item['header'], 36, delta=1, msg=str(item))
                         self.assertAlmostEqual(item['row'], 36, delta=1, msg=str(item))
                         self.assertTrue(item['middle'], item)
                         self.assertTrue(item['padding'], item)
@@ -158,7 +158,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                             };
                         } finally { table.remove(); }
                     }""")
-                    self.assertAlmostEqual(result['header'], 42, delta=1, msg=str(result))
+                    self.assertAlmostEqual(result['header'], 36, delta=1, msg=str(result))
                     self.assertAlmostEqual(result['row'], 36, delta=1, msg=str(result))
                     self.assertEqual(result['align'], 'middle')
         finally:

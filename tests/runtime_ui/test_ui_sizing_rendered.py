@@ -651,7 +651,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 self.assertEqual(geometry["rows"][key], "none", geometry)
             for key in ("data-row", "state-row", "control-row", "group-row", "document-row"):
                 self.assertEqual(geometry["rows"][key], "table-row", geometry)
-            self.assertEqual(geometry["heading"], "right", geometry)
+            self.assertEqual(geometry["heading"], "center", geometry)
             self.assertEqual(geometry["action"], "right", geometry)
         finally:
             page.close()
