@@ -53,7 +53,7 @@ function renderTrend(title, rows, key, chartKey) {
     const label = row[key];
     const clickable = count > 0 ? ' style="cursor:pointer" data-click="showGerritTrendDetail" data-a0="' + esc(key) + '" data-a1="' + esc(String(label)) + '" title="点击查看该时段提交明细"' : '';
     return '<div class="bar-row"' + clickable + '><div class="bar-label">' + esc(label) + '</div><div class="bar-track"><div class="bar-fill" style="width:' + Math.max(5, Math.round(count * 100 / max)) + '%"></div></div><div class="bar-count">' + esc(count) + '</div></div>';
-  }).join('') || '<div class="muted">无数据</div>';
+  }).join('') || '<div class="ui-empty-state">无数据</div>';
   const range = trendDateRange(chartKey);
   const tip = (range.start || range.end) ? ('范围: ' + (range.start || '不限') + ' 至 ' + (range.end || '不限')) : '设置统计日期范围';
   return '<section class="trend-panel"><div class="trend-title-row"><h2>' + esc(title) + '</h2><button class="trend-start-btn" data-click="setTrendStartDate" data-a0="' + esc(chartKey) + '" data-a1="' + esc(title) + '" title="' + esc(tip) + '">⚙</button></div><div class="trend-body">' + bars + '</div></section>';
@@ -142,7 +142,7 @@ function renderLists(lists, prefix) {
 function renderChangeList(title, rows, sectionId) {
   return '<section class="list-section" id="' + esc(sectionId || '') + '"><h2>' + esc(title) + '</h2><div class="wrap"><table><thead><tr><th>变更</th><th>项目</th><th>分支</th><th>状态</th><th>更新时间</th></tr></thead><tbody>'
     + (rows || []).map(renderStatsRow).join('')
-    + ((rows || []).length ? '' : '<tr><td colspan="5" class="muted">无记录</td></tr>')
+    + ((rows || []).length ? '' : '<tr><td colspan="5" class="table-placeholder">无记录</td></tr>')
     + '</tbody></table></div></section>';
 }
 function renderDepartmentUsers(users) {
@@ -426,12 +426,17 @@ async function applyGerritWorkspaceContext(next, navigate) {
     pendingWorkspaceChangeId = '';
   }
 }
+function renderGerritStatus(value) {
+  const status = String(value || '-');
+  const tone = ({MERGED:'is-success', NEW:'is-warning', OPEN:'is-warning', ABANDONED:'', DRAFT:'is-info', SUBMITTED:'is-info'})[status.toUpperCase()] || '';
+  return '<span class="ui-status ' + tone + '">' + esc(status) + '</span>';
+}
 function renderStatsRow(item) {
   const url = changeUrl(item);
   const id = item.number || item._number || item.id || '-';
   const patchset = changePatchset(item);
   const subject = item.subject || '-';
-  return '<tr data-gerrit-change-id="' + esc(id) + '" data-gerrit-patchset="' + esc(patchset) + '"><td><div class="change-title">' + (url ? '<a data-gerrit-select href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span></div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + esc(item.status || '-') + '</td><td>' + esc(item.updated || item.lastUpdated || item.updated_at || '-') + '</td></tr>';
+  return '<tr data-gerrit-change-id="' + esc(id) + '" data-gerrit-patchset="' + esc(patchset) + '"><td><div class="change-title">' + (url ? '<a data-gerrit-select href="' + esc(url) + '" target="_blank">#' + esc(id) + '</a>' : '#' + esc(id)) + '<span title="' + esc(subject) + '">' + esc(subject) + '</span></div></td><td>' + esc(item.project || '-') + '</td><td>' + esc(item.branch || '-') + '</td><td>' + renderGerritStatus(item.status) + '</td><td>' + esc(item.updated || item.lastUpdated || item.updated_at || '-') + '</td></tr>';
 }
 function renderRow(item) {
   const url = changeUrl(item);
