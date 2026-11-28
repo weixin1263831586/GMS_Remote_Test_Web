@@ -25,8 +25,8 @@
 :is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#play"], [href$="#check"], [href$="#check-square"], [href$="#save"], [href$="#unlock"], [href$="#shield"])) { color: var(--ui-icon-green); }
 :is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#warning"], [href$="#star"], [href$="#bell"], [href$="#battery"], [href$="#bolt"], [href$="#power"], [href$="#mount"], [href$="#pause"])) { color: var(--ui-icon-amber); }
 :is(body, .page-ui-rework, .tech-dialog) svg.ui-icon:has(> use:is([href$="#trash"], [href$="#stop"], [href$="#error"], [href$="#eraser"], [href$="#lock"])) { color: var(--ui-icon-red); }
-/* Primary/danger fills must retain readable white icons; disabled is muted. */
-:is(body, .page-ui-rework, .tech-dialog) :is(.btn-primary, .btn-danger) > svg.ui-icon { color: var(--text-on-accent, #fff); }
+/* Action icons follow their button text color; disabled actions remain muted. */
+:is(body, .page-ui-rework, .tech-dialog) :is(.btn-primary, .btn-danger) > svg.ui-icon { color: inherit; }
 :is(body, .page-ui-rework, .tech-dialog) button:disabled > svg.ui-icon { color: var(--text-muted, #878796); }
 #page-test :is(.adb-button-frame, .vnc-button-frame, .vpn-btn-frame) button > svg.ui-icon {
   box-sizing: content-box; padding: 2px; border-radius: 5px;

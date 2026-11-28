@@ -185,3 +185,41 @@ def test_dynamic_device_button_labels_preserve_color_icons():
     assert "btn.textContent = '🔌" not in vpn
     usbip = (ROOT / "web/static/js/pages/firmware-burn-usbip.js").read_text(encoding="utf-8")
     assert "GmsUi.icon('network') + ' USB/IP'" not in usbip
+
+
+def test_ordinary_action_labels_do_not_reintroduce_decorative_icons():
+    """Check static HTML and literal JS button templates across all workspaces."""
+    roots = (ROOT / "web/shell", ROOT / "web/static/js", ROOT / "features")
+    labels = {
+        "刷新", "刷新设备", "刷新套件", "刷新列表", "刷新状态", "刷新端口",
+        "刷新历史邮件", "刷新附件元数据", "刷新页面重试", "搜索", "查询",
+        "添加", "编辑", "删除", "保存", "重置", "清空", "导出", "上传",
+        "下载", "复制", "同步", "下载套件", "解压套件", "复制部署命令",
+    }
+    glyph = re.compile(r"^[\U0001F300-\U0001FAFF\uFE0F\u2600-\u27BF＋+↻⟳\s]+")
+    failures = []
+    for root in roots:
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in {".html", ".js"} or not path.is_file():
+                continue
+            if root.name == "features" and "ui" not in path.relative_to(root).parts:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for match in re.finditer(r"<button\b([^>]*?)>(.*?)</button>", source, re.S):
+                attrs, body = match.groups()
+                if re.search(r'role="tab"|workspace-tab|filter-btn|aria-pressed|modal-close', attrs):
+                    continue
+                visible = re.sub(r"<[^>]+>", "", body).strip()
+                visible = glyph.sub("", visible).strip()
+                if visible not in labels:
+                    continue
+                if re.search(r"<svg\b|test-action-icon", body) or glyph.match(re.sub(r"<[^>]+>", "", body).strip()):
+                    failures.append(f"{path.relative_to(ROOT)}:{source.count(chr(10), 0, match.start()) + 1}: {visible}")
+    assert not failures, "Ordinary actions must use plain labels:\n" + "\n".join(failures)
+
+
+def test_download_button_does_not_restore_a_legacy_glyph():
+    source = (ROOT / "web/static/js/pages/test-suite-browser-transfer.js").read_text(encoding="utf-8")
+    labels = re.findall(r"(?:downloadBtn|extractBtn)\.textContent\s*=\s*'([^']+)'", source)
+    assert "下载套件" in labels and "下载中" in labels and "解压套件" in labels
+    assert all(re.fullmatch(r"(?:下载|解压)[\u4e00-\u9fff. …]+", label) for label in labels), labels

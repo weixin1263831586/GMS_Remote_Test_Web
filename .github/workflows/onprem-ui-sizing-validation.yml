@@ -64,6 +64,7 @@ on:
       - 'tests/runtime_ui/test_header_action_alignment.py'
       - 'tests/architecture/test_shared_page_edge.py'
       - 'tests/runtime_ui/test_ui_controls_matrix.py'
+      - 'tests/architecture/test_ui_icon_semantics.py'
       - 'tests/runtime_ui/test_workspace_tabs.py'
       - 'tests/runtime_ui/test_terminal.py'
       - 'tests/runtime_ui/test_automation_history.py'
@@ -134,6 +135,7 @@ jobs:
           "$RUNNER_TEMP/gms-ui-sizing-venv/bin/python" -m pytest -q \
             tests/test_ui_sizing_contract.py \
             tests/test_typography_contract.py \
+            tests/architecture/test_ui_icon_semantics.py \
             features/reports/tests/test_analysis_agent.py \
             tests/runtime_ui/test_architecture_views.py \
             tests/runtime_ui/test_aoa_workbench.py::RuntimeAoaWorkbenchTests::test_command_grid_keeps_labels_comments_and_actions_on_one_line \

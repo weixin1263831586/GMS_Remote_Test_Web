@@ -141,3 +141,77 @@ class UiControlsMatrixTests(RuntimeUiHarness):
             self.assertAlmostEqual(result["before"], result["after"]["width"], delta=1)
         finally:
             page.close()
+
+
+    def test_refresh_action_rendering_and_screenshots(self):
+        page = self.new_page()
+        samples = {}
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1792, "height": 900})
+            targets = (
+                ("users", "#users-list-refresh"),
+                ("apk-analysis", "#apk-task-history-refresh"),
+                ("api-docs", "#page-api-docs .api-search-toolbar .api-action"),
+            )
+            for name, selector in targets:
+                page.evaluate("(name) => switchPage(name, null)", name)
+                page.locator(selector).first.wait_for(state="visible")
+                samples[name] = self._action_geometry(page, selector)
+                self._capture_action_page(page, name)
+            for name, route, selector in (
+                ("cluster", "/cluster", "#refresh"),
+                ("redmine", "/redmine-agent", "#refreshBtn"),
+                ("gerrit", "/gerrit-dashboard", "#refreshBtn"),
+            ):
+                page.goto(self.base_url + route, wait_until="domcontentloaded")
+                page.locator(selector).first.wait_for(state="visible")
+                samples[name] = self._action_geometry(page, selector)
+                self._capture_action_page(page, name)
+            directory = os.getenv("GMS_UI_PREVIEW_DIR")
+            if directory:
+                (Path(directory) / "button-geometry.json").write_text(
+                    json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            for name, records in samples.items():
+                self.assertTrue(records, name)
+                for record in records:
+                    with self.subTest(page=name, label=record["label"]):
+                        self.assertEqual(record["icons"], 0, record)
+                        self.assertGreaterEqual(record["height"], 24, record)
+                        self.assertLessEqual(record["height"], 44, record)
+                        self.assertTrue(record["outlined"], record)
+                        self.assertTrue(record["filled"], record)
+                        self.assertTrue(record["fits"], record)
+        finally:
+            page.close()
+
+    @staticmethod
+    def _action_geometry(page, selector):
+        return page.locator(selector).evaluate_all("""controls => controls
+            .filter(button => button.getBoundingClientRect().width > 0 &&
+                              button.getBoundingClientRect().height > 0)
+            .map(button => {
+                const style = getComputedStyle(button);
+                const rect = button.getBoundingClientRect();
+                return {
+                    label: button.textContent.trim(),
+                    icons: button.querySelectorAll('svg, .test-action-icon').length,
+                    width: rect.width, height: rect.height,
+                    radius: style.borderTopLeftRadius,
+                    color: style.color, background: style.backgroundColor,
+                    border: style.borderTopColor,
+                    outlined: style.borderTopStyle === 'solid' && parseFloat(style.borderTopWidth) >= 1,
+                    filled: style.backgroundColor !== 'rgba(0, 0, 0, 0)',
+                    fits: button.scrollWidth <= button.clientWidth + 1,
+                    disabled: button.disabled,
+                };
+            })""")
+
+    @staticmethod
+    def _capture_action_page(page, name):
+        directory = os.getenv("GMS_UI_PREVIEW_DIR")
+        if directory:
+            target = Path(directory)
+            target.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(target / f"button-{name}-1792.png"))
