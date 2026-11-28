@@ -4,13 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>GMS更新雷达</title>
-  <link rel="stylesheet" href="/static/css/theme.css?v=20261112-purple-surfaces">
-  <link rel="stylesheet" href="/static/css/form-controls.css?v=20261128-ui-role-convergence">
-  <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-ui-role-convergence">
-  <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261128-ui-role-convergence">
+  <link rel="stylesheet" href="/static/css/theme.css?v=20261128-shared-ui">
+  <link rel="stylesheet" href="/static/css/form-controls.css?v=20261128-shared-ui">
+  <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-shared-ui">
+  <link rel="stylesheet" href="/static/css/workspace-tabs.css?v=20261128-shared-ui">
   <style>
     *{box-sizing:border-box}body{margin:0;background:var(--page-background);color:var(--text-primary);}
-    button:disabled{opacity:.45;cursor:default}button.primary{background:var(--primary-gradient)}
     main{min-width:0}h1{margin:0 0 6px}h2{margin:0 0 12px}p{margin:6px 0}.muted{color:var(--text-secondary)}
     .panel{background:var(--card-bg);border:1px solid var(--border-color);border-radius:8px;padding:16px;margin-top:16px;min-width:0}.scope,.actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.scope span{border:1px solid var(--border-color);background:var(--light-bg);border-radius:6px;padding:4px 10px}
     .status{white-space:pre-wrap;color:var(--primary-light)}#message{min-height:24px;white-space:pre-wrap}#message[data-error=true],.error{color:var(--danger-color)}
@@ -22,18 +21,18 @@
   </style>
   <!-- .modal/.modal-content/.modal-header 基础档位在 modal.css（shell 同源）；
        缺它时关闭弹框移除 .show 后元素仍按默认 display 可见。 -->
-  <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
-  <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261117-radar-fixed-footer">
-  <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-ui-role-convergence">
-<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-ui-role-convergence">
-<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261128-ui-role-convergence">
+  <link rel="stylesheet" href="/static/css/modal.css?v=20261128-shared-ui">
+  <link rel="stylesheet" href="/static/css/update-radar-settings.css?v=20261128-shared-ui">
+  <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-shared-ui">
+<link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-shared-ui">
+<link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261128-shared-ui">
   <script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller" defer></script>
   <script src="/static/js/update-radar-settings.js?v=20261117-radar-fixed-footer" defer></script>
   <script src="/static/js/workspace-tabs.js?v=20261114-unified-tabs" defer></script>
   <script src="/gms-update-radar/page.js?v=20261124-radar-period-snapshots" defer></script>
 <script src="/static/js/dialog-frame.js?v=20261117-compact-dialogs" defer></script>
-    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-ui-role-convergence">
-                        <link rel="stylesheet" href="/static/css/typography.css?v=20261128-ui-role-convergence">
+    <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-shared-ui">
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261128-shared-ui">
 </head>
 <body class="ui-standalone-controls">
 <header class="workspace-header">

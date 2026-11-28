@@ -82,15 +82,27 @@ class TypographyContractTests(unittest.TestCase):
             "shell-workspaces.css", "shared-diagrams.css",
             "inline-and-exceptions.css",
         )
-        # Asset versions change when individual typography chunks are edited.
-        # Validate all five imported paths and nonempty versions instead of
-        # pinning a stale cache-busting token in the contract itself.
+        # All UI roots and typography chunks share one cache generation.
         imports = re.findall(
             r'@import url\("/static/css/typography/([^"?]+)\?v=([A-Za-z0-9._-]+)"\);',
             css,
         )
         self.assertEqual([path for path, _version in imports], list(parts))
         self.assertEqual(css.count("@import url("), len(parts))
+        versions = {version for _, version in imports}
+        self.assertEqual(len(versions), 1)
+        roots = (*ENTRYPOINTS, "features/redmine/ui/settings.html",
+                 "features/devices/deployment/api.py", "features/devices/debug/api.py",
+                 "web/static/css/common.css")
+        for path in roots:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            refs = re.findall(
+                r'/static/css/[a-zA-Z0-9_/.\-]+\.css(?:\?v=([a-zA-Z0-9_.\-]+))?(?=["\'])',
+                source,
+            )
+            with self.subTest(path=path):
+                self.assertTrue(refs)
+                self.assertEqual(set(refs), versions)
         for part in parts:
             with self.subTest(part=part):
                 file = STYLE.parent / "typography" / part
@@ -270,7 +282,14 @@ class TypographyContractTests(unittest.TestCase):
         self.assertIn('html[data-ui-type-root="review"] button { font-size: var(--ui-type-size-small);', main)
         self.assertIn('html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-body);', main)
         self.assertIn('html[data-ui-type-root="gerrit"] .gerrit-wiki-btn { font-size: var(--ui-type-size-small); }', exceptions)
-        self.assertIn('html[data-ui-type-root="update-radar"] button { font-family: inherit; font-size: var(--ui-type-size-small); }', exceptions)
+        self.assertIn('html[data-ui-type-root] button:not(.modal-close) { font-size: var(--ui-type-size-small); }', main)
+        self.assertIn('html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-body); }', main)
+        self.assertNotIn('html[data-ui-type-root="update-radar"] button {', exceptions)
+        self.assertNotIn('html[data-ui-type-root="update-radar"] :is(input,select,textarea)', exceptions)
+        radar = (ROOT / "features/gms/radar/ui/page.html").read_text(encoding="utf-8")
+        self.assertIn('class="ui-standalone-controls"', radar)
+        self.assertNotIn('button.primary{background:', radar)
+        self.assertNotIn('button:disabled{opacity:', radar)
 
     def test_operational_copy_and_responsive_tabs_use_standard_roles(self):
         shell = (STYLE.parent / "typography/shell-layout.css").read_text(encoding="utf-8")

@@ -163,8 +163,6 @@ html[data-ui-type-root="gerrit"] :where(th) { font-weight: var(--ui-type-weight-
 
 /* features/gms/radar/ui/page.html [inline <style>] */
 html[data-ui-type-root="update-radar"] body { font: var(--ui-type-size-body)/1.6 var(--ui-type-font-sans); }
-html[data-ui-type-root="update-radar"] button { font-family: inherit; font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="update-radar"] :is(input,select,textarea) { font-family: inherit; font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="update-radar"] h1 { font-size: var(--ui-type-size-display); }
 html[data-ui-type-root="update-radar"] h2 { font-size: var(--ui-type-size-dialog); }
 html[data-ui-type-root="update-radar"] th { font-weight: var(--ui-type-weight-medium); }
