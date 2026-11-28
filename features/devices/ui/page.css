@@ -1,7 +1,6 @@
 :root{color-scheme:dark;--bg:var(--dark-bg);--panel:var(--card-bg);--panel-2:var(--light-bg);--border:var(--border-color);--text:var(--text-primary);--muted:var(--text-secondary);--blue:var(--primary-color);--green:var(--success-color);--yellow:var(--warning-color);--red:var(--danger-color);--shadow:0 12px 36px rgba(0,0,0,.25)}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--page-background);color:var(--text);}
-button{border:1px solid var(--border);border-radius:6px;background:var(--lighter-bg);color:var(--text);padding:5px 9px;cursor:pointer}
 button:hover{border-color:#59677c;background:var(--lighter-bg)}
 button:disabled,input:disabled{cursor:not-allowed;opacity:.5}
 button.primary{background:var(--primary-gradient);border-color:var(--primary-color);color:white}
@@ -44,7 +43,7 @@ h1,h2,h3,p{margin:0}
    这里把两条链的 family/size/weight 显式钉成同一组值兜底。 */
 .terminal .xterm{height:100%}.terminal .xterm-viewport{overscroll-behavior:contain}
 .input-row{margin-top:8px}.input-row input{flex:1;min-width:80px}
-input,textarea,select{width:100%;border:1px solid var(--border);border-radius:6px;background:var(--darker-bg);color:var(--text);padding:7px 9px;outline:none}
+input,textarea,select{width:100%}
 input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color) 15%, transparent)}
 .history-column{display:flex;flex-direction:column;gap:9px;padding:11px;border:1px solid var(--border);border-radius:8px;background:var(--card-bg)}
 .history-column label{display:grid;grid-template-columns:60px 1fr;align-items:center;gap:7px;color:var(--muted);}
@@ -112,6 +111,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
    JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
 :root {
+    --ui-field-bg: var(--panel2);
     --bg: #15151b;
     --panel: #1b1b23;
     --panel2: #202027;
@@ -133,7 +133,6 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
     --bad: #f06b78;
     --danger: #f06b78;
 }
-:where(button, select, input, textarea) {  border-radius: 6px; }
 :where(button):not(:disabled) { transition: color .15s, background-color .15s, border-color .15s; }
 :where(button, select, input, textarea):focus-visible {
     outline: 2px solid var(--primary); outline-offset: 2px;
@@ -153,4 +152,3 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
     background: var(--panel);
 }
 .terminal { border-color: var(--border); }
-:where(input, textarea, select) { border-color: var(--border); background: var(--panel2); }

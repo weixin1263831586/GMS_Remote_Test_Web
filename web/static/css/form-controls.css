@@ -90,16 +90,19 @@
 }
 
 /* Shared neutral controls for standalone workspaces and ordinary shell fields. */
-:where(.ui-standalone-controls) button:not(.workspace-tab,.modal-close,.password-visibility-toggle) {
+:where(.ui-standalone-controls) :where(button:not(.workspace-tab,.modal-close,.password-visibility-toggle)) {
     box-sizing: border-box; min-height: var(--ui-control-height); white-space: nowrap;
     cursor: pointer; border: 1px solid var(--border-color); border-radius: var(--ui-radius-control);
-    background: var(--lighter-bg); color: var(--text-primary); padding: 5px 10px;
+    background: var(--ui-button-bg, var(--lighter-bg)); color: var(--text-primary); padding: 5px 10px;
 }
-:where(.ui-standalone-controls) :is(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]),select,textarea) {
+:where(.ui-standalone-controls) :where(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]),select,textarea),
+.entry-field, .combo-box {
     box-sizing: border-box; min-width: 0; padding: 6px 10px; border: 1px solid var(--border-color);
-    border-radius: var(--ui-radius-control); background: var(--light-bg); color: var(--text-primary);
+    border-radius: var(--ui-radius-control); background: var(--ui-field-bg, var(--darker-bg)); color: var(--text-primary);
 }
-:where(.ui-standalone-controls) :is(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]),select) { min-height: var(--ui-control-height); }
+:where(.ui-standalone-controls) :where(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]),select) { min-height: var(--ui-control-height); }
+:where(.ui-standalone-controls) :where(button:not(.workspace-tab,.modal-close):hover:not(:disabled)) { border-color: var(--primary-light); }
+:where(.ui-standalone-controls) :where(input,select,textarea):focus-visible { outline: 2px solid var(--primary-light); outline-offset: 2px; }
 :where(.ui-standalone-controls) button.primary { background: var(--primary-strong); color: var(--text-on-accent); }
 :where(.ui-standalone-controls) button:disabled { opacity: .55; cursor: not-allowed; }
 

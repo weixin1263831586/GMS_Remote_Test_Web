@@ -20,7 +20,7 @@
     /* Modal chrome lives in /static/css/modal.css. Keep field layout only. */
     .modal-body { display:flex; flex-direction:column; gap:10px; }
     .modal-body label {   color:var(--muted); margin-bottom:2px; display:block; }
-    .modal-body input, .modal-body select, .modal-body textarea { width:100%; min-width:0; max-width:100%; padding:8px 10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px;  }
+    .modal-body input, .modal-body select, .modal-body textarea { width:100%; min-width:0; max-width:100%; }
     .redmine-reply-modal textarea { width:100%; min-height:280px; resize:vertical; padding:10px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px;  line-height:1.5;  }
     .redmine-reply-drop { width:100%; padding:18px 12px; text-align:center; cursor:pointer; border:2px dashed var(--border); border-radius:6px; background:var(--panel2); color:var(--muted);  transition:border-color .15s, background .15s; }
     .redmine-reply-drop.drag-over { border-color:#60a5fa; background:color-mix(in srgb, var(--primary-color) 12%, var(--card-bg)); color:var(--primary-light); }
@@ -461,7 +461,6 @@
     --bad: #f06b78;
     --danger: #f06b78;
 }
-:where(button, select, input, textarea) {  border-radius: 6px; }
 :where(button):not(:disabled) { transition: color .15s, background-color .15s, border-color .15s; }
 :where(button, select, input, textarea):focus-visible {
     outline: 2px solid var(--primary); outline-offset: 2px;

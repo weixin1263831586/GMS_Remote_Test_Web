@@ -174,7 +174,7 @@
 }
 :is(.modal, .modal-backdrop) .modal-content :is(button.btn-xxs, button.btn-xs, button.btn-small, button.secondary, .modal-actions > button, .modal-footer > button, .modal-buttons > button) {
     border: 1px solid var(--border-light);
-    border-radius: 7px;
+    border-radius: var(--ui-radius-control);
     background: var(--lighter-bg);
     color: var(--text-primary);
     box-shadow: none;

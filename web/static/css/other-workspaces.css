@@ -129,7 +129,7 @@
 /* ADB/VNC 动作按钮的宽度、内距与间距统一在 ui-foundations.css 定义，
    这里不再覆盖它们的 .btn-xxs，避免后加载的规则把两行宽度拆散。 */
 #page-test.page-ui-rework .vpn-btn-frame .btn-xxs {
-    min-width: 0; min-height: 29px; padding: 4px 8px;
+    min-width: 0; min-height: var(--ui-control-height-dense); padding: 4px 8px;
 }
 #page-test.page-ui-rework .test-btn-frame {
     display: flex; flex-wrap: wrap; align-items: center;
@@ -140,9 +140,9 @@
 #page-test.page-ui-rework .test-btn-frame #test-toggle-btn {
     flex: 0 0 auto;
     box-sizing: border-box;
-    width: auto;
-    min-width: 0;
-    min-height: 34px;
+    width: 110px;
+    min-width: 110px;
+    min-height: var(--ui-control-height);
     padding: 6px 14px;
     white-space: nowrap;
     line-height: 20px;
@@ -250,11 +250,6 @@
 #page-security-audit.page-ui-rework {
     --audit-web: #70a6ff; --audit-cli: #9a75f3; --audit-other: #747b93;
     --audit-edge: color-mix(in srgb, var(--primary-color) 15%, var(--border-color));
-}
-/* Preserve the shared Users/Security Audit 26px header capsule. */
-.page-ui-rework .users-view-tabs .btn-xs {
-    height:var(--ui-segmented-inner-height); min-height:var(--ui-segmented-inner-height); max-height:var(--ui-segmented-inner-height); padding:3px 9px;
-    border-radius:0; transition:none;
 }
 #page-security-audit .audit-integrity-check:focus-visible {
     outline:2px solid var(--primary-light); outline-offset:2px;

@@ -88,15 +88,6 @@ body {
 .worker-dot.up::before { background: var(--ok); }
 .worker-dot.down { color: var(--danger); border-color: var(--danger); }
 .worker-dot.down::before { background: var(--danger); }
-button {
-    border: 1px solid var(--line);
-    background: var(--panel-3);
-    color: var(--text);
-    border-radius: 4px;
-    padding: 6px 10px;
-    cursor: pointer;
-
-}
 button:hover { border-color: var(--primary); color: #fff; }
 button.primary { background:var(--primary-gradient); border-color: var(--primary); }
 button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
@@ -197,15 +188,7 @@ button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
 }
 .stack { display: grid; gap: 12px; }
 label { display: grid; gap: 5px; color: var(--muted);  }
-input, select, textarea {
-    width: 100%;
-    border: 1px solid var(--line);
-    background: var(--panel-3);
-    color: var(--text);
-    border-radius: 5px;
-    padding: 7px 9px;
-
-}
+input, select, textarea { width: 100%; }
 input:disabled, select:disabled, button:disabled {
     cursor: not-allowed;
     opacity: .48;
@@ -895,6 +878,8 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
    Scope: only color, surfaces, controls and tables; do not change tab geometry,
    JS data hooks, canvas/terminal, modal visibility or scroll ownership. */
 :root {
+    --ui-button-bg: var(--panel-3);
+    --ui-field-bg: var(--panel-3);
     --bg: #15151b;
     --panel: #1b1b23;
     --panel2: #202027;
@@ -916,7 +901,6 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
     --bad: #f06b78;
     --danger: #f06b78;
 }
-:where(button, select, input, textarea) {  border-radius: 6px; }
 :where(button):not(:disabled) { transition: color .15s, background-color .15s, border-color .15s; }
 :where(button, select, input, textarea):focus-visible {
     outline: 2px solid var(--primary); outline-offset: 2px;

@@ -161,27 +161,27 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                 <button type="button" class="modal-close" aria-label="关闭" data-click="_actCloseModal" data-a0="${modalId}">&times;</button>
             </div>
             <div class="modal-body">
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">Redmine Issue ID</label>
+                <div class="api-reply-field">
+                    <label>Redmine Issue ID</label>
                     <input type="text" id="${issueInputId}" data-redmine-issue-input placeholder="输入 Redmine Issue ID"
-                           style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); ">
+                           class="api-reply-input">
                 </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">回复内容</label>
+                <div class="api-reply-field">
+                    <label>回复内容</label>
                     <textarea id="${replyTextId}" data-redmine-reply-text rows="10" placeholder="输入回复内容..."
-                              style="width: 100%; padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--darker-bg); color: var(--text-primary); white-space: pre-wrap; resize: vertical;"></textarea>
+                              class="api-reply-text"></textarea>
                 </div>
-                <div style="margin-bottom: 16px;">
-                    <label style="display: block; margin-bottom: 6px; color: var(--text-primary);">📎 附件</label>
+                <div class="api-reply-field">
+                    <label>📎 附件</label>
                     <input type="file" id="${fileInputId}" data-redmine-files multiple
                            style="display: none;"
                            data-change="updateRedmineFileList" data-a0="${fileInputId}" data-a1="${fileListId}">
-                    <div id="${fileInputId}-drop" class="redmine-drop-zone tech-upload-zone" role="button" tabindex="0" data-keydown="_actClickById" data-key="13,32" data-prevent data-redmine-drop
+                    <div id="${fileInputId}-drop" class="redmine-drop-zone tech-upload-zone api-reply-upload" role="button" tabindex="0" data-keydown="_actClickById" data-key="13,32" data-prevent data-redmine-drop
                          data-click="_actClickById" data-a0="${fileInputId}"
-                         style="padding: 20px 14px; background: var(--secondary-bg); color: var(--text-muted); border: 2px dashed var(--border-color); border-radius: 6px; cursor: pointer; width: 100%; text-align: center; transition: all 0.2s; user-select: none;">
+                         >
                         📎 拖拽文件到此处，或点击选择文件
                     </div>
-                    <div id="${fileListId}" style="margin-top: 8px;"></div>
+                    <div id="${fileListId}" class="api-reply-files"></div>
                 </div>
                 <div class="ui-action-group api-reply-actions">
                     <button type="button" class="btn-xs" data-click="_actCloseModal" data-a0="${modalId}">取消</button>

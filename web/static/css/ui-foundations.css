@@ -76,7 +76,7 @@
   min-width: 80px;
   max-width: 80px;
   flex: 0 0 80px;
-  min-height: 29px;
+  min-height: var(--ui-control-height-dense);
   padding: 4px 3px;
   gap: 0;
   white-space: nowrap;

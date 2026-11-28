@@ -58,3 +58,8 @@
 @media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }
 
 .api-reply-actions { justify-content: flex-end; }
+
+.tech-dialog--report-reply .api-reply-field { display: grid; gap: var(--ui-spacing-xs); margin-bottom: var(--ui-spacing-sm); }
+.tech-dialog--report-reply :is(.api-reply-input,.api-reply-text) { width: 100%; }
+.tech-dialog--report-reply .api-reply-text { white-space: pre-wrap; resize: vertical; }
+.tech-dialog--report-reply .api-reply-files { margin-top: var(--ui-spacing-sm); }
