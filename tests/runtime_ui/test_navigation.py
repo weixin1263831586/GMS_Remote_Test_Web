@@ -44,7 +44,25 @@ class RuntimeNavigationTests(RuntimeUiHarness):
             expect(root.locator('.page-header-actions .users-view-tabs')).to_have_count(1)
             expect(personal).to_have_attribute('aria-selected', 'true')
             expect(panel).to_be_hidden()
+            group = root.locator('.page-header-actions .users-view-tabs')
+            def assert_tabs_geometry():
+                bounds = group.evaluate("""group => {
+                    const g = group.getBoundingClientRect();
+                    const [a, b] = [...group.querySelectorAll('[role=tab]')].map(el => el.getBoundingClientRect());
+                    return {display: getComputedStyle(group).display,
+                        height: g.height, aligned: Math.abs(a.top-b.top) <= 1,
+                        ordered: a.right <= b.left + 1,
+                        contained: a.top >= g.top-1 && b.bottom <= g.bottom+1 &&
+                                   a.left >= g.left-1 && b.right <= g.right+1};
+                }""")
+                self.assertEqual(bounds["display"], "flex", bounds)
+                self.assertAlmostEqual(bounds["height"], 26, delta=1)
+                self.assertTrue(bounds["aligned"] and bounds["ordered"] and bounds["contained"], bounds)
+            assert_tabs_geometry()
             external.click()
+            assert_tabs_geometry()
+            self.assertGreaterEqual(panel.locator('[data-kb-source-form]').bounding_box()['y'],
+                                    group.bounding_box()['y'] + group.bounding_box()['height'] - 1)
             expect(external).to_have_class(re.compile(r'\bactive\b'))
             expect(external).to_have_attribute('aria-selected', 'true')
             expect(personal).to_have_attribute('aria-selected', 'false')

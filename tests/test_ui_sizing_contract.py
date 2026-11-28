@@ -283,6 +283,11 @@ class UiSizingContractTests(unittest.TestCase):
         suite = (CSS / "common-page.css").read_text(encoding="utf-8")
         self.assertNotRegex(suite, r"\.suite-browser-filter\s*\{[^}]*width:\s*calc\(100% - 20px\)")
 
+    def test_header_segmented_tabs_all_use_public_role(self):
+        for filename in ("users.html", "security-audit.html", "notes.html"):
+            markup = (ROOT / "web/shell/pages" / filename).read_text(encoding="utf-8")
+            self.assertRegex(markup, r'<div class="users-view-tabs ui-segmented"[^>]*role="tablist"', filename)
+
     def test_workspace_sidebar_roles(self):
         for filename, selector in (
             ("workspace-panels.css", ".agent-layout.agent-layout-with-sessions"),

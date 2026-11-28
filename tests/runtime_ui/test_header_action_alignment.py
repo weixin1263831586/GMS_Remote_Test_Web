@@ -44,20 +44,27 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                                 pages.forEach(node => node.classList.toggle(
                                     'active', node === root));
                                 root.classList.add('host-workspace-ready');
-                                group.style.display = 'flex';
+                                // Reveal permission-controlled groups, without masking a missing flex role.
+                                if (oldDisplay === 'none') group.style.removeProperty('display');
                                 try {
                                     const rootBox = root.getBoundingClientRect();
                                     const actionBox = actions.getBoundingClientRect();
                                     const groupBox = group.getBoundingClientRect();
-                                    const buttons = [...group.querySelectorAll('button')]
-                                        .map(node => node.getBoundingClientRect().height)
-                                        .filter(height => height > 0);
+                                    const boxes = [...group.querySelectorAll('button')]
+                                        .map(node => node.getBoundingClientRect())
+                                        .filter(rect => rect.width > 0 && rect.height > 0);
+                                    const buttons = boxes.map(rect => rect.height);
                                     samples[name] = {
                                         top: groupBox.top - rootBox.top,
                                         right: rootBox.right - groupBox.right,
                                         actionTop: actionBox.top - rootBox.top,
                                         height: groupBox.height,
                                         buttons, count: buttons.length,
+                                        display: getComputedStyle(group).display,
+                                        segmented: group.classList.contains('ui-segmented'),
+                                        oneRow: boxes.every(rect => Math.abs(rect.top - boxes[0].top) <= 1),
+                                        contained: boxes.every(rect => rect.top >= groupBox.top - 1 && rect.bottom <= groupBox.bottom + 1 && rect.left >= groupBox.left - 1 && rect.right <= groupBox.right + 1),
+                                        nonOverlapping: boxes.every((rect, i) => i === 0 || rect.left >= boxes[i-1].right - 1),
                                         whiteSpace: getComputedStyle(group).whiteSpace,
                                         visible: getComputedStyle(group).display !== 'none',
                                     };
@@ -82,6 +89,14 @@ class HeaderActionAlignmentTests(RuntimeUiHarness):
                     with self.subTest(width=width, page=name):
                         self.assertTrue(item["visible"], item)
                         self.assertGreaterEqual(item["count"], 1, item)
+                        self.assertTrue(item["oneRow"], item)
+                        self.assertTrue(item["contained"], item)
+                        self.assertTrue(item["nonOverlapping"], item)
+                        if name in ("users", "security-audit", "notes"):
+                            self.assertTrue(item["segmented"], item)
+                            self.assertEqual(item["display"], "flex", item)
+                        if name == "notes":
+                            self.assertEqual(item["count"], 2, item)
                         self.assertAlmostEqual(item["top"], 8, delta=0.75, msg=str(item))
                         self.assertAlmostEqual(item["right"], 8, delta=0.75, msg=str(item))
                         self.assertAlmostEqual(item["actionTop"], 8,

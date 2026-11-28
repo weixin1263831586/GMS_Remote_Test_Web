@@ -1,10 +1,8 @@
 <div class="container page-content page-ui-rework" id="page-notes">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">📚</span> 个人知识库{% include 'components/page-header-actions.html' %}
-                <div class="users-view-tabs" role="tablist" aria-label="知识库视图">
+                <div class="users-view-tabs ui-segmented" role="tablist" aria-label="知识库视图">
                     <button class="btn-xs active" type="button" role="tab" aria-selected="true" data-kb-view="personal">个人知识库</button>
-                    <div>
-                        <button class="btn-xs" type="button" role="tab" aria-selected="false" data-kb-view="external">外部知识源</button>
-                    </div>
+                    <button class="btn-xs" type="button" role="tab" aria-selected="false" data-kb-view="external">外部知识源</button>
                 </div>
             {% include 'components/page-header-end.html' %}
             <div class="kb-layout ui-workspace-grid">
