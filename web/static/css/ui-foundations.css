@@ -433,6 +433,7 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     padding: var(--ui-spacing-lg) var(--ui-spacing-md);
 }
 .ui-empty-state--inline { padding: 0; text-align: inherit; }
+:where(.users-empty-message, .agent-access-empty, .table-placeholder) { color: var(--text-secondary); text-align: center; }
 :is(.ui-log-toolbar, .log-frame-header, .build-log-toolbar) {
     display: flex;
     align-items: center;
