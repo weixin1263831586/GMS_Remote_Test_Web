@@ -122,22 +122,35 @@
       const width=Math.min(190,Math.max(46,Array.from(String(edge[2])).reduce(function(px,c){
         return px + (c.codePointAt(0)>127?12:7);
       },14)));
-      const x=edge[3]-width/2,y=edge[4]-15;
-      // Narrow gaps must not produce labels painted over the actual nodes.
-      // Edge semantics remain available as a native SVG <title>.
-      const blocked=graph.nodes.some(function(node){
-        return x<node[5]+node[7] && x+width>node[5]
-          && y<node[6]+node[8] && y+21>node[6];
+      // Keep every edge label visible, relocating it only when its authored
+      // anchor intersects a node or an earlier label.
+      const anchorX=edge[3],anchorY=edge[4];
+      const offsets=[[0,0]];
+      for(let radius=8;radius<=240;radius+=8){
+        for(let dx=-radius;dx<=radius;dx+=8){
+          const dy=radius-Math.abs(dx);
+          offsets.push([dx,dy]);
+          if(dy)offsets.push([dx,-dy]);
+        }
+      }
+      const position=offsets.map(([dx,dy])=>({
+        cx:anchorX+dx,cy:anchorY+dy,
+        left:anchorX+dx-width/2,right:anchorX+dx+width/2,
+        top:anchorY+dy-15,bottom:anchorY+dy+6
+      })).find(box=>{
+        if(box.left<4||box.right>1116||box.top<4||box.bottom>graph.h-4)return false;
+        const intersects=(other,padding)=>box.left<other.right+padding
+          &&box.right>other.left-padding&&box.top<other.bottom+padding
+          &&box.bottom>other.top-padding;
+        return !graph.nodes.some(node=>intersects({
+          left:node[5],right:node[5]+node[7],top:node[6],bottom:node[6]+node[8]
+        },2))&&!labelBounds.some(other=>intersects(other,4));
       });
-      const overlap=labelBounds.some(function(box){
-        return x<box.right+5 && x+width>box.left-5
-          && y<box.bottom+3 && y+21>box.top-3;
-      });
-      if(blocked || overlap)return '';
-      labelBounds.push({left:x,right:x+width,top:y,bottom:y+21});
+      if(!position)return '';
+      labelBounds.push(position);
       return '<rect class="arch-scene-edge-pill arch-scene-edge-pill--'+edge[1]
-        +'" x="'+x.toFixed(1)+'" y="'+y+'" width="'+width+'" height="21" rx="10.5"/>'
-        +'<text class="arch-scene-edge-label" x="'+edge[3]+'" y="'+edge[4]+'">'+esc(edge[2])+'</text>';
+        +'" x="'+position.left.toFixed(1)+'" y="'+position.top+'" width="'+width+'" height="21" rx="10.5"/>'
+        +'<text class="arch-scene-edge-label" x="'+position.cx+'" y="'+position.cy+'">'+esc(edge[2])+'</text>';
     }).join('');
     return '<svg class="arch-scene-wires" xmlns="http://www.w3.org/2000/svg" width="1120" height="'+graph.h
       +'" viewBox="0 0 1120 '+graph.h+'" aria-hidden="true" focusable="false"><defs>'
