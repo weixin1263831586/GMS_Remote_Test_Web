@@ -228,9 +228,7 @@
 #tailscale-info-modal .modal-form-row > input { flex: 1; min-width: 0; }
 #tailscale-info-modal .modal-form-row > button { flex: 0 0 auto; }
 #username-detect-modal .modal-form-row label {
-    min-width: 86px;
     color: var(--text-primary);
-
 }
 /* This variant already owns four clipped corners and a custom body. */
 #route-check-dialog .route-check-actions .btn-primary {
