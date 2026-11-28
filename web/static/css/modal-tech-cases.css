@@ -14,8 +14,8 @@
 /* Creation forms: paired metadata in tool editors; simple categories stay stacked. */
 .tech-dialog--category .tech-field-card,
 .tech-dialog--ut-category .tech-field-card { min-height: 54px; }
-.tech-dialog--tool .tech-form-section,
-.tech-dialog--ut-tool .tech-form-section { display: block; }
+.tech-dialog--tool .tech-form-section:not(.tech-aligned-fields),
+.tech-dialog--ut-tool .tech-form-section:not(.tech-aligned-fields) { display: block; }
 .tech-dialog--tool .tech-section-title,
 .tech-dialog--ut-tool .tech-section-title { grid-column: 1 / -1; margin-bottom: 0; }
 .tech-dialog--tool .tech-field-card,
@@ -47,7 +47,6 @@
 .tech-dialog--add-local-suite .tech-field-card { flex-wrap: wrap; }
 .tech-dialog--add-local-suite .tech-field-card > input { width: 100%; flex-basis: 100%; }
 .tech-dialog--extract-suite .tech-field-card { margin-bottom: 12px; }
-.tech-dialog--extract-suite .tech-field-card > label { min-width: 120px; }
 /* Firmware: source and targets across the top; AOA configuration spans the width. */
 #firmware-modal > .modal-content.tech-dialog--firmware { width: min(820px,calc(100vw - 32px)); max-width: min(820px,calc(100vw - 32px)); height: auto; }
 .firmware-preflight-grid { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.15fr); gap: 12px; }
@@ -499,9 +498,6 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 #username-detect-modal .tech-form-section--username-detect .tech-field-card {
   margin: 0; gap: 12px; min-height: 65px; background: #252033;
 }
-#username-detect-modal .tech-form-section--username-detect .tech-field-card > label {
-  width: 156px; min-width: 156px;
-}
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > input {
   min-width: 0; flex: 1; width: 100%;
 }
@@ -567,7 +563,6 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   #username-detect-modal .modal-body { padding: 12px; }
   #username-detect-modal .tech-form-section--username-detect { padding: 6px; }
   #username-detect-modal .tech-form-section--username-detect .tech-field-card { flex-wrap: wrap; gap: 8px; }
-  #username-detect-modal .tech-form-section--username-detect .tech-field-card > label { flex: 1; width: auto; min-width: 0; }
   #username-detect-modal .tech-form-section--username-detect .tech-field-card > input { flex-basis: 100%; }
   #firmware-modal .firmware-preflight-grid > .tech-section { padding: 10px; }
 }
@@ -811,4 +806,8 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
     max-height: 180px;
     overflow-y: auto;
   }
+}
+
+@media (min-width: 801px) {
+  .tech-dialog--ut-tool .tech-aligned-fields > .tech-field-card:has(#ut-tool-filepath) > div { width: 100%; }
 }

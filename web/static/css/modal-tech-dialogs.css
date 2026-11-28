@@ -91,7 +91,7 @@
   border: 1px solid var(--tech-edge-soft); border-radius: 9px; background: var(--tech-panel);
 }
 .tech-dialog .tech-field-card > label:not(:has(input)) {
-  margin: 0; padding: 0 0 0 10px; min-width: 90px; width: auto;
+  margin: 0; padding: 0 0 0 10px; min-width: 0; width: auto;
   border-left: 1px solid var(--tech-edge); color: var(--text-primary);
 }
 .tech-dialog .tech-field-card > label::before { content: none !important; }
@@ -188,7 +188,6 @@
 }
 @media(max-width: 480px), (max-height:560px) {
   :is(.modal,.modal-backdrop,.auth-gate) .modal-content.tech-dialog { max-height: calc(100dvh - 16px); }
-  .tech-dialog .tech-field-card > label:not(:has(input)) { min-width: 0; }
   .tech-dialog .tech-section { padding: 14px; }
   .tech-dialog .tech-header-ticks { right: 70px; }
   .tech-dialog .tech-footer-decoration { left: 18px; width: 38%; }
@@ -245,7 +244,7 @@
   padding: 8px 10px; min-height: 44px;
 }
 .tech-dialog .tech-field-card > label:not(:has(input)) {
-  min-width: 115px;  border-left: 2px solid #ae77e7;
+  border-left: 2px solid #ae77e7;
 }
 .tech-dialog .tech-field-glyph {
   width: var(--tech-field-glyph-size); height: var(--tech-field-glyph-size); border-radius: 8px;
@@ -266,7 +265,6 @@
 .tech-dialog .tech-footer-decoration { opacity: .95; }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-close { z-index: 3; }
 @media (max-width: 800px) {
-  .tech-dialog .tech-field-card > label:not(:has(input)) { min-width: 0; }
   .tech-dialog .tech-title-glyph { width: 28px; height: 28px; }
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head) { min-height: var(--ui-modal-header-height-dense); padding: 8px 14px 13px; }
   :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog > :is(.modal-header,.modal-head,.section-head)::after { left: 16px; width: 68px; }
@@ -399,5 +397,31 @@
 @media(max-width:570px) {
   #tailscale-info-modal .tech-dialog--tailscale > .tech-dialog-footer {
     padding: 6px 20px 18px !important;
+  }
+}
+
+/* Shared horizontal forms: the longest actual label defines the aligned column.
+   Stacked cards and multi-control workspaces keep their own composition. */
+@media (min-width: 801px) {
+  .tech-dialog .tech-aligned-fields {
+    display: grid;
+    grid-template-columns: max-content fit-content(40%) minmax(0,1fr);
+    column-gap: var(--ui-spacing-sm);
+    min-width: 0;
+  }
+  .tech-dialog .tech-aligned-fields > * { grid-column: 1 / -1; }
+  .tech-dialog .tech-aligned-fields > .tech-field-card {
+    display: grid;
+    grid-template-columns: subgrid;
+    align-items: center;
+    column-gap: var(--ui-spacing-sm);
+  }
+  .tech-dialog .tech-aligned-fields > .tech-field-card > label:not(:has(input)) {
+    min-width: 0;
+    width: auto;
+    overflow-wrap: anywhere;
+  }
+  .tech-dialog .tech-aligned-fields > .tech-field-card > :is(input:not([type=hidden]),select,textarea,.password-input-wrap,.input-with-btn) {
+    width: 100%; min-width: 0; max-width: 100%;
   }
 }

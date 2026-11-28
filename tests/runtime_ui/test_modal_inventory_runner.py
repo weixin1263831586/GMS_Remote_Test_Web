@@ -93,6 +93,20 @@ GEOMETRY = r"""content => {
     }
     return false;
   };
+  // Measure the real text-to-control gap rather than just the label box.
+  // Report every visible horizontal field, including embedded workspace dialogs.
+  const labelGaps = [...content.querySelectorAll('.tech-field-card,.modal-form-row,.tech-tailscale-row,.auth-field')].flatMap(row => {
+    const label = row.querySelector(':scope > label');
+    const field = row.querySelector(':scope > input:not([type=hidden],[type=checkbox],[type=radio]),:scope > select,:scope > textarea,:scope > .password-input-wrap,:scope > .input-with-btn');
+    if (!active(label) || !active(field) || label.contains(field)) return [];
+    const range = document.createRange();
+    range.selectNodeContents(label);
+    const text = range.getBoundingClientRect(), input = rect(field);
+    if (text.width <= 0 || text.bottom <= input.top || text.top >= input.bottom || input.left < text.left) return [];
+    return [{label:label.textContent.trim(), field:field.id || field.querySelector('input')?.id || '',
+             gap:Math.round(input.left-text.right), labelWidth:Math.round(rect(label).width),
+             inputWidth:Math.round(input.width)}];
+  });
   const leaked = [...content.querySelectorAll('button,input,select,textarea,[role=button]')]
       .filter(active).filter(el => {
         const b = rect(el);
@@ -128,7 +142,7 @@ GEOMETRY = r"""content => {
     footer:footer ? {bounds:rect(footer),
       justify:getComputedStyle(footer).justifyContent,
       position:getComputedStyle(footer).position,controls} : null,
-    nestedActions,leaked,
+    nestedActions,leaked,labelGaps,
   };
 }"""
 

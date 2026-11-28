@@ -20,6 +20,42 @@ class CompactModalLayoutTests(RuntimeUiHarness):
             directory.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(directory / f'compact-{name}-{page.viewport_size["width"]}.png'), animations='disabled')
 
+    def test_horizontal_dialog_labels_fit_content_and_align(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            self.close_initial_modals(page)
+            for modal_id in ("elevate-modal", "username-detect-modal", "device-password-modal",
+                             "wifi-modal", "vpn-credential-modal", "firmware-share-password-modal",
+                             "extract-suite-modal"):
+                with self.subTest(modal=modal_id):
+                    page.set_viewport_size({"width": 1440, "height": 960})
+                    page.evaluate("id => ModalManager.open(id)", modal_id)
+                    group = page.locator(f"#{modal_id} .tech-aligned-fields")
+                    expect(group).to_be_visible()
+                    geometry = group.evaluate("""el => [...el.querySelectorAll(':scope > .tech-field-card')].map(row => {
+                      const label = row.querySelector(':scope > label');
+                      const field = row.querySelector(':scope > input:not([type=hidden]),:scope > select,:scope > .password-input-wrap');
+                      const range = document.createRange();
+                      range.selectNodeContents(label);
+                      const text = range.getBoundingClientRect();
+                      return {textRight:text.right, textWidth:text.width,
+                              labelRight:label.getBoundingClientRect().right,
+                              inputLeft:field.getBoundingClientRect().left,
+                              inputWidth:field.getBoundingClientRect().width};
+                    })""")
+                    self.assertTrue(geometry)
+                    for row in geometry:
+                        self.assertGreater(row["inputWidth"], 80)
+                        self.assertLessEqual(row["labelRight"], row["inputLeft"] + 1)
+                        self.assertAlmostEqual(row["inputLeft"], geometry[0]["inputLeft"], delta=2)
+                    longest = max(geometry, key=lambda row: row["textWidth"])
+                    self.assertLessEqual(longest["inputLeft"] - longest["textRight"], 18, geometry)
+                    self.capture(page, modal_id + "-labels")
+                    page.evaluate("id => ModalManager.close(id)", modal_id)
+        finally:
+            page.close()
+
     def test_routing_endpoints_share_a_row_and_leave_inventory_accessible(self):
         page = self.new_page()
         try:
