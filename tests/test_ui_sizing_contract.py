@@ -578,7 +578,7 @@ class UiSizingContractTests(unittest.TestCase):
     def test_removed_legacy_ui_selectors_do_not_return(self):
         cases = {
             "common.css": ("desktop-container", "vnc-placeholder", "device-scrollable-frame"),
-            "common-layout.css": ("log-progress-container", "report-failure-card-head", "dx-meta-grid", "btn-secondary"),
+            "common-layout.css": ("log-progress-container", "report-failure-card-head", "dx-meta-grid", "btn-secondary", "terminal-opened"),
             "architecture-layers.css": ("arch-layer", "arch-system-stage", "arch-legend"),
             "ui-sizing.css": ("ui-control--dense", "ui-stat-card", "ui-card-heading", "ui-nowrap"),
             "data-table-page.css": ("tabs-row",),
