@@ -124,7 +124,8 @@
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
 .tech-dialog .tech-row-action {
-  width: auto; min-height: var(--ui-control-height); height: auto; min-width: 68px; padding: 5px 12px;
+  width: var(--ui-action-reserved-width, auto); min-height: var(--ui-control-height); height: auto;
+  min-width: var(--ui-action-reserved-width, 68px); padding: 5px 12px;
     line-height: 1.4;
   color: var(--text-primary); border: 1px solid var(--border-light) !important; border-radius: 7px !important;
   background: var(--tech-panel) !important; box-shadow: inset 0 0 12px color-mix(in srgb, var(--primary-color) 12%, transparent);

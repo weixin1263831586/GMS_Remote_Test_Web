@@ -456,7 +456,7 @@ function agentAccessRenderTokens(tokens) {
         const workers = token.allowed_workers === '*' || !token.allowed_workers ? '全部 Worker' : token.allowed_workers;
         const devices = token.allowed_devices === '*' || !token.allowed_devices ? '全部设备' : token.allowed_devices;
         const revokeButton = status === 'active'
-            ? `<button class="btn-xxs btn-danger" type="button" data-agent-token-id="${agentAccessEscape(token.id)}">吊销</button>`
+            ? `<button class="btn-xxs btn-danger" data-busy-size="plain" type="button" data-agent-token-id="${agentAccessEscape(token.id)}">吊销</button>`
             : '—';
         return `
             <tr>

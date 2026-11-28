@@ -304,7 +304,7 @@ async function startApkAnalysis() {
     if (btn) {
         btn.style.display = 'inline-flex';
         btn.disabled = true;
-        btn.textContent = '⏳ 分析中...';
+        btn.textContent = '分析中';
     }
     $('apk-analysis-state').textContent = '正在反编译 APK...';
     $('apk-analysis-progress-container').style.display = 'block';
@@ -324,14 +324,14 @@ async function startApkAnalysis() {
             showToast(`分析失败: ${data.error}`, 'error');
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '🔬 开始分析';
+                btn.textContent = '开始分析';
             }
         }
     } catch (e) {
         showToast(`分析失败: ${e.message}`, 'error');
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '🔬 开始分析';
+            btn.textContent = '开始分析';
         }
     }
 }
@@ -356,7 +356,7 @@ async function pollApkStatus() {
             const btn = $('apk-btn-analyze');
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '🔬 重新分析';
+                btn.textContent = '重新分析';
             }
             return;
         }
@@ -368,7 +368,7 @@ async function pollApkStatus() {
             const btn = $('apk-btn-analyze');
             if (btn) {
                 btn.disabled = false;
-                btn.textContent = '🔬 重新分析';
+                btn.textContent = '重新分析';
             }
             return;
         }
@@ -383,8 +383,8 @@ async function pollApkStatus() {
             analyzeBtn.style.display = ['uploaded', 'error', 'analyzing'].includes(status.status) ? 'inline-flex' : 'none';
             analyzeBtn.disabled = status.status === 'analyzing';
             analyzeBtn.textContent = status.status === 'analyzing'
-                ? '⏳ 分析中...'
-                : status.status === 'error' ? '🔬 重新分析' : '🔬 开始分析';
+                ? '分析中'
+                : status.status === 'error' ? '重新分析' : '开始分析';
         }
 
         if (status.status === 'completed') {
@@ -449,7 +449,7 @@ async function pollApkStatus() {
         const btn = $('apk-btn-analyze');
         if (btn) {
             btn.disabled = false;
-            btn.textContent = '🔬 重新分析';
+            btn.textContent = '重新分析';
         }
     } finally {
         if (window.apkCurrentTaskId === taskId && window.apkPollGeneration === generation) {
@@ -512,7 +512,7 @@ async function loadApkPermissions() {
         const data = await apiCall(`/api/apk/permissions/${window.apkCurrentTaskId}`);
 
         if (!data.success) {
-            $('apk-permissions-list').innerHTML = `<div style="color: var(--danger-color); padding: 20px; text-align: center;">加载失败: ${escapeHtml(data.error)}</div>`;
+            $('apk-permissions-list').innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(data.error)}</div>`;
             return;
         }
 
@@ -520,7 +520,7 @@ async function loadApkPermissions() {
         $('apk-perm-count').textContent = permissions.length;
 
         if (permissions.length === 0) {
-            $('apk-permissions-list').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">未发现权限声明</div>';
+            $('apk-permissions-list').innerHTML = '<div class="ui-empty-state">未发现权限声明</div>';
             return;
         }
 
@@ -534,7 +534,7 @@ async function loadApkPermissions() {
             </div>`
         ).join('');
     } catch (e) {
-        $('apk-permissions-list').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(e.message)}</div>`;
+        $('apk-permissions-list').innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(e.message)}</div>`;
     }
 }
 
@@ -545,14 +545,14 @@ async function loadApkSourceTree(path = '') {
         const data = await apiCall(`/api/apk/source/${window.apkCurrentTaskId}?path=${encodeURIComponent(path)}`);
 
         if (!data.success) {
-            $('apk-source-tree').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(data.error)}</div>`;
+            $('apk-source-tree').innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(data.error)}</div>`;
             return;
         }
 
         const items = data.data.items;
 
         if (items.length === 0) {
-            $('apk-source-tree').innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-secondary);">目录为空</div>';
+            $('apk-source-tree').innerHTML = '<div class="ui-empty-state">目录为空</div>';
             return;
         }
 
@@ -570,7 +570,7 @@ async function loadApkSourceTree(path = '') {
             }
         }
     } catch (e) {
-        $('apk-source-tree').innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(e.message)}</div>`;
+        $('apk-source-tree').innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(e.message)}</div>`;
     }
 }
 

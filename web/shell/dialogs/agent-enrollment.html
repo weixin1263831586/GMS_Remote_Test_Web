@@ -68,7 +68,7 @@
             <span class="agent-access-form-hint">生成时验证管理员身份，Agent 仅获得所选权限。</span>
             <div>
                 <button class="btn-xs" type="button" data-click="agentAccessToggleCreate" data-a0="false">取消</button>
-                <button id="agent-access-create-submit" class="btn-xs btn-primary" type="submit" form="agent-access-enroll-form">生成配对码</button>
+                <button id="agent-access-create-submit" data-busy-size="long" class="btn-xs btn-primary" type="submit" form="agent-access-enroll-form">生成配对码</button>
             </div>
         </div>
 
@@ -145,7 +145,7 @@
                     </label>
                     <label class="agent-access-field">
                         <span>重新发现（可选）</span>
-                        <button id="agent-sdk-add-discover-btn" class="btn-xs" type="button" data-click="sdkConfigDiscoverRoots">发现目录</button>
+                        <button id="agent-sdk-add-discover-btn" data-busy-size="plain" class="btn-xs" type="button" data-click="sdkConfigDiscoverRoots">发现目录</button>
                         <small id="agent-sdk-add-discover-hint">服务器路径填错改动后可手动重刷下拉。</small>
                     </label>
                 </div></section>
@@ -158,8 +158,8 @@
             <span class="agent-access-form-hint">注册前会连接服务器校验路径与 git 仓库；只读检索，绝不写入远端。</span>
             <div>
                 <button class="btn-xs" type="button" data-click="sdkConfigToggleAddSdk" data-a0="false">取消</button>
-                <button id="agent-sdk-add-probe-btn" class="btn-xs" type="button" data-click="sdkConfigProbePath">校验路径</button>
-                <button id="agent-sdk-add-submit" class="btn-xs btn-primary" type="submit" form="agent-sdk-add-form">添加</button>
+                <button id="agent-sdk-add-probe-btn" data-busy-size="plain" class="btn-xs" type="button" data-click="sdkConfigProbePath">校验路径</button>
+                <button id="agent-sdk-add-submit" data-busy-size="plain" class="btn-xs btn-primary" type="submit" form="agent-sdk-add-form">添加</button>
             </div>
         </div>
     </div>
@@ -229,7 +229,7 @@
             <span class="agent-access-form-hint">保存后同步更新 SDK 检索配置与统计卡。</span>
             <div>
                 <button class="btn-xs" type="button" data-click="sdkConfigCloseEditSource">取消</button>
-                <button id="agent-sdk-edit-submit" class="btn-xs btn-primary" type="submit" form="agent-sdk-edit-form">保存修改</button>
+                <button id="agent-sdk-edit-submit" data-busy-size="plain" class="btn-xs btn-primary" type="submit" form="agent-sdk-edit-form">保存修改</button>
             </div>
         </div>
     </div>

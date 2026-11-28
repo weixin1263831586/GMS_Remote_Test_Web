@@ -596,8 +596,13 @@ function updateApiStats(apis) {
     updateApiMethodDistribution(apis);
 }
 
-function createBadge(text, colorVar, size = 'xs') {
-    return `<span style="background: var(--${colorVar}); color: white; padding: ${BADGE_PADDINGS[size]}; border-radius: 3px; font-size: ${BADGE_SIZES[size]};">${escapeHtml(text)}</span>`;
+function createBadge(text, colorVar) {
+    const tone = {
+        'danger-color': 'is-danger',
+        'info-color': 'is-info',
+        'primary-color': 'is-accent',
+    }[colorVar] || '';
+    return `<span class="ui-status ${tone}">${escapeHtml(text)}</span>`;
 }
 
 /**
@@ -733,7 +738,7 @@ function generateParamsHtml(details) {
 
         parts.push(`
             <div class="api-param-row" style="margin-bottom: 4px;">
-                <span class="ui-mono" style="font-weight: var(--ui-type-weight-semibold); color: var(--primary-color);">${escapeHtml(param.name)}</span>
+                <span class="ui-mono" data-ui-type-weight="semibold" style="color: var(--primary-color);">${escapeHtml(param.name)}</span>
                 ${typeBadge} ${requiredBadge}
                 <span style="color: var(--text-secondary); margin-left: 4px;">${escapeHtml(param.desc)}</span>
                 <span style="color: var(--text-secondary);">${escapeHtml(param.in || '')}</span>

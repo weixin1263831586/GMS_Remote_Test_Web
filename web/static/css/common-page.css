@@ -638,7 +638,6 @@ body.apk-resizing {
 #agent-model-check.btn-xxs {
     flex: 0 0 auto;
     white-space: nowrap;
-    min-width: 44px;
     padding-inline: 7px;
 
 }

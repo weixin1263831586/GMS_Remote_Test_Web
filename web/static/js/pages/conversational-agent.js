@@ -168,8 +168,7 @@ async function fetchAgentModelStatus(probe, quiet) {
     const button = $('agent-model-check');
     if (!label || !button) return;
     if (probe) {
-        button.disabled = true;
-        button.textContent = '检测中';
+        setActionButtonBusy(button, true, '检测中');
         label.textContent = '分析模型：检测中…';
         label.dataset.state = 'loading';
     }
@@ -189,8 +188,7 @@ async function fetchAgentModelStatus(probe, quiet) {
         if (probe && !quiet) showToast(`模型检测失败: ${error.message}`, 'warning');
     } finally {
         agentModelStatusLoaded = true;
-        button.disabled = false;
-        button.textContent = '检测';
+        setActionButtonBusy(button, false);
     }
 }
 

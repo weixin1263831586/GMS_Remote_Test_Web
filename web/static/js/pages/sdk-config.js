@@ -273,7 +273,7 @@ async function sdkConfigSubmitEdit(event) {
         const password = document.getElementById('agent-sdk-edit-password')?.value || '';
         if (password) payload.password = password;
     }
-    if (submit) { submit.disabled = true; submit.textContent = '保存中…'; }
+    setActionButtonBusy(submit, true, '保存中…');
     try {
         const granted = window.requestElevatedAccess
             ? await window.requestElevatedAccess(`修改 SDK 源配置：${sourceId}`)
@@ -296,7 +296,7 @@ async function sdkConfigSubmitEdit(event) {
     } catch (error) {
         showToast(`保存失败：${error.message || '未知错误'}`, 'error');
     } finally {
-        if (submit) { submit.disabled = false; submit.textContent = '保存修改'; }
+        setActionButtonBusy(submit, false);
     }
 }
 
@@ -422,7 +422,7 @@ async function sdkConfigDiscoverRootsInner() {
         showToast('请先填写编译服务器地址（user@host）', 'warning');
         return;
     }
-    if (button) { button.disabled = true; button.textContent = '发现中…'; }
+    setActionButtonBusy(button, true, '发现中…');
     if (list) {
         list.innerHTML = '<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact">发现中…</div>';
         list.dataset.count = '0';
@@ -458,7 +458,7 @@ async function sdkConfigDiscoverRootsInner() {
         if (list) list.innerHTML = `<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact is-error">发现失败：${agentAccessEscape(error.message || '')}</div>`;
         if (hint) hint.textContent = '发现失败时可直接在「手动路径兜底」输入完整路径。';
     } finally {
-        if (button) { button.disabled = false; button.textContent = '发现目录'; }
+        setActionButtonBusy(button, false);
     }
 }
 
@@ -488,7 +488,7 @@ async function sdkConfigProbePath() {
         showToast('请先选择或填写 SDK 路径', 'warning');
         return;
     }
-    if (button) { button.disabled = true; button.textContent = '校验中…'; }
+    setActionButtonBusy(button, true, '校验中…');
     if (box) box.hidden = true;
     try {
         const resp = await apiCall('/api/sdk/manage/probe', 'POST', {
@@ -512,7 +512,7 @@ async function sdkConfigProbePath() {
         }
         if (box) box.hidden = false;
     } finally {
-        if (button) { button.disabled = false; button.textContent = '校验路径'; }
+        setActionButtonBusy(button, false);
     }
 }
 
@@ -530,7 +530,8 @@ async function sdkConfigSubmitAdd(event) {
     const revision = document.getElementById('agent-sdk-add-revision')?.value?.trim() || '';
     if (type === 'ssh_git' && !target) { showToast('请填写编译服务器地址（user@host）', 'warning'); return; }
     if (!paths.length) { showToast('请先「发现目录」并勾选，或在手动路径兜底里填写', 'warning'); return; }
-    if (submit) { submit.disabled = true; submit.textContent = paths.length > 1 ? `添加中（${paths.length} 条）…` : '添加中…'; }
+    setActionButtonBusy(submit, true, '添加中…');
+    if (submit && paths.length > 1) submit.title = `正在添加 ${paths.length} 条 SDK 源`;
     try {
         const granted = window.requestElevatedAccess
             ? await window.requestElevatedAccess(`添加 SDK 源码源：${paths.join('、')}`)
@@ -593,7 +594,8 @@ async function sdkConfigSubmitAdd(event) {
     } catch (error) {
         showToast(`添加失败：${error.message || '未知错误'}`, 'error');
     } finally {
-        if (submit) { submit.disabled = false; submit.textContent = '添加'; }
+        setActionButtonBusy(submit, false);
+        if (submit) submit.removeAttribute('title');
     }
 }
 
