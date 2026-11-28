@@ -32,7 +32,7 @@
         </div>
         <!-- 控制台操作区（Redmine 同构）：会话打开后填充，随激活 Tab 切换内容。 -->
         <div id="console-toolbar" class="header-toolbar workspace-actions" hidden>
-            <span id="console-socket-status" class="socket-status status-pill offline">未连接</span>
+            <span id="console-socket-status" class="socket-status status-pill ui-status is-danger offline">未连接</span>
             <div class="btn-group">
                 <button id="console-reconnect" type="button" data-console-action="reconnect">重连</button>
                 <button id="console-pause" type="button" data-console-action="pause">暂停</button>
@@ -45,7 +45,7 @@
 
     <div id="page-notice" class="notice" hidden></div>
     <section id="ports-section" class="view-panel ui-page-edge" role="tabpanel" aria-labelledby="ports-tab">
-        <div id="ports-list" class="ports-grid"><div class="empty">正在扫描串口…</div></div>
+        <div id="ports-list" class="ports-grid"><div class="empty ui-empty-state">正在扫描串口…</div></div>
     </section>
 
     <!-- 控制台面板与 tab 由 page.js 依据打开的会话动态渲染（支持多个控制台并存）。 -->
@@ -78,6 +78,6 @@
 <script src="/static/js/shell/ui-primitives.js?v=20261112-ui-foundations"></script>
 <script src="/static/vendor/xterm/xterm.min.js"></script>
 <script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
-<script src="/devices-console/page.js?v=20261127-shared-aside"></script>
+<script src="/devices-console/page.js?v=20261128-shared-status"></script>
 </body>
 </html>
