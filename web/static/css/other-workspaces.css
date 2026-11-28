@@ -283,16 +283,8 @@
 }
 #page-security-audit .audit-stat-card .page-stat-label { order:0; }
 #page-security-audit .audit-stat-note {  line-height:1.2; color:var(--text-muted); white-space:nowrap; }
-#page-security-audit.page-ui-rework .audit-filter-bar {
-    flex-wrap: nowrap; margin: 0; padding: 10px 12px;
-}
 #page-security-audit .audit-log-filters > .combo-box { flex: 0 1 185px; min-width: 125px; max-width: 210px; }
 #page-security-audit .audit-filter-bar > .entry-field { flex: 1 1 240px; min-width: 150px; }
-#page-security-audit .audit-filter-bar .audit-toolbar-button {
-    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-    flex: 0 0 auto; min-height: var(--ui-control-height); padding: 6px 13px; white-space: nowrap;
-}
-#page-security-audit .audit-filter-bar .audit-toolbar-button[data-busy-size] { padding-inline:6px; gap:2px; }
 #page-security-audit .audit-log-panel,
 #page-security-audit .audit-side-card {
     min-width: 0; border: 1px solid var(--audit-edge); border-radius: var(--ui-radius-card);
@@ -465,9 +457,6 @@
      color: var(--text-muted);
 }
 #page-test-suites .suite-download-field { flex: 1 1 auto; min-width: 0; }
-#page-test-suites :is(#btn-download-suite, #btn-extract-suite) {
-    min-width: 90px;
-}
 #page-test-suites #btn-extract-suite {
     background: var(--lighter-bg); border: 1px solid var(--border-light);
     color: var(--text-primary);
@@ -692,7 +681,6 @@
     #page-test-suites .suite-context-actions { justify-content: flex-start; flex-wrap: wrap; }
 }
 @media (max-width: 600px) {
-    #page-test-suites .suite-download-row { flex-wrap: wrap; }
     #page-test-suites .suite-download-field { flex: 1 1 100%; }
     #page-test-suites .suite-file-table { --suite-table-cols: minmax(150px,1.7fr) 54px minmax(160px,1fr); }
     #page-test-suites .suite-file-table-head > :nth-child(2),
@@ -700,18 +688,10 @@
 }
 /* Users workspace: one record per fixed-height row, aligned with inventory and audit.
    Horizontal scrolling belongs to the table, never the whole shell. */
-#page-users .users-list-toolbar {
-    display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;
-    min-width:0; margin-bottom:10px; padding:8px 10px;
-    border:1px solid var(--border-color); border-radius:8px; background:var(--card-bg);
-}
-#page-users .users-list-filters, #page-users .users-list-actions {display:flex;align-items:center;gap:8px;min-width:0}
 #page-users .users-list-filters {flex:1 1 420px}
 #page-users #users-list-search {flex:1 1 240px;min-width:155px;max-width:420px;height:var(--ui-control-height)}
 #page-users #users-list-status-filter {flex:0 0 128px;min-width:116px;height:var(--ui-control-height)}
-#page-users .users-list-actions {flex:0 0 auto;margin-left:auto}
 #page-users #users-list-visible-count {color:var(--text-secondary);white-space:nowrap}
-#page-users #users-list-refresh {display:inline-flex;align-items:center;gap:5px;height:var(--ui-control-height);white-space:nowrap}
 #page-users :is(.users-table-wrap,.agent-access-table-wrap) {
     min-width:0;overflow:auto;
 }
@@ -757,7 +737,6 @@
 #page-users .sdk-source-table .agent-access-status-badge {
     max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
 }
-#page-users .agent-access-toolbar {gap:10px}
 #page-users .agent-access-list-label > span {overflow:hidden;text-overflow:ellipsis}
 @media(max-width:680px) {
     #page-users .users-list-filters {flex-wrap:wrap;flex-basis:100%}

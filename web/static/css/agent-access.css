@@ -1,14 +1,4 @@
 /* Agent enrollment: overview, focused configuration, and connection records. */
-#agent-access-panel,
-#sdk-config-panel {
-    gap: 14px;
-    overflow: auto;
-}
-
-#agent-access-panel > *,
-#sdk-config-panel > * { flex-shrink: 0; }
-
-.agent-access-toolbar,
 .agent-access-card-heading,
 .agent-access-form-actions,
 .agent-access-code-value,
@@ -23,7 +13,7 @@
 /* 裸文字块与公共页面外框的呼吸量：标题/说明这类无边框文字直接从
    15px 容器边贴到外框线上。只缩进文字块本身，统计卡片、表格等自带
    边框的组件保持贴边原样。 */
-.agent-access-list-label { padding-left: 8px; }
+
 #agent-access-create-toggle { flex-shrink: 0; white-space: nowrap; }
 
 /* 面板是 flex gap 容器，统计卡行的 margin-bottom（page-stat-row 模板
@@ -122,20 +112,20 @@
 .agent-access-code-next { padding-top: 14px; border-top: 1px solid var(--border-color); color: var(--text-secondary);  line-height: 1.6; }
 .agent-access-code-next .btn-xs { flex-shrink: 0; }
 
-.agent-access-list-section { display: flex; flex-direction: column; min-height: 220px; flex: 1 0 auto; }
+.agent-access-list-section { min-height: 0; }
 .agent-access-list-label {
     min-width: 0;
     /* 标题与计数说明同行（基线对齐）；窄屏放不下时自然换行。 */
     display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 4px 10px;
+    align-items: center;
+    gap: var(--ui-spacing-sm);
+    white-space: nowrap;
 }
-.agent-access-list-label > span { color: var(--text-secondary);  }
-.agent-access-list-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-access-list-label > span { color:var(--text-secondary); min-width:0; overflow:hidden; text-overflow:ellipsis; }
+
 #agent-access-search { width: 210px; min-width: 0; }
 #agent-access-status-filter { width: 104px; }
-#agent-access-refresh { min-width: 76px; white-space: nowrap; }
+
 .agent-access-table-wrap { min-height: 0; overflow: auto; }
 .agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .agent-access-table th { position: sticky; top: 0; z-index: 1; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg);   text-align: left; }
@@ -152,8 +142,6 @@
 .agent-access-token-scope-list code { display: block; margin-top: 3px; color: var(--text-secondary);  overflow-wrap: anywhere; }
 
 @media (max-width: 1100px) {
-    .agent-access-toolbar { flex-wrap: wrap; }
-    .agent-access-list-actions { flex: 1; }
     #agent-access-search { flex: 1; }
 }
 
@@ -162,8 +150,6 @@
 }
 
 @media (max-width: 600px) {
-    #agent-access-panel,
-    #sdk-config-panel { gap: 12px; }
     .agent-access-create-card,
     .agent-access-code-card { padding: 14px; }
     .agent-access-card-heading { flex-wrap: wrap; gap: 8px; }
@@ -174,7 +160,6 @@
     .agent-access-form-actions,
     .agent-access-code-next { align-items: flex-start; flex-direction: column; gap: 10px; }
     .agent-access-form-actions > div { align-self: flex-end; }
-    .agent-access-list-actions { flex-wrap: wrap; }
     #agent-access-search { flex: 1 1 100%; width: 100%; }
     #agent-access-code-result {  letter-spacing: 1px; }
 }

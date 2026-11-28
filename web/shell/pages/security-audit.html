@@ -36,7 +36,7 @@
                     </div>
                 </div>
 
-                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-log-filters" role="search" aria-label="筛选审计日志">
+                <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-log-filters" role="search" aria-label="筛选审计日志">
                     <select id="audit-source-filter" class="combo-box" aria-label="来源" data-change="loadSecurityAudit" data-a0="true">
                         <option value="">全部来源</option>
                         <option value="web">Web</option>
@@ -134,7 +134,7 @@
                         <span class="workbench-stat-copy"><span class="page-stat-label">最近记录</span><strong class="page-stat-value audit-mail-recent-value" id="audit-mail-latest">-</strong><span class="audit-stat-note">当前筛选最新记录（UTC）</span></span>
                     </div>
                 </div>
-                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-mail-filters" role="search" aria-label="筛选历史邮件">
+                <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-mail-filters" role="search" aria-label="筛选历史邮件">
                     <select id="email-outbox-channel-filter" class="combo-box" aria-label="邮件通道" data-change="loadAuditOutbox" data-a0="true">
                         <option value="">全部通道</option>
                         <option value="manual">手动发送</option>
@@ -232,7 +232,7 @@
                         <span class="workbench-stat-copy"><span class="page-stat-label">参考超龄大小</span><strong class="page-stat-value" id="audit-disk-aged">-</strong><span class="audit-stat-note">非可删除空间预估</span></span>
                     </div>
                 </div>
-                <div class="audit-filter-bar ui-panel-frame ui-toolbar audit-disk-filters" role="search" aria-label="筛选磁盘产物">
+                <div class="audit-filter-bar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter audit-disk-filters" role="search" aria-label="筛选磁盘产物">
                     <select id="audit-disk-group" class="combo-box" aria-label="产物类别" data-change="filterDiskArtifactsByControls">
                         <option value="">全部类别</option>
                         <option value="固件">固件</option>

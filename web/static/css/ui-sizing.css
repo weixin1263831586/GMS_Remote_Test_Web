@@ -68,6 +68,41 @@
 .ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
 .ui-control:is(button,select) { white-space: nowrap; }
 
+/* Standalone search, filter and action bars share the same compact frame.
+   Heading bars retain the existing 28px controls. */
+.ui-workspace-toolbar.ui-workspace-toolbar--filter {
+    flex: 0 0 auto;
+    min-height: 40px;
+    min-width: 0;
+    padding: 4px var(--ui-spacing-sm);
+    gap: var(--ui-spacing-sm);
+    flex-wrap: wrap;
+    align-items: center;
+}
+.ui-toolbar-fields, .ui-toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--ui-spacing-sm);
+    min-width: 0;
+}
+.ui-toolbar-fields { flex: 1 1 auto; flex-wrap: wrap; }
+.ui-toolbar-actions { flex: 0 0 auto; margin-inline-start: auto; flex-wrap: wrap; }
+.ui-workspace-toolbar--filter > :is(input, select, button, .ui-workspace-control),
+.ui-workspace-toolbar--filter :is(.ui-toolbar-fields, .ui-toolbar-actions) > :is(input, select, button),
+.ui-workspace-toolbar--filter :is(.ui-toolbar-fields, .suite-download-field) input,
+.ui-workspace-toolbar--filter .ui-toolbar-fields select {
+    box-sizing: border-box;
+    height: var(--ui-control-height);
+    min-height: var(--ui-control-height);
+    max-height: var(--ui-control-height);
+    margin-block: 0;
+}
+.ui-workspace-toolbar--filter button { white-space: nowrap; }
+@media (max-width: 680px) {
+    .ui-toolbar-fields { flex-basis: 100%; }
+    .ui-toolbar-actions { max-width: 100%; }
+}
+
 /* Do not reserve data-row height for structurally empty placeholder rows.
    Real loading, empty-state, editable and grouped rows contain content or controls. */
 :is(table.ui-table, table.list-table, table.users-table, table.agent-access-table, table.dept-table, table.dash-resource-table, table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))

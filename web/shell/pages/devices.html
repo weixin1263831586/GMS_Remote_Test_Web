@@ -42,8 +42,8 @@
                         <div><div class="page-stat-label">Fastboot设备</div><div class="page-stat-value" id="fastboot-devices-count">-</div><small>Fastboot 启动模式</small></div>
                     </div>
                 </div>
-                <div class="inventory-toolbar ui-panel-frame">
-                    <div class="inventory-filters" role="search" aria-label="筛选设备库存">
+                <div class="inventory-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter">
+                    <div class="inventory-filters ui-toolbar-fields" role="search" aria-label="筛选设备库存">
                         <label>系统<select id="inventory-system" data-change="filterDeviceInventory"><option value="">全部系统</option></select></label>
                         <label>连接<select id="inventory-connection" data-change="filterDeviceInventory">
                             <option value="">全部连接</option><option value="usb">USB 直连</option><option value="network">网络 ADB</option><option value="usbip">USB/IP</option><option value="adb_proxy">ADB Proxy</option><option value="unknown">未知连接</option>
@@ -56,12 +56,12 @@
                         </select></label>
                         <label class="inventory-search"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg><input id="inventory-search" type="search" aria-label="搜索设备库存" placeholder="搜索名称 / SN / IP / 主机 / 分组" data-input="filterDeviceInventory"></label>
                     </div>
-                    <div class="inventory-selection-bar">
+                    <div class="inventory-selection-bar ui-toolbar-actions">
                         <span class="inventory-selection-count">已选择 <strong id="inventory-selected-count">0</strong> 台</span>
-                        <button id="inventory-create-group" type="button" class="btn-xxs" data-click="createInventoryGroup" disabled><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#folder"></use></svg>所选设备新建分组</button>
+                        <button id="inventory-create-group" type="button" class="btn-xxs" data-click="createInventoryGroup" aria-label="所选设备新建分组" title="将所选设备新建分组" disabled>新建分组</button>
                         <button id="inventory-clear-selection" type="button" class="btn-xxs" data-click="clearInventorySelection" disabled>清除选择</button>
                         <button type="button" class="btn-xxs" data-click="resetDeviceInventoryFilters">重置筛选</button>
-                        <button type="button" class="btn-xxs inventory-refresh" data-click="loadDevicesManagement">刷新列表</button>
+                        <button type="button" class="btn-xxs inventory-refresh" data-click="loadDevicesManagement" data-busy-size="short">刷新</button>
                     </div>
                 </div>
                 <div class="devices-table-wrap list-table-wrap">
