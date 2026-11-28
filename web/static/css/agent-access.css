@@ -35,7 +35,7 @@
 .agent-access-code-card {
     padding: 18px;
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-card);
     background: var(--light-bg);
 }
 
@@ -208,11 +208,6 @@
     overflow-y: auto;
 }
 
-.agent-sdk-path-empty {
-    padding: 6px 8px;
-    color: var(--text-secondary);
-
-}
 
 .agent-sdk-path-item {
     display: grid;

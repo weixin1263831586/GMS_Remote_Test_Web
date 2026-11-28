@@ -37,7 +37,7 @@ function renderNotificationList() {
     if (!list) return;
 
     if (!state.notifications.length) {
-        list.innerHTML = '<div class="notification-empty">暂无通知</div>';
+        list.innerHTML = '<div class="notification-empty ui-empty-state">暂无通知</div>';
         updateNotificationBadge();
         return;
     }

@@ -304,7 +304,7 @@ function sdkConfigOnTypeChange() {
 function sdkConfigResetPathOptions() {
     const list = document.getElementById('agent-sdk-add-path-list');
     if (list) {
-        list.innerHTML = '<div class="agent-sdk-path-empty">请先填写服务器并按回车「发现目录」</div>';
+        list.innerHTML = '<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact">请先填写服务器并按回车「发现目录」</div>';
         list.dataset.count = '0';
     }
     const actions = document.getElementById('agent-sdk-add-path-actions');
@@ -416,7 +416,7 @@ async function sdkConfigDiscoverRootsInner() {
     }
     if (button) { button.disabled = true; button.textContent = '发现中…'; }
     if (list) {
-        list.innerHTML = '<div class="agent-sdk-path-empty">发现中…</div>';
+        list.innerHTML = '<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact">发现中…</div>';
         list.dataset.count = '0';
     }
     if (actions) actions.hidden = true;
@@ -430,7 +430,7 @@ async function sdkConfigDiscoverRootsInner() {
             candidates = Array.isArray(resp?.data?.candidates) ? resp.data.candidates : [];
         }
         if (!candidates.length) {
-            if (list) list.innerHTML = '<div class="agent-sdk-path-empty">未发现候选目录；可改用手动路径兜底</div>';
+            if (list) list.innerHTML = '<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact">未发现候选目录；可改用手动路径兜底</div>';
             if (hint) hint.textContent = '列表为空时，在「手动路径兜底」输入完整绝对路径。';
             return;
         }
@@ -447,7 +447,7 @@ async function sdkConfigDiscoverRootsInner() {
             if (hint) sdkConfigRefreshPathHint();
         }
     } catch (error) {
-        if (list) list.innerHTML = `<div class="agent-sdk-path-empty">发现失败：${agentAccessEscape(error.message || '')}</div>`;
+        if (list) list.innerHTML = `<div class="agent-sdk-path-empty ui-empty-state ui-empty-state--compact is-error">发现失败：${agentAccessEscape(error.message || '')}</div>`;
         if (hint) hint.textContent = '发现失败时可直接在「手动路径兜底」输入完整路径。';
     } finally {
         if (button) { button.disabled = false; button.textContent = '发现目录'; }

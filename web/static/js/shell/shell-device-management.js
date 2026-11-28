@@ -352,7 +352,6 @@
                 const actionDeviceId = String(device.device_id || serialNo);
                 const serialAttr = escapeIconAttr(actionDeviceId);
                 const workerAttr = escapeIconAttr(device.worker_id || workspaceLocalWorkerId());
-                const actionButtonStyle = '';
                 const releaseButton = !device.cluster_readonly && device.locked_by
                     ? `<button class="btn-xxs btn-danger-quiet device-release-action" aria-label="释放设备" data-serial="${serialAttr}" data-click="forceReleaseDeviceLock" data-r0="dataset.serial" title="强制释放该设备的平台占用锁">${GmsUi.icon('unlock')}释放</button>`
                     : '';
@@ -389,9 +388,6 @@
                 const adbShellDisabled = Boolean(shellDisabled || (!isClusterRemote && (hasNoAdb || localClaimed)));
                 const adbInspectionDisabled = Boolean(remoteInspectionDisabled || (!isClusterRemote && (hasNoAdb || localClaimedByOther)));
                 const adbControlDisabled = Boolean(remoteControlDisabled || (!isClusterRemote && (hasNoAdb || localClaimedByOther)));
-                const shellStyle = adbShellDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const remoteInspectionStyle = adbInspectionDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
-                const remoteControlStyle = adbControlDisabled ? 'opacity:.45;cursor:not-allowed;' : '';
                 const inspectionTitle = device.claimed
                     ? '设备已被测试或平台操作占用，Device Info 会在释放后可用'
                     : device.cluster_device_inspection
@@ -416,14 +412,14 @@
                     : localClaimedByOther ? '设备已被其他用户或任务占用'
                     : '智能 UI 操控：截图 + 布局元素 + 点按';
                 const shellButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="adb shell" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell" style="${actionButtonStyle}${shellStyle}"${shellDisabled}>${GmsUi.icon('terminal')}Shell</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="adb shell" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}" style="${actionButtonStyle}${shellStyle}"${adbShellDisabled ? ' disabled' : ''}>${GmsUi.icon('terminal')}Shell</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="adb shell" data-click="openClusterDeviceShell" data-r0="dataset.serial" data-r1="dataset.worker" title="仅可对具备 SSH 元数据的可用 Worker 设备打开 adb shell"${shellDisabled}>${GmsUi.icon('terminal')}Shell</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="adb shell" data-click="openDeviceShell" data-r0="dataset.serial" title="${localShellTitle}"${adbShellDisabled ? ' disabled' : ''}>${GmsUi.icon('terminal')}Shell</button>`;
                 const deviceInfoButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="device info" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${remoteInspectionDisabled}>${GmsUi.icon('info')}查看</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" aria-label="device info" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}" style="${actionButtonStyle}${remoteInspectionStyle}"${adbInspectionDisabled ? ' disabled' : ''}>${GmsUi.icon('info')}查看</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="device info" data-click="openClusterDeviceInfo" data-r0="dataset.serial" data-r1="dataset.worker" title="${inspectionTitle}"${remoteInspectionDisabled}>${GmsUi.icon('info')}查看</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" data-worker="${workerAttr}" aria-label="device info" data-click="openDeviceConfigExplorer" data-r0="dataset.serial" data-r1="dataset.worker" data-testid="device-config-open" title="${localInspectionTitle}"${adbInspectionDisabled ? ' disabled' : ''}>${GmsUi.icon('info')}查看</button>`;
                 const uiControlButton = isClusterRemote
-                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="UI 操控" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${remoteControlDisabled}>${GmsUi.icon('target')}操控</button>`
-                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="UI 操控" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}" style="${actionButtonStyle}${remoteControlStyle}"${adbControlDisabled ? ' disabled' : ''}>${GmsUi.icon('target')}操控</button>`;
+                    ? `<button class="btn-xxs" data-serial="${clusterFullIdAttr}" data-worker="${clusterWorkerAttr}" aria-label="UI 操控" data-click="openClusterDeviceUiControl" data-r0="dataset.serial" data-r1="dataset.worker" title="${controlTitle}"${remoteControlDisabled}>${GmsUi.icon('target')}操控</button>`
+                    : `<button class="btn-xxs" data-serial="${serialAttr}" aria-label="UI 操控" data-click="openUiControl" data-r0="dataset.serial" title="${localControlTitle}"${adbControlDisabled ? ' disabled' : ''}>${GmsUi.icon('target')}操控</button>`;
 
                 return `
                     <tr data-device-id="${serialAttr}" data-worker="${workerAttr}">

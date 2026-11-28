@@ -30,6 +30,7 @@
 .inventory-select-cell { text-align: center !important; }
 #devices-main-view input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--primary-color); cursor: pointer; }
 #devices-main-view .device-row-actions .btn-xxs { flex: none; width: auto; min-height: var(--ui-control-height-dense); max-height: none; padding: 3px 5px;  }
+#devices-main-view .device-row-actions .btn-xxs:disabled { opacity: .45; cursor: not-allowed; }
 #devices-main-view .device-row-actions .btn-xxs > .ui-icon { margin-right: 3px; }
 #devices-main-view .device-group-header { padding: 0; min-height: var(--ui-control-height-small); }
 .inventory-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; min-height: 40px; padding: 0 12px; color: var(--text-secondary);  }

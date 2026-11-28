@@ -202,6 +202,17 @@
 #page-notes .kb-source-table :is(th, td):last-child { text-align: right; }
 #page-notes .kb-source-actions > button { flex-shrink: 0; }
 
+/* 个人知识库导航及文档卡片。 */
+#page-notes .kb-nav-button { width: 100%; margin-bottom: var(--ui-spacing-xs); justify-content: flex-start; text-align: left; }
+#page-notes .kb-nav-node { padding-left: var(--kb-indent, 6px); }
+#page-notes :is(.kb-nav-button,.kb-doc-card).is-selected { border-color: var(--primary-color); }
+#page-notes .kb-doc-card { margin-bottom: var(--ui-spacing-sm); cursor: pointer; }
+#page-notes .kb-doc-title { margin-bottom: var(--ui-spacing-xs); }
+#page-notes .kb-doc-summary { color: var(--text-secondary); line-height: 1.5; }
+#page-notes .kb-doc-tags { display: flex; flex-wrap: wrap; gap: var(--ui-spacing-xs); margin-top: var(--ui-spacing-xs); }
+.file-browser-error { cursor: default; flex-direction: column; align-items: flex-start; gap: var(--ui-spacing-sm); }
+.file-browser-route-action { margin-top: var(--ui-spacing-xs); }
+
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
 #page-notes.page-ui-rework #kb-doc-content {
     min-height: 0; border: 0; padding: 12px;

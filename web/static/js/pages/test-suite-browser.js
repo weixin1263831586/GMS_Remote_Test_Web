@@ -582,7 +582,7 @@ function renderSuiteSearchResults(items, query) {
     if (!resultsEl) return;
 
     if (!items.length) {
-        resultsEl.innerHTML = `<div class="suite-empty" style="padding: 10px;">未找到: ${escapeHtml(query)}</div>`;
+        resultsEl.innerHTML = `<div class="suite-empty ui-empty-state ui-empty-state--compact">未找到: ${escapeHtml(query)}</div>`;
         resultsEl.style.display = 'block';
         return;
     }
@@ -657,7 +657,7 @@ async function searchSuiteFiles() {
 
     const resultsEl = $('suite-search-results');
     if (resultsEl) {
-        resultsEl.innerHTML = '<div class="suite-empty" style="padding: 10px;">搜索中...</div>';
+        resultsEl.innerHTML = '<div class="suite-empty ui-empty-state ui-empty-state--compact">搜索中...</div>';
         resultsEl.style.display = 'block';
     }
 

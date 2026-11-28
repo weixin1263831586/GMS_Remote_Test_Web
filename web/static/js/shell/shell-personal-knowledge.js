@@ -435,7 +435,7 @@
             const box = document.getElementById('kb-space-list');
             if (!box) return;
             box.innerHTML = kbState.spaces.map(sp => `
-                <button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${sp.space_id === kbState.currentSpace ? 'border-color:var(--primary-color);' : ''}" data-click="kbSelectSpace" data-a0="${kbEsc(sp.space_id)}">
+                <button class="btn-xs kb-nav-button${sp.space_id === kbState.currentSpace ? ' is-selected' : ''}" data-click="kbSelectSpace" data-a0="${kbEsc(sp.space_id)}">
                     ${kbEsc(sp.name)} <span style="color:var(--text-secondary)">(${sp.doc_count || 0})</span>
                 </button>
             `).join('');
@@ -459,7 +459,7 @@
                     const clickArg = isDoc ? kbEsc(n.doc_id) : kbEsc(n.node_id);
                     return `
                         <div>
-                            <button class="btn-xs" style="width:100%;margin-bottom:4px;text-align:left;padding-left:${6 + depth * 14}px;${active ? 'border-color:var(--primary-color);' : ''}" data-click="${click}" data-a0="${clickArg}">
+                            <button class="btn-xs kb-nav-button kb-nav-node${active ? ' is-selected' : ''}" style="--kb-indent:${6 + depth * 14}px" data-click="${click}" data-a0="${clickArg}">
                                 ${isDoc ? '📄' : '📁'} ${kbEsc(n.title)}
                             </button>
                             ${!isDoc ? render(n.node_id, depth + 1) : ''}
@@ -467,7 +467,7 @@
                     `;
                 }).join('');
             }
-            tree.innerHTML = `<button class="btn-xs" style="width:100%;margin-bottom:6px;text-align:left;${kbState.currentParent ? '' : 'border-color:var(--primary-color);'}" data-click="kbSelectFolder" data-a0="">全部文档</button>` + (render('', 0) || '<div class="suite-empty" data-ui-type-size="body" style="padding:8px;">暂无目录</div>');
+            tree.innerHTML = `<button class="btn-xs kb-nav-button${kbState.currentParent ? '' : ' is-selected'}" data-click="kbSelectFolder" data-a0="">全部文档</button>` + (render('', 0) || '<div class="ui-empty-state ui-empty-state--compact" data-ui-type-size="body">暂无目录</div>');
         }
 
         async function kbLoadDocs() {
@@ -479,7 +479,7 @@
             if (box) {
                 box.setAttribute('aria-busy', 'true');
                 if (!hadRenderedDocs) {
-                    box.innerHTML = '<div class="suite-empty" style="padding:20px;text-align:center;">加载中...</div>';
+                    box.innerHTML = '<div class="ui-empty-state">加载中...</div>';
                 }
             }
             const q = (document.getElementById('kb-search-input') || {}).value || '';
@@ -494,22 +494,22 @@
                 const docs = data.docs || data.items || [];
                 if (!box) return;
                 if (!docs.length) {
-                    box.innerHTML = '<div class="suite-empty" style="padding:28px;text-align:center;">暂无文档</div>';
+                    box.innerHTML = '<div class="ui-empty-state">暂无文档</div>';
                     kbState.docsLoaded = true;
                     return;
                 }
                 box.innerHTML = docs.map(doc => `
-                    <div class="report-failure-card" data-doc-id="${kbEsc(doc.doc_id)}" style="cursor:pointer;margin-bottom:8px;${doc.doc_id === kbState.currentDocId ? 'border-color:var(--primary-color);' : ''}" data-click="kbOpenDoc" data-a0="${kbEsc(doc.doc_id)}">
-                        <div class="kb-doc-title" style="margin-bottom:4px;">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
-                        <div class="kb-doc-summary" style="color:var(--text-secondary);line-height:1.5;">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
-                        <div style="margin-top:6px;">${(doc.tags || []).map(t => `<span class="badge">${kbEsc(t)}</span>`).join(' ')}</div>
+                    <div class="kb-doc-card ui-card${doc.doc_id === kbState.currentDocId ? ' is-selected' : ''}" data-doc-id="${kbEsc(doc.doc_id)}" data-click="kbOpenDoc" data-a0="${kbEsc(doc.doc_id)}">
+                        <div class="kb-doc-title">${doc.favorite ? '★ ' : ''}${kbEsc(doc.title || '无标题')}</div>
+                        <div class="kb-doc-summary">${kbEsc(doc.summary || kbSnippet(doc.content_md || doc.raw_content, 110))}</div>
+                        <div class="kb-doc-tags">${(doc.tags || []).map(t => `<span class="ui-status is-neutral">${kbEsc(t)}</span>`).join(' ')}</div>
                     </div>
                 `).join('');
                 kbState.docsLoaded = true;
             } catch (error) {
                 if (requestGeneration !== kbState.docsRequestGeneration) return;
                 if (hadRenderedDocs) showToast('文档列表刷新失败: ' + error.message, 'error');
-                else if (box) box.innerHTML = `<div class="suite-empty" style="padding:20px;text-align:center;">加载失败: ${kbEsc(error.message)}</div>`;
+                else if (box) box.innerHTML = `<div class="ui-empty-state is-error">加载失败: ${kbEsc(error.message)}</div>`;
             } finally {
                 if (requestGeneration === kbState.docsRequestGeneration) {
                     box?.setAttribute('aria-busy', 'false');

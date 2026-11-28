@@ -403,10 +403,10 @@ function renderFirmwareShareBrowseError(host, message) {
     const list = document.getElementById('file-browser-list');
     if (!list) return;
     const routeBtn = host
-        ? `<button class="btn-xxs" style="margin-top: 4px;" data-action="check-routing" data-host="${escapeHtml(host)}">📡 检查路由</button>`
+        ? `<button class="btn-xxs file-browser-route-action" data-action="check-routing" data-host="${escapeHtml(host)}">📡 检查路由</button>`
         : '';
     list.innerHTML = `
-        <div class="file-browser-item" style="cursor: default; flex-direction: column; align-items: flex-start; gap: 6px;">
+        <div class="file-browser-item file-browser-error">
             <div style="color: var(--danger-color);">⚠️ 无法加载远端固件目录</div>
             <div class="file-browser-error-host" style="color: var(--text-secondary);">主机 ${escapeHtml(host || '')}：${escapeHtml(message || '')}</div>
             <div class="file-browser-error-help" style="color: var(--text-muted);">请确认主机可达且 SSH 凭据正确；若仍失败可关闭后重试。</div>

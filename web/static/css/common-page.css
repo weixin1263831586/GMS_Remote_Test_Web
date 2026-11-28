@@ -531,7 +531,7 @@ body.apk-resizing {
     text-align: center;
     padding: 22px;
     border: 1px dashed var(--border-color);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-card);
     background: rgba(255, 255, 255, 0.02);
 }
 

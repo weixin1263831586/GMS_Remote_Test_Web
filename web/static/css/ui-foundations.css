@@ -147,8 +147,6 @@ button > .ui-icon:last-child:first-child { margin-right: 0; }
 .ui-status.is-info { --status-color: var(--info-color, #6aa6ff); }
 .ui-status.is-accent { --status-color: var(--primary-color, #8b74e8); }
 .ui-status .ui-icon { width: 13px; height: 13px; }
-.btn-xxs, .btn-xs, .btn-small { box-shadow: none;  }
-.btn-xxs:hover, .btn-xs:hover, .btn-small:hover { transform: none; box-shadow: none; }
 .btn-danger-quiet {
     color: var(--danger-color, #f06b78);
     background: color-mix(in srgb, var(--danger-color, #f06b78) 6%, transparent);
@@ -432,6 +430,8 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     text-align: center;
     padding: var(--ui-spacing-lg) var(--ui-spacing-md);
 }
+.ui-empty-state.ui-empty-state--compact { padding: var(--ui-spacing-sm); }
+.ui-empty-state.is-error { color: var(--danger-color); }
 .ui-empty-state.ui-empty-state--inline { padding: 0; text-align: inherit; }
 :is(.users-empty-message, .agent-access-empty, .table-placeholder) { color: var(--text-secondary); text-align: center; }
 :is(.ui-log-toolbar, .log-frame-header, .build-log-toolbar) {

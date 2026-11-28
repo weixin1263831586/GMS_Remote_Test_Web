@@ -249,6 +249,7 @@ select option {
     background: var(--light-bg);
     color: #fff;
     transition: color .15s ease, border-color .15s ease, background-color .15s ease;
+    box-shadow: none;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -273,6 +274,8 @@ select option {
 }
 
 .btn-xxs:hover, .btn-xs:hover, .btn-small:hover {
+    transform: none;
+    box-shadow: none;
     background: var(--lighter-bg);
     border-color: var(--primary-light);
 }
@@ -1469,12 +1472,6 @@ select option {
     color: var(--text-muted);
 }
 
-.notification-empty {
-    padding: 28px 12px;
-    text-align: center;
-    color: var(--text-secondary);
-
-}
 
 /* ==================== Scrollbar ==================== */
 ::-webkit-scrollbar {
