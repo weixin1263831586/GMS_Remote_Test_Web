@@ -145,9 +145,6 @@
 .agent-access-table tbody tr:hover { background: color-mix(in srgb, var(--primary-color) 4%, transparent); }
 .agent-token-id,
 .agent-token-secondary { display: inline; margin-left: 8px; color: var(--text-secondary);  line-height: 1.5; white-space: nowrap; }
-.agent-token-status { display: inline-block; padding: 3px 8px; border-radius: 5px; color: var(--success-color); background: color-mix(in srgb, var(--success-color) 10%, transparent);  white-space: nowrap; }
-.agent-token-status.expired { color: var(--warning-color); background: color-mix(in srgb, var(--warning-color) 10%, transparent); }
-.agent-token-status.revoked { color: var(--text-secondary); background: var(--darker-bg); }
 .agent-token-scope-link { border: 0; padding: 0; background: none; color: var(--primary-light);  cursor: pointer; }
 .agent-token-scope-link:hover { text-decoration: underline; }
 .agent-access-token-scope-list { padding-left: 18px;  }
@@ -185,33 +182,10 @@
 
 /* ==================== SDK 源码源面板（添加SDK / 路径校验） ==================== */
 
-.agent-access-status-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 999px;
+.agent-access-status-badge { cursor: help; }
 
 
-    white-space: nowrap;
-    cursor: help;
-}
 
-.agent-access-status-badge.ok {
-    background: rgba(46, 125, 50, 0.12);
-    color: #2e7d32;
-}
-
-.agent-access-status-badge.bad {
-    background: rgba(198, 40, 40, 0.12);
-    color: #c62828;
-}
-
-/* SDK 源后台校验进行中（pending/stale）：中性色，与 ok/bad 明确区分。 */
-.agent-access-status-badge.pending {
-    background: rgba(120, 120, 120, 0.12);
-    color: #616161;
-}
 
 #agent-sdk-add-probe-result {
     margin-top: 12px;
