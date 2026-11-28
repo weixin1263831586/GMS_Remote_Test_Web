@@ -101,7 +101,7 @@
                             <span id="agent-access-list-count">仅显示接入凭据信息，不展示原始 Token。</span>
                         </div>
                         <div class="agent-access-list-actions ui-toolbar-actions">
-                            <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">创建配对码</button>
+                            <button id="agent-access-create-toggle" data-busy-size="long" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">创建配对码</button>
                             <button id="agent-access-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">刷新</button>
                         </div>
                     </div>
@@ -126,14 +126,14 @@
             <div id="sdk-config-panel" class="ui-workspace-stack" style="display: none;">
                 <!-- 统计卡模板与用户列表/Agent 接入一致；卡片按 Android 版本由 sdkConfigRenderStats 动态生成。 -->
                 <div class="agent-stats page-stat-row" id="agent-sdk-stat-row"></div>
-                <section class="agent-access-list-section" aria-label="已配置的 SDK 源码源">
+                <section class="agent-access-list-section ui-workspace-stack" aria-label="已配置的 SDK 源码源">
                     <div class="agent-access-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter">
                         <div class="agent-access-list-label">
                             <h3>已配置的 SDK 源码源</h3>
                             <span id="agent-sdk-sources-count">分析 Redmine 问题时的只读源码取证来源（本机 / 编译服务器 / OpenGrok）。</span>
                         </div>
                         <div class="agent-access-list-actions ui-toolbar-actions">
-                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">添加SDK</button>
+                            <button id="agent-sdk-sources-add" data-busy-size="plain" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">添加SDK</button>
                             <button id="agent-sdk-sources-refresh" data-busy-size="short" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el">刷新</button>
                         </div>
                     </div>

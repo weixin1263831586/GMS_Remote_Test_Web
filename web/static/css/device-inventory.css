@@ -4,13 +4,12 @@
 #devices-main-view .page-stat-row { margin: 0; }
 .inventory-stat .page-stat-value { color: var(--text-primary); }
 .inventory-stat small { display: block; color: var(--text-muted);  margin-top: 3px; line-height: 1.2; }
-.inventory-filters { flex: 1 1 690px; flex-wrap: nowrap; }
+.inventory-filters { flex: 1 1 680px; flex-wrap: nowrap; }
 .inventory-filters label { display:flex; flex: 1 1 112px; align-items:center; gap:4px; min-width:100px; color:var(--text-secondary); white-space:nowrap; }
 .inventory-filters :is(input, select) { min-width:0; width:100%; padding: 0 8px; border:1px solid var(--border-color); border-radius:var(--ui-radius-control); background:var(--darker-bg); color:var(--text-primary); }
 .inventory-filters .inventory-search { position:relative; flex: 2 1 190px; min-width:160px; }
 .inventory-search > .ui-icon { position: absolute; left: 9px; color: var(--text-muted); }
 .inventory-filters .inventory-search input { padding-left: 29px; }
-.inventory-selection-bar { flex: 0 0 auto; }
 .inventory-selection-count { white-space: nowrap; color: var(--text-secondary);  }
 .inventory-selection-count strong { color: var(--primary-light); font-variant-numeric: tabular-nums; }
 

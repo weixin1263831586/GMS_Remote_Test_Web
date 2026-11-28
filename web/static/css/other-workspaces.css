@@ -422,7 +422,6 @@
 }
 @media (max-width: 800px) {
     /* Match the desktop selector specificity so narrow screens can wrap controls. */
-    #page-security-audit.page-ui-rework .audit-filter-bar { flex-wrap: wrap; }
     #page-security-audit .audit-side-panels { grid-template-columns: minmax(0,1fr); }
     #page-security-audit .audit-log-filters > .combo-box { flex: 1 1 140px; }
     #page-security-audit .audit-filter-bar > .entry-field { flex-basis: 100%; }
@@ -689,8 +688,8 @@
 /* Users workspace: one record per fixed-height row, aligned with inventory and audit.
    Horizontal scrolling belongs to the table, never the whole shell. */
 #page-users .users-list-filters {flex:1 1 420px}
-#page-users #users-list-search {flex:1 1 240px;min-width:155px;max-width:420px;height:var(--ui-control-height)}
-#page-users #users-list-status-filter {flex:0 0 128px;min-width:116px;height:var(--ui-control-height)}
+#page-users #users-list-search {flex:1 1 240px;min-width:155px;max-width:420px}
+#page-users #users-list-status-filter {flex:0 0 128px;min-width:116px}
 #page-users #users-list-visible-count {color:var(--text-secondary);white-space:nowrap}
 #page-users :is(.users-table-wrap,.agent-access-table-wrap) {
     min-width:0;overflow:auto;
@@ -737,9 +736,7 @@
 #page-users .sdk-source-table .agent-access-status-badge {
     max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
 }
-#page-users .agent-access-list-label > span {overflow:hidden;text-overflow:ellipsis}
 @media(max-width:680px) {
-    #page-users .users-list-filters {flex-wrap:wrap;flex-basis:100%}
-    #page-users #users-list-search {max-width:none}
+    #page-users :is(#users-list-search, #agent-access-search) {max-width:none}
     #page-users .users-list-actions {width:100%;justify-content:space-between}
 }

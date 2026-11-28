@@ -16,10 +16,6 @@
 
 #agent-access-create-toggle { flex-shrink: 0; white-space: nowrap; }
 
-/* 面板是 flex gap 容器，统计卡行的 margin-bottom（page-stat-row 模板
-   为非 flex 容器自带）会被叠加成 24px；清零后节奏为 14px。 */
-#agent-access-panel .page-stat-row,
-#sdk-config-panel .page-stat-row { margin-bottom: 0; }
 
 .agent-access-create-card,
 .agent-access-code-card {
@@ -112,19 +108,18 @@
 .agent-access-code-next { padding-top: 14px; border-top: 1px solid var(--border-color); color: var(--text-secondary);  line-height: 1.6; }
 .agent-access-code-next .btn-xs { flex-shrink: 0; }
 
-.agent-access-list-section { min-height: 0; }
 .agent-access-list-label {
     min-width: 0;
-    /* 标题与计数说明同行（基线对齐）；窄屏放不下时自然换行。 */
     display: flex;
     align-items: center;
     gap: var(--ui-spacing-sm);
     white-space: nowrap;
 }
+.agent-access-list-label > h3 { flex-shrink:0; }
 .agent-access-list-label > span { color:var(--text-secondary); min-width:0; overflow:hidden; text-overflow:ellipsis; }
 
-#agent-access-search { width: 210px; min-width: 0; }
-#agent-access-status-filter { width: 104px; }
+#agent-access-search { flex:1 1 240px; min-width:155px; max-width:420px; }
+#agent-access-status-filter { flex:0 0 128px; min-width:116px; }
 
 .agent-access-table-wrap { min-height: 0; overflow: auto; }
 .agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }

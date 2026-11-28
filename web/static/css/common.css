@@ -943,18 +943,6 @@ body {
     text-align: center;
 }
 
-.audit-filter-bar {
-    display: grid;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 10px;
-}
-#audit-main-view > .audit-filter-bar {
-    grid-template-columns: 120px 140px minmax(180px, 1fr) auto auto;
-}
-#audit-outbox-panel > .audit-filter-bar {
-    grid-template-columns: 130px 120px minmax(180px, 1fr) auto auto;
-}
 #email-outbox-all-users-label {
 
     white-space: nowrap;

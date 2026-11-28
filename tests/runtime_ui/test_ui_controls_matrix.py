@@ -260,3 +260,71 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                             self.assertTrue(state["fits"], item)
         finally:
             page.close()
+
+
+    def test_shared_filter_toolbars_use_one_desktop_row(self):
+        page = self.new_page()
+        samples = {}
+        try:
+            self.goto_shell(page)
+            page.evaluate("() => { state.elevated = true; state.elevatedUntil = Date.now() + 300000; }")
+            targets = (
+                ("users", "#users-main-view .users-list-toolbar"),
+                ("users", "#agent-access-panel .agent-access-toolbar"),
+                ("users", "#sdk-config-panel .agent-access-toolbar"),
+                ("devices", ".inventory-toolbar"),
+                ("api-docs", ".api-search-toolbar"),
+                ("security-audit", ".audit-log-filters"),
+                ("notes", "[data-kb-source-form]"),
+                ("test-suites", ".suite-download-row"),
+            )
+            for width, height in ((1792, 900), (1440, 900), (390, 844)):
+                page.set_viewport_size({"width": width, "height": height})
+                for name, selector in targets:
+                    page.evaluate("(name) => switchPage(name, null)", name)
+                    # Display the requested local UI fixture without invoking privileged
+                    # mutations or external data sources.
+                    page.evaluate("""({name,selector}) => {
+                        if (name === 'users') {
+                            for (const id of ['users-main-view','agent-access-panel','sdk-config-panel']) {
+                                const panel = document.getElementById(id);
+                                panel.style.display = selector.startsWith('#'+id) ? 'flex' : 'none';
+                            }
+                        }
+                        if (name === 'notes') {
+                            document.querySelector('#page-notes .kb-layout').style.display = 'none';
+                            document.querySelector('[data-kb-external]').hidden = false;
+                        }
+                    }""", {"name":name,"selector":selector})
+                    bar = page.locator(selector).first
+                    bar.wait_for(state="visible")
+                    result = bar.evaluate("""bar => {
+                        const box = bar.getBoundingClientRect();
+                        const controls = [...bar.querySelectorAll('input:not([type=checkbox]), select, button')]
+                            .filter(el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
+                        const rects = controls.map(el => el.getBoundingClientRect());
+                        const centers = rects.map(r => (r.top+r.bottom)/2);
+                        return {shared:bar.classList.contains('ui-workspace-toolbar--filter'),
+                            height:box.height,padding:getComputedStyle(bar).padding,
+                            controls:rects.map(r=>r.height),
+                            oneRow: Math.max(...centers)-Math.min(...centers)<=1,
+                            contained:rects.every(r=>r.left>=box.left-1 && r.right<=box.right+1)};
+                    }""")
+                    samples[f"{width}/{selector}"] = result
+                    with self.subTest(width=width, selector=selector):
+                        self.assertTrue(result["shared"], result)
+                        self.assertTrue(result["controls"], result)
+                        self.assertTrue(result["contained"], result)
+                        self.assertTrue(all(abs(h-32)<=1 for h in result["controls"]), result)
+                        if width >= 1440:
+                            self.assertTrue(result["oneRow"], result)
+                    if os.getenv("GMS_UI_PREVIEW_DIR") and width == 1792:
+                        target=Path(os.environ["GMS_UI_PREVIEW_DIR"])
+                        target.mkdir(parents=True,exist_ok=True)
+                        label=selector.split()[0].strip("#.[]").replace("data-kb-source-form","external-sources")
+                        page.screenshot(path=str(target / f"filter-toolbar-{name}-{label}.png"))
+            if os.getenv("GMS_UI_PREVIEW_DIR"):
+                (Path(os.environ["GMS_UI_PREVIEW_DIR"]) / "filter-toolbar-geometry.json").write_text(
+                    json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")
+        finally:
+            page.close()
