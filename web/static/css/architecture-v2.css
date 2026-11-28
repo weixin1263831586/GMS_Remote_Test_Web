@@ -159,18 +159,6 @@
   margin:0 12px 12px;border-color:#3d3854;border-radius:10px;
   background:radial-gradient(ellipse 70% 65% at 48% 95%,rgba(79,62,179,.13),transparent),#14141f;
 }
-.architecture-v2 .topology svg g[data-node]>rect{
-  stroke-width:2;
-  filter:drop-shadow(0 0 7px rgba(99,102,241,.20));
-}
-.architecture-v2 .topology svg g[data-node]:hover>rect{
-  fill:#242645;filter:drop-shadow(0 0 10px rgba(145,110,255,.38));
-}
-.architecture-v2 .topology svg g[data-source]>path{
-  stroke-width:2.3;stroke-linecap:round;
-  filter:drop-shadow(0 0 2px rgba(87,178,255,.34));
-}
-.architecture-v2 .topology svg text{paint-order:stroke;stroke:#151623;stroke-width:1px;stroke-linejoin:round}
 .architecture-v2 :is(.arch-v2-mini,.arch-v2-map-scroll,.arch-v2-svg-frame) :focus-visible{outline:2px solid #b99dff;outline-offset:2px}
 @media(max-width:1370px){
   .architecture-v2 .arch-v2-platform-layout{grid-template-columns:minmax(0,1fr)}

@@ -381,15 +381,6 @@
 #route-check-dialog .ping-result:not(:empty) {
     margin-top: 14px;
 }
-.btn-secondary {
-    background: var(--light-bg);
-    color: var(--text-secondary);
-    border: 1px solid var(--border-color);
-}
-.btn-secondary:hover {
-    background: var(--lighter-bg);
-    border-color: var(--border-light);
-}
 .ping-result {
     min-height: 100px;
 }

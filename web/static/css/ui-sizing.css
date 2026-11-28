@@ -45,15 +45,8 @@
     --ui-radius-control: 6px;
     --ui-radius-card: 8px;
 }
-/* Opt-in semantic primitives for new surfaces. Existing components consume
-   the same tokens in their owning styles, avoiding late global overrides. */
+/* Shared control and workspace roles used by current renderers. */
 .ui-control { box-sizing: border-box; min-height: var(--ui-control-height); }
-.ui-control--dense { min-height: var(--ui-control-height-dense); }
-.ui-control--small { min-height: var(--ui-control-height-small); }
-.ui-control--large { min-height: var(--ui-control-height-large); }
-.ui-control--icon { min-height: var(--ui-control-height-icon); }
-.ui-control--dialog { min-height: var(--ui-control-height-dialog); }
-.ui-control--touch { min-height: var(--ui-touch-target-height); }
 .ui-toolbar { display: flex; align-items: center; gap: var(--ui-spacing-sm); min-width: 0; }
 .ui-workspace-toolbar {
     box-sizing: border-box;
@@ -72,10 +65,6 @@
     padding-block: 2px;
     margin-block: 0;
 }
-.ui-card-heading { min-height: var(--ui-card-heading-height); display: flex; align-items: center; }
-.ui-stat-card { min-height: var(--ui-stat-height); }
-.ui-stat-card--compact { min-height: var(--ui-stat-height-compact); }
-.ui-nowrap { white-space: nowrap; min-width: 0; }
 .ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
 .ui-control:is(button,select) { white-space: nowrap; }
 

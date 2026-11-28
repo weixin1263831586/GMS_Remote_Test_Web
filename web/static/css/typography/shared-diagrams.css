@@ -132,11 +132,6 @@ html[data-ui-type-root="shell"] #review-login-modal .modal-content input { font-
 /* web/static/css/architecture-layers.css */
 html[data-ui-type-root="architecture"] body { font-family: var(--ui-type-font-sans); }
 html[data-ui-type-root="architecture"] h2 { font-size: var(--ui-type-size-page); }
-html[data-ui-type-root="architecture"] .card h3 { font-size: var(--ui-type-size-section); }
-html[data-ui-type-root="architecture"] .card p,
-html[data-ui-type-root="architecture"] .card li { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="architecture"] .topology svg { font-family: var(--ui-type-font-sans); }
-html[data-ui-type-root="architecture"] .note { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-heading h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-hint { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="architecture"] .architecture-v2 .arch-v2-intro { font-size: var(--ui-type-size-body); }

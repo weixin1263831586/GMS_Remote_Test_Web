@@ -5,42 +5,7 @@ body { margin: 0; background: var(--page-background); color: var(--text);  }
 .arch-pane { min-width: 0; }
 section { margin: 12px 0; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: linear-gradient(145deg, color-mix(in srgb, var(--card-bg) 98%, transparent), color-mix(in srgb, var(--card-bg) 78%, transparent)); }
 h2 { margin: 0 0 12px;  color: var(--blue); }
-.grid { display: grid; gap: 10px; }
-.roles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-.workers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.sources { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.card { padding: 12px; border: 1px solid var(--line); border-top: 3px solid var(--blue); border-radius: 10px; background: color-mix(in srgb, var(--darker-bg) 72%, transparent); }
-.card.agent, .card.access { border-top-color: var(--arch-access); }
-.card.worker { border-top-color: var(--arch-worker); }
-.card.source { border-top-color: var(--arch-resource); }
-.card h3 { margin: 0 0 8px;  }
-.card p, .card li { color: var(--muted);  line-height: 1.6; }
-.card ul { margin: 0; padding-left: 18px; }
-.topology { overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: color-mix(in srgb, var(--darker-bg) 50%, var(--panel)); }
-.topology svg {
-  display: block; width: 100%; min-width: 1040px; max-width: 1240px; height: auto; margin: 0 auto;
-  grid-column: 1; grid-row: 1;
-
-}
-.note { margin-top: 12px; padding: 12px; border-left: 3px solid var(--amber); color: var(--muted); background: color-mix(in srgb, var(--amber) 6%, var(--panel));  line-height: 1.7; }
 code { color: var(--green); }
-@media (max-width: 980px) {
-  .roles, .workers, .sources { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 620px) {
-  .roles, .workers, .sources { grid-template-columns: 1fr; }
-}
 
-/* One font, role palette and line vocabulary for HTML layers and all SVG views. */
-:root {
-
-  --arch-access: #a78bfa;
-  --arch-control: #38bdf8;
-  --arch-worker: #fbbf24;
-  --arch-resource: #34d399;
-  --arch-data: #38bdf8;
-  --arch-command: #a78bfa;
-  --arch-text: var(--text-primary);
-  --arch-node: var(--darker-bg);
-}
+:root { --arch-text: var(--text-primary); }
 
