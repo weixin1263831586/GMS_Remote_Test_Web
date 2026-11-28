@@ -209,8 +209,7 @@ class TypographyContractTests(unittest.TestCase):
         required = (
             (shell, 'html[data-ui-type-root="shell"] .adb-proxy-assignments { font-size: var(--ui-type-size-body); }'),
             (shell, 'html[data-ui-type-root="shell"] .page-header-actions select { font-size: var(--ui-type-size-body); }'),
-            (shell, 'html[data-ui-type-root="shell"] .list-table th { font-size: var(--ui-type-size-small); }'),
-            (shell, 'html[data-ui-type-root="shell"] .users-table th { font-size: var(--ui-type-size-small); }'),
+            (pages, 'html[data-ui-type-root] table :is(th, td) { font-size: var(--ui-type-size-small); }'),
             (shell, 'html[data-ui-type-root="shell"] .btn-terminal { font-size: var(--ui-type-size-small);'),
             (shell, 'html[data-ui-type-root="shell"] .tools-add-category { font-size: var(--ui-type-size-small);'),
             (diagrams, '.device-routing-notes { font-size: var(--ui-type-size-body); }'),
@@ -223,6 +222,11 @@ class TypographyContractTests(unittest.TestCase):
             with self.subTest(rule=rule):
                 self.assertIn(rule, stylesheet)
         self.assertNotIn('.page-header-actions :is(button, select)', shell)
+        for selector in (".list-table th", ".users-table th"):
+            self.assertNotIn(
+                f'html[data-ui-type-root="shell"] {selector} {{ font-size:',
+                shell,
+            )
         weekly = (ROOT / "web/static/js/shell/weekly-report.js").read_text(encoding="utf-8")
         self.assertNotRegex(weekly, r"\bfont-(?:size|weight)\s*:")
         self.assertIn('data-ui-type-size=', weekly)

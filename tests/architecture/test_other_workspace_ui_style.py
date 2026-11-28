@@ -47,8 +47,7 @@ def test_shell_style_bundle_keeps_all_links_adjacent() -> None:
 
 def test_kpis_preserve_existing_metric_ids_and_actions() -> None:
     expected = {
-        # users 页两个视图共用 page-stat-card 模板：用户列表 3 张 +
-        # Agent 接入 3 张（agent-token-*-count），同页共 6 个图标。
+        # 用户列表与 Agent 接入各有三个固定指标；SDK 统计卡动态生成。
         "users": ("total-users-count", "active-users-count", "testing-users-count",
                   "agent-token-total-count", "agent-token-active-count",
                   "agent-token-inactive-count"),
@@ -63,10 +62,23 @@ def test_kpis_preserve_existing_metric_ids_and_actions() -> None:
     }
     for page, ids in expected.items():
         source = (SHELL / "pages" / f"{page}.html").read_text(encoding="utf-8")
-        assert source.count('class="workbench-stat-icon"') == len(ids), page
+        sdk_placeholder_count = 1 if page == "users" else 0
+        assert source.count('class="workbench-stat-icon"') == len(ids) + sdk_placeholder_count, page
         for field in ids:
             assert source.count(f'id="{field}"') == 1, (page, field)
     users = (SHELL / "pages" / "users.html").read_text(encoding="utf-8")
+    sdk_row = re.search(r'<div\b[^>]*\bid="agent-sdk-stat-row"[^>]*>', users)
+    assert sdk_row is not None
+    assert "page-stat-row" in sdk_row.group()
+    assert "ui-kpi-row--dynamic" in sdk_row.group()
+    assert 'aria-busy="true"' in sdk_row.group()
+    sdk_placeholder = users[sdk_row.end():users.index("</section>", sdk_row.end())]
+    assert sdk_placeholder.count('class="workbench-stat-icon"') == 1
+    assert 'class="page-stat-card workbench-stat"' in sdk_placeholder
+    sdk_js = (ROOT / "web/static/js/pages/sdk-config.js").read_text(encoding="utf-8")
+    assert 'class="page-stat-card workbench-stat"' in sdk_js
+    assert 'class="workbench-stat-icon"' in sdk_js
+    assert 'class="page-stat-label"' in sdk_js
     # 统计卡为纯展示（与设备/审计页一致）：不允许点击筛选处理器；
     # 旧专属统计卡模板（agent-access-stat）与 intro 区已删除。
     assert 'setUsersStatusFilter' not in users
