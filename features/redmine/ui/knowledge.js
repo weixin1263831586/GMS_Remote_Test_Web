@@ -269,7 +269,7 @@ async function draftReply(issueId, matureCaseId) {
     const data = await api(`/api/redmine-agent/issues/${issueId}/draft-reply`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(matureCaseId ? {mature_case_id: matureCaseId} : {})});
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${data.source==='mature_case'?'成熟案例 #'+(data.mature_case_id||''):'相似工单'} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       <textarea id="replyDraftArea" rows="14" style="width:100%">${esc(data.reply_draft||'')}</textarea>
-      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
+      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
 }
@@ -285,7 +285,7 @@ async function draftAgentReply(issueId, matureCaseId) {
     const body = `<div class="muted" style="margin-bottom:6px">Redmine ${renderRedmineIssueLink(issueId, {stopPropagation: false})} · 来源: ${esc(data.source || '-')} · 模块 ${esc(data.module||'-')} ${data.error_signature?'/ '+esc(data.error_signature):''}</div>
       ${data.patch_direction ? `<div class="field"><div class="field-label">补丁方向</div>${renderFormattedContent(data.patch_direction, 'field-content')}</div>` : ''}
       <textarea id="replyDraftArea" rows="16" style="width:100%">${esc(data.reply_draft||'')}</textarea>
-      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">📋 复制</button></div>`;
+      <div style="margin-top:8px"><button data-click="copyReplyDraft" data-r0="el">复制</button></div>`;
     setKnowledgeBody(body);
   } catch(e){ setKnowledgeBody(`<div class="muted">失败: ${esc(e.message)}</div>`); }
 }

@@ -224,7 +224,7 @@ function renderIssueCard(item) {
 
     <div class="knowledge-actions">
       <button class="ka-btn primary" data-click="agentReplyDraft" data-a0="${item.issue_id}" data-r1="el" title="复用报告分析风格生成 Redmine 回复草稿、根因和补丁方向">✉️ Redmine回复</button>
-      <button class="ka-btn" data-click="refreshIssueMetadata" data-a0="${item.issue_id}" title="只刷新Redmine历史回复和附件元数据，不下载附件">🔄 刷新附件元数据</button>
+      <button class="ka-btn" data-click="refreshIssueMetadata" data-a0="${item.issue_id}" title="只刷新Redmine历史回复和附件元数据，不下载附件">刷新附件元数据</button>
       <button class="ka-btn" data-click="toggleIssueWorkbench" data-a0="${item.issue_id}" title="展开相似工单、历史回复和附件解析摘要">🧩 展开依据</button>
       <button class="ka-btn" data-click="saveIssueToWiki" data-a0="${item.issue_id}" title="把该工单存入 Wiki「Redmine问题沉淀」分类，并建立外链">📥 存为Wiki</button>
       <button class="ka-btn" data-click="navigateFromRedmineIssue" data-a0="reports" data-a1="${item.issue_id}" title="保留工单上下文并打开测试报告">📊 关联报告</button>

@@ -43,7 +43,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-packages">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-pkg-filter" placeholder="过滤包名或路径…" data-input="dcfgScheduleFilterPkg">
-                        <button id="dcfg-pkg-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDevicePackagesF"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        <button id="dcfg-pkg-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDevicePackagesF">刷新</button>
                         <span id="dcfg-pkg-stat"></span>
                     </div>
                     <div id="dcfg-pkg-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -52,7 +52,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-features">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-feat-filter" placeholder="过滤特性名…" data-input="dcfgScheduleFilterFeat">
-                        <button id="dcfg-feat-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceFeatures"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        <button id="dcfg-feat-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceFeatures">刷新</button>
                         <span id="dcfg-feat-stat"></span>
                     </div>
                     <div id="dcfg-feat-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -61,7 +61,7 @@
                 <div class="dcfg-tab" id="dcfg-tab-props">
                     <div class="dcfg-toolbar">
                         <input type="text" id="dcfg-prop-filter" placeholder="过滤属性名或值…" data-input="dcfgScheduleFilterProp" class="dcfg-filter-input">
-                        <button id="dcfg-prop-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceProps"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        <button id="dcfg-prop-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceProps">刷新</button>
                         <span id="dcfg-prop-stat"></span>
                     </div>
                     <div id="dcfg-prop-results" class="dcfg-empty">点击「刷新」加载</div>
@@ -69,9 +69,9 @@
                 <!-- ===== Tab: overrides (RRO config override) ===== -->
                 <div class="dcfg-tab" id="dcfg-tab-overrides">
                     <div class="dcfg-toolbar dcfg-ovr-toolbar">
-                        <button id="dcfg-ovr-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceOverrides"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        <button id="dcfg-ovr-refresh" class="btn-xxs dcfg-refresh-action" data-click="loadDeviceOverrides">刷新</button>
                         <button class="btn-xxs btn-primary" data-click="dcfgApplyOverrides">⚡ 应用(编译+推送+重启)</button>
-                        <button class="btn-xxs" data-click="dcfgRevertAll"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#back"></use></svg> 全部撤销(删除+重启)</button>
+                        <button class="btn-xxs" data-click="dcfgRevertAll">全部撤销(删除+重启)</button>
                         <button class="btn-xxs" id="dcfg-ovr-disable-verity" data-click="dcfgToggleVerity" data-a0="disable" title="关闭 dm-verity（apply 前的一次性步骤，需重启）"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#unlock"></use></svg> 关闭verity</button>
                         <button class="btn-xxs" id="dcfg-ovr-enable-verity" data-click="dcfgToggleVerity" data-a0="enable" title="恢复 dm-verity（验证启动，需重启）"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 恢复verity</button>
                         <span id="dcfg-ovr-status-summary" class="dcfg-stat"></span>

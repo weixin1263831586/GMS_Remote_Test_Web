@@ -672,7 +672,7 @@ async function loadProjectDashboard(force) {
   try {
     await loadStatsConfig();
     if (!projectProfiles().length) {
-      box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" data-click="showAddProjectModal">＋ 添加项目</button></div>';
+      box.innerHTML = '<div class="muted" style="padding:20px">暂无项目看板配置。<button style="margin-left:10px" data-click="showAddProjectModal">添加项目</button></div>';
       box.dataset.loaded = 'true';
       return;
     }

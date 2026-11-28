@@ -1761,7 +1761,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     html += `
             <div class="modal-buttons tech-dialog-actions"><span class="tech-footer-decoration" aria-hidden="true"></span>
                 <button type="button" class="btn-xs" data-click="closeAIAnalysisModal" data-a0="${modalId}">关闭</button>
-                <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs">📋 复制分析报告</button>
+                <button data-click="copyAIAnalysis" data-a0="${modalId}" class="btn-xs">复制分析报告</button>
             </div>
             </div>
         </div>
