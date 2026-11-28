@@ -125,5 +125,22 @@ class ApiCatalogBrowserTests(RuntimeUiHarness):
             page.wait_for_timeout(400)
             self.assertGreater(page.locator("#api-docs-table-body tr").count(), 0)
             self.assertLessEqual(page.locator("#api-docs-table-body tr").count(), 20)
+            for query in ("__no_api_matches_fixture__", "", "/api/agent"):
+                page.locator("#api-search-input").fill(query)
+                page.wait_for_timeout(400)
+                rows = page.locator("#api-docs-table-body tr")
+                self.assertGreater(rows.count(), 0)
+                self.assertLessEqual(rows.count(), 20)
+                self.assertEqual(rows.evaluate_all("""rows => rows.filter(row =>
+                    !row.textContent.trim() && !row.querySelector('button,input,svg,a')).length"""), 0)
+                if query == "__no_api_matches_fixture__":
+                    self.assertEqual(rows.count(), 1)
+                    self.assertEqual(rows.first.locator("td").get_attribute("colspan"), "5")
+            page.evaluate("switchPage('users', null)")
+            page.evaluate("switchPage('api-docs', null)")
+            self.assertEqual(page.locator("#api-docs-table-body tr").evaluate_all(
+                """rows => rows.filter(row => !row.textContent.trim()
+                    && !row.querySelector('button,input,svg,a')).length"""
+            ), 0)
         finally:
             page.close()
