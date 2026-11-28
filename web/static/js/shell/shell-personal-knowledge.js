@@ -654,8 +654,8 @@
             const versions = data.versions || [];
             const info = document.getElementById('kb-side-info');
             if (!info) return;
-            info.innerHTML = `<div data-ui-type-weight="semibold" style="margin-bottom:8px;">版本历史</div>` + (versions.length
-                ? versions.map(version => `<div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;padding-bottom:6px;border-bottom:1px solid var(--border-color);">
+            info.innerHTML = `<div data-ui-type-weight="semibold" class="kb-history-heading">版本历史</div>` + (versions.length
+                ? versions.map(version => `<div class="kb-history-row">
                     <span style="flex:1;">v${version.version_no} · ${kbEsc(version.created_at)}<br>${kbEsc(version.title)}</span>
                     <button class="btn-xs" data-version-id="${kbEsc(version.version_id)}" data-click="kbRestoreVersion" data-r0="dataset.versionId">恢复</button>
                   </div>`).join('')
@@ -747,13 +747,13 @@
                         ${Number.isInteger(step.new_evidence) ? ' · 新证据 ' + step.new_evidence : ''}</div>`).join('')}
                     </details>` : '';
                 const sources = contexts.length ? `
-                    <div data-ui-type-weight="semibold" style="margin-top:10px;margin-bottom:6px;">来源</div>
+                    <div data-ui-type-weight="semibold" class="kb-evidence-heading">来源</div>
                     ${contexts.map((ctx, i) => {
                         const title = '[' + (ctx.evidence_id || i + 1) + '] ' + (ctx.title || '无标题');
                         const heading = ctx.doc_id
                             ? `<button class="btn-xs" data-click="kbOpenDoc" data-a0="${kbEsc(ctx.doc_id)}">${kbEsc(title)}</button>`
                             : `<strong>${kbEsc(title)}</strong>`;
-                        return `<details style="border:1px solid var(--border-color);border-radius:6px;padding:6px;margin-bottom:6px;">
+                        return `<details class="kb-evidence-detail">
                             <summary>${heading}</summary>
                             <div style="color:var(--text-secondary);white-space:pre-wrap;overflow-wrap:anywhere;">${kbEsc(ctx.snippet || '')}</div>
                             <div style="color:var(--text-secondary);overflow-wrap:anywhere;">${kbEsc(ctx.reference || '')} · ${kbEsc(ctx.source_revision || '')}</div>

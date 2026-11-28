@@ -308,6 +308,19 @@ button[data-busy-size="long"] { --ui-action-reserved-width: var(--ui-action-widt
     .ui-workspace-grid--aside-persistent { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* Shared trend chart surface; data-specific graph and axes stay local. */
+.ui-dashboard .trend-panel {
+    background: var(--panel, var(--card-bg));
+    border: 1px solid var(--border, var(--border-color));
+    border-radius: var(--ui-radius-card);
+    padding: var(--ui-spacing-md);
+    min-height: 180px;
+    display: flex;
+    flex-direction: column;
+    box-shadow: none;
+}
+.ui-dashboard .trend-panel > :is(h2,h3) { flex-shrink: 0; line-height: 30px; }
+
 /* Standard panel heading and distribution chart geometry. */
 .ui-panel-heading {
     box-sizing: border-box;

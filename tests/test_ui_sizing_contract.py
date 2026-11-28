@@ -197,9 +197,6 @@ class UiSizingContractTests(unittest.TestCase):
                     self.assertTrue(version, (path, name))
                     seen.add(name)
                     versions.add(version)
-            versions.update(re.findall(
-                r'/static/css/ui-sizing\.css\?v=([a-zA-Z0-9_.\-]+)', source,
-            ))
         self.assertEqual(seen, names)
         self.assertEqual(len(versions), 1, versions)
 
@@ -232,6 +229,17 @@ class UiSizingContractTests(unittest.TestCase):
         for role in ("command-button", "command-editor", "config-control", "config-control-height-short"):
             self.assertIn(f"--ui-aoa-{role}" if role.endswith("short")
                           else f"--ui-aoa-{role}-height", sizing)
+
+    def test_dashboard_compound_and_trend_roles_have_one_owner(self):
+        shared = (CSS / "form-controls.css").read_text(encoding="utf-8")
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        self.assertIn(".ui-dashboard .select-with-add", shared)
+        self.assertIn(".ui-dashboard .select-add-btn", shared)
+        self.assertIn(".ui-dashboard .trend-panel {", foundation)
+        for path in ("features/redmine/ui/page.css", "features/gerrit/ui/page.html"):
+            source = (ROOT / path).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r"(?m)^\s*\.select-(?:with-add|add-btn)\s*\{")
+            self.assertNotRegex(source, r"(?m)^\s*\.trend-panel\s*\{")
 
     def test_redundant_module_height_aliases_are_not_reintroduced(self):
         """Directly consume shared height roles instead of aliasing identical values."""

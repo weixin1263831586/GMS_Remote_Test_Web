@@ -1705,7 +1705,7 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
     if (data.root_cause) {
         html += `
             <div style="background: color-mix(in srgb, var(--danger-color) 12%, transparent); border-left: 4px solid var(--danger-color); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 8px; color: var(--danger-color);">🎯 根本原因</div>
+                <div class="ai-report-copy-text ai-report-card ai-report-root-heading">🎯 根本原因</div>
                 <div class="ai-report-copy-text ai-report-body" style="color: var(--text-color); line-height: 1.6;">${escapeHtml(data.root_cause)}</div>
             </div>
         `;
@@ -1713,8 +1713,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.analysis) {
         html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">📊 详细分析</div>
+            <div class="ai-report-section ui-card">
+                <div class="ai-report-copy-text ai-report-card ai-report-section-heading">📊 详细分析</div>
                 <div class="ai-report-copy-text ai-report-small" style="line-height: 1.8; white-space: pre-wrap; word-break: break-word;">${escapeHtml(data.analysis)}</div>
             </div>
         `;
@@ -1722,12 +1722,12 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.suggestions && data.suggestions.length > 0) {
         html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">💡 解决建议</div>
+            <div class="ai-report-section ui-card">
+                <div class="ai-report-copy-text ai-report-card ai-report-section-heading">💡 解决建议</div>
                 <div style="display: flex; flex-direction: column; gap: 10px;">
                     ${data.suggestions.map((suggestion, idx) => `
                         <div style="display: flex; gap: 10px; align-items: flex-start;">
-                            <span class="ai-report-index" style="background: var(--primary-gradient); color: var(--text-on-accent); width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0;">${idx + 1}</span>
+                            <span class="ai-report-index">${idx + 1}</span>
                             <span class="ai-report-body" style="line-height: 1.6; color: var(--text-color);">${escapeHtml(suggestion)}</span>
                         </div>
                     `).join('')}
@@ -1738,8 +1738,8 @@ function displayAIAnalysis(data, testName, errorMessage = '') {
 
     if (data.related_docs && data.related_docs.length > 0) {
         html += `
-            <div style="background: var(--light-bg); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div class="ai-report-copy-text ai-report-card" style="font-weight: var(--ui-type-weight-semibold); margin-bottom: 12px;">📚 相关文档</div>
+            <div class="ai-report-section ui-card">
+                <div class="ai-report-copy-text ai-report-card ai-report-section-heading">📚 相关文档</div>
                 <div style="display: flex; flex-direction: column; gap: 8px;">
                     ${data.related_docs.map(doc => {
                         const docUrl = safeReportExternalUrl(doc.url);

@@ -381,9 +381,9 @@ function renderAuditDetailBlock(title, content, options = {}) {
     const isJson = options.json !== false;
     const text = isJson ? formatAuditJson(content) : String(content || '-');
     return `
-        <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
-            <div class="audit-detail-block-title" style="margin-bottom: 8px; color: var(--text-primary);">${escapeHtml(title)}</div>
-            <pre class="audit-detail-block-code" style="margin: 0; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; line-height: 1.45; color: var(--text-secondary);">${escapeHtml(text)}</pre>
+        <div class="audit-detail-block">
+            <div class="audit-detail-block-title">${escapeHtml(title)}</div>
+            <pre class="audit-detail-block-code ui-log-content">${escapeHtml(text)}</pre>
         </div>
     `;
 }
@@ -483,7 +483,7 @@ async function showSecurityAuditDetail(auditId) {
         `;
     } catch (error) {
         if (generation !== securityAuditDetailRequestGeneration) return;
-        body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
+        body.innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 
@@ -675,9 +675,9 @@ function closeOutboxDetailModal() {
 
 function renderOutboxDetailField(label, value) {
     return `
-        <div style="display: grid; grid-template-columns: 96px 1fr; gap: 6px; padding: 5px 0; border-bottom: 1px dashed var(--border-color); font-size: var(--ui-type-size-small);">
-            <div style="color: var(--text-secondary);">${escapeHtml(label)}</div>
-            <div style="color: var(--text-primary); word-break: break-all;">${value}</div>
+        <div class="audit-detail-field">
+            <div class="audit-detail-label">${escapeHtml(label)}</div>
+            <div class="audit-detail-value">${value}</div>
         </div>
     `;
 }
@@ -703,7 +703,7 @@ async function showOutboxDetail(emailId) {
             ? renderAuditDetailBlock('失败原因', entry.error, { json: false })
             : '';
         body.innerHTML = `
-            <div style="background: var(--light-bg); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; margin-bottom: 10px;">
+            <div class="audit-detail-block">
                 ${renderOutboxDetailField('记录 ID', `<span style="user-select: all;">${escapeHtml(entry.id || '')}</span>`)}
                 ${renderOutboxDetailField('时间 (UTC)', escapeHtml(formatOutboxTime(entry.created_at)))}
                 ${renderOutboxDetailField('通道', escapeHtml(AUDIT_OUTBOX_CHANNEL_LABELS[entry.channel] || entry.channel || '-'))}
@@ -722,7 +722,7 @@ async function showOutboxDetail(emailId) {
         `;
     } catch (error) {
         if (generation !== outboxDetailRequestGeneration) return;
-        body.innerHTML = `<div style="color: var(--danger-color); padding: 20px;">加载失败: ${escapeHtml(error.message)}</div>`;
+        body.innerHTML = `<div class="ui-empty-state is-error">加载失败: ${escapeHtml(error.message)}</div>`;
     }
 }
 

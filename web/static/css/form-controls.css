@@ -173,6 +173,21 @@
 }
 
 
+/* Shared department selector with an inline add action. */
+.ui-dashboard .select-with-add { position: relative; display: inline-flex; align-items: center; }
+.ui-dashboard .select-with-add select { padding-inline-end: 28px; min-width: var(--ui-select-add-min-width, 0); }
+.ui-dashboard .select-add-btn {
+    position: absolute; inset-inline-end: 2px; top: 50%; transform: translateY(-50%);
+    background: none; border: 0; color: var(--text-secondary);
+    padding: 0 6px; line-height: 1; cursor: pointer;
+    height: var(--ui-control-height-icon); min-width: 22px;
+}
+.ui-dashboard .select-add-btn:hover { color: var(--text-primary); background: transparent; }
+@media (max-width: 560px) {
+    .ui-dashboard .select-with-add select { padding-inline-end: calc(var(--ui-touch-target-height) + 4px); }
+    .ui-dashboard .select-add-btn { height: var(--ui-touch-target-height); min-width: var(--ui-touch-target-height); }
+}
+
 /* Compact actions inside settings sections, not dialog footers. */
 .settings-action-row {
     display: flex;

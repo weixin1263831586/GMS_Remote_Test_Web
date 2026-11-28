@@ -79,10 +79,6 @@
     .redmine-advanced-sync-body { display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding:0 10px 10px; }
     .redmine-advanced-sync-body input { height:var(--ui-control-height-dense); width:180px; min-width:150px; background:var(--panel2); color:var(--text); border:1px solid var(--border); border-radius:5px; padding:0 8px;  }
     .redmine-advanced-sync-body button { height:var(--ui-control-height-dense);  }
-    .select-with-add { position:relative; display:inline-flex; align-items:center; }
-    .select-with-add select { padding-right:26px; }
-    .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted);  padding:0 5px; line-height:1; cursor:pointer; height:var(--ui-control-height-icon); min-width:20px; }
-    .select-add-btn:hover { color:var(--text); background:transparent; }
 
     /* Issue cards */
     .issue-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:var(--ui-spacing-md); margin-bottom:var(--ui-spacing-sm); background:var(--card-bg); }
@@ -172,8 +168,7 @@
     .dashboard-summary-controls { display:flex; align-items:center; gap:8px; margin-left:auto; flex-wrap:wrap; min-height:30px; }
     .dashboard-summary-meta {  min-height:30px; display:flex; align-items:center; }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
-    .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:12px; min-height:180px; display:flex; flex-direction:column; }
-    .trend-panel h3 { margin:0;  flex-shrink:0; line-height:30px; }
+    .trend-panel h3 { margin:0; }
     .trend-title-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:10px; min-height:30px; }
     .trend-start-btn { width:30px; min-width:30px; padding:0; background:var(--lighter-bg); color:var(--muted); }
     .trend-start-btn:hover { color:var(--text); }
@@ -487,7 +482,7 @@
 
 /* Redmine：不改变现有七个 tab / 工单/晨报数据视图。 */
 
-:where(.panel, .issue-card, .trend-panel) {
+:where(.panel, .issue-card) {
     background: var(--panel); border: 1px solid var(--border);
     border-radius: var(--ui-radius-card);
 }

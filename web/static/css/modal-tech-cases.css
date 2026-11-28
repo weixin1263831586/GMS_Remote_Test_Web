@@ -814,3 +814,17 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
 @media (min-width: 801px) {
   .tech-dialog--ut-tool .tech-aligned-fields > .tech-field-card:has(#ut-tool-filepath) > div { width: 100%; }
 }
+
+/* Shared audit and mail evidence detail layout. */
+.audit-detail-block { background: var(--light-bg); border: 1px solid var(--border-color); border-radius: var(--ui-radius-control); padding: 10px; margin-bottom: 10px; }
+.audit-detail-block-title { margin-bottom: var(--ui-spacing-sm); color: var(--text-primary); }
+.audit-detail-block-code { margin: 0; max-height: 220px; word-break: break-word; line-height: 1.45; color: var(--text-secondary); }
+.audit-detail-field { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 6px; padding: 5px 0; border-bottom: 1px dashed var(--border-color); }
+.audit-detail-label { color: var(--text-secondary); }
+.audit-detail-value { color: var(--text-primary); word-break: break-all; }
+
+/* AI report presentation is a reading surface, not an ordinary data table. */
+.tech-dialog--report-ai .ai-report-section { background: var(--light-bg); border: 0; padding: var(--ui-spacing-lg); margin-bottom: var(--ui-spacing-lg); }
+.tech-dialog--report-ai .ai-report-section-heading { margin-bottom: var(--ui-spacing-md); }
+.tech-dialog--report-ai .ai-report-root-heading { margin-bottom: var(--ui-spacing-sm); color: var(--danger-color); }
+.tech-dialog--report-ai .ai-report-index { background: var(--primary-gradient); color: var(--text-on-accent); width: var(--ui-control-height-icon); height: var(--ui-control-height-icon); border-radius: 50%; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }

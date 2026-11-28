@@ -966,3 +966,9 @@ body.apk-resizing {
 .ui-ctrl-el.hover-soft:hover {
     background: var(--hover-bg, rgba(0, 0, 0, 0.04));
 }
+
+/* Knowledge history and evidence reading cards. */
+.kb-history-heading { margin-bottom: var(--ui-spacing-sm); }
+.kb-history-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--border-color); }
+.kb-evidence-heading { margin-top: 10px; margin-bottom: 6px; }
+.kb-evidence-detail { border: 1px solid var(--border-color); border-radius: var(--ui-radius-control); padding: 6px; margin-bottom: 6px; }

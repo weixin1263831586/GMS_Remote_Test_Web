@@ -21,22 +21,17 @@
     #query { width:clamp(180px, 24vw, 320px); min-width:180px; }
     #queryBtn:disabled { cursor:wait; opacity:.7; }
     #owner { width:clamp(180px, 18vw, 260px); min-width:180px; }
-    .select-with-add { position:relative; display:inline-flex; align-items:center; }
-    .select-with-add select { padding-right:28px; min-width:180px; }
-    .select-add-btn { position:absolute; right:2px; top:50%; transform:translateY(-50%); background:none; border:0; color:var(--muted);  padding:0 6px; line-height:1; cursor:pointer; height:var(--ui-control-height-icon); min-width:22px; }
-    .select-add-btn:hover { color:var(--text); background:transparent; }
     .tab-content { display:none; }
     .tab-content.active { display:block; }
     .stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px, 1fr)); gap:var(--ui-spacing-sm); }
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
-    .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:12px; min-height:180px; display:flex; flex-direction:column; }
-    .trend-panel h2, .list-section h2 { margin:0 0 10px;  }
+    :root { --ui-select-add-min-width: 180px; }
+.trend-panel h2, .list-section h2 { margin:0 0 10px;  }
     .dept-section-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
     .dept-section-head h2 { margin:0; }
     .dept-hint {  }
-    .trend-panel h2 { flex-shrink:0; line-height:30px; }
     .trend-body { overflow-y:auto; max-height:330px; flex:1; }
     .trend-body::-webkit-scrollbar { width:6px; }
     .trend-body::-webkit-scrollbar-track { background:var(--panel2); border-radius:3px; }
@@ -91,7 +86,7 @@
     #routeCheckModal .modal-body { display:block; }
     #routeCheckModal .modal-header h3 { margin:0;   }
     @media (max-width:800px) {  input { min-width:180px; width:100%; } .header-toolbar { flex-wrap:wrap; } .ui-dashboard .header-toolbar .filter-bar, .ui-dashboard .header-toolbar .btn-group { flex-wrap:wrap; } }
-    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  .select-add-btn { height:40px; min-width:40px; } .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
+    @media (max-width:560px) { .trend-grid { grid-template-columns:minmax(0,1fr); } .form-grid { grid-template-columns:1fr; } .field.full { grid-column:auto; } .modal-actions { flex-direction:column; } .modal-actions button { width:100%; }  .trend-start-btn { width:40px; min-width:40px; min-height:40px; } .modal-close { width:40px; height:40px; min-width:40px; min-height:40px; } }
     @media (max-height:560px) { .modal { align-items:stretch; } .modal-content { max-height:calc(100dvh - 16px); } }
 
 /* Agent/Device Inventory design alignment for isolated iframe documents.
@@ -133,7 +128,7 @@
 
 /* Gerrit 保留已有各视图/列表/对话框交互，只对齐公共视觉。 */
 
-:where(.trend-panel, .wrap, .dept-table-wrap) {
+:where(.wrap, .dept-table-wrap) {
     background: var(--panel); border-color: var(--border); border-radius: 8px; box-shadow: none;
 }
 :where(table) th { background: var(--panel2); color: var(--muted); }

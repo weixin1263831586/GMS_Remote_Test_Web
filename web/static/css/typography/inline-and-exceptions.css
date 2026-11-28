@@ -137,7 +137,6 @@ html[data-ui-type-root="gerrit"] .header-title { font-size: var(--ui-type-size-p
 html[data-ui-type-root="gerrit"] select,
 html[data-ui-type-root="gerrit"] input { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="gerrit"] button { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="gerrit"] .select-add-btn { font-size: var(--ui-type-size-section); }
 html[data-ui-type-root="gerrit"] .stat-card .label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="gerrit"] .trend-panel h2,
 html[data-ui-type-root="gerrit"] .list-section h2 { font-size: var(--ui-type-size-card); }
