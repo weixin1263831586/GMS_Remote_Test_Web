@@ -260,8 +260,7 @@
     outline:2px solid var(--primary-light); outline-offset:2px;
 }
 #page-security-audit .audit-stats.page-stat-row {
-    margin:0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
-    flex:0 0 auto;
+    display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
 }
 #page-security-audit .audit-stat-card { position: relative; overflow: hidden; }
 #page-security-audit .audit-stat-primary { --audit-accent: #a57df2; }

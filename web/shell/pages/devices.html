@@ -18,7 +18,7 @@
                     <button id="aoa-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="aoaViewToggle" data-a0="true">AOA工作台</button>
                 </div>
             {% include 'components/page-header-end.html' %}
-            <div id="devices-main-view">
+            <div id="devices-main-view" class="ui-workspace-stack">
                 <div id="devices-scope-hint"></div>
                 <div class="page-stat-row">
                     <div class="page-stat-card inventory-stat">
@@ -64,7 +64,7 @@
                         <button type="button" class="btn-xxs inventory-refresh" data-click="loadDevicesManagement" data-busy-size="short">刷新</button>
                     </div>
                 </div>
-                <div class="devices-table-wrap list-table-wrap">
+                <div class="devices-table-wrap list-table-wrap ui-workspace-content ui-workspace-panel--scroll">
                     <table class="list-table device-management-table">
                         <colgroup><col style="width:30px"><col style="width:115px"><col style="width:115px"><col style="width:84px"><col style="width:100px"><col style="width:100px"><col style="width:92px"><col style="width:92px"><col style="width:114px"><col style="width:106px"><col style="width:70px"><col style="width:246px"></colgroup>
                         <thead><tr>

@@ -251,6 +251,17 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertEqual(disk.count("ui-toolbar-search--grow"), 3)
         self.assertEqual(disk.count("ui-workspace-stack"), 3)
 
+    def test_device_inventory_inherits_stack_spacing(self):
+        markup = (ROOT / "web/shell/pages/devices.html").read_text(encoding="utf-8")
+        self.assertIn('id="devices-main-view" class="ui-workspace-stack"', markup)
+        self.assertIn('devices-table-wrap list-table-wrap ui-workspace-content ui-workspace-panel--scroll', markup)
+        source = (CSS / "device-inventory.css").read_text(encoding="utf-8")
+        for _, selector, body, line in _css_leaf_rules(source):
+            if selector.strip() in ("#devices-main-view", "#devices-main-view:not([hidden])",
+                                     "#devices-main-view > * + *", "#devices-main-view > *",
+                                     "#devices-main-view .devices-table-wrap"):
+                self.assertNotRegex(body, r"(?:^|;)\s*(?:margin(?:-[\w-]+)?|gap|display|flex(?:-[\w-]+)?|background)\s*:", (line, selector))
+
     def test_workspace_sidebar_roles(self):
         for filename, selector in (
             ("workspace-panels.css", ".agent-layout.agent-layout-with-sessions"),

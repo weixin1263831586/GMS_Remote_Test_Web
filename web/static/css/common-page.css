@@ -765,8 +765,6 @@ body.apk-resizing {
 /* Agent 接入统计卡已并入 page-stat-row/workbench-stat 模板
    （与用户列表/设备/审计页同源），本页无专属统计卡规则。 */
 
-.users-table-wrap {
-}
 
 .users-table {
     width: 100%;
@@ -1021,11 +1019,6 @@ body.apk-resizing {
         gap: 8px !important;
     }
 
-    .users-table-wrap,
-    .audit-table-wrap,
-    .list-table-wrap {
-        overflow: auto !important;
-    }
 
     .users-table-wrap table,
     .audit-table-wrap table,

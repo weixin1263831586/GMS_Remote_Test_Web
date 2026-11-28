@@ -311,7 +311,13 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                             .filter(el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
                         const rects = controls.map(el => el.getBoundingClientRect());
                         const centers = rects.map(r => (r.top+r.bottom)/2);
-                        return {shared:bar.classList.contains('ui-workspace-toolbar--filter'),
+                        const root = bar.closest('#users-main-view,#agent-access-panel,#sdk-config-panel,#devices-main-view,#audit-main-view,#audit-outbox-panel,#audit-disk-panel');
+                        const stat = root?.querySelector(':scope > .page-stat-row');
+                        const next = bar.nextElementSibling;
+                        const statsBox = stat?.getBoundingClientRect();
+                        const contentBox = next?.getBoundingClientRect();
+                        const spacing = statsBox && contentBox ? {before:box.top-statsBox.bottom, after:contentBox.top-box.bottom, statTop:statsBox.top, toolbarTop:box.top, toolbarBottom:box.bottom, left:box.left, right:box.right} : null;
+                        return {spacing,shared:bar.classList.contains('ui-workspace-toolbar--filter'),
                             height:box.height,padding:getComputedStyle(bar).padding,
                             controls:rects.map(r=>r.height),
                             oneRow: Math.max(...centers)-Math.min(...centers)<=1,
@@ -325,11 +331,21 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                         self.assertTrue(all(abs(h-32)<=1 for h in result["controls"]), result)
                         if width >= 1440:
                             self.assertTrue(result["oneRow"], result)
+                            if name in {"users", "devices", "security-audit"}:
+                                self.assertIsNotNone(result["spacing"], result)
+                                self.assertAlmostEqual(result["spacing"]["before"], 8, delta=1)
+                                self.assertAlmostEqual(result["spacing"]["after"], 8, delta=1)
                     if os.getenv("GMS_UI_PREVIEW_DIR") and width == 1792:
                         target=Path(os.environ["GMS_UI_PREVIEW_DIR"])
                         target.mkdir(parents=True,exist_ok=True)
                         label=selector.split()[0].strip("#.[]").replace("data-kb-source-form","external-sources")
                         page.screenshot(path=str(target / f"filter-toolbar-{name}-{label}.png"))
+            for width in (1792, 1440):
+                aligned = [samples[f"{width}/{selector}"]["spacing"] for name, selector in targets
+                           if name in {"users", "devices", "security-audit"}]
+                for key in ("statTop", "toolbarTop", "toolbarBottom", "left", "right"):
+                    values = [record[key] for record in aligned]
+                    self.assertLessEqual(max(values) - min(values), 1, (width, key, values))
             if os.getenv("GMS_UI_PREVIEW_DIR"):
                 (Path(os.environ["GMS_UI_PREVIEW_DIR"]) / "filter-toolbar-geometry.json").write_text(
                     json.dumps(samples, ensure_ascii=False, indent=2), encoding="utf-8")

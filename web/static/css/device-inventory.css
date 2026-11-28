@@ -1,7 +1,3 @@
-#devices-main-view:not([hidden]) { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-#devices-main-view > * + * { margin-top: var(--ui-spacing-sm); }
-#devices-main-view > * { flex-shrink: 0; }
-#devices-main-view .page-stat-row { margin: 0; }
 .inventory-stat .page-stat-value { color: var(--text-primary); }
 .inventory-stat small { display: block; color: var(--text-muted);  margin-top: 3px; line-height: 1.2; }
 .inventory-filters { flex: 1 1 680px; flex-wrap: nowrap; }
@@ -11,7 +7,7 @@
 .inventory-selection-count { white-space: nowrap; color: var(--text-secondary);  }
 .inventory-selection-count strong { color: var(--primary-light); font-variant-numeric: tabular-nums; }
 
-#devices-main-view .devices-table-wrap { flex: 1; min-height: 160px; margin: 0; background: var(--card-bg); }
+#devices-main-view .devices-table-wrap { min-height: 160px; }
 #devices-main-view .device-management-table { min-width: 1264px; table-layout: fixed; }
 #devices-main-view .device-management-table th { position: sticky; top: 0; z-index: 1; background: var(--light-bg); white-space: nowrap; color: var(--text-secondary); }
 #devices-main-view .device-management-table td { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
