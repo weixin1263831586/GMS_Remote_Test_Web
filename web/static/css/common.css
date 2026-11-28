@@ -725,7 +725,7 @@ body {
     display: none;
 }
 
-.host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:auto; }
+.host-workspace-grid { flex:1; min-height:0; display:grid; gap:var(--ui-spacing-sm); height:auto; }
 .host-workspace-grid.layout-single { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-horizontal { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-vertical { grid-template-columns:minmax(0,1fr); grid-template-rows:repeat(2,minmax(0,1fr)); }

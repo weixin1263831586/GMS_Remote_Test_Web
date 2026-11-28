@@ -154,8 +154,6 @@
     background: color-mix(in srgb, var(--primary-color) 16%, var(--card-bg));
 }
 /* 主机桌面/终端：不干预 noVNC、xterm 节点尺寸与连接逻辑。 */
-#page-desktop.page-ui-rework .host-workspace-grid,
-#page-terminal.page-ui-rework .host-workspace-grid { gap: 10px; }
 #page-desktop.page-ui-rework .host-workspace-title-state,
 #page-terminal.page-ui-rework .host-workspace-title-state {
     color: var(--text-secondary);
@@ -479,9 +477,7 @@
     width: 6px; height: 6px; border-radius: 50%; background: var(--success-color);
 }
 #page-test-suites .suite-browser-main { container-type: inline-size; container-name: suite-panel; }
-#page-test-suites.page-ui-rework .suite-browser-header {
-    flex-wrap: nowrap; justify-content: space-between; gap: 16px;
-}
+#page-test-suites.page-ui-rework .suite-browser-header { flex-wrap: nowrap; }
 #page-test-suites .suite-browser-identity {
     display: flex; align-items: center; gap: 10px;
     flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap;

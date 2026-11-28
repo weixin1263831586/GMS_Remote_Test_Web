@@ -262,6 +262,22 @@ class UiSizingContractTests(unittest.TestCase):
                                      "#devices-main-view .devices-table-wrap"):
                 self.assertNotRegex(body, r"(?:^|;)\s*(?:margin(?:-[\w-]+)?|gap|display|flex(?:-[\w-]+)?|background)\s*:", (line, selector))
 
+    def test_shared_workspace_spacing_has_no_page_overrides(self):
+        api = (ROOT / "web/shell/pages/api-docs.html").read_text(encoding="utf-8")
+        self.assertIn('class="api-dashboard ui-workspace-stack"', api)
+        css = (CSS / "api-docs-workbench.css").read_text(encoding="utf-8")
+        self.assertNotRegex(css, r"\.api-dashboard\s*\{")
+        host = (CSS / "common.css").read_text(encoding="utf-8")
+        self.assertRegex(host, r"\.host-workspace-grid\s*\{[^}]*gap:\s*var\(--ui-spacing-sm\)")
+        overrides = (CSS / "other-workspaces.css").read_text(encoding="utf-8")
+        self.assertNotRegex(overrides, r"\.host-workspace-grid\s*\{")
+        cluster = (ROOT / "features/cluster/ui/page.css").read_text(encoding="utf-8")
+        for _, selector, body, line in _css_leaf_rules(cluster):
+            if "#tab-dashboard" in selector or "#tab-management" in selector:
+                if set(part.strip() for part in selector.split(",")) <= {"#tab-dashboard", "#tab-management"}:
+                    self.assertNotRegex(body, r"(?:^|;)\s*padding(?:-[\w-]+)?\s*:", (line, selector))
+        self.assertNotIn("border-radius:9px;background:#1c1c24", cluster)
+
     def test_workspace_sidebar_roles(self):
         for filename, selector in (
             ("workspace-panels.css", ".agent-layout.agent-layout-with-sessions"),

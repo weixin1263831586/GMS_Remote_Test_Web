@@ -311,7 +311,7 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                             .filter(el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
                         const rects = controls.map(el => el.getBoundingClientRect());
                         const centers = rects.map(r => (r.top+r.bottom)/2);
-                        const root = bar.closest('#users-main-view,#agent-access-panel,#sdk-config-panel,#devices-main-view,#audit-main-view,#audit-outbox-panel,#audit-disk-panel');
+                        const root = bar.closest('#users-main-view,#agent-access-panel,#sdk-config-panel,#devices-main-view,#audit-main-view,#audit-outbox-panel,#audit-disk-panel,.api-dashboard');
                         const stat = root?.querySelector(':scope > .page-stat-row');
                         const next = bar.nextElementSibling;
                         const statsBox = stat?.getBoundingClientRect();
@@ -331,7 +331,7 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                         self.assertTrue(all(abs(h-32)<=1 for h in result["controls"]), result)
                         if width >= 1440:
                             self.assertTrue(result["oneRow"], result)
-                            if name in {"users", "devices", "security-audit"}:
+                            if name in {"users", "devices", "security-audit", "api-docs"}:
                                 self.assertIsNotNone(result["spacing"], result)
                                 self.assertAlmostEqual(result["spacing"]["before"], 8, delta=1)
                                 self.assertAlmostEqual(result["spacing"]["after"], 8, delta=1)
@@ -342,7 +342,7 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                         page.screenshot(path=str(target / f"filter-toolbar-{name}-{label}.png"))
             for width in (1792, 1440):
                 aligned = [samples[f"{width}/{selector}"]["spacing"] for name, selector in targets
-                           if name in {"users", "devices", "security-audit"}]
+                           if name in {"users", "devices", "security-audit", "api-docs"}]
                 for key in ("statTop", "toolbarTop", "toolbarBottom", "left", "right"):
                     values = [record[key] for record in aligned]
                     self.assertLessEqual(max(values) - min(values), 1, (width, key, values))
