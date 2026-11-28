@@ -402,6 +402,7 @@ select option {
     gap: 10px;
 }
 
+.device-routing-toggle { gap: var(--ui-spacing-xs); user-select: none; }
 .adb-proxy-section-head .adb-proxy-section-title {
     margin-bottom: 0;
 }

@@ -287,8 +287,8 @@ function initTerminal() {
                             2. 静态资源加载失败<br>
                             3. 防火墙阻止
                         </div>
-                        <button type="button" data-action="reload-page" style="padding:10px 20px;cursor:pointer;background:var(--success-color);color:white;border:none;border-radius:4px;">
-                            🔄 刷新页面重试
+                        <button type="button" class="btn-xs btn-primary" data-action="reload-page">
+                            刷新页面重试
                         </button>
                     </div>
                 `;

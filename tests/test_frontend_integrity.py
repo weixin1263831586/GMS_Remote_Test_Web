@@ -759,7 +759,7 @@ class FrontendIntegrityTests(unittest.TestCase):
         shell = read_shell_bundle()
         notifications = read_text("web/static/js/notifications.js")
 
-        self.assertIn("notifications.js?v=20261118-targeted-notice-navigation", shell)
+        self.assertRegex(shell, r'/static/js/notifications\.js\?v=[\w.-]+"[^>]*\bdefer\b')
         self.assertNotIn('onclick="toggleNotificationPanel()"', shell)
         self.assertIn('id="notification-toggle" class="notification-toggle" title="消息通知" disabled', shell)
         self.assertIn(

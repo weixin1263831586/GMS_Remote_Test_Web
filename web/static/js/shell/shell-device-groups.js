@@ -158,12 +158,12 @@
             const name = `<span class="device-group-name" title="${GmsUi.escape(group.description || group.name)}">${escapeHtml(group.name)}</span>`;
             const cnt = `<span class="device-group-count">${count}</span>`;
             const followBtn = isUngrouped ? '' :
-                `<button class="btn-xxs" data-mgmt-follow="${group.id}" title="关注后主页ADB设备区只显示关注的分组" style="padding:2px 6px;${followed ? 'background:var(--warning-color);' : ''}">${followed ? '★ 已关注' : '☆ 关注'}</button>`;
+                `<button class="btn-xxs${followed ? ' btn-tone-warning' : ''}" data-mgmt-follow="${group.id}" title="关注后主页ADB设备区只显示关注的分组" aria-pressed="${followed}">${followed ? '★ 已关注' : '☆ 关注'}</button>`;
             const ops = isUngrouped ? '' :
-                `<span style="margin-left:auto; display:flex; gap:4px;">
+                `<span class="ui-action-group device-group-actions">
                     ${followBtn}
-                    <button class="btn-xxs" data-mgmt-edit="${group.id}" style="padding:2px 6px;">✏️ 编辑</button>
-                    <button class="btn-xxs" data-mgmt-del="${group.id}" style="padding:2px 6px;">🗑️ 删除</button>
+                    <button class="btn-xxs" data-mgmt-edit="${group.id}">✏️ 编辑</button>
+                    <button class="btn-xxs" data-mgmt-del="${group.id}">🗑️ 删除</button>
                 </span>`;
             return `<tr class="device-group-row" style="background: var(--lighter-bg);">
                 <td colspan="12">

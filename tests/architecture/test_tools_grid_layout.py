@@ -89,8 +89,11 @@ def test_shared_tools_and_websites_cards_keep_original_square_dimensions():
         assert "tools-page-body.html" in source
     assert 'class="tools-footer"' in page_body
     assert 'data-tools-add' in page_body
-    assert "min-height: 118px;" in renderer
-    assert "width: 40px; height: 40px;" in renderer
+    css = _CSS.read_text(encoding="utf-8")
+    assert re.search(r"\.tool-card\s*\{[^}]*min-height:\s*118px;", css)
+    assert re.search(r"\.tool-icon\s*\{[^}]*width:\s*40px;[^}]*height:\s*40px;", css)
+    assert "tool-card ui-card" in renderer
+    assert "min-height: 118px;" not in renderer
 
 
 def test_proxy_windows_icon_matches_tailscale_brand_svg():

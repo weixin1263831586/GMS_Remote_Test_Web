@@ -61,3 +61,5 @@
 #page-api-docs .api-notes li::marker { color:var(--primary-light); }
 @media (max-width:1150px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(3,minmax(0,1fr)); } #page-api-docs .api-side-panels { display:grid;grid-template-columns:repeat(3,minmax(0,1fr)); } }
 @media (max-width:720px) { #page-api-docs .api-stat-grid.page-stat-row { grid-template-columns:repeat(2,minmax(0,1fr)); } #page-api-docs .api-search-toolbar,#page-api-docs .api-category-toolbar { flex-wrap:wrap; } #page-api-docs .api-search-box { flex-basis:100%; } #page-api-docs .api-category-actions { padding-left:0;border-left:0;justify-content:flex-start; } #page-api-docs .api-side-panels { grid-template-columns:minmax(0,1fr); } }
+
+.api-reply-actions { justify-content: flex-end; }

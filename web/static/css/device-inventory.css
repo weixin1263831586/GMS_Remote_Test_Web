@@ -48,3 +48,5 @@
     .inventory-selection-bar { gap: 6px; }
     .inventory-footer > label { margin-left: 0; }
 }
+
+.device-group-actions { margin-left: auto; }

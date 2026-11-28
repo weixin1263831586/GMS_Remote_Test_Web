@@ -183,11 +183,9 @@ function openRedmineReplyModal(moduleName, testCaseName, failureIndex, issueIdFr
                     </div>
                     <div id="${fileListId}" style="margin-top: 8px;"></div>
                 </div>
-                <div style="display: flex; gap: 10px; justify-content: flex-end;">
-                    <button data-click="_actCloseModal" data-a0="${modalId}"
-                            style="padding: 8px 16px; background: var(--secondary-bg); color: var(--text-primary); border: none; border-radius: 6px; cursor: pointer; ">取消</button>
-                    <button data-click="confirmAndSendRedmineReply" data-a0="${modalId}"
-                            style="padding: 8px 16px; background: var(--primary-gradient); color: var(--text-on-accent); border: none; border-radius: 6px; cursor: pointer; ">确认并发送</button>
+                <div class="ui-action-group api-reply-actions">
+                    <button type="button" class="btn-xs" data-click="_actCloseModal" data-a0="${modalId}">取消</button>
+                    <button type="button" class="btn-xs btn-primary" data-click="confirmAndSendRedmineReply" data-a0="${modalId}">确认并发送</button>
                 </div>
             </div>
         </div>
