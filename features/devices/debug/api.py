@@ -96,8 +96,8 @@ async def debug_action(request: Request, session_id: str, body: DebugAction,
 def review_session(request: Request, session_id: str):
     return HTMLResponse('''<!doctype html><html lang="zh-CN" data-ui-type-root="review"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>调试会话授权</title><link rel="stylesheet" href="/static/css/device-deployment-review.css?v=20261128-ui-role-audit"><link rel="stylesheet" href="/static/css/modal.css?v=20261128-ui-role-audit">
-<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-ui-role-audit"><link rel="stylesheet" href="/static/css/typography.css?v=20261128-ui-role-audit">
+<title>调试会话授权</title><link rel="stylesheet" href="/static/css/device-deployment-review.css?v=20261128-form12-radius6"><link rel="stylesheet" href="/static/css/modal.css?v=20261128-form12-radius6">
+<link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261128-form12-radius6"><link rel="stylesheet" href="/static/css/typography.css?v=20261128-form12-radius6">
 ''' + LOGIN_ASSETS + '''
 <script src="/static/js/pages/device-debug-review.js" defer></script></head>
 <body class="ui-page-edge"><main><h1>调试会话授权</h1><p>请登录发起申请的 Agent 所属平台账号。批准后，Agent 可在以下设备和应用范围内连续调试，直到到期或撤销。</p>
