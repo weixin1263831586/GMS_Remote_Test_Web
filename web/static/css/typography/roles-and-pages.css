@@ -3,6 +3,7 @@
 html[data-ui-type-root] button:not(.modal-close) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root] table :is(th, td) { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root] :is(.list-table, .ui-table, .users-table, .audit-table, .agent-access-table, .dash-resource-table, .dept-table) thead th { font-weight: var(--ui-type-weight-semibold); }
 :where(html, body) {
   font-family: var(--ui-type-font-sans);
   font-size: var(--ui-type-size-body);
@@ -44,15 +45,6 @@ html[data-ui-type-root="shell"] #page-test .section-title {
   font-size: var(--ui-type-size-stat);
   font-weight: var(--ui-type-weight-semibold);
 }
-.page-content :is(.list-table, .ui-table, .users-table, .audit-table,
-  .agent-access-table) thead th {
-  font-size: var(--ui-type-size-small) !important;
-  font-weight: var(--ui-type-weight-semibold);
-}
-.page-content :is(.list-table, .ui-table, .users-table, .audit-table,
-  .agent-access-table) tbody td {
-  font-size: var(--ui-type-size-small) !important;
-}
 .page-content :is(.entry-field, .combo-box, .suite-browser-filter,
   .suite-file-search, .apk-search-input) {
   font-size: var(--ui-type-size-body);
@@ -91,8 +83,6 @@ html[data-ui-type-root="shell"] :is(.tech-dialog--adb-proxy,.tech-dialog--usbip-
     :is(button, input, select, textarea):not(.modal-close) {
   font-family: var(--ui-type-font-sans);
 }
-:where(.workspace-tabs > .workspace-tab) { font-family: var(--ui-type-font-sans); }
-:where(.ui-status, .status-badge, .badge-mini) { font-size: var(--ui-type-size-compact); }
 /* No forced font-size on xterm, SVG icons, emoji, charts or graphics. */
 
 /* === Canonical typography ownership: standalone feature CSS ===
@@ -131,7 +121,6 @@ html[data-ui-type-root="automation"] .build-job-source { font-size: var(--ui-typ
 html[data-ui-type-root="automation"] .events-heading > span:first-child { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="automation"] .report-card-meta { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="automation"] .field-label { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="automation"] .badge { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="automation"] .events { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="automation"] .event-line-level { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="automation"] .event-columns-hint { font-size: var(--ui-type-size-small); }
@@ -170,7 +159,6 @@ html[data-ui-type-root="cluster"] .dash-stat-card .label { font-size: var(--ui-t
 html[data-ui-type-root="cluster"] .dash-stat-card .sub { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] .dash-panel-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="cluster"] .dash-test-row { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="cluster"] .dash-test-row .badge-mini { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="cluster"] .dash-test-group-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="cluster"] .dash-empty { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] .dash-trend-btn { font-size: var(--ui-type-size-small); }
@@ -193,7 +181,6 @@ html[data-ui-type-root="cluster"] #dashboard .dist-number { font-size: var(--ui-
 html[data-ui-type-root="cluster"] #dashboard .dist-summary { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #dashboard .dash-chart-legend { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="cluster"] #dashboard .dash-test-group-title { font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="cluster"] #dashboard .dash-test-row .badge-mini { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="cluster"] #dashboard .dash-test-row strong { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #tab-management .section-head h2 { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="cluster"] #tab-management .heading-count { font-size: var(--ui-type-size-compact); }
@@ -219,7 +206,6 @@ html[data-ui-type-root="cluster"] #tab-management .worker-card :is(.worker-memor
 html[data-ui-type-root="cluster"] #tab-management .worker-card .worker-counts strong { font-size: var(--ui-type-size-card); }
 
 html[data-ui-type-root="devices"] .toolbar p { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="devices"] .status-pill { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="devices"] .port-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="devices"] .port-error { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="devices"] .identity-badge { font-size: var(--ui-type-size-compact); }
@@ -335,7 +321,6 @@ html[data-ui-type-root="redmine"] .analysis-doc h2.md-h { font-size: var(--ui-ty
 html[data-ui-type-root="redmine"] .analysis-doc h3.md-h { font-size: var(--ui-type-size-card); }
 html[data-ui-type-root="redmine"] .analysis-doc .md-table th { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="redmine"] .analysis-doc code { font: var(--ui-type-size-small) var(--ui-type-font-mono); }
-html[data-ui-type-root="redmine"] .analysis-doc .claim-badge { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="redmine"] .analysis-doc .claim-ref { font: var(--ui-type-size-compact) var(--ui-type-font-mono); }
 html[data-ui-type-root="redmine"] .daily-brief-meta-row { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .daily-brief-quality-chip { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
@@ -356,7 +341,6 @@ html[data-ui-type-root="redmine"] :where(button, select, input, textarea) { font
 html[data-ui-type-root="redmine"] :where(th) { font-weight: var(--ui-type-weight-semibold); }
 
 /* features/redmine/ui/case-library.css */
-html[data-ui-type-root="redmine"] .case-status { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="redmine"] .case-sig { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .case-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="redmine"] .case-scope { font-size: var(--ui-type-size-small); }
@@ -456,3 +440,6 @@ html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--u
 
 /* Host pane emoji icons share one glyph size. */
 html[data-ui-type-root="shell"] .host-pane-label-icon { font-size: 17px; }
+
+/* Radar change semantics use the same typography tokens as other data pages. */
+html[data-ui-type-root="update-radar"] :is(.radar-subtitle,.radar-added,.radar-modified,.radar-removed,.radar-warning) { font-weight: var(--ui-type-weight-bold); }

@@ -13,7 +13,6 @@ html[data-ui-type-root="cluster"] select,
 html[data-ui-type-root="cluster"] input { font-family: inherit; }
 html[data-ui-type-root="cluster"] .hint { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] .onboarding-grid label { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="cluster"] .dash-test-row .badge-mini { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="cluster"] .cluster-main .dash-stat-card .label { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="cluster"] #dashboard .resource-host-name { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="cluster"] #dashboard .resource-summary { font-size: var(--ui-type-size-small); }

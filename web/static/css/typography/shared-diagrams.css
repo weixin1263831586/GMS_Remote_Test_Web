@@ -11,10 +11,8 @@
 .suite-browser-path, .apk-file-path, #client-identity,
 #script-path, #device-host, #local-server, #test-module, #test-case, #retry-result,
 input[id$="-path"] { font-family: var(--ui-type-font-mono); }
-.ui-status { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
+:is(.ui-status,.status-badge,.badge-mini,.suite-type-badge,.suite-header-type,.device-status,.vpn-status-label,.aoa-status-pill,.host-pane-status,.radar-pill,.agent-access-status-badge,.claim-badge,.case-status,.status-pill,.dx-status-pill) { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
 .btn-xxs, .btn-xs, .btn-small { font-weight: var(--ui-type-weight-medium); }
-:is(.list-table, .ui-table) th { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
-:is(.list-table, .ui-table) tbody td { font-size: var(--ui-type-size-small); }
 .device-sort { font: inherit; }
 .device-sort + .device-sort { font-size: var(--ui-type-size-body); }
 .device-row-actions .btn-xxs { font-size: var(--ui-type-size-small); }
@@ -34,8 +32,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 :is(.modal,.modal-backdrop,.auth-gate) .tech-dialog .modal-body { font-size: var(--ui-type-size-body); }
 .tech-dialog .tech-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 .tech-dialog .tech-field-card > label:not(:has(input)) { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-.tech-dialog .tech-field-stack > label { font-size: var(--ui-type-size-body); }
-.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) { font-size: var(--ui-type-size-body); }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
 .tech-dialog .tech-row-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 #tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
@@ -43,9 +39,6 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); }
 #tailscale-info-modal .tech-tailscale-help { font-size: var(--ui-type-size-small) !important; }
 #tailscale-info-modal .tech-dialog-footer > button { font-size: var(--ui-type-size-small); }
-.tech-dialog .modal-title { font-size: var(--ui-type-size-dialog) !important; }
-.tech-dialog :is(label,input,select,textarea) { font-size: var(--ui-type-size-body) !important; }
-.tech-dialog button:not(.modal-close) { font-size: var(--ui-type-size-small) !important; }
 
 /* web/static/css/modal-tech-cases.css */
 .tech-form-section > .tech-section-title { font-size: var(--ui-type-size-body); }
