@@ -136,11 +136,12 @@
 #agent-access-search { width: 210px; min-width: 0; }
 #agent-access-status-filter { width: 104px; }
 #agent-access-refresh { min-width: 76px; white-space: nowrap; }
-.agent-access-table-wrap { min-height: 150px; overflow: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--light-bg); }
+.agent-access-table-wrap { min-height: 0; overflow: auto; }
 .agent-access-table { width: 100%; border-collapse: separate; border-spacing: 0; table-layout: auto; }
 .agent-access-table th { position: sticky; top: 0; z-index: 1; border-bottom: 1px solid var(--border-color); color: var(--text-secondary); background: var(--darker-bg);   text-align: left; }
 .agent-access-table td { color: var(--text-primary);  line-height: 1.5; white-space: nowrap; }
 .agent-access-table th { white-space: nowrap; }
+.agent-access-table :is(th,td):last-child { text-align: center; }
 .agent-access-table tbody tr:hover { background: color-mix(in srgb, var(--primary-color) 4%, transparent); }
 .agent-token-id,
 .agent-token-secondary { display: inline; margin-left: 8px; color: var(--text-secondary);  line-height: 1.5; white-space: nowrap; }
@@ -152,7 +153,7 @@
 .agent-access-token-scope-list { padding-left: 18px;  }
 .agent-access-token-scope-list li { margin: 12px 0; }
 .agent-access-token-scope-list code { display: block; margin-top: 3px; color: var(--text-secondary);  overflow-wrap: anywhere; }
-.agent-access-empty { height: 120px; text-align: center; color: var(--text-secondary) !important; }
+.agent-access-empty { text-align: center; color: var(--text-secondary) !important; }
 
 @media (max-width: 1100px) {
     .agent-access-toolbar { flex-wrap: wrap; }
@@ -308,7 +309,7 @@
 #sdk-config-panel .sdk-source-actions {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
+    justify-content: center;
     gap: 6px;
     min-width: 0;
     white-space: nowrap;

@@ -1614,7 +1614,7 @@ select option {
 .model-catalog-table th:nth-child(3) { width: 110px; }
 .model-catalog-table th:nth-child(4) { width: 100px; }
 .model-catalog-table th:last-child { width: 100px; }
-.model-catalog-table :is(th,td):last-child { text-align: right; }
+.model-catalog-table :is(th,td):last-child { text-align: center; }
 .model-catalog-table :is(th,td):nth-child(4) { text-align: right; }
 .model-catalog-state[data-model-state="available"] { color: var(--success-color); }
 .model-catalog-state[data-model-state="unavailable"] { color: var(--danger-color); }

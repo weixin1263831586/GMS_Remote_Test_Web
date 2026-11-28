@@ -13,6 +13,63 @@ from tests.runtime_ui.harness import RuntimeUiHarness, expect
 
 
 class RuntimeAgentTests(RuntimeUiHarness):
+    def test_short_agent_and_sdk_tables_have_no_reserved_blank_rows(self):
+        page = self.new_page()
+        tokens = [{"id": "agt_geometry_1", "name": "fixture-one", "scopes": ["devices.read"]},
+                  {"id": "agt_geometry_2", "name": "fixture-two", "scopes": ["devices.read"]}]
+        sources = [{"source_id": "sdk-geometry-1", "provider": "ssh_git", "android_version": "16"},
+                   {"source_id": "sdk-geometry-2", "provider": "ssh_git", "android_version": "17"}]
+        payloads = {"tokens": tokens}
+        page.route("**/api/auth/agent-tokens", lambda route: route.fulfill(
+            json={"success": True, "tokens": payloads["tokens"]}))
+        page.route("**/api/sdk/sources", lambda route: route.fulfill(
+            json={"success": True, "data": {"sources": sources}}))
+        page.route("**/api/sdk/manage/sources?*", lambda route: route.fulfill(
+            json={"success": True, "data": {"sources": sources}}))
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('users')")
+            self.close_initial_modals(page)
+            page.locator("#agent-access-tab").click()
+            expect(page.locator("#agent-access-tokens tr")).to_have_count(2)
+            expect(page.locator("#agent-access-tokens")).to_contain_text("fixture-two")
+            for panel, tbody in (("#agent-access-panel", "#agent-access-tokens"),
+                                 ("#sdk-config-panel", "#agent-sdk-sources-tbody")):
+                if panel == "#sdk-config-panel":
+                    page.evaluate("usersViewSwitch('sdk')")
+                    expect(page.locator(tbody)).to_contain_text("sdk-geometry-2")
+                for width in (1920, 1440, 1024):
+                    page.set_viewport_size({"width": width, "height": 900})
+                    for count in (2, 1, 0):
+                        with self.subTest(panel=panel, width=width, records=count):
+                            if panel == "#agent-access-panel":
+                                page.evaluate("items => agentAccessRenderTokens(items)", tokens[:count])
+                            else:
+                                page.evaluate("items => sdkConfigRenderSources(document.getElementById('agent-sdk-sources-tbody'), items)", sources[:count])
+                            table = page.locator(panel + " .agent-access-table")
+                            expect(table.locator("tbody tr")).to_have_count(max(1, count))
+                            metrics = table.evaluate("""el => {
+                                const wrap = el.parentElement;
+                                const last = el.tBodies[0].rows[el.tBodies[0].rows.length - 1];
+                                const heading = el.tHead.rows[0].cells[el.tHead.rows[0].cells.length - 1];
+                                const range = document.createRange();
+                                range.selectNodeContents(heading);
+                                const h = heading.getBoundingClientRect(), label = range.getBoundingClientRect();
+                                return {blank:wrap.clientHeight - el.getBoundingClientRect().height,
+                                        lastRowBottomDelta:el.getBoundingClientRect().bottom - last.getBoundingClientRect().bottom,
+                                        headingCenterDelta:Math.abs((h.left + h.right - label.left - label.right) / 2),
+                                        empty:last.querySelector('td[colspan]')?.textContent.trim() || ''};
+                            }""")
+                            self.assertLessEqual(metrics["blank"], 2, metrics)
+                            self.assertLessEqual(metrics["lastRowBottomDelta"], 2, metrics)
+                            self.assertLessEqual(metrics["headingCenterDelta"], 1, metrics)
+                            if count == 0:
+                                self.assertTrue(metrics["empty"], metrics)
+                            else:
+                                self.assertFalse(metrics["empty"], metrics)
+        finally:
+            page.close()
+
     def test_sdk_version_card_renders_literal_text(self):
         page = self.new_page()
         try:
