@@ -40,7 +40,7 @@ class RuntimeAgentTests(RuntimeUiHarness):
                     expect(page.locator(tbody)).to_contain_text("sdk-geometry-2")
                 for width in (1920, 1440, 1024):
                     page.set_viewport_size({"width": width, "height": 900})
-                    for count in (2, 1, 0):
+                    for count in (2, 1, 0, 2):
                         with self.subTest(panel=panel, width=width, records=count):
                             if panel == "#agent-access-panel":
                                 page.evaluate("items => agentAccessRenderTokens(items)", tokens[:count])
@@ -48,6 +48,10 @@ class RuntimeAgentTests(RuntimeUiHarness):
                                 page.evaluate("items => sdkConfigRenderSources(document.getElementById('agent-sdk-sources-tbody'), items)", sources[:count])
                             table = page.locator(panel + " .agent-access-table")
                             expect(table.locator("tbody tr")).to_have_count(max(1, count))
+                            self.assertEqual(table.locator("tbody tr").evaluate_all(
+                                """rows => rows.filter(row => !row.textContent.trim()
+                                    && !row.querySelector('button,input,select,svg,a')).length"""
+                            ), 0)
                             metrics = table.evaluate("""el => {
                                 const wrap = el.parentElement;
                                 const last = el.tBodies[0].rows[el.tBodies[0].rows.length - 1];
