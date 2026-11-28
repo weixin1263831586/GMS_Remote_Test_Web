@@ -400,6 +400,25 @@ button[data-busy-size="long"] { --ui-action-reserved-width: 92px; }
     line-height: 1.45;
 }
 .page-stat-card:is(.inventory-stat, .workbench-stat)[hidden] { display: none; }
+/* Variable-count KPI rows keep one row before and after data arrives. */
+.ui-kpi-row--dynamic {
+    min-height: var(--ui-stat-height);
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+.ui-kpi-row--dynamic > .page-stat-card.workbench-stat {
+    flex: 1 0 140px;
+}
+.ui-kpi-row--dynamic .page-stat-label {
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 1100px) {
+    .ui-kpi-row--dynamic { overflow-x: scroll; }
+}
 button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--primary-color); }
 .page-stat-card.workbench-stat.active {
     background: color-mix(in srgb, var(--primary-color) 7%, var(--card-bg));

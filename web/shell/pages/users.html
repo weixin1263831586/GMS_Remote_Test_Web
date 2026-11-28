@@ -125,10 +125,16 @@
             <!-- SDK 配置：Agent 源码检索的数据源绑定（本机 / 编译服务器 / OpenGrok）。 -->
             <div id="sdk-config-panel" class="ui-workspace-stack" style="display: none;">
                 <!-- 统计卡模板与用户列表/Agent 接入一致；卡片按 Android 版本由 sdkConfigRenderStats 动态生成。 -->
-                <div class="agent-stats page-stat-row" id="agent-sdk-stat-row"></div>
+                <div class="agent-stats page-stat-row ui-kpi-row--dynamic" id="agent-sdk-stat-row" aria-busy="true" role="region" aria-label="SDK 源统计" tabindex="0">
+                    <div class="page-stat-card workbench-stat">
+                        <span class="workbench-stat-icon" aria-hidden="true"><svg class="ui-icon" focusable="false"><use href="/static/icons/ui.svg#users"></use></svg></span><span class="workbench-stat-copy">
+                        <span class="page-stat-value tone-primary">—</span>
+                        <span class="page-stat-label">全部 SDK 源</span>
+                    </span></div>
+                </div>
                 <section class="agent-access-list-section ui-workspace-stack" aria-label="已配置的 SDK 源码源">
                     <div class="agent-access-toolbar ui-panel-frame ui-workspace-toolbar ui-workspace-toolbar--filter">
-                        <div class="agent-access-list-label">
+                        <div class="agent-access-list-label ui-toolbar-grow">
                             <h3>已配置的 SDK 源码源</h3>
                             <span id="agent-sdk-sources-count">分析 Redmine 问题时的只读源码取证来源（本机 / 编译服务器 / OpenGrok）。</span>
                         </div>

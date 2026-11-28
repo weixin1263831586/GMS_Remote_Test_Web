@@ -74,6 +74,55 @@ class RuntimeAgentTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_sdk_first_load_keeps_toolbar_and_table_stationary(self):
+        page = self.new_page()
+        pending = []
+        sources = [{"source_id": f"sdk-layout-{version}", "provider": "ssh_git",
+                    "android_version": str(version)} for version in (14, 15, 16, 17)]
+        try:
+            self.goto_shell(page)
+            page.set_viewport_size({"width": 1792, "height": 900})
+            page.evaluate("() => { state.elevated = true; state.elevatedUntil = Date.now() + 300000; }")
+            page.route("**/api/sdk/sources", lambda route: pending.append(route))
+            page.route("**/api/sdk/manage/sources?*", lambda route: pending.append(route))
+            page.evaluate("switchPage('users')")
+            self.close_initial_modals(page)
+            page.evaluate("usersViewSwitch('list')")
+            page.locator("#sdk-config-tab").click()
+            panel = page.locator("#sdk-config-panel")
+            expect(panel.locator("#agent-sdk-stat-row")).to_have_attribute("aria-busy", "true")
+            expect(panel.locator("#agent-sdk-stat-row .page-stat-card")).to_have_count(1)
+            def geometry():
+                return panel.evaluate("""root => {
+                    const rect = selector => {
+                        const r = root.querySelector(selector).getBoundingClientRect();
+                        return {top:r.top, height:r.height};
+                    };
+                    return {stats:rect('#agent-sdk-stat-row'),
+                            toolbar:rect('.agent-access-toolbar'),
+                            table:rect('.agent-access-table-wrap'),
+                            refresh:rect('#agent-sdk-sources-refresh')};
+                }""")
+            before = geometry()
+            # Pump Playwright events until both deliberately deferred reads arrive.
+            for _ in range(100):
+                if len(pending) >= 2:
+                    break
+                page.wait_for_timeout(20)
+            self.assertEqual(len(pending), 2)
+            for route in pending:
+                route.fulfill(json={"success": True, "data": {"sources": sources}})
+            expect(panel.locator("#agent-sdk-stat-row")).to_have_attribute("aria-busy", "false")
+            expect(panel.locator("#agent-sdk-stat-row .page-stat-card")).to_have_count(5)
+            expect(panel.locator("#agent-sdk-sources-tbody tr")).to_have_count(4)
+            after = geometry()
+            for part in before:
+                for prop in before[part]:
+                    self.assertAlmostEqual(before[part][prop], after[part][prop], delta=1,
+                                           msg=f"{part}/{prop}: {before} -> {after}")
+        finally:
+            page.close()
+
     def test_sdk_version_card_renders_literal_text(self):
         page = self.new_page()
         try:

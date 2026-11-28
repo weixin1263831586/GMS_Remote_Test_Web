@@ -33,7 +33,6 @@ html[data-ui-type-root="shell"] .page-header-actions label { font-size: var(--ui
 html[data-ui-type-root="shell"] .page-stat-card > .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .page-stat-card > .page-stat-label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #email-outbox-all-users-label { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #devices-scope-hint { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .page-header-actions .header-host-select { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .pane-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .pane-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }

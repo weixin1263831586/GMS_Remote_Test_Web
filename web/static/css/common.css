@@ -920,10 +920,6 @@ body {
     white-space: nowrap;
 }
 #email-outbox-all-users { vertical-align: middle; }
-#devices-scope-hint {
-    color: var(--text-secondary);
-
-}
 #device-group-filter {
     width: 150px;
     max-width: 160px;

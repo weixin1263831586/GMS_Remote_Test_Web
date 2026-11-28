@@ -224,12 +224,12 @@
 .page-ui-rework .embedded-frame-loading { background: var(--card-bg); color: var(--text-secondary); }
 /* 宽度回退：不要缩小表格到丢失操作列，使用局部横向滚动。 */
 @media (max-width: 1100px) {
-    .page-ui-rework .page-stat-row { flex-wrap: wrap; }
-    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 160px; }
+    .page-ui-rework .page-stat-row:not(.ui-kpi-row--dynamic) { flex-wrap: wrap; }
+    .page-ui-rework .page-stat-row:not(.ui-kpi-row--dynamic) > .page-stat-card.workbench-stat { flex: 1 1 160px; }
     #page-test.page-ui-rework .middle-row { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-    .page-ui-rework .page-stat-card.workbench-stat { flex: 1 1 45%; }
+    .page-ui-rework .page-stat-row:not(.ui-kpi-row--dynamic) > .page-stat-card.workbench-stat { flex: 1 1 45%; }
     .page-ui-rework :is(.list-table-wrap, .users-table-wrap, .audit-table-wrap) { overflow-x: auto; }
 }
 @media (prefers-reduced-motion: reduce) {

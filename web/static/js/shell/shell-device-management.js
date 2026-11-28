@@ -118,7 +118,6 @@
                 if (includeCluster && !clusterResp?.ok) {
                     throw new Error('集群设备列表读取失败，请刷新重试');
                 }
-                const scopeHint = document.getElementById('devices-scope-hint');
                 // 为本地设备补全 worker_id，使按主机分组时本地和远端设备都能正确归类
                 loadedDevices.forEach(d => {
                     if (!d.worker_id) d.worker_id = localWorkerId;

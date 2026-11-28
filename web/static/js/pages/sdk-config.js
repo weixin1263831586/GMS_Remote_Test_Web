@@ -8,6 +8,7 @@
 // repo_root 永不出现在只读列表里；SSH 口令任何响应都不回传。
 
 let agentSdkSourcesLoaded = false;
+let agentSdkSourcesLoading = false;
 let agentSdkSourcesSequence = 0;
 let agentSdkSourcesCache = [];
 let agentSdkUserLiveCache = {};
@@ -34,11 +35,14 @@ async function sdkConfigToggle(show) {
 async function sdkConfigLoadSources(button) {
     const tbody = document.getElementById('agent-sdk-sources-tbody');
     if (!tbody || (button && button.disabled)) return;
-    if (agentSdkSourcesLoaded && !button) return; // 打开页签时自动加载一次
+    if ((agentSdkSourcesLoaded || agentSdkSourcesLoading) && !button) return; // 自动加载不重复请求
     const sequence = ++agentSdkSourcesSequence;
-    if (button) {
-        setActionButtonBusy(button, true, '刷新中');
-    }
+    agentSdkSourcesLoading = true;
+    const refresh = button || document.getElementById('agent-sdk-sources-refresh');
+    const stats = document.getElementById('agent-sdk-stat-row');
+    stats?.setAttribute('aria-busy', 'true');
+    tbody.setAttribute('aria-busy', 'true');
+    if (refresh) setActionButtonBusy(refresh, true, '刷新中');
     try {
         // 「刷新」按钮（button 非空）走 sync 强校验；页签自动加载走
         // auto（fresh 缓存直接显示，stale/pending 转后台校验不阻塞）。
@@ -69,11 +73,15 @@ async function sdkConfigLoadSources(button) {
             agentSdkSourcesLoaded = false;
             agentSdkSourcesCache = [];
             agentSdkUserLiveCache = {};
+            sdkConfigRenderStats(null);
             tbody.innerHTML = `<tr><td colspan="8" class="agent-access-empty">加载失败：${agentAccessEscape(error.message || '需要 sdk.read 权限')}</td></tr>`;
         }
     } finally {
-        if (sequence === agentSdkSourcesSequence && button) {
-            setActionButtonBusy(button, false);
+        if (sequence === agentSdkSourcesSequence) {
+            agentSdkSourcesLoading = false;
+            stats?.setAttribute('aria-busy', 'false');
+            tbody.setAttribute('aria-busy', 'false');
+            if (refresh) setActionButtonBusy(refresh, false);
         }
     }
 }
@@ -91,10 +99,10 @@ function sdkConfigVersionSortKey(version) {
 function sdkConfigRenderStats(sources) {
     const row = document.getElementById('agent-sdk-stat-row');
     if (!row) return;
-    const total = sources.length;
+    const total = sources === null ? '—' : sources.length;
     // 按 android_version 分组计数；空值归「未识别」。
     const counts = new Map();
-    sources.forEach(source => {
+    (sources || []).forEach(source => {
         const version = (source.android_version || '').trim() || '未识别';
         counts.set(version, (counts.get(version) || 0) + 1);
     });
