@@ -69,7 +69,7 @@
         // 裸 tty 名（临时节点），tooltip 保留完整提示，端口卡矮一行。
         const unstable = port.identity_stable === false;
         const value = element('span', 'mono', port.by_id || port.port_key);
-        const badge = element('span', `identity-badge${unstable ? ' unstable' : ''}`,
+        const badge = element('span', `identity-badge ui-status ${unstable ? 'unstable is-danger' : 'is-success'}`,
             unstable ? '临时节点' : '稳定');
         badge.title = unstable
             ? '只有易变的 tty 名称，重插后可能指向不同硬件，不能持久绑定'
@@ -164,7 +164,7 @@
         const list = $('ports-list');
         list.replaceChildren();
         if (!state.ports.length) {
-            list.append(element('div', 'empty', '未发现 ttyUSB/ttyACM 串口。插入 USB 转串口线后点击刷新。'));
+            list.append(element('div', 'empty ui-empty-state', '未发现 ttyUSB/ttyACM 串口。插入 USB 转串口线后点击刷新。'));
             return;
         }
         state.ports.forEach(port => {
@@ -172,7 +172,7 @@
             const card = element('article', `port-card${session ? ' selected' : ''}`);
             const head = element('div', 'port-card-head');
             head.append(element('div', 'port-title', portTitle(port)));
-            head.append(element('span', `port-state ${port.online ? 'online' : ''}`, port.online ? '在线' : '离线'));
+            head.append(element('span', `port-state ui-status ${port.online ? 'online is-success' : 'is-danger'}`, port.online ? '在线' : '离线'));
             card.append(head);
 
             const meta = element('div', 'port-meta');
@@ -459,7 +459,7 @@
         const pill = session.pane.querySelector('.socket-status');
         if (pill) {
             pill.innerHTML = GmsUi.icon(className === 'online' ? 'check' : className === 'offline' ? 'close' : 'clock') + GmsUi.escape(text);
-            pill.className = `socket-status status-pill ${className}`;
+            pill.className = `socket-status status-pill ui-status ${className} ${className === 'online' ? 'is-success' : className === 'waiting' ? 'is-warning' : 'is-danger'}`;
         }
         if (session === activeConsoleSession()) syncConsoleToolbar();
     }
@@ -723,17 +723,17 @@
                     </section>
                     <section class="console-operation-history">
                         <h3>${GmsUi.icon('clock')}本次操作</h3>
-                        <ul class="console-activity"><li class="empty">尚无操作</li></ul>
+                        <ul class="console-activity"><li class="empty ui-empty-state ui-empty-state--inline">尚无操作</li></ul>
                     </section>
                     <section class="history-column">
-                    <div class="history-head">
+                    <div class="history-head ui-log-toolbar">
                         <h3>历史日志</h3>
                         <button class="reload-log" type="button">${GmsUi.icon('refresh')}刷新</button>
                     </div>
                     <label>日期<select class="log-date"><option value="">最新</option></select></label>
                     <label>尾部行数<select class="log-tail"><option>200</option><option selected>500</option><option>2000</option><option>10000</option></select></label>
-                    <pre class="history-output">暂无日志</pre>
-                    <div class="history-actions">
+                    <pre class="history-output ui-log-content">暂无日志</pre>
+                    <div class="history-actions ui-log-actions">
                         <button class="download-log" type="button">${GmsUi.icon('download')}下载</button>
                         <button class="clear-logs danger" type="button">${GmsUi.icon('trash')}清空日志</button>
                     </div>
