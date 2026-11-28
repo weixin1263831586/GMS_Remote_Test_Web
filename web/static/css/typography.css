@@ -3,7 +3,7 @@
 
 @import url("/static/css/typography/roles-and-pages.css?v=20261128-css-reference-cleanup");
 @import url("/static/css/typography/shell-layout.css?v=20261128-css-reference-cleanup");
-@import url("/static/css/typography/shell-workspaces.css?v=20261127-shared-panel-type");
+@import url("/static/css/typography/shell-workspaces.css?v=20261128-toolbar-cleanup");
 @import url("/static/css/typography/shared-diagrams.css?v=20261128-css-reference-cleanup");
 @import url("/static/css/typography/inline-and-exceptions.css?v=20261120-type-dedup-v1");
 /* Normal UI: buttons/tables 12px, body/forms/descriptions 13px. Only compact

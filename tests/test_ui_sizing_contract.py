@@ -222,6 +222,34 @@ class UiSizingContractTests(unittest.TestCase):
             self.assertNotRegex(source, r"\.suite-download-section\s*\{")
             self.assertNotIn(".kb-external-layout", source)
 
+    def test_filter_toolbar_has_no_superseded_page_rules(self):
+        removed = {
+            "common-page.css": ("#users-main-view", "#agent-access-panel", "#sdk-config-panel",
+                                "#audit-main-view", "#audit-outbox-panel", "#audit-disk-panel",
+                                "#btn-download-suite", "#btn-extract-suite", "#api-search-input"),
+            "agent-access.css": ("#agent-access-search", "#agent-access-status-filter", ".agent-access-table-wrap"),
+            "api-docs-workbench.css": (".api-search-box", "#api-search-input"),
+            "other-workspaces.css": (".users-list-toolbar", ".users-list-filters", ".users-list-actions",
+                                     "#users-list-search", "#users-list-status-filter", ".audit-dashboard",
+                                     ".audit-filter-bar", ".suite-download-field", "#btn-extract-suite"),
+            "audit-disk.css": (".audit-disk-filters",),
+        }
+        for name, selectors in removed.items():
+            for _, selector, _, line in _css_leaf_rules((CSS / name).read_text(encoding="utf-8")):
+                for obsolete in selectors:
+                    self.assertNotRegex(selector, rf"{re.escape(obsolete)}(?![\w-])", (name, line, selector))
+        for name, count in (("users.html", 3), ("security-audit.html", 3), ("devices.html", 1),
+                            ("api-docs.html", 1), ("notes.html", 1), ("test-suites.html", 1)):
+            source = (ROOT / "web/shell/pages" / name).read_text(encoding="utf-8")
+            self.assertEqual(source.count("ui-workspace-toolbar--filter"), count, name)
+        users = (ROOT / "web/shell/pages/users.html").read_text(encoding="utf-8")
+        self.assertEqual(users.count("ui-toolbar-search--bounded"), 2)
+        self.assertEqual(users.count("ui-toolbar-select--compact"), 2)
+        disk = (ROOT / "web/shell/pages/security-audit.html").read_text(encoding="utf-8")
+        self.assertEqual(disk.count("ui-toolbar-select--regular"), 6)
+        self.assertEqual(disk.count("ui-toolbar-search--grow"), 3)
+        self.assertEqual(disk.count("ui-workspace-stack"), 3)
+
     def test_workspace_sidebar_roles(self):
         for filename, selector in (
             ("workspace-panels.css", ".agent-layout.agent-layout-with-sessions"),

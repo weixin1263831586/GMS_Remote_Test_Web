@@ -981,16 +981,6 @@ body.apk-resizing {
     color: var(--text-secondary);
 
 }
-#api-search-input {
-    width: 100%;
-    box-sizing: border-box;
-    padding: 10px 15px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: var(--darker-bg);
-    color: var(--text-primary);
-
-}
 .filter-btn.tone-primary { background: var(--primary-gradient); color: #fff; }
 .filter-btn.tone-success { background: var(--success-color); color: #fff; }
 #suite-download-url { width: 100%; }

@@ -275,6 +275,8 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                 ("devices", ".inventory-toolbar"),
                 ("api-docs", ".api-search-toolbar"),
                 ("security-audit", ".audit-log-filters"),
+                ("security-audit", ".audit-mail-filters"),
+                ("security-audit", ".audit-disk-filters"),
                 ("notes", "[data-kb-source-form]"),
                 ("test-suites", ".suite-download-row"),
             )
@@ -290,6 +292,11 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                                 const panel = document.getElementById(id);
                                 panel.style.display = selector.startsWith('#'+id) ? 'flex' : 'none';
                             }
+                        }
+                        if (name === 'security-audit') {
+                            const ids = ['audit-main-view','audit-outbox-panel','audit-disk-panel'];
+                            const selectors = ['.audit-log-filters','.audit-mail-filters','.audit-disk-filters'];
+                            for (let i=0; i<ids.length; i++) document.getElementById(ids[i]).style.display = selectors[i]===selector ? 'flex' : 'none';
                         }
                         if (name === 'notes') {
                             document.querySelector('#page-notes .kb-layout').style.display = 'none';

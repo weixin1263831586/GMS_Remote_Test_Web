@@ -164,7 +164,6 @@ html[data-ui-type-root="shell"] .inventory-stat .page-stat-label { font-size: va
 html[data-ui-type-root="shell"] .inventory-stat .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .inventory-stat small { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .inventory-filters label { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] .inventory-filters :is(input, select),
 html[data-ui-type-root="shell"] .inventory-footer select { font-family: inherit; font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .inventory-selection-count { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #devices-main-view .device-management-table .ui-name { font-size: var(--ui-type-size-small); }
@@ -210,8 +209,6 @@ html[data-ui-type-root="shell"] #auth-sshd-guide-content { font: var(--ui-type-s
 /* API catalog typography moved from other-workspaces.css. */
 html[data-ui-type-root="shell"] #page-api-docs .api-stat .page-stat-value { font-size: var(--ui-type-size-stat); }
 html[data-ui-type-root="shell"] #page-api-docs .api-stat-hint { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #page-api-docs #api-search-input.entry-field { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #page-api-docs .api-search-toolbar .api-action,
 html[data-ui-type-root="shell"] #page-api-docs .api-category-toolbar .filter-btn { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #page-api-docs .api-panel-title strong,
 html[data-ui-type-root="shell"] #page-api-docs .api-panel-count { font-size: var(--ui-type-size-small); }
@@ -233,7 +230,6 @@ html[data-ui-type-root="shell"] #page-api-docs .api-notes li { font-size: var(--
 /* Newly added suite-workspace text rules (centralized). */
 html[data-ui-type-root="shell"] #page-test-suites .suite-download-label strong { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] #page-test-suites .suite-download-label small { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #page-test-suites :is(#btn-download-suite, #btn-extract-suite) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #page-test-suites .suite-sidebar-heading { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] #page-test-suites .suite-browser-count { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] #page-test-suites .suite-suite-name { font-size: var(--ui-type-size-small); }

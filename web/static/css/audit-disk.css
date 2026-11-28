@@ -1,5 +1,4 @@
 /* Disk audit inherits audit-log/mail cards, header, filters and table-row sizing. */
-#page-security-audit #audit-disk-panel { min-height: 0; }
 /* Disk audit contains three variable-height info cards. Let this column scroll
    independently of the artifact table instead of shrinking/clipping cards. */
 #page-security-audit #audit-disk-panel .audit-side-panels {
@@ -11,7 +10,6 @@
 #page-security-audit #audit-disk-panel .audit-side-panels > .audit-side-card {
     flex: 0 0 auto;
 }
-#page-security-audit .audit-disk-filters > .combo-box { flex: 0 1 174px; min-width: 123px; max-width: 200px; }
 #page-security-audit .audit-disk-table { min-width: 1010px; table-layout: fixed; }
 #page-security-audit .audit-disk-table thead th {
     position: sticky; top: 0; z-index: 2;

@@ -706,7 +706,3 @@
 #page-users .sdk-source-table .agent-access-status-badge {
     max-width:100%;overflow:hidden;text-overflow:ellipsis;vertical-align:middle;
 }
-@media(max-width:680px) {
-
-    #page-users .users-list-actions {width:100%;justify-content:space-between}
-}

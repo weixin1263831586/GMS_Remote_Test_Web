@@ -105,7 +105,7 @@
 .ui-workspace-toolbar--filter .ui-toolbar-actions > button { flex-shrink: 0; white-space: nowrap; }
 .ui-search-field { position: relative; display: flex; align-items: center; flex: 1 1 180px; min-width: 0; }
 .ui-search-field > .ui-icon { position: absolute; left: 9px; width: 16px; height: 16px; color: var(--text-muted); pointer-events: none; }
-.ui-search-field > input { width: 100%; min-width: 0; padding-inline-start: 30px; }
+.ui-search-field > :is(input.combo-box, input.entry-field) { width: 100%; min-width: 0; padding-inline-start: 30px; }
 @media (max-width: 800px) {
     .ui-toolbar-select--regular { flex: 1 1 140px; }
     .ui-toolbar-search--grow { flex-basis: 100%; }
@@ -115,10 +115,10 @@
 @media (max-width: 680px) {
     .ui-toolbar-fields { flex-basis: 100%; }
     .ui-toolbar-actions { max-width: 100%; }
+    .ui-toolbar-actions--spread { width: 100%; justify-content: space-between; }
     .ui-workspace-toolbar--filter > :is(input, select) { max-width: 100%; }
     .ui-toolbar-grow, .ui-search-field { flex-basis: 100%; }
     .ui-toolbar-search--bounded { max-width: none; }
-    .ui-toolbar-fields--search { flex-basis: 100%; }
 }
 
 /* Do not reserve data-row height for structurally empty placeholder rows.
