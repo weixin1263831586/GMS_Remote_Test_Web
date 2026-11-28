@@ -27,7 +27,7 @@ function toolsRenderCategorySection({ category, catIndex, icon, count, cardsHtml
     const safeCategory = escapeIconAttr(category);
     return `
         <div class="category-section" data-category="${safeCategory}" data-category-index="${catIndex}" draggable="true">
-${toolsRenderCategoryHeader({ category, icon, count, addButtonBackground })}
+${toolsRenderCategoryHeader({ category, icon, count })}
             <div class="tools-grid">
 ${cardsHtml}
             </div>

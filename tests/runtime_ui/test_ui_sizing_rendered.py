@@ -730,6 +730,37 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_utility_cards_use_shared_chrome_and_no_inline_button_styles(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""() => {
+                const fixture = document.createElement('div');
+                fixture.className = 'tools-grid-frame';
+                fixture.innerHTML = toolsRenderCategorySection({
+                    category:'fixture',catIndex:0,icon:'📁',count:1,
+                    cardsHtml:ut_createToolCard({title:'Fixture',url:'https://example.invalid'},'fixture',0,'#9479e9')
+                });
+                document.body.append(fixture);
+                const card = fixture.querySelector('.tool-card');
+                const css = getComputedStyle(card);
+                const value = {shared:card.classList.contains('ui-card'),
+                    radius:css.borderTopLeftRadius,
+                    border:css.borderTopWidth,
+                    actions:[...fixture.querySelectorAll('button')].map(button => ({
+                        action:button.dataset.toolsAction,inline:button.hasAttribute('style')
+                    }))};
+                fixture.remove();
+                return value;
+            }""")
+            self.assertTrue(result["shared"], result)
+            self.assertEqual(result["radius"], "8px", result)
+            self.assertEqual(result["border"], "2px", result)
+            self.assertTrue(result["actions"], result)
+            self.assertFalse(any(item["inline"] for item in result["actions"]), result)
+        finally:
+            page.close()
+
     def test_report_row_actions_use_shared_classes(self):
         page = self.new_page()
         try:

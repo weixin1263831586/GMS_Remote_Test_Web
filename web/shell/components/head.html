@@ -4,24 +4,24 @@
     <title>{{ initial_title | default('测试界面 - GMS远程测试') }}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="preload" as="script" href="/static/js/shell/shell-early-boot.js" fetchpriority="high">
-        <link rel="stylesheet" href="/static/css/common.css?v=20261128-shared-components" data-shell-styles>
+        <link rel="stylesheet" href="/static/css/common.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-components.css?v=20261128-shared-components" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-components.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/common-page.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/agent-access.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/device-inventory.css?v=20261127-shared-components" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-layout.css?v=20261128-component-audit" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/common-page.css?v=20261128-component-audit" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/agent-access.css?v=20261128-component-audit" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-component-audit" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/device-inventory.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/workspace-panels.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261128-shared-components" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/other-workspaces.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/host-workspace.css?v=20261127-host-label" data-shell-styles>
     <link rel="stylesheet" href="/static/css/host-desktop-workspace.css?v=20261127-host-label" data-shell-styles>
     <link rel="stylesheet" href="/static/css/host-terminal-workspace.css?v=20261127-host-label" data-shell-styles>
     <link rel="stylesheet" href="/static/css/audit-disk.css?v=20261126-table-geometry" data-shell-styles>
     <link rel="stylesheet" href="/static/css/api-docs-workbench.css?v=20261127-component-convergence" data-shell-styles>
     <link rel="stylesheet" href="/static/css/analysis-workbench-tokens.css?v=20261128-shared-components" data-shell-styles>
-    <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261127-panel-heading" data-shell-styles>
+    <link rel="stylesheet" href="/static/css/apk-workbench.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/css/report-workbench.css?v=20261128-shared-components" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261125-inline-password-action" data-shell-styles>
     <link rel="stylesheet" href="/static/css/modal-tech-dialogs.css?v=20261128-label-alignment" data-shell-styles>
@@ -29,7 +29,7 @@
     <link rel="stylesheet" href="/static/css/modal-tech-cases.css?v=20261128-label-alignment" data-shell-styles>
     <link rel="stylesheet" href="/static/css/vpn-proxy-panel.css?v=20261126-table-dedup" data-shell-styles>
     <link rel="stylesheet" href="/static/css/ui-sizing.css?v=20261127-tabs-42-110" data-shell-styles>
-                        <link rel="stylesheet" href="/static/css/typography.css?v=20261127-host-label" data-shell-styles>
+                        <link rel="stylesheet" href="/static/css/typography.css?v=20261128-component-audit" data-shell-styles>
     <link rel="stylesheet" href="/static/vendor/xterm/xterm.css?v=20260324-3">
     <link rel="stylesheet" href="/static/css/shell-extra.css?v=20260930-shell-extra">
     <link rel="stylesheet" href="/static/css/aoa-workbench.css?v=20261126-command-60-40">
@@ -54,14 +54,14 @@
     <script src="/static/js/shell/shell-host-management.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-workspace.js?v=20261127-host-label" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-terminal-workspace.js?v=20261127-host-label" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-user-management.js?v=20261126-table-geometry" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-device-management.js?v=20261127-shared-components" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-user-management.js?v=20261128-component-audit" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-device-management.js?v=20261128-component-audit" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-groups.js?v=20261112-primary-gradient" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-uiaction.js?v=20261117-safe-ui-hierarchy" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-config-viewer.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-device-override.js?v=20260930-shell-split" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-page-switching.js?v=20261114-orbit-viewport" defer data-shell-runtime></script>
-    <script src="/static/js/shell/shell-personal-knowledge.js?v=20261127-shared-components" defer data-shell-runtime></script>
+    <script src="/static/js/shell/shell-personal-knowledge.js?v=20261128-component-audit" defer data-shell-runtime></script>
     <script src="/static/js/shell/shell-main.js?v=20261125-init-consolidation" defer data-shell-runtime></script>
     <!-- AOA 工作台独立于不可变 shell bundle，便于设备页增量部署；它依赖
          上面的设备 UI 控制/Worker 轮询函数，但不参与 14 段运行时打包。
@@ -99,21 +99,21 @@
     <script src="/static/js/api.js?v=20261126-settings-auth" defer></script>
     <script src="/static/js/shell/websocket-manager.js?v=20261105-aoa-device-refresh" defer></script>
     <script src="/static/js/shell/icon-auto.js?v=20260905-extract" defer></script>
-    <script src="/static/js/shell/tools-render.js?v=20261118-square-cards" defer></script>
+    <script src="/static/js/shell/tools-render.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/shell/websites.js?v=20261126-legacy-bookmarks" defer></script>
-    <script src="/static/js/shell/server-sync.js?v=20261114-tools-12col" defer></script>
+    <script src="/static/js/shell/server-sync.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/shell/dnd-sort.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/vpn-proxy-panel.js?v=20261118-client-toggles" defer></script>
-    <script src="/static/js/shell/utility-tools.js?v=20261126-legacy-tool-ids" defer></script>
+    <script src="/static/js/shell/utility-tools.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/shell/weekly-report.js?v=20261116-aligned-corner-path" defer></script>
     <script src="/static/js/shell/arrow-nav.js?v=20260917-navigation-focus-anchor" defer></script>
     <script src="/static/js/shell/shell-terminal.js?v=20260905-extract" defer></script>
     <script src="/static/js/shell/sidebar-dnd.js?v=20260910-device-console-order" defer></script>
     <script src="/static/js/shell/workspace-devices.js?v=20261118-color-refresh-suites" defer></script>
     <!-- 加载通知中心 - 页面脚本依赖，须先于其执行 -->
-    <script src="/static/js/notifications.js?v=20261118-targeted-notice-navigation" defer></script>
+    <script src="/static/js/notifications.js?v=20261128-component-audit" defer></script>
     <!-- 加载页面模块 - 必须在 navigation.js 之前加载，由后者负责初始化 -->
-    <script src="/static/js/pages/test-suite-browser.js?v=20261125-browser-consolidation" defer></script>
+    <script src="/static/js/pages/test-suite-browser.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/pages/test-suite-browser-transfer.js?v=20261125-transfer" defer></script>
     <script src="/static/js/pages/test-suite-browser-reports.js?v=20261126-table-dedup-final" defer></script>
     <script src="/static/js/pages/test-suite-browser-files.js?v=20261119-analysis-status" defer></script>
@@ -126,18 +126,18 @@
     <script src="/static/js/pages/firmware-burn-adb-proxy.js?v=20260930-pages-split" defer></script>
     <script src="/static/js/pages/firmware-burn-usbip.js?v=20261124-usbip-short-label" defer></script>
     <script src="/static/js/pages/auth-elevation.js?v=20261126-admin-role" defer></script>
-    <script src="/static/js/pages/vpn-control.js?v=20261124-usbip-short-label" defer></script>
-    <script src="/static/js/pages/file-browser.js?v=20260904-gsi-worker-browse" defer></script>
+    <script src="/static/js/pages/vpn-control.js?v=20261128-component-audit" defer></script>
+    <script src="/static/js/pages/file-browser.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/pages/test-control.js?v=20261126-central-settings" defer></script>
     <script src="/static/js/shell/system-settings.js?v=20261127-model-settings-grid" defer></script>
     <script src="/static/js/pages/test-reports.js?v=20261128-shared-components" defer></script>
-    <script src="/static/js/pages/report-analysis.js?v=20261128-shared-components" defer></script>
+    <script src="/static/js/pages/report-analysis.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/pages/report-analysis-activity.js?v=20261119-shared-status-v2" defer></script>
     <script src="/static/js/pages/report-failure-workbench.js?v=20261119-hostlog-source" defer></script>
     <script src="/static/js/pages/agent-policy-evidence.js?v=20261126" defer></script>
-    <script src="/static/js/pages/conversational-agent.js?v=20261128-shared-components" defer></script>
+    <script src="/static/js/pages/conversational-agent.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/pages/agent-access.js?v=20261128-shared-components" defer></script>
-    <script src="/static/js/pages/sdk-config.js?v=20261128-shared-components" defer></script>
+    <script src="/static/js/pages/sdk-config.js?v=20261128-component-audit" defer></script>
     <script src="/static/js/pages/api-docs.js?v=20261127-shared-components" defer></script>
     <script src="/static/js/pages/apk-analysis.js?v=20261107-apk-refresh-width" defer></script>
     <script src="/static/js/pages/security-audit.js?v=20261127-component-convergence" defer></script>

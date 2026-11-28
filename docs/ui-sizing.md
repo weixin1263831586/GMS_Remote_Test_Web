@@ -90,3 +90,7 @@ Redmine/Gerrit 通过 `ui-dashboard` 共用普通按钮、输入/选择框及页
 状态标签统一使用 `.ui-status` 和语义色角色（`is-success`、`is-warning`、`is-danger`、`is-info`、`is-accent`），业务状态和值保持原样。普通空状态使用 `.ui-empty-state`，行内提示使用 `ui-empty-state--inline`，表格空态保留单个跨列单元格。日志工具栏、操作组、内容滚动分别使用 `.ui-log-toolbar`、`.ui-log-actions`、`.ui-log-content`；xterm 及日志操作权限不变。报告行操作允许按列宽换行，按钮标签本身不换行。
 
 Runner 的页面清单测试输出 `table-inventory.json`、`component-inventory.json` 和各页面截图；控件采样用于核对字体、尺寸、圆角和滚动，不能替代实测结果审查。
+
+普通卡片可复用 `.ui-card`（8px 圆角、公共边框、背景、12px 内边距），模块只定义必要的内容布局。`.ui-file-preview` 复用滚动边界但保持源代码缩进与横向阅读；日志采用独立换行角色。普通、紧凑和行内空状态使用公共角色。字体规则仍只在 typography/ 中定义。
+
+CSS 引用扫描生成 `css-reference-inventory.json`，包含孤立字面选择器候选、同文本重复规则候选和内联按钮样式候选。该清单不等于死代码结论：动态类名、媒体查询、主题及状态依赖必须结合运行时证据复核。

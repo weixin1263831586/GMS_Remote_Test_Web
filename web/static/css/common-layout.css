@@ -752,13 +752,12 @@
     cursor: move;
 }
 .tools-category-title { display: flex; align-items: center; min-width: 0; gap: var(--ui-spacing-xs); }
-.tools-category-icon { font-size: var(--ui-type-size-dialog); cursor: grab; }
+.tools-category-icon { cursor: grab; }
 .tools-category-name { padding: 0; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; }
 .tools-category-count { margin-left: var(--ui-spacing-xs); }
 .tools-empty-state { padding-block: var(--ui-spacing-lg); }
-.tools-empty-icon { font-size: var(--ui-type-size-stat); margin-bottom: var(--ui-spacing-sm); }
-.tools-empty-title { font-size: var(--ui-type-size-dialog); margin-bottom: var(--ui-spacing-sm); }
-.tools-empty-hint { font-size: var(--ui-type-size-body); }
+.tools-empty-icon { margin-bottom: var(--ui-spacing-sm); }
+.tools-empty-title { margin-bottom: var(--ui-spacing-sm); }
 
 /* Tool Cards */
 .tool-icon {
@@ -770,7 +769,6 @@
     justify-content: center;
     background: var(--light-bg);
     border-radius: var(--ui-radius-control);
-    font-size: var(--ui-type-size-stat);
     pointer-events: none;
 
 }
@@ -1633,9 +1631,6 @@
 
 .dx-code {
     color: var(--text-secondary);
-    white-space: pre-wrap;
-    word-break: break-word;
-    overflow: auto;
 }
 
 .dx-list {

@@ -1,5 +1,7 @@
 """UI geometry entrypoint and no-wrap guarantees across page roots."""
 
+import json
+import os
 import re
 import subprocess
 import unittest
@@ -392,6 +394,75 @@ class UiSizingContractTests(unittest.TestCase):
         foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
         for role in (".ui-empty-state--inline", ".ui-log-content", ".ui-table-actions--wrap"):
             self.assertIn(role, foundation)
+
+    def test_component_reference_inventory_and_migrated_renderers(self):
+        """Report candidates conservatively; dynamic selectors require review."""
+        paths = list(_tracked_ui_sources())
+        source_tokens = set()
+        styles = []
+        inline_buttons = []
+        for path in paths:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            name = path.as_posix()
+            if path.suffix == ".css":
+                styles.append((name, source))
+            else:
+                source_tokens.update(re.findall(r"[\w-]+", source))
+                for match in re.finditer(r"""<button\b[^>]*\bstyle\s*=\s*(["'])(.*?)\1""", source, re.I | re.S):
+                    if re.search(r"(?:padding|border-radius|height|background|margin|font-size)\s*:", match[2]):
+                        inline_buttons.append({"file": name, "line": source.count("\n", 0, match.start()) + 1})
+                for css in re.findall(r"<style\b[^>]*>(.*?)</style\s*>", source, re.I | re.S):
+                    styles.append((name, css))
+        unreferenced = []
+        repeated = []
+        for name, css in styles:
+            css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+            seen = set()
+            for rule in re.finditer(r"([^{}]+)\{([^{}]*)\}", css):
+                selector = " ".join(rule[1].split())
+                body = " ".join(rule[2].split())
+                if not body:
+                    continue
+                key = (selector, body)
+                if key in seen:
+                    repeated.append({"file": name, "selector": selector})
+                seen.add(key)
+                # Only report isolated literal class/id selectors. Media scope,
+                # escaped identifiers and dynamically composed tokens need manual review.
+                if re.fullmatch(r"[.#][A-Za-z_][\w-]*", selector) and selector[1:] not in source_tokens:
+                    unreferenced.append({"file": name, "selector": selector})
+        evidence = {"source_count": len(paths), "style_blocks": len(styles),
+                    "unreferenced_candidates": unreferenced,
+                    "repeated_rule_candidates": repeated, "inline_button_candidates": inline_buttons}
+        output = os.getenv("GMS_UI_PREVIEW_DIR")
+        if output:
+            directory = Path(output)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "css-reference-inventory.json").write_text(
+                json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.assertTrue(styles)
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        for role in (".ui-card", ".ui-file-preview", ".ui-empty-state--compact"):
+            self.assertIn(role, foundation)
+        for path, roles in {
+            "features/redmine/ui/knowledge.js": ("case-card ui-card", "case-status ui-status", "ref-badge ui-status"),
+            "features/redmine/ui/core.js": ("claim-badge ui-status",),
+            "features/gms/ui/page.js": ("gerritStatusTone", "gerrit-badge ui-status"),
+            "web/static/js/shell/tools-render.js": ("tool-card ui-card", "ui-action-group"),
+            "web/static/js/shell/shell-personal-knowledge.js": ("kb-doc-card ui-card", "kb-nav-button"),
+            "web/shell/pages/apk-analysis.html": ("ui-file-preview",),
+            "web/static/js/pages/sdk-config.js": ("ui-empty-state--compact",),
+        }.items():
+            source = (ROOT / path).read_text(encoding="utf-8")
+            for role in roles:
+                self.assertIn(role, source, path)
+        for path in ("web/static/js/shell/tools-render.js", "web/static/js/shell/server-sync.js",
+                     "web/static/js/shell/utility-tools.js", "web/static/js/shell/shell-device-management.js"):
+            source = (ROOT / path).read_text(encoding="utf-8")
+            self.assertNotRegex(source, r'<button[^>]*\bstyle="[^"]*(?:padding|border-radius|actionButtonStyle)', path)
+        renderer = (ROOT / "web/static/js/shell/tools-render.js").read_text(encoding="utf-8")
+        for obsolete in ("addButtonBackground", "sectionStyle", "actionsStyle"):
+            self.assertNotIn(obsolete, renderer)
 
     def test_shared_templates_consume_tokens(self):
         mapping = {
