@@ -263,7 +263,6 @@ html[data-ui-type-root="redmine"] .ref-item a { font-weight: var(--ui-type-weigh
 html[data-ui-type-root="redmine"] .ref-title { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="redmine"] .run-item-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="redmine"] .run-item-meta { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="redmine"] .stat-card .value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="redmine"] .stat-card .label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .stats-section h2 { font-size: var(--ui-type-size-section); }
 html[data-ui-type-root="redmine"] .dashboard-summary-title { font-size: var(--ui-type-size-section); }

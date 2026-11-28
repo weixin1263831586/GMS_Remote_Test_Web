@@ -179,7 +179,7 @@ body.workspace-scope-single .host-workspace-surface .host-pane-single-name {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    min-height: 34px;
+    min-height: var(--ui-control-height-dialog);
     padding: 6px 16px;
     border: 1px solid var(--primary-color);
     background: color-mix(in srgb, var(--primary-color) 22%, var(--card-bg));

@@ -2,7 +2,6 @@
 :root {
 
 
-
   --tech-field-glyph-size: 28px;
   --tech-deep: var(--light-bg, #202027);
   --tech-panel: var(--card-bg, #1b1b23);
@@ -108,12 +107,6 @@
 .tech-dialog .tech-field-stack > .tech-field-glyph .ui-icon { width: 20px; height: 20px; }
 .tech-dialog .tech-field-stack > :not(label):not(.tech-field-glyph) { grid-column: 1 / -1; width: 100%; min-width: 0; }
 .tech-dialog .tech-field-stack > label { min-width: 0 !important;  }
-.tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) {
-  min-width: 0; max-width: 100%; box-sizing: border-box;
-  padding: 5px 8px; min-height: var(--ui-control-height);
-  color: var(--text-primary); background: var(--tech-input); border: 1px solid var(--border-light);
-  border-radius: 6px;  line-height: 1.5; box-shadow: none;
-}
 .tech-dialog :is(input,select,textarea)::placeholder { color: var(--text-secondary); opacity: 1; }
 .tech-dialog :is(input,select,textarea):disabled { opacity: .5; }
 .tech-dialog :is(input,select,textarea):focus-visible,
@@ -252,8 +245,10 @@
 }
 .tech-dialog .tech-field-glyph :is(.ui-icon,.tech-brand-icon) { width: 18px; height: 18px; }
 .tech-dialog :is(input:not([type=checkbox]):not([type=radio]):not([type=file]):not([type=hidden]),select,textarea) {
-   min-height: var(--ui-control-height); border: 1px solid #82719c;
-  border-radius: 6px; background: #191625;
+  min-width: 0; max-width: 100%; box-sizing: border-box;
+  padding: 5px 8px; min-height: var(--ui-control-height);
+  color: var(--text-primary); background: #191625; border: 1px solid #82719c;
+  border-radius: var(--ui-radius-control); line-height: 1.5; box-shadow: none;
 }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close) {
   border-color: #a76dd5 !important;

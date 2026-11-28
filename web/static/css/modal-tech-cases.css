@@ -329,7 +329,10 @@
 #route-check-dialog .route-probe-results { margin-top: 6px; }
 #route-check-dialog .ping-result { margin: 0; padding: 8px 0; border: 0; background: transparent; }
 #route-check-dialog .route-check-actions { margin: 0; min-height: 62px; padding: 10px 18px 22px; }
-#route-check-dialog .route-check-actions .btn-xxs { min-height: var(--ui-control-height-dialog); padding: 7px 12px;  }
+#route-check-dialog .route-check-actions .btn-xxs {
+  min-width: 96px; min-height: var(--ui-control-height-dialog); padding: 7px 12px;
+  gap: 6px; border-radius: 8px; letter-spacing: .2px; transform: none; box-shadow: none;
+}
 @media(max-width: 700px) {
  .report-import-choices { grid-template-columns: 1fr; gap: 14px; }
  .report-import-choice { min-height: 150px; }

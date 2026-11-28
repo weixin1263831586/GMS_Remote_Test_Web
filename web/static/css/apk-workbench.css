@@ -31,7 +31,6 @@
 #page-apk-analysis .apk-status-actions { align-items: center; flex-wrap: nowrap; }
 #page-apk-analysis .apk-status-actions > .btn-xs {
     flex: 0 0 auto;
-    min-height: 28px;
     border: 1px solid var(--border-light);
     background: var(--lighter-bg);
     white-space: nowrap;
@@ -237,6 +236,7 @@
 }
 #page-apk-analysis .apk-tree-children { padding-left: 14px; }
 #page-apk-analysis #apk-file-viewer {
+    animation: fadeIn 0.2s ease;
     grid-column: 3;
     height: 100%;
     padding: 0;
@@ -264,8 +264,12 @@
     background: var(--apk-surface);
 }
 #page-apk-analysis .apk-file-tab {
+    display: inline-flex;
     flex: 0 0 auto;
     align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    white-space: nowrap;
     min-width: 72px;
     max-width: 220px;
     height: 34px;
@@ -285,6 +289,23 @@
     box-shadow: inset 0 2px 0 var(--apk-accent);
 }
 #page-apk-analysis .apk-file-tab:hover { color: var(--text-primary); }
+#page-apk-analysis .apk-file-tab-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+#page-apk-analysis .apk-file-tab-close {
+    flex: 0 0 auto;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    line-height: 15px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+#page-apk-analysis .apk-file-tab-close:hover {
+    background: var(--lighter-bg);
+    color: var(--danger-color);
+}
 #page-apk-analysis #apk-file-path {
     flex: 0 0 auto;
     box-sizing: border-box;

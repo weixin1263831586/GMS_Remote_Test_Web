@@ -176,9 +176,6 @@
 }
 
 /* 文件查看器 */
-#apk-file-viewer {
-    animation: fadeIn 0.2s ease;
-}
 .apk-file-path {
 
 
@@ -274,67 +271,6 @@ body.apk-resizing {
     background: var(--darker-bg);
 }
 
-#apk-file-viewer {
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 10px;
-    background: var(--light-bg);
-    min-width: 0;
-    min-height: 0;
-    height: 100%;
-    overflow: hidden;
-}
-
-.apk-file-tabs {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-bottom: 8px;
-    overflow-x: auto;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 6px;
-}
-
-.apk-file-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    max-width: 220px;
-    padding: 5px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px 6px 0 0;
-    background: var(--darker-bg);
-    color: var(--text-secondary);
-
-    cursor: pointer;
-    white-space: nowrap;
-}
-
-.apk-file-tab.active {
-    color: var(--text-primary);
-    background: var(--card-bg);
-    border-bottom-color: var(--primary-color);
-}
-
-.apk-file-tab-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.apk-file-tab-close {
-    flex: 0 0 auto;
-    width: 16px;
-    height: 16px;
-    border-radius: 50%;
-    line-height: 15px;
-    text-align: center;
-    color: var(--text-secondary);
-}
-
-.apk-file-tab-close:hover {
-    background: var(--lighter-bg);
-    color: var(--danger-color);
-}
 
 /* APK 文件搜索结果 */
 .apk-search-result-item {
@@ -352,7 +288,6 @@ body.apk-resizing {
 .apk-search-result-item:last-child {
     border-bottom: none;
 }
-
 
 
 .apk-search-result-path {
@@ -593,7 +528,6 @@ body.apk-resizing {
 }
 
 
-
 .agent-run-stage-bar {
     display: flex;
     gap: 2px;
@@ -632,7 +566,7 @@ body.apk-resizing {
 }
 
 .agent-actions .btn-xs {
-    min-height: 24px;
+    min-height: var(--ui-control-height-icon);
     padding: 3px 9px;
 }
 
@@ -946,8 +880,6 @@ body.apk-resizing {
     .apk-upload-content > button {
         max-width: 100%;
     }
-
-
 
 
     .suite-browser-header > div {

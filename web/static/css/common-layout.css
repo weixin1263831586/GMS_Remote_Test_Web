@@ -321,17 +321,6 @@
     pointer-events: none;
     z-index: 2;
 }
-#route-check-dialog .route-check-actions .btn-xxs {
-    min-width: 96px;
-    min-height: 38px;
-    padding: 0 18px;
-    gap: 6px;
-    border-radius: 8px;
-
-    letter-spacing: 0.2px;
-    transform: none;
-    box-shadow: none;
-}
 #route-check-dialog .route-check-actions .btn-xxs:not(.btn-primary) {
     color: #f4f1ff;
     background: transparent;
@@ -491,10 +480,6 @@
 
     margin-top: 4px;
 }
-
-
-
-
 
 
 .ping-error {
