@@ -233,6 +233,7 @@ class UiSizingContractTests(unittest.TestCase):
                                      "#users-list-search", "#users-list-status-filter", ".audit-dashboard",
                                      ".audit-filter-bar", ".suite-download-field", "#btn-extract-suite"),
             "audit-disk.css": (".audit-disk-filters",),
+            "typography/shell-layout.css": ("#api-search-input",),
         }
         for name, selectors in removed.items():
             for _, selector, _, line in _css_leaf_rules((CSS / name).read_text(encoding="utf-8")):

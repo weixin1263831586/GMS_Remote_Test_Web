@@ -293,7 +293,6 @@ html[data-ui-type-root="shell"] #kb-doc-tags,
 html[data-ui-type-root="shell"] #kb-search-input { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #kb-doc-content { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] #kb-side-info { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] #api-search-input { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .suite-progress-status { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .suite-progress-percent { font-size: var(--ui-type-size-small); }
 @media (max-width: 600px) { html[data-ui-type-root="shell"] .sidebar-brand { font-size: 0; } }
