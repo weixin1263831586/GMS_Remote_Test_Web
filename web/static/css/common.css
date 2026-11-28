@@ -725,24 +725,6 @@ body {
     display: none;
 }
 
-.host-workspace-layouts { display:flex; align-items:stretch; gap:0; flex-wrap:nowrap; }
-.host-workspace-layouts > .btn-xs {
-    /* Both layout tabs and Users/Audit tabs live in a 26px title action row.
-       The old 24px host buttons sat 2px lower because the row aligns its
-       children on the bottom; use the canonical height instead. */
-    box-sizing: border-box;
-    height: var(--ui-control-height-small);
-    min-height: var(--ui-control-height-small);
-    max-height: var(--ui-control-height-small);
-    padding: 2px 7px;
-    border-radius: 0;
-    box-shadow: none;
-    transform: none;
-}
-.host-workspace-layouts > .btn-xs:first-child { border-radius:4px 0 0 4px; }
-.host-workspace-layouts > .btn-xs:last-child { border-radius:0 4px 4px 0; }
-.host-workspace-layouts > .btn-xs + .btn-xs { margin-left:-1px; }
-.host-workspace-layouts .btn-xs.active { background:var(--primary-gradient); color:#fff; border-color:var(--primary-color); }
 .host-workspace-grid { flex:1; min-height:0; display:grid; gap:8px; height:auto; }
 .host-workspace-grid.layout-single { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
 .host-workspace-grid.layout-horizontal { grid-template-columns:repeat(2,minmax(0,1fr)); grid-template-rows:minmax(0,1fr); }
@@ -893,16 +875,6 @@ body {
    内联样式）。line-height 必须显式声明：button 卡（users 筛选卡）的
    UA 默认 line-height:normal 会覆盖继承值，导致同一模板出现两种卡高。 */
 .page-stat-row { display: flex; gap: var(--ui-spacing-sm); margin-bottom: 10px; }
-.page-stat-card {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: var(--ui-radius-card);
-    flex: 1;
-    min-height: var(--ui-stat-height);
-    min-width: 0;
-    line-height: 1.6;
-    padding: 15px;
-}
 .page-stat-card > .page-stat-value { display: block;   }
 .page-stat-card > .page-stat-label { display: block; color: var(--text-secondary);  margin-top: 5px; }
 .page-stat-value.tone-primary { color: var(--primary-color); }

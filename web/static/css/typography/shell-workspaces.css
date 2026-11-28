@@ -244,7 +244,6 @@ html[data-ui-type-root="shell"] #page-test-suites .suite-browser-footer { font-s
 /* Reports table is rendered by JavaScript: no inline typography overrides. */
 html[data-ui-type-root="shell"] #reports-table-body td { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #reports-table-body .reports-mono-cell { font-family: var(--ui-type-font-mono); }
-html[data-ui-type-root="shell"] #reports-table-body .reports-type-cell { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] #reports-table-body .reports-metric-cell { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] #reports-load-more-wrapper.reports-page-count { font-size: var(--ui-type-size-small); }
 

@@ -3,7 +3,7 @@
                 <!-- 视图页签：同 users 页「用户列表 / Agent 接入」胶囊模板
                      （.users-view-tabs 通用分段按钮样式）。「历史邮件」为
                      owner 视图（本人邮件台账），管理员可切全量。 -->
-                <div class="users-view-tabs" id="audit-view-tabs" role="tablist" aria-label="安全审计视图" style="display: none;">
+                <div class="users-view-tabs ui-segmented" id="audit-view-tabs" role="tablist" aria-label="安全审计视图" style="display: none;">
                     <button id="audit-logs-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="switchSecurityAuditView" data-a0="logs">审计日志</button>
                     <div id="audit-outbox-entry">
                         <button id="audit-outbox-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="switchSecurityAuditView" data-a0="outbox"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#mail"></use></svg> 历史邮件</button>

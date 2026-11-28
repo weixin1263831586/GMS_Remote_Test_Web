@@ -135,14 +135,13 @@
     display: flex; flex-wrap: wrap; align-items: center;
     gap: 8px; margin-top: 0; padding-top: 6px; border-top: 1px solid var(--border-color);
 }
-/* The start/stop control is text-only in all states. Its hit target follows
-   the label width (no former SVG slot or oversized 20px side padding). */
+/* Start, starting, stop and stopping share one fixed action footprint. */
 #page-test.page-ui-rework .test-btn-frame #test-toggle-btn {
     flex: 0 0 auto;
     box-sizing: border-box;
-    width: 110px;
-    min-width: 110px;
-    min-height: var(--ui-control-height);
+    width: 90px;
+    min-width: 90px;
+    min-height: var(--ui-control-height-dialog);
     padding: 6px 14px;
     white-space: nowrap;
     line-height: 20px;
@@ -167,7 +166,6 @@
 }
 #page-reports.page-ui-rework .list-table { min-width: 1120px; }
 /* 报告分析 / APK：强化上传/结果/失败列表层级，保留原 tab 和内容容器。 */
-#page-report-analysis.page-ui-rework .report-result-card,
 #page-apk-analysis.page-ui-rework .apk-source-frame {
     border: 1px solid var(--border-color); border-radius: var(--ui-radius-card);
     background: var(--card-bg); box-shadow: none;

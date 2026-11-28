@@ -372,7 +372,7 @@ button[data-busy-size="long"] { --ui-action-reserved-width: 92px; }
 }
 
 /* KPI roles: common frame, icon-led inventory cards, and centered dashboard counters. */
-.page-stat-card:is(.inventory-stat, .workbench-stat),
+.page-stat-card,
 .ui-dashboard .stat-card,
 .ui-kpi-card--icon,
 .ui-kpi-stack .stat-card,
@@ -385,6 +385,7 @@ button[data-busy-size="long"] { --ui-action-reserved-width: 92px; }
     border-radius: var(--ui-radius-card);
     box-shadow: none;
 }
+.page-stat-card { flex: 1; line-height: 1.6; padding: 15px; }
 .page-stat-card:is(.inventory-stat, .workbench-stat),
 .ui-dashboard .stat-card,
 .ui-kpi-card--icon { height: var(--ui-stat-height); }
@@ -581,3 +582,12 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
         min-width: var(--ui-touch-target-height);
     }
 }
+
+/* Title-level view and layout switchers share one segmented capsule. */
+.ui-segmented { box-sizing: border-box; display: flex; align-items: center; gap: 0; padding: 0; height: var(--ui-control-height-small); border: 1px solid var(--border-color); border-radius: var(--ui-radius-control); background: var(--darker-bg); overflow: hidden; }
+.ui-segmented .btn-xs { box-sizing: border-box; height: var(--ui-segmented-inner-height); min-height: var(--ui-segmented-inner-height); max-height: var(--ui-segmented-inner-height); padding: 3px 9px; border: 0; border-radius: 0; background: transparent; box-shadow: none; transition: none; }
+.ui-segmented > div { display: flex; align-items: stretch; border-left: 1px solid var(--border-color); }
+.ui-segmented > div > .btn-xs { flex: 1; }
+.ui-segmented > .btn-xs + .btn-xs { border-left: 1px solid var(--border-color); }
+.ui-segmented .btn-xs:hover:not(:disabled) { background: var(--lighter-bg); box-shadow: none; transform: none; }
+.ui-segmented .btn-xs.active { color: var(--text-on-accent); background: var(--primary-strong); box-shadow: none; }

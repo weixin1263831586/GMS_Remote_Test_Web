@@ -710,58 +710,6 @@ body.apk-resizing {
 }
 
 /* ==================== 用户与 Agent 接入管理 ==================== */
-.users-view-tabs {
-    /* in-flow 子容器：定位由 .page-header-actions 模板统一（底边对齐
-       内容框顶）。仅保留胶囊视觉（边框/分段按钮）。 */
-    display: flex;
-    align-items: center;
-    gap: 0;
-    padding: 0;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    background: var(--darker-bg);
-    overflow: hidden;
-}
-
-.users-view-tabs .btn-xs {
-    /* 24px 分段按钮 + 上下边框 = 26px 胶囊，与全站动作区控件同高同底边。 */
-    height: var(--ui-segmented-inner-height);
-    min-height: var(--ui-segmented-inner-height);
-    padding: 3px 9px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    transition: none;
-}
-
-.users-view-tabs > div {
-    display: flex;
-    align-items: stretch;
-    border-left: 1px solid var(--border-color);
-}
-
-.users-view-tabs > div > .btn-xs {
-    flex: 1;
-}
-
-.users-view-tabs .btn-xs:hover {
-    border: 0;
-    background: var(--lighter-bg);
-    box-shadow: none;
-    transform: none;
-}
-
-.users-view-tabs .btn-xs.active {
-    /* 与桌面页 host-workspace-layouts（单屏/左右/上下/四屏）一致：
-       当前视图页签用主色渐变醒目标识。规则顺序在 :hover 之后，
-       悬停在 active 页签上时渐变背景不会被 hover 覆盖。 */
-    color: #fff;
-    background: var(--primary-gradient);
-    box-shadow: none;
-}
-
-
 /* Agent 接入统计卡已并入 page-stat-row/workbench-stat 模板
    （与用户列表/设备/审计页同源），本页无专属统计卡规则。 */
 

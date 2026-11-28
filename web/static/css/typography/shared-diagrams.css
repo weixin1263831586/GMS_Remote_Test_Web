@@ -11,7 +11,7 @@
 .suite-browser-path, .apk-file-path, #client-identity,
 #script-path, #device-host, #local-server, #test-module, #test-case, #retry-result,
 input[id$="-path"] { font-family: var(--ui-type-font-mono); }
-:is(.ui-status,.status-badge,.badge-mini,.suite-type-badge,.suite-header-type,.device-status,.vpn-status-label,.aoa-status-pill,.host-pane-status,.radar-pill,.agent-access-status-badge,.claim-badge,.case-status,.status-pill,.dx-status-pill) { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
+:is(.ui-status,.status-badge,.badge-mini,.suite-type-badge,.suite-header-type,.device-status,.vpn-status-label,.aoa-status-pill,.host-pane-status,.radar-pill,.agent-access-status-badge,.claim-badge,.case-status,.status-pill,.dx-status-pill,.ref-badge,.identity-badge,.port-state,.socket-status,.reports-type-cell) { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-medium); }
 .btn-xxs, .btn-xs, .btn-small { font-weight: var(--ui-type-weight-medium); }
 .device-sort { font: inherit; }
 .device-sort + .device-sort { font-size: var(--ui-type-size-body); }

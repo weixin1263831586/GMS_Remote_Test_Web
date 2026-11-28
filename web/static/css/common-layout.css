@@ -1,12 +1,4 @@
 /* ==================== Report Analysis Page ==================== */
-.report-result-card {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 8px;
-}
-.report-result-card:last-child { margin-bottom: 0; }
 #report-analysis-result [data-click="sendReportAnalysisEmail"] { margin-right: 6px; }
 .report-summary-grid {
     display: grid;
@@ -93,15 +85,7 @@
     overflow-wrap: anywhere;
     word-break: break-word;
 }
-.report-failure-card {
-    display: grid;
-    gap: 10px;
-    padding: 12px;
-    margin-bottom: 12px;
-    border-left: 3px solid var(--danger-color);
-    border-radius: 6px;
-    background: var(--darker-bg);
-}
+.report-failure-card { display: grid; gap: var(--ui-spacing-sm); }
 .report-failure-action {
     min-height: var(--ui-control-height-small);
     padding: 4px 9px;
@@ -1399,11 +1383,11 @@
     line-height: 1.7;
 }
 
+.dx-stack { overflow: auto; }
 .dx-stack,
 .dx-code {
     margin: 0;
     max-height: 420px;
-    overflow: auto;
     padding: 10px;
     border-radius: var(--ui-radius-card);
     background: var(--light-bg);

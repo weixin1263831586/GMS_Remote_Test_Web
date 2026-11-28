@@ -1,6 +1,6 @@
 <div class="container page-content page-ui-rework" id="page-users">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">👥</span> 用户管理{% include 'components/page-header-actions.html' %}
-                <div class="users-view-tabs" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
+                <div class="users-view-tabs ui-segmented" id="users-view-tabs" role="tablist" aria-label="用户管理视图" style="display: none;">
                     <button id="users-list-tab" class="btn-xs active" type="button" role="tab" aria-selected="true" data-click="agentAccessToggle" data-a0="false">用户列表</button>
                     <div id="agent-access-entry">
                         <button id="agent-access-tab" class="btn-xs" type="button" role="tab" aria-selected="false" data-click="agentAccessToggle" data-a0="true">Agent 接入</button>

@@ -503,7 +503,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                     self.assertEqual(result['icons'], 0, result)
                     self.assertEqual(result['disabled'], disabled, result)
                     self.assertIn(css_class, result['className'])
-                    self.assertLessEqual(result['width'], 100, result)
+                    self.assertAlmostEqual(result['width'], 90, delta=1, msg=str(result))
                     self.assertGreaterEqual(result['height'], 34, result)
             page.evaluate("""() => {
                 state.testStarting = false;
