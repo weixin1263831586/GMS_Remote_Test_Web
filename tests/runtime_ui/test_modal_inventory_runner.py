@@ -126,7 +126,27 @@ GEOMETRY = r"""content => {
           return (cs.overflowY==='auto' || cs.overflowY==='scroll')
              && el.scrollHeight > el.clientHeight + 3;
       });
+  const tables = [...content.querySelectorAll('table')].filter(table =>
+      active(table) && table.tHead && !table.closest('.md-table,.info-table,.input-table,.aoa-command-table'))
+      .map(table => {
+          const rows = [...table.tBodies].flatMap(body => [...body.rows]);
+          const headers = [...table.tHead.rows];
+          const cells = headers.length === 1 && [...headers[0].cells].every(c => c.colSpan === 1 && c.rowSpan === 1)
+              ? [...headers[0].cells] : [];
+          const comparable = rows.filter(row => active(row) && cells.length
+              && row.cells.length === cells.length && [...row.cells].every(c => c.colSpan === 1 && c.rowSpan === 1));
+          const blank = rows.filter(row => !row.matches('.group-row,[contenteditable],[aria-busy=true]')
+              && !row.closest('[contenteditable=true]') && !row.textContent.trim()
+              && !row.querySelector('input,select,textarea,button,svg,img,canvas,[role],a,[title],[aria-label],[contenteditable]'));
+          return {name: table.id || table.className, rows: rows.length,
+              blankDom: blank.length, blankVisible: blank.filter(active).length,
+              headings: cells.map(c => ({label: c.textContent.trim(), align: getComputedStyle(c).textAlign})),
+              maxColumnDelta: Math.max(0, ...comparable.flatMap(row => [...row.cells].map((c, j) =>
+                  Math.max(Math.abs(rect(c).left - rect(cells[j]).left),
+                      Math.abs(rect(c).right - rect(cells[j]).right)))))};
+      });
   return {
+    tables,
     bounds:outer, viewport:{width:innerWidth,height:innerHeight},
     tech:content.classList.contains('tech-dialog'),
     frame:!!content.querySelector(':scope > .tech-frame'),
@@ -314,6 +334,9 @@ class ModalInventoryRunnerTests(RuntimeUiHarness):
                     or metrics["glyphCustom"] or metrics["glyphEmoji"], key)
             self.assertEqual(metrics["leaked"], [], key)
             self.assertEqual(metrics["nestedActions"], [], key)
+            for table in metrics["tables"]:
+                self.assertEqual(table["blankVisible"], 0, f"{key}: {table}")
+                self.assertLessEqual(table["maxColumnDelta"], 2, f"{key}: {table}")
             footer = metrics["footer"]
             if footer:
                 self.assertEqual(footer["justify"], "flex-end", key)
