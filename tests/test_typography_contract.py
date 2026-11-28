@@ -220,7 +220,7 @@ class TypographyContractTests(unittest.TestCase):
         exceptions = (STYLE.parent / "typography/inline-and-exceptions.css").read_text(encoding="utf-8")
         required = (
             (shell, 'html[data-ui-type-root="shell"] .adb-proxy-assignments { font-size: var(--ui-type-size-body); }'),
-            (shell, 'html[data-ui-type-root="shell"] .page-header-actions select { font-size: var(--ui-type-size-body); }'),
+            (shell, 'html[data-ui-type-root="shell"] .page-header-actions select { font-size: var(--ui-type-size-small); }'),
             (pages, 'html[data-ui-type-root] table :is(th, td) { font-size: var(--ui-type-size-small); }'),
             (shell, 'html[data-ui-type-root="shell"] .btn-terminal { font-size: var(--ui-type-size-small);'),
             (shell, 'html[data-ui-type-root="shell"] .tools-add-category { font-size: var(--ui-type-size-small);'),
@@ -280,10 +280,10 @@ class TypographyContractTests(unittest.TestCase):
         main = (STYLE.parent / "typography/roles-and-pages.css").read_text(encoding="utf-8")
         exceptions = (STYLE.parent / "typography/inline-and-exceptions.css").read_text(encoding="utf-8")
         self.assertIn('html[data-ui-type-root="review"] button { font-size: var(--ui-type-size-small);', main)
-        self.assertIn('html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-body);', main)
+        self.assertIn('html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-small);', main)
         self.assertIn('html[data-ui-type-root="gerrit"] .gerrit-wiki-btn { font-size: var(--ui-type-size-small); }', exceptions)
         self.assertIn('html[data-ui-type-root] button:not(.modal-close) { font-size: var(--ui-type-size-small); }', main)
-        self.assertIn('html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-body); }', main)
+        self.assertIn('html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-small); }', main)
         self.assertNotIn('html[data-ui-type-root="update-radar"] button {', exceptions)
         self.assertNotIn('html[data-ui-type-root="update-radar"] :is(input,select,textarea)', exceptions)
         radar = (ROOT / "features/gms/radar/ui/page.html").read_text(encoding="utf-8")

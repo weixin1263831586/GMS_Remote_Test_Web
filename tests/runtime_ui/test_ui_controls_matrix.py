@@ -288,7 +288,7 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                 with self.subTest(route=route):
                     self.assertEqual(result["panelPadding"], "12px", result)
                     self.assertEqual(result["panelMinHeight"], "180px", result)
-                    self.assertEqual(result["panelRadius"], "8px", result)
+                    self.assertEqual(result["panelRadius"], "6px", result)
                     self.assertEqual(result["buttonHeight"], "24px", result)
                     self.assertEqual(result["buttonFont"], "14px", result)
                     self.assertEqual(result["buttonPosition"], "absolute", result)

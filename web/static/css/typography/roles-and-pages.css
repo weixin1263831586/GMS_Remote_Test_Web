@@ -1,7 +1,7 @@
 /* Semantic defaults for Shell, standalone pages and embedded workspaces.
    Layout constraints must not reduce standard control text. */
 html[data-ui-type-root] button:not(.modal-close) { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root] :is(input, select, textarea) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root] .select-add-btn { font-size: var(--ui-type-size-card); }
 html[data-ui-type-root] table :is(th, td) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root] :is(.list-table, .ui-table, .users-table, .audit-table, .agent-access-table, .dash-resource-table, .dept-table) thead th { font-weight: var(--ui-type-weight-semibold); }
@@ -48,7 +48,7 @@ html[data-ui-type-root="shell"] #page-test .section-title {
 }
 .page-content :is(.entry-field, .combo-box, .suite-browser-filter,
   .suite-file-search, .apk-search-input) {
-  font-size: var(--ui-type-size-body);
+  font-size: var(--ui-type-size-small);
 }
 /* Modal title 16; form text 13; action buttons 12, close glyph untouched. */
 :is(.modal, .modal-backdrop, .auth-gate) .tech-dialog .tech-title-group
@@ -57,10 +57,8 @@ html[data-ui-type-root="shell"] #page-test .section-title {
   font-weight: var(--ui-type-weight-semibold);
   line-height: var(--ui-type-line-heading);
 }
-:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog
-    :is(label, input:not([type=checkbox]):not([type=radio]), select, textarea) {
-  font-size: var(--ui-type-size-body) !important;
-}
+:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog label { font-size: var(--ui-type-size-body) !important; }
+:is(.modal, .modal-backdrop, .auth-gate) .tech-dialog :is(input:not([type=checkbox]):not([type=radio]), select, textarea) { font-size: var(--ui-type-size-small) !important; }
 :is(.modal, .modal-backdrop, .auth-gate) .tech-dialog button:not(.modal-close) {
   font-size: var(--ui-type-size-small) !important;
   font-weight: var(--ui-type-weight-medium);
@@ -222,20 +220,20 @@ html[data-ui-type-root="redmine"] .header-title { font-size: var(--ui-type-size-
 html[data-ui-type-root="redmine"] .muted { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="redmine"] button { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] header .filter-bar input,
-html[data-ui-type-root="redmine"] header .filter-bar select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] header .filter-bar select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] header .btn-group > button { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .modal-body label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="redmine"] .modal-body input,
 html[data-ui-type-root="redmine"] .modal-body select,
-html[data-ui-type-root="redmine"] .modal-body textarea { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="redmine"] .redmine-reply-modal textarea { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="redmine"] .modal-body textarea { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="redmine"] .redmine-reply-modal textarea { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-mono); }
 html[data-ui-type-root="redmine"] .redmine-reply-drop { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .redmine-reply-file { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .redmine-reply-file button { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .filter-bar input,
-html[data-ui-type-root="redmine"] .filter-bar select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .filter-bar select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .redmine-advanced-sync summary { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="redmine"] .redmine-advanced-sync-body input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] .redmine-advanced-sync-body input { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .redmine-advanced-sync-body button { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .issue-card h3 { font-size: var(--ui-type-size-dialog); }
 html[data-ui-type-root="redmine"] .chip { font-size: var(--ui-type-size-compact); }
@@ -340,7 +338,7 @@ html[data-ui-type-root="redmine"] .case-title { font-size: var(--ui-type-size-bo
 html[data-ui-type-root="redmine"] .case-scope { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .case-sources { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .redmine-issue-link { font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="redmine"] #knowledgeBody textarea { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="redmine"] #knowledgeBody textarea { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .case-view-toggle button { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="redmine"] .workbench-title { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="redmine"] .kv-line { font-size: var(--ui-type-size-small); }
@@ -430,7 +428,7 @@ html[data-ui-type-root="shell"] #route-check-dialog .modal-title {
 html[data-ui-type-root="review"] body { font-family: var(--ui-type-font-sans); font-size: var(--ui-type-size-body); line-height: var(--ui-type-line-body); }
 html[data-ui-type-root="review"] h1 { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="review"] button { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-sans); }
-html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-sans); }
+html[data-ui-type-root="review"] :is(input,select,textarea) { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-sans); }
 
 /* Host pane emoji icons share one glyph size. */
 html[data-ui-type-root="shell"] .host-pane-label-icon { font-size: 17px; }

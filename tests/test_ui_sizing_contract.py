@@ -230,6 +230,11 @@ class UiSizingContractTests(unittest.TestCase):
             self.assertIn(f"--ui-aoa-{role}" if role.endswith("short")
                           else f"--ui-aoa-{role}-height", sizing)
 
+    def test_card_and_control_radius_share_one_value(self):
+        source = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        self.assertIn("--ui-radius-control: 6px;", source)
+        self.assertIn("--ui-radius-card: var(--ui-radius-control);", source)
+
     def test_dashboard_compound_and_trend_roles_have_one_owner(self):
         shared = (CSS / "form-controls.css").read_text(encoding="utf-8")
         foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")

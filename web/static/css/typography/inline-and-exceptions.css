@@ -44,7 +44,7 @@ html[data-ui-type-root="devices"] body { font: var(--ui-type-size-body)/1.45 var
 html[data-ui-type-root="devices"] button { font: var(--ui-type-size-small)/1.4 var(--ui-type-font-sans); }
 html[data-ui-type-root="devices"] input,
 html[data-ui-type-root="devices"] textarea,
-html[data-ui-type-root="devices"] select { font: var(--ui-type-size-body)/1.4 var(--ui-type-font-sans); }
+html[data-ui-type-root="devices"] select { font: var(--ui-type-size-small)/1.4 var(--ui-type-font-sans); }
 html[data-ui-type-root="devices"] h1 { font-size: var(--ui-type-size-display); }
 html[data-ui-type-root="devices"] h2 { font-size: var(--ui-type-size-section); }
 html[data-ui-type-root="devices"] h3 { font-size: var(--ui-type-size-body); }
@@ -109,7 +109,7 @@ html[data-ui-type-root="shell"] .project-guide-example h5 { font-size: var(--ui-
 html[data-ui-type-root="shell"] .project-guide-example p { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .project-guide-zoom-hint { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #guide-image-caption { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .host-input { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }
+html[data-ui-type-root="shell"] .host-input { font-size: var(--ui-type-size-small); font-family: var(--ui-type-font-mono); }
 html[data-ui-type-root="shell"] .filter-btn { font-size: var(--ui-type-size-small); }
 
 /* web/shell/shell.html [inline <style>] */
@@ -135,7 +135,7 @@ html[data-ui-type-root="cluster"] .job-artifact-link { font: inherit; font-size:
 html[data-ui-type-root="gerrit"] body { font-family: var(--ui-type-font-sans); }
 html[data-ui-type-root="gerrit"] .header-title { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="gerrit"] select,
-html[data-ui-type-root="gerrit"] input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="gerrit"] input { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="gerrit"] button { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="gerrit"] .stat-card .label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="gerrit"] .trend-panel h2,

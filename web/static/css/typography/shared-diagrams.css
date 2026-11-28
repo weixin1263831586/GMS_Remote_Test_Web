@@ -35,7 +35,7 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 .tech-dialog :is(.modal-buttons,.modal-footer,.modal-actions,.agent-access-form-actions) button:not(.modal-close),
 .tech-dialog .tech-row-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 #tailscale-info-modal .tech-tailscale-row > label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-body); }
+#tailscale-info-modal .tech-tailscale-row > input { font-size: var(--ui-type-size-small); }
 #tailscale-info-modal .tech-row-action { font-size: var(--ui-type-size-small); }
 #tailscale-info-modal .tech-tailscale-help { font-size: var(--ui-type-size-small) !important; }
 #tailscale-info-modal .tech-dialog-footer > button { font-size: var(--ui-type-size-small); }
@@ -56,7 +56,7 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 .report-import-choice > .report-choice-folder-icon { font-size: 34px; font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji", sans-serif; }
 #route-check-dialog .modal-title { font-size: var(--ui-type-size-dialog); }
 #route-check-dialog .route-check-form label { font-size: var(--ui-type-size-body); }
-#route-check-dialog .route-check-form input[type=text] { font-size: var(--ui-type-size-body); }
+#route-check-dialog .route-check-form input[type=text] { font-size: var(--ui-type-size-small); }
 #route-check-dialog .route-check-form small { font-size: var(--ui-type-size-small); }
 #route-check-dialog .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small); }
 #username-detect-modal .modal-ssh-info { font-size: var(--ui-type-size-body); }
@@ -74,7 +74,7 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 #firmware-modal #firmware-aoa-hint { font-size: var(--ui-type-size-small); }
 #route-check-dialog .modal-content.tech-dialog--route-check .modal-title { font-size: var(--ui-type-size-dialog) !important; font-weight: var(--ui-type-weight-semibold); }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-form label { font-size: var(--ui-type-size-body) !important; }
-#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { font-size: var(--ui-type-size-body) !important; }
+#route-check-dialog .modal-content.tech-dialog--route-check .route-check-form input[type="text"] { font-size: var(--ui-type-size-small) !important; }
 #route-check-dialog .modal-content.tech-dialog--route-check .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small) !important; }
 .tech-dialog--ui-control .ui-control-serial { font-size: var(--ui-type-size-small); }
 .tech-dialog--ui-control .ui-control-panel-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
@@ -106,7 +106,7 @@ input[id$="-path"] { font-family: var(--ui-type-font-mono); }
 .tech-dialog--vpn-proxy .vpn-proxy-client-state { font-weight: var(--ui-type-weight-semibold); }
 .tech-dialog--vpn-proxy .vpn-proxy-install-glyph { font-size: var(--ui-type-size-page); }
 .tech-dialog--vpn-proxy .vpn-proxy-install-row label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-.tech-dialog--vpn-proxy .vpn-proxy-install-row input { font: var(--ui-type-size-body)/1.4 var(--ui-type-font-mono); }
+.tech-dialog--vpn-proxy .vpn-proxy-install-row input { font: var(--ui-type-size-small)/1.4 var(--ui-type-font-mono); }
 .tech-dialog--vpn-proxy .vpn-proxy-hint { font-size: var(--ui-type-size-body); }
 
 /* web/static/css/apk-analysis.css */
@@ -119,7 +119,7 @@ html[data-ui-type-root="shell"] .apk-section-title { font-size: var(--ui-type-si
 /* web/static/css/device-deployment-review.css */
 html[data-ui-type-root="shell"] button { font-family: inherit; }
 html[data-ui-type-root="shell"] #review-login-modal .modal-content label { font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] #review-login-modal .modal-content input { font-family: inherit; font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #review-login-modal .modal-content input { font-family: inherit; font-size: var(--ui-type-size-small); }
 
 /* === Canonical typography ownership: diagrams and independent data tables === */
 /* web/static/css/architecture-layers.css */
@@ -171,7 +171,7 @@ html[data-ui-type-root="data-table"] .tabs button { font-size: var(--ui-type-siz
 html[data-ui-type-root="data-table"] .section-badge { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="data-table"] button { font-family: inherit; font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="data-table"] input,
-html[data-ui-type-root="data-table"] select { font-family: inherit; font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="data-table"] select { font-family: inherit; font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="data-table"] table { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="data-table"] .group-row td { font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="data-table"] .pager { font-size: var(--ui-type-size-small); }

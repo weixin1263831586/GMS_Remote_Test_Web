@@ -22,25 +22,25 @@ html[data-ui-type-root="shell"] .sidebar-text { font-weight: var(--ui-type-weigh
 html[data-ui-type-root="shell"] .embedded-frame-loading { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .tools-add-category { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="shell"] .host-workspace-layouts > .btn-xs { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .host-workspace-pane-header select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .host-workspace-pane-header select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .host-workspace-pane-status { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .section-title { font-size: var(--ui-type-size-page); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .page-header-actions button,
 html[data-ui-type-root="shell"] #page-devices #devices-view-tabs button { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .page-header-actions select { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #page-devices #devices-view-tabs select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .page-header-actions select { font-size: var(--ui-type-size-small); }
+html[data-ui-type-root="shell"] #page-devices #devices-view-tabs select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .page-header-actions label { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .page-stat-card > .page-stat-value { font-size: var(--ui-type-size-stat); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .page-stat-card > .page-stat-label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #email-outbox-all-users-label { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] .page-header-actions .header-host-select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .page-header-actions .header-host-select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .pane-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .pane-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .pane-icon-btn { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="shell"] .page-title-row .btn-xxs,
 html[data-ui-type-root="shell"] .page-title-row .btn-xs,
 html[data-ui-type-root="shell"] .page-title-action { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .device-group-toolbar select.btn-xxs { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .device-group-toolbar select.btn-xxs { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .device-group-toggle { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .device-group-name { font-weight: var(--ui-type-weight-semibold); font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .device-group-count { font-size: var(--ui-type-size-compact); font-weight: var(--ui-type-weight-semibold); }
@@ -57,26 +57,26 @@ html[data-ui-type-root="shell"] .log-tab-btn { font-size: var(--ui-type-size-sma
 
 /* web/static/css/common-components.css */
 html[data-ui-type-root="shell"] .form-row label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
-html[data-ui-type-root="shell"] .entry-field { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .entry-field { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .drop-zone { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .drop-zone-filename { font-weight: var(--ui-type-weight-medium); font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] .combo-box { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .combo-box { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .progress-info { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-medium); }
 html[data-ui-type-root="shell"] .firmware-share-actions .btn-xxs { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .btn-primary { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .btn-lg { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .device-routing-modal-content select:not(.usbip-device-select) { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .device-routing-modal-content select:not(.usbip-device-select) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .adb-proxy-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .adb-proxy-assignments { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .usbip-transport-state { font-size: var(--ui-type-size-compact); }
 html[data-ui-type-root="shell"] .transport-diagnostics-output { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .adb-proxy-inline-actions { font-size: var(--ui-type-size-small); }
-html[data-ui-type-root="shell"] .usbip-device-select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .usbip-device-select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .dcfg-header .dcfg-tabbtn { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .dcfg-serial { font-size: var(--ui-type-size-body); font-family: var(--ui-type-font-mono); }
 html[data-ui-type-root="shell"] #device-config-modal .dcfg-empty { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] #device-config-modal .dcfg-toolbar input,
-html[data-ui-type-root="shell"] #device-config-modal .dcfg-toolbar select { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #device-config-modal .dcfg-toolbar select { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #device-config-modal .dcfg-toolbar .dcfg-label { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #device-config-modal .dcfg-stat { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #device-config-modal .dcfg-tab table td .dcell { font-family: var(--ui-type-font-mono); font-size: var(--ui-type-size-small); }
@@ -96,7 +96,7 @@ html[data-ui-type-root="shell"] .modal-form-row input[type="password"],
 html[data-ui-type-root="shell"] .modal-form-row input[type="number"],
 html[data-ui-type-root="shell"] .modal-form-row input[type="search"],
 html[data-ui-type-root="shell"] .modal-form-row select,
-html[data-ui-type-root="shell"] .modal-form-row textarea { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .modal-form-row textarea { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .config-section-title { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .config-section > .config-note,
 html[data-ui-type-root="shell"] .config-section > small { font-size: var(--ui-type-size-small); }
@@ -137,7 +137,7 @@ html[data-ui-type-root="shell"] #report-failure-list .failure-reason { font-size
 html[data-ui-type-root="shell"] .report-failure-action { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] #route-check-dialog .modal-close { font-size: var(--ui-type-size-display); }
 html[data-ui-type-root="shell"] #route-check-dialog .route-check-form label { font-size: var(--ui-type-size-body); font-weight: var(--ui-type-weight-bold); }
-html[data-ui-type-root="shell"] #route-check-dialog .route-check-form input[type="text"] { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #route-check-dialog .route-check-form input[type="text"] { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #route-check-dialog .route-check-form small { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #route-check-dialog .route-check-actions .btn-xxs { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .ping-testing { font-size: var(--ui-type-size-card); }
@@ -221,7 +221,7 @@ html[data-ui-type-root="shell"] .dx-loading-card span { font-size: var(--ui-type
 
 /* web/static/css/common-page.css */
 html[data-ui-type-root="shell"] .apk-task-history-controls { font-size: var(--ui-type-size-body); }
-html[data-ui-type-root="shell"] #apk-task-history { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] #apk-task-history { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .report-upload-content,
 html[data-ui-type-root="shell"] .apk-upload-content { font-family: inherit; font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #page-report-analysis > .section-title { font-family: inherit; font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-bold); }
@@ -252,7 +252,7 @@ html[data-ui-type-root="shell"] .apk-search-result-name { font-family: var(--ui-
 html[data-ui-type-root="shell"] .apk-search-result-path { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .redmine-file-item { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .redmine-file-remove { font-size: var(--ui-type-size-card); }
-html[data-ui-type-root="shell"] .apk-search-input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .apk-search-input { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .agent-chat-empty { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .agent-role { font-weight: var(--ui-type-weight-bold); }
 html[data-ui-type-root="shell"] .agent-time { font-size: var(--ui-type-size-compact); font-family: var(--ui-type-font-mono); }
@@ -262,7 +262,7 @@ html[data-ui-type-root="shell"] .agent-plan-value { font-size: var(--ui-type-siz
 html[data-ui-type-root="shell"] .agent-plan-note { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .agent-question-field { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .agent-question-field select,
-html[data-ui-type-root="shell"] .agent-question-field input { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-question-field input { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .agent-run-progress-empty { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] .agent-run-stage-label { font-size: var(--ui-type-size-small); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .agent-run-stage-time { font-size: var(--ui-type-size-compact); }
@@ -287,9 +287,9 @@ html[data-ui-type-root="shell"] .emoji-opt { font-size: var(--ui-type-size-dialo
 
 
 /* Dynamic category rename and mail filters share the global form role. */
+html[data-ui-type-root="shell"] .email-outbox-filter-label { font-size: var(--ui-type-size-body); }
 html[data-ui-type-root="shell"] .tool-category-rename-input,
-html[data-ui-type-root="shell"] .email-outbox-filter-label,
-html[data-ui-type-root="shell"] :is(#email-outbox-channel,#email-outbox-sent) { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] :is(#email-outbox-channel,#email-outbox-sent) { font-size: var(--ui-type-size-small); }
 html[data-ui-type-root="shell"] #email-outbox-list table :is(th,td) { font-size: var(--ui-type-size-small); }
 
 /* Category labels are card headings, not large-font ordinary action buttons. */

@@ -42,9 +42,9 @@ class TypographyRenderedTests(RuntimeUiHarness):
             ["#page-apk-analysis .page-title-icon", 14],
             ["#page-users .page-title-icon", 14],
             ["#page-test-suites #btn-download-suite", 12],
-            ["#page-test-suites #suite-download-url", 13],
+            ["#page-test-suites #suite-download-url", 12],
             ["#page-apk-analysis .apk-upload-content > button", 12],
-            ["#page-apk-analysis #apk-task-history", 13],
+            ["#page-apk-analysis #apk-task-history", 12],
             ["#page-report-analysis .report-upload-content > button", 12],
             ["#page-devices .device-management-table thead th", 12],
             ["#page-security-audit .audit-log-table thead th", 12],
@@ -134,8 +134,8 @@ class TypographyRenderedTests(RuntimeUiHarness):
                 ("/automation", ((".ats-actions button", 12),)),
                 ("/cluster", ((".workspace-tab", 12),)),
                 ("/devices-console", (("#refresh-ports", 12),)),
-                ("/redmine-agent", ((".workspace-tab", 12), ("#searchInput", 13))),
-                ("/gerrit-dashboard", (("button", 12), ("#query", 13))),
+                ("/redmine-agent", ((".workspace-tab", 12), ("#searchInput", 12))),
+                ("/gerrit-dashboard", (("button", 12), ("#query", 12))),
             )
             for route, cases in routes:
                 with self.subTest(route=route):
@@ -192,7 +192,7 @@ class TypographyRenderedTests(RuntimeUiHarness):
                 ("#page-desktop .host-workspace-title-state", 12),
                 ("#page-terminal .host-workspace-title-state", 12),
                 ("#type-role-fixture > button:first-child", 12),
-                ("#type-role-fixture > select", 13),
+                ("#type-role-fixture > select", 12),
                 ("#type-role-fixture th", 12),
                 ("#type-role-fixture .btn-terminal", 12),
                 ("#type-role-fixture .tools-add-category", 12),

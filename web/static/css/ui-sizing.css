@@ -47,7 +47,7 @@
     --ui-spacing-md: 12px;
     --ui-spacing-lg: 16px;
     --ui-radius-control: 6px;
-    --ui-radius-card: 8px;
+    --ui-radius-card: var(--ui-radius-control);
 }
 /* Shared control and workspace roles used by current renderers. */
 .ui-control { box-sizing: border-box; min-height: var(--ui-control-height); }
