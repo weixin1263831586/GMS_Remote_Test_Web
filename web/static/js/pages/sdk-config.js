@@ -171,13 +171,13 @@ function sdkConfigRenderSources(tbody, sources) {
                 const tip = state === 'pending'
                     ? '尚未校验，后台校验进行中；稍后刷新查看结果'
                     : `上次校验（${verifiedAt || '时间未知'}）已过期，后台校验进行中`;
-                badge = `<span class="agent-access-status-badge pending" title="${tip}">… 校验中</span>`;
+                badge = `<span class="agent-access-status-badge ui-status is-warning pending" title="${tip}">… 校验中</span>`;
             } else {
                 const title = ok
                     ? ' title="最近一次刷新时路径存在且含 git 仓库"'
                     : ` title="${reason}"`;
                 const badgeText = ok ? '✓ 存在' : `✗ ${reason || '不可用'}`;
-                badge = `<span class="agent-access-status-badge ${ok ? 'ok' : 'bad'}"${title}${verifiedAt ? ` data-verified="${verifiedAt}"` : ''}>${badgeText}</span>`;
+                badge = `<span class="agent-access-status-badge ui-status ${ok ? 'ok is-success' : 'bad is-danger'}"${title}${verifiedAt ? ` data-verified="${verifiedAt}"` : ''}>${badgeText}</span>`;
             }
             live = badge;
             action = `<div class="sdk-source-actions"><button class="btn-xxs" type="button" data-click="sdkConfigOpenEditSource" data-a0="${agentAccessEscape(source.source_id)}">编辑</button><button class="btn-xxs" type="button" data-click="sdkConfigDeleteSource" data-a0="${agentAccessEscape(source.source_id)}">删除</button></div>`;
