@@ -2,7 +2,7 @@
 // 网格列数/间距在 common-layout.css 的 .tools-grid；事件走 data-tools-action
 // 委托（CSP 下无内联 onclick）；卡片拖拽沿用 act-bridge 的声明式属性。
 
-function toolsRenderCategoryHeader({ category, icon, count, addButtonBackground }) {
+function toolsRenderCategoryHeader({ category, icon, count }) {
     const safeCategory = escapeIconAttr(category);
     return `
             <div class="category-header">
@@ -23,10 +23,10 @@ function toolsRenderCategoryHeader({ category, icon, count, addButtonBackground 
             </div>`;
 }
 
-function toolsRenderCategorySection({ category, catIndex, icon, count, cardsHtml, addButtonBackground, sectionStyle = '' }) {
+function toolsRenderCategorySection({ category, catIndex, icon, count, cardsHtml }) {
     const safeCategory = escapeIconAttr(category);
     return `
-        <div class="category-section" data-category="${safeCategory}" data-category-index="${catIndex}" draggable="true"${sectionStyle ? ` style="${sectionStyle}"` : ''}>
+        <div class="category-section" data-category="${safeCategory}" data-category-index="${catIndex}" draggable="true">
 ${toolsRenderCategoryHeader({ category, icon, count, addButtonBackground })}
             <div class="tools-grid">
 ${cardsHtml}
@@ -35,17 +35,17 @@ ${cardsHtml}
     `;
 }
 
-function toolsRenderEmptyGrid({ icon, title, hint, padding = '60px 20px', iconSize = '64px' }) {
+function toolsRenderEmptyGrid({ icon, title, hint }) {
     return `
         <div class="ui-empty-state tools-empty-state">
-            <div style="font-size: ${iconSize}; margin-bottom: 20px;">${escapeHtml(icon)}</div>
-            <div style="font-size: var(--ui-type-size-dialog); margin-bottom: 8px;">${escapeHtml(title)}</div>
-            <div style="font-size: var(--ui-type-size-body);">${escapeHtml(hint)}</div>
+            <div class="tools-empty-icon">${escapeHtml(icon)}</div>
+            <div class="tools-empty-title">${escapeHtml(title)}</div>
+            <div class="tools-empty-hint">${escapeHtml(hint)}</div>
         </div>
     `;
 }
 
-function toolsRenderToolCard({ tool, category, index, cardColor, actionsHtml, cardClass = '', clickAttrs = '', dragAttrs = '', actionsStyle = '', tooltip = '' }) {
+function toolsRenderToolCard({ tool, category, index, cardColor, actionsHtml, cardClass = '', clickAttrs = '', dragAttrs = '', tooltip = '' }) {
     const safeCategory = escapeIconAttr(category);
     const safeDescription = escapeIconAttr(tool?.description || '');
     const tooltipAttr = (tooltip || safeDescription) ? ` title="${tooltip ? escapeIconAttr(tooltip) : safeDescription}"` : '';
@@ -62,7 +62,7 @@ function toolsRenderToolCard({ tool, category, index, cardColor, actionsHtml, ca
                 </div>
             </div>
 
-            <div class="tool-actions"${actionsStyle ? ` style="${actionsStyle}"` : ''}>
+            <div class="tool-actions">
                 ${actionsHtml}
             </div>
         </div>

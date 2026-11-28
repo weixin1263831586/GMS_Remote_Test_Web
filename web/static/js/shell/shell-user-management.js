@@ -217,15 +217,10 @@
                 const activeClusterJob = getActiveUserClusterJob(user);
                 const normalizedStatus = getUserDisplayStatus(user);
                 const statusLabels = { testing: '测试中', online: '在线', offline: '离线' };
-                const statusColors = {
-                    testing: 'var(--warning-color)',
-                    online: 'var(--success-color)',
-                    offline: 'var(--text-secondary)'
-                };
                 const statusText = activeClusterJob
                     ? `集群测试中 · ${activeClusterJob.worker_id || '-'}`
                     : (statusLabels[normalizedStatus] || '离线');
-                const statusColor = statusColors[normalizedStatus] || 'var(--text-secondary)';
+                const statusTone = normalizedStatus === 'testing' ? 'is-warning' : normalizedStatus === 'online' ? 'is-success' : '';
 
                 const lastSeen = user.last_seen ? formatTime(user.last_seen) : '-';
                 const createdAt = user.created_at ? formatTime(user.created_at) : '-';
@@ -245,7 +240,7 @@
                 const localDevicesTitle = `title="${escapeHtml(localInventory?.available === false && localInventory.error
                     ? localInventory.error : localDevices)}"`;
                 const sourceLabel = user.source_label || '-';
-                const sourceColor = user.source === 'internal' ? 'var(--primary-color)' : (user.source === 'public' ? 'var(--warning-color)' : 'var(--text-secondary)');
+                const sourceTone = user.source === 'internal' ? 'is-accent' : user.source === 'public' ? 'is-warning' : '';
                 const removeCell = renderUserRemoveCell(user, normalizedStatus);
                 const clusterCell = activeClusterJob
                     ? `<button class="btn-xxs" data-cluster-job="${escapeHtml(activeClusterJob.id)}" data-worker-id="${escapeHtml(activeClusterJob.worker_id || '')}" data-attempt-id="${escapeHtml(activeClusterJob.attempt_id || '')}">任务</button>`
@@ -259,8 +254,8 @@
                         <td title="${escapeHtml(user.ip || '')}" style="text-align: center;  ">
                             ${escapeHtml(user.ip || '')}
                         </td>
-                        <td style="text-align: center;  color: ${sourceColor}; ">
-                            ${escapeHtml(sourceLabel)}
+                        <td style="text-align: center;">
+                            <span class="ui-status ${sourceTone}">${escapeHtml(sourceLabel)}</span>
                         </td>
                         <td style="text-align: center;  ${localDevicesStyle}" ${localDevicesTitle}>
                             ${escapeHtml(localDevices)}
@@ -269,8 +264,7 @@
                             ${escapeHtml(devices)}
                         </td>
                         <td title="${escapeHtml(statusText)}" style="text-align: center;">
-                            <span style="color: ${statusColor};  ">●</span>
-                            <span style="margin-left: 6px; ">${escapeHtml(statusText)}</span>
+                            <span class="ui-status ${statusTone}">${escapeHtml(statusText)}</span>
                         </td>
                         <td style="text-align: center; ">
                             ${createdAt}

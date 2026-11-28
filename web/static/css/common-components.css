@@ -1237,6 +1237,15 @@ select option {
 
 }
 
+.file-browser-item.file-browser-error {
+    display: flex;
+    cursor: default;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--ui-spacing-sm);
+}
+.file-browser-route-action { margin-top: var(--ui-spacing-xs); }
+
 .file-browser-item:hover {
     background: var(--light-bg);
 }

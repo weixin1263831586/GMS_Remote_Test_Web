@@ -248,11 +248,6 @@
 
     line-height: 1.5;
     color: var(--text-secondary);
-    white-space: pre;
-    word-wrap: normal;
-    tab-size: 4;
-    overflow: auto;
-    min-height: 0;
     max-height: none;
     box-sizing: border-box;
 }
@@ -525,11 +520,7 @@ body.apk-resizing {
 .agent-chat-empty {
     margin: auto;
     max-width: 560px;
-    color: var(--text-secondary);
-
     line-height: 1.7;
-    text-align: center;
-    padding: 22px;
     border: 1px dashed var(--border-color);
     border-radius: var(--ui-radius-card);
     background: rgba(255, 255, 255, 0.02);

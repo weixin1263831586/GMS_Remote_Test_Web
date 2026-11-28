@@ -210,8 +210,6 @@
 #page-notes .kb-doc-title { margin-bottom: var(--ui-spacing-xs); }
 #page-notes .kb-doc-summary { color: var(--text-secondary); line-height: 1.5; }
 #page-notes .kb-doc-tags { display: flex; flex-wrap: wrap; gap: var(--ui-spacing-xs); margin-top: var(--ui-spacing-xs); }
-.file-browser-error { display: flex; cursor: default; flex-direction: column; align-items: flex-start; gap: var(--ui-spacing-sm); }
-.file-browser-route-action { margin-top: var(--ui-spacing-xs); }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
 #page-notes.page-ui-rework #kb-doc-content {

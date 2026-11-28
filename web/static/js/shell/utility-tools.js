@@ -376,22 +376,6 @@ function ut_renderAllCategories(grid) {
         section.addEventListener('drop', ut_handleCategoryDrop);
     });
 
-    // 悬停反馈只能内联：other-workspaces.css 对 #page-tools 的
-    // .tool-card:hover 有 transform:none 覆盖，CSS 悬停会被压掉。
-    grid.querySelectorAll('.tool-card').forEach(card => {
-        if (card.dataset.utHoverBound === 'true') return;
-        card.dataset.utHoverBound = 'true';
-        card.addEventListener('mouseenter', () => {
-            card.style.transform = 'translateY(-2px)';
-            card.style.boxShadow = 'var(--shadow-md)';
-            card.style.borderColor = card.style.getPropertyValue('--card-accent') || '';
-        });
-        card.addEventListener('mouseleave', () => {
-            card.style.transform = 'translateY(0)';
-            card.style.boxShadow = 'none';
-            card.style.borderColor = 'var(--border-color)';
-        });
-    });
 }
 
 function ut_createToolCard(tool, category, index, cardColor) {

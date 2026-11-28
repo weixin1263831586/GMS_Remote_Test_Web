@@ -1350,7 +1350,7 @@ function renderReportDiagnosis(data) {
                     </div>
                     <div class="dx-section">
                         <div class="dx-section-title">${patchDraftTitle}</div>
-                        <pre class="dx-code">${escapeHtml(patchDraft || '无')}</pre>
+                        <pre class="dx-code ui-file-preview">${escapeHtml(patchDraft || '无')}</pre>
                     </div>
                     <div class="dx-section">
                         <div class="dx-section-title">GMS 认证知识库</div>

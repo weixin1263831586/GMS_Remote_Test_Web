@@ -101,8 +101,6 @@ function renderAllCategories(grid) {
         catIndex,
         icon: (DEFAULT_CATEGORIES[category] || { icon: '📁' }).icon,
         count: categorizedTools[category].length,
-        addButtonBackground: 'var(--primary-gradient)',
-        sectionStyle: 'margin-bottom: 4px;',
         cardsHtml: categorizedTools[category]
             .map((tool, index) => renderToolCard(tool, category, index, toolsCategoryColor(catIndex)))
             .join('\n'),
@@ -119,7 +117,7 @@ function renderSingleCategory(grid, category) {
     if (tools.length === 0) {
         grid.innerHTML = toolsRenderEmptyGrid({
             icon: categoryInfo.icon, title: `"${category}"分类下还没有工具`,
-            hint: '点击右侧按钮添加工具到该分类', padding: '40px 20px', iconSize: '48px',
+            hint: '点击右侧按钮添加工具到该分类',
         });
         return;
     }
@@ -129,7 +127,6 @@ function renderSingleCategory(grid, category) {
         catIndex: 0,
         icon: categoryInfo.icon,
         count: tools.length,
-        addButtonBackground: categoryInfo.color,
         cardsHtml: tools
             .map((tool, index) => renderToolCard(tool, category, index, toolsCategoryColor(0)))
             .join('\n'),
@@ -152,12 +149,10 @@ function renderToolCard(tool, category, index, cardColor) {
             + ' data-dragover="handleToolDragOver" data-r2="event"'
             + ' data-drop="handleToolDrop" data-r3="event"',
         actionsHtml: `
-                <button type="button" class="btn-act act-edit btn-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; border-radius: 3px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color);">
+                <button type="button" class="btn-act act-edit btn-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     ✏️
                 </button>
-                <button type="button" class="btn-act act-danger btn-delete" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; border-radius: 3px; cursor: pointer; line-height: 1; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color);">
+                <button type="button" class="btn-act act-danger btn-delete" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     🗑️
                 </button>`,
     });

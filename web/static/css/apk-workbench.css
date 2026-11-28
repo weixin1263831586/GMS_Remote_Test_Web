@@ -371,7 +371,6 @@
 #page-apk-analysis #apk-file-content {
     flex: 1 1 auto;
     width: 100%;
-    min-height: 0;
     margin: 0;
     padding: 10px 0 22px;
     border: 0;
@@ -379,7 +378,6 @@
     background: var(--apk-stage);
     color: #d7d5e0;
 
-    overflow: auto;
     scrollbar-width: thin;
 }
 #page-apk-analysis .apk-code-line { min-height: 20px; }

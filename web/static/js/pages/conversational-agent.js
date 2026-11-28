@@ -369,7 +369,7 @@ function renderAgentMessages(session) {
     const previousTop = container.scrollTop;
     const messages = session?.messages || [];
     if (!messages.length) {
-        container.innerHTML = '<div class="agent-chat-empty">可以问：每个页面功能、rk3572设备、最近报告、测试套件、VPN状态；也可以说：跑 CtsWifiTestCases，失败 retry 2 次并分析报告</div>';
+        container.innerHTML = '<div class="agent-chat-empty ui-empty-state">可以问：每个页面功能、rk3572设备、最近报告、测试套件、VPN状态；也可以说：跑 CtsWifiTestCases，失败 retry 2 次并分析报告</div>';
         return;
     }
 
