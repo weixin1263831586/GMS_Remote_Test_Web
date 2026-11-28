@@ -608,3 +608,50 @@ class UiSizingRenderedTests(RuntimeUiHarness):
             self.assertEqual(errors, [], "\n".join(errors))
         finally:
             page.close()
+
+    def test_data_table_empty_rows_and_action_heading(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            geometry = page.evaluate("""() => {
+                const host = document.createElement('div');
+                host.innerHTML = '<table class="ui-table"><thead><tr><th>名称</th>'
+                  + '<th>操作</th></tr></thead><tbody>'
+                  + '<tr id="empty-row"></tr><tr id="empty-cells"><td></td><td></td></tr>'
+                  + '<tr id="data-row"><td>设备</td><td></td></tr>'
+                  + '<tr id="state-row"><td colspan="2">暂无数据</td></tr>'
+                  + '<tr id="control-row"><td></td><td><input></td></tr>'
+                  + '<tr id="group-row" class="group-row"><td></td><td></td></tr>'
+                  + '</tbody></table>'
+                  + '<table class="md-table"><tbody><tr id="document-row">'
+                  + '<td></td></tr></tbody></table>';
+                document.body.appendChild(host);
+                const notes = document.getElementById('page-notes');
+                const table = document.createElement('table');
+                table.className = 'list-table kb-source-table';
+                table.innerHTML = '<thead><tr><th>名称</th><th>操作</th></tr></thead>'
+                  + '<tbody><tr><td>来源</td><td><button>编辑</button></td></tr></tbody>';
+                notes.appendChild(table);
+                try {
+                    const ids = ['empty-row', 'empty-cells', 'data-row', 'state-row',
+                                 'control-row', 'group-row', 'document-row'];
+                    return {
+                        rows: Object.fromEntries(ids.map(id => [
+                            id, getComputedStyle(host.querySelector('#' + id)).display
+                        ])),
+                        heading: getComputedStyle(table.tHead.rows[0].cells[1]).textAlign,
+                        action: getComputedStyle(table.tBodies[0].rows[0].cells[1]).textAlign,
+                    };
+                } finally {
+                    host.remove();
+                    table.remove();
+                }
+            }""")
+            for key in ("empty-row", "empty-cells"):
+                self.assertEqual(geometry["rows"][key], "none", geometry)
+            for key in ("data-row", "state-row", "control-row", "group-row", "document-row"):
+                self.assertEqual(geometry["rows"][key], "table-row", geometry)
+            self.assertEqual(geometry["heading"], "right", geometry)
+            self.assertEqual(geometry["action"], "right", geometry)
+        finally:
+            page.close()
