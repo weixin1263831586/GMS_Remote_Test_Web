@@ -253,7 +253,6 @@
 .aoa-semantic-tools > :not(summary) { margin-top: 10px; }
 .aoa-semantic-tools textarea, .aoa-semantic-tools > select { box-sizing: border-box; width: 100%; min-width: 0; }
 .aoa-semantic-tools textarea { resize: vertical; max-height: 240px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 5px; }
-.aoa-profile-actions { justify-content: space-between; }
 .aoa-target-section { flex: none; }
 .aoa-replay-runner { align-items: end; display: grid; gap: 10px; grid-template-columns: minmax(80px, 1fr) auto; }
 .aoa-replay-actions { flex-wrap: nowrap; justify-content: flex-end; }
@@ -363,7 +362,7 @@
 }
 
 @container (max-width: 340px) {
-    .aoa-screen-toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
     .aoa-screen-column .aoa-device-selectors { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -379,7 +378,7 @@
     .aoa-screen-column { height: clamp(460px, 75dvh, 720px); }
     .aoa-config-column { grid-column: auto; height: auto; overflow: visible; }
     .aoa-config-column > .aoa-result { flex: none; }
-    .aoa-config-column > .aoa-result[hidden] { display: none; }
+
     .aoa-command-column { grid-column: auto; height: clamp(480px, 75dvh, 760px); }
 }
 @media (max-width: 480px) {

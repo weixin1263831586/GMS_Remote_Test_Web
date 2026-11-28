@@ -25,5 +25,4 @@
     .evidence-line, .reply-line, .attachment-evidence { border-top:1px dashed var(--border-color); padding-top:7px; margin-top:7px;  line-height:1.5; }
     .evidence-line span { color:var(--text-secondary); }
     .detected-errors { display:inline-block; margin-top:4px; padding:2px 6px; border-radius:4px; background:#3b1f1f; color:#fecaca;  }
-    .workbench-actions { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid var(--border); padding-top:10px; }
     @media (max-width:900px) { .workbench-grid { grid-template-columns:1fr; } .kv-line { grid-template-columns:1fr; } }

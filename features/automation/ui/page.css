@@ -100,14 +100,6 @@ button {
 button:hover { border-color: var(--primary); color: #fff; }
 button.primary { background:var(--primary-gradient); border-color: var(--primary); }
 button.danger { background: rgb(239 68 68 / 18%); border-color: var(--danger); }
-
-.workflow-divider {
-    flex: 0 0 1px;
-    width: 1px;
-    height: 16px;
-    margin: 0 -3px;
-    background: var(--line-strong);
-}
 .workflow-surface {
     flex: 1 1 auto;
     min-height: 0;
@@ -842,7 +834,6 @@ body.overlay-open { overflow: hidden; }
     .event-line-message { grid-column: 1 / -1; }
     .log-view { height: 60vh; min-height: 360px; }
     .overview-breakdowns { grid-template-columns: 1fr; }
-    .workflow-divider { display: none; }
     .event { grid-template-columns: 1fr; gap: 6px; }
     .report-card { grid-template-columns: 1fr; }
     .report-card-actions { width: 100%; }

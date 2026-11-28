@@ -8,7 +8,6 @@
        露出被裁切的正文。弹框期间把页头固定回视口顶部：条带里显示的就是
        真实的页签栏/工具条，关闭后恢复 sticky。 */
     html.modal-open body > header { position:fixed; left:0; right:0; top:0; }
-    .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted);  line-height:1.6; }
     button.warn { background:#b45309; }
     /* 工具栏与 Tabs 同行，整体靠右；控件略微缩小，筛选区与按钮区以细分隔线区分。 */
@@ -16,8 +15,7 @@
     header .filter-bar select { width:86px; min-width:86px; }
     header .btn-group > button { width:72px; min-width:72px; padding:0; text-align:center; }
 
-    @media (max-width:1199px) {
-    }
+    
 
     /* Modal chrome lives in /static/css/modal.css. Keep field layout only. */
     .modal-body { display:flex; flex-direction:column; gap:10px; }
@@ -145,8 +143,6 @@
     .info-table th { text-align:left; color:var(--muted); background:var(--panel2); border:1px solid var(--border); white-space:nowrap; }
     .info-table td { border:1px solid var(--border); white-space:nowrap; }
     .info-table td strong { color:var(--primary-light); }
-
-    .test-info { padding:6px 0;  color:var(--primary-light); border-bottom:1px solid var(--border); margin-bottom:8px; }
     .ref-card-list { display:grid; gap:8px; }
     .ref-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); background:var(--light-bg); padding:8px 10px; }
     .ref-item { display:flex; align-items:flex-start; gap:8px; padding:4px 0;  }
@@ -203,7 +199,6 @@
     .issue-mini-title strong { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text);  }
     .issue-mini-title span { display:block; color:var(--muted);  line-height:1.5; margin-top:2px; }
     .issue-mini-meta { color:var(--muted);  text-align:right; line-height:1.5; }
-    .dept-toolbar { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
     .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:18px; }
     .dept-table { width:100%; border-collapse:collapse; min-width:760px;  }
     .dept-table th { text-align:left; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
@@ -243,12 +238,9 @@
 
     /* ---- Knowledge base: case cards + actions ---- */
     .knowledge-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
-
-    .settings-subsection-title {   color:var(--primary-light); }
     .setting-help { margin-top:3px; color:var(--muted);  line-height:1.5; }
     .setting-checkbox-row { display:flex !important; align-items:center; gap:8px; color:var(--text) !important; }
     .setting-checkbox-row input { width:auto !important; }
-    .setting-inline-grid { display:grid; grid-template-columns:minmax(0,2fr) minmax(120px,1fr); gap:10px; }
 
     /* 每日晨报：信息分层清楚，长标题和窄屏不挤压状态与操作。 */
     /* clip 不产生滚动容器（hidden 会），卡片内工具栏才能 position:sticky；
@@ -259,7 +251,6 @@
        更高层（摘要工具栏同为 sticky，靠后会盖住浮层）。 */
     .daily-brief-card[data-device-picker-open] .daily-brief-single-section > .daily-brief-toolbar { z-index:6; }
     .daily-brief-head { padding:8px 16px; background:linear-gradient(135deg,color-mix(in srgb, var(--primary-color) 10%, transparent),rgba(124,58,237,.08)); }
-    .daily-brief-titlebar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
     .daily-brief-toolbar { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--ui-spacing-sm); min-height:var(--ui-card-heading-height); padding:var(--ui-spacing-xs) var(--ui-spacing-md); border-bottom:1px solid var(--border);
       /* 滚动晨报 tab 时两个区块标题保持可见：工具栏吸附在页头（tabs+筛选
          行）下方；--daily-brief-sticky-top 由 JS 按页头实测高度写入。 */
@@ -268,8 +259,6 @@
     .daily-brief-single-form, .daily-brief-run-controls { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     /* Keep the multi-device list above the following daily-brief summary. */
     #singleIssueAnalysisForm { position:relative; z-index:2; }
-    .daily-brief-toolbar-right { display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; min-width:0; }
-    .daily-brief-toolbar-right .daily-brief-single-form { justify-content:flex-end; }
     .daily-brief-run-controls { justify-content:flex-end; }
     .daily-brief-toolbar .ka-btn { white-space:nowrap; }
 
@@ -277,7 +266,6 @@
     .single-issue-analysis-hint-modal textarea { min-height:300px; height:min(52vh, 440px); resize:vertical; line-height:1.55; }
     .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }
     .daily-brief-run-controls .daily-brief-action { display:flex; align-items:center; gap:8px; margin-left:0; }
-    .daily-brief-toolbar-right .daily-brief-action { width:auto; }
     .daily-brief-toolbar .sr-only { position:absolute; width:1px; height:1px; padding:0; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; }
     #singleIssueAnalysisMode { width:108px; flex:0 0 108px; }
     #singleIssueAnalysisDevice { position:relative; width:190px; min-width:190px; flex:0 0 190px; margin:0; }
@@ -397,10 +385,6 @@
     .daily-brief-analysis-overlay .analysis-doc .code-block pre { color:#4ade80; }
     .daily-brief-analysis-overlay .analysis-doc code { color:#79c0ff; }
     .daily-brief-analysis-overlay .daily-brief-section { background:#030303; border-color:var(--lighter-bg); }
-    .daily-brief-structured { padding:12px 14px 14px; display:flex; flex-direction:column; gap:10px; }
-    .daily-brief-sub { border-left:2px solid var(--border); padding-left:10px; }
-    .daily-brief-sub-title {   color:var(--text-secondary); margin-bottom:2px; }
-    .daily-brief-sub-body { white-space:pre-wrap; line-height:1.7; overflow-wrap:anywhere; color:var(--text); }
     .daily-brief-modal-footer { flex:0 0 auto; width:100%; margin:0; padding:12px 20px; border-top:1px solid var(--border); background:var(--panel); box-shadow:0 -8px 20px rgba(0,0,0,.18); }
     /* 实时分析进度时间线（「查看分析」弹框优化） */
     .analysis-timeline { display:flex; flex-direction:column; gap:2px;  line-height:1.6; }
@@ -433,8 +417,6 @@
     .daily-brief-analysis-overlay .analysis-timeline-meta { align-self:auto; }
     @media (max-width:760px) {
         .daily-brief-toolbar { grid-template-columns:1fr; }
-        .daily-brief-toolbar-right { justify-content:flex-start; }
-        .setting-inline-grid { grid-template-columns:1fr; }
         .daily-brief-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); }
         .daily-brief-stat-grid { grid-template-columns:1fr; }
         .daily-brief-stat-overview { grid-template-columns:1fr; }
