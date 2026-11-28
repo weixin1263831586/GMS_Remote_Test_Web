@@ -52,7 +52,7 @@ function renderDashboard(){
   tests.forEach(t=>{const wid=t.worker_id||'-';(byWorker[wid]=byWorker[wid]||[]).push(t)});
   const sortedWorkers=Object.keys(byWorker).sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
   let html=`<div class="dash-panel-title"><svg class="ui-icon" aria-hidden="true"><use href="/static/icons/ui.svg#test"></use></svg>当前测试执行 (${tests.length})</div><div class="dash-tests-list">`;
-  if(!tests.length){html+='<div class="dash-empty">当前无运行中的测试</div>'}
+  if(!tests.length){html+='<div class="dash-empty ui-empty-state">当前无运行中的测试</div>'}
   else{
    sortedWorkers.forEach(wid=>{
     const worker=state.workers.find(w=>w.id===wid);
@@ -70,5 +70,5 @@ function renderDashboardFallback(){
  // 资源表和设备分布始终可用；只有 ECharts 的 24 小时趋势需要降级。
  if(window.dashEchartsStatus!=='failed')return;
  const chart=document.querySelector('#dash-trend-chart');
- if(chart)chart.innerHTML='<div class="dash-empty">历史趋势图暂不可用；实时资源与设备状态仍可正常查看。</div>';
+ if(chart)chart.innerHTML='<div class="dash-empty ui-empty-state">历史趋势图暂不可用；实时资源与设备状态仍可正常查看。</div>';
 }
