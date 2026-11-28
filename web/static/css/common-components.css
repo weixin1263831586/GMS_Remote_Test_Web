@@ -1614,13 +1614,10 @@ select option {
 .model-catalog-table-wrap { max-width: 100%; overflow-x: auto; }
 .model-catalog-table { width: 100%; min-width: 520px; table-layout: fixed; border-collapse: collapse; }
 .model-catalog-table :is(th,td) {
-    padding: var(--ui-table-cell-padding-block) var(--ui-table-cell-padding-inline);
     text-align: left;
-    vertical-align: middle;
     overflow-wrap: anywhere;
 }
-.model-catalog-table th { height: var(--ui-table-header-height); background: var(--darker-bg); }
-.model-catalog-table td { height: var(--ui-table-row-height); }
+.model-catalog-table th { background: var(--darker-bg); }
 .model-catalog-table th:nth-child(1) { width: 26%; }
 .model-catalog-table th:nth-child(3) { width: 110px; }
 .model-catalog-table th:nth-child(4) { width: 100px; }

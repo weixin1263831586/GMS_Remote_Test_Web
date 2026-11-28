@@ -308,6 +308,10 @@ class DeviceOperationsTests(unittest.TestCase):
         }
 
         class ConfigManager(_ConfigManager):
+            @contextmanager
+            def runtime_config_transaction(self):
+                yield
+
             def get_runtime_config(self):
                 return runtime_config
 

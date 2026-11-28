@@ -84,6 +84,7 @@ class AutomationApiTests(unittest.TestCase):
         request.state.current_user = CurrentUser(
             id=f'id-{username}', username=username, role=role, extra_permissions=extra_permissions,
         )
+        request.state.auth_method = 'session'
         return request
 
     def test_create_does_not_mutate_nested_request_when_removing_secret(self):

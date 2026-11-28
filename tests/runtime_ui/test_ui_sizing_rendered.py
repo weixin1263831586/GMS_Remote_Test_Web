@@ -229,7 +229,7 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 page.evaluate("(name) => switchPage(name, null)", name)
                 grid = page.locator(selector).first
                 grid.wait_for(state="visible")
-                return grid.evaluate("""el => getComputedStyle(el).gridTemplateColumns
+                return grid.evaluate(r"""el => getComputedStyle(el).gridTemplateColumns
                     .split(/\s+/).map(parseFloat)""")
 
             for name, selector in (

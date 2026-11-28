@@ -11,8 +11,8 @@ from features.devices.adb import api
 @pytest.mark.parametrize('action', ['start', 'stop'])
 @pytest.mark.parametrize('role,method,elevated,expected', [
     (None, 'session', False, 401), ('user', 'session', False, 403),
-    ('admin', 'session', False, 403), ('admin', 'session', True, 200),
-    ('user', 'agent_token', True, 403),
+    ('admin', 'session', False, 200), ('admin', 'session', True, 200),
+    ('user', 'agent_token', True, 403), ('admin', 'agent_token', True, 403),
 ])
 def test_legacy_tunnels_require_human_elevation(monkeypatch, action, role, method, elevated, expected):
     monkeypatch.setenv('GMS_AUTH_REQUIRED', 'true')

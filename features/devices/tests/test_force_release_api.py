@@ -18,7 +18,8 @@ def client(monkeypatch):
 
     @app.middleware("http")
     async def identity(request: Request, call_next):
-        request.state.current_user = CurrentUser(id="alice", username="alice", role="admin")
+        request.state.current_user = CurrentUser(id="alice", username="alice", role=request.headers.get("X-Test-Role", "admin"))
+        request.state.auth_method = "session"
         request.state.is_elevated = request.headers.get("X-Test-Elevated") == "1"
         if request.headers.get("Authorization"):
             request.state.auth_method = "agent_token"
@@ -31,10 +32,10 @@ def client(monkeypatch):
         yield test_client
 
 
-def test_force_release_preserves_elevation_gate(client, monkeypatch):
+def test_force_release_rejects_unprivileged_user(client, monkeypatch):
     release = Mock(return_value=(True, "已释放"))
     monkeypatch.setattr(operations_api, "force_release_device_lock", release)
-    response = client.post("/api/devices/force-release", json={"device_id": "ABC"})
+    response = client.post("/api/devices/force-release", json={"device_id": "ABC"}, headers={"X-Test-Role": "user"})
     assert response.status_code == 403
     release.assert_not_called()
 
@@ -57,9 +58,9 @@ def test_bearer_cannot_inherit_human_elevation(client, monkeypatch):
     release.assert_not_called()
 
 
-def test_success_returns_existing_result_envelope(client, monkeypatch):
+def test_admin_without_second_elevation_returns_existing_result_envelope(client, monkeypatch):
     monkeypatch.setattr(operations_api, "force_release_device_lock", Mock(return_value=(True, "原回放及端口锁已释放")))
-    response = client.post("/api/devices/force-release", json={"device_id": "ABC"}, headers={"X-Test-Elevated": "1"})
+    response = client.post("/api/devices/force-release", json={"device_id": "ABC"})
     assert response.status_code == 200 and response.json()["success"] is True
     assert "端口锁" in response.json()["results"][0]["message"]
 

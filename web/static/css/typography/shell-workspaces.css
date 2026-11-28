@@ -281,3 +281,4 @@ html[data-ui-type-root="shell"] .audit-detail-block-code { font-family: var(--ui
 /* Knowledge cards use semantic heading/body roles regardless of JS rendering. */
 html[data-ui-type-root="shell"] .kb-doc-title { font-size: var(--ui-type-size-card); font-weight: var(--ui-type-weight-semibold); }
 html[data-ui-type-root="shell"] .kb-doc-summary { font-size: var(--ui-type-size-body); }
+html[data-ui-type-root="shell"] .agent-image-preview .agent-image-remove { font-size: var(--ui-type-size-section); }

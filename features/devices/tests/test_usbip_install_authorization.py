@@ -47,23 +47,23 @@ class UsbipInstallAuthorizationTests(unittest.TestCase):
                 patch.object(api, "DeviceSSHConnection", lambda _config: contextlib.nullcontext(MagicMock())):
             return self.client.post("/api/usbip/install")
 
-    def test_unauthenticated_or_non_elevated_callers_are_rejected(self):
+    def test_unauthenticated_or_unauthorized_callers_are_rejected(self):
         import os
         import unittest.mock as mock
         with mock.patch.dict(os.environ, {"GMS_AUTH_REQUIRED": "true"}):
             for role, method, elevated, expected in (
                 (None, "session", False, 401),
                 ("user", "session", False, 403),
-                ("admin", "session", False, 403),
                 ("user", "agent_token", True, 403),
+                ("admin", "agent_token", True, 403),
             ):
                 with self.subTest(role=role, method=method, elevated=elevated):
                     self.role, self.method, self.elevated = role, method, elevated
                     self.assertEqual(self._install().status_code, expected)
         self.manager.install_usbipd.assert_not_called()
 
-    def test_elevated_admin_installs_on_the_authorized_host(self):
-        self.role, self.method, self.elevated = "admin", "session", True
+    def test_admin_installs_without_second_elevation_on_the_authorized_host(self):
+        self.role, self.method, self.elevated = "admin", "session", False
         response = self._install()
         self.assertEqual(response.status_code, 200, response.text)
         self.assertTrue(response.json()["success"])

@@ -53,6 +53,7 @@ class _ClusterApiTestBase(unittest.TestCase):
                 username=username,
                 role=request.headers.get("X-Test-Role", "admin"),
             )
+            request.state.auth_method = "session"
             if request.headers.get("X-Test-Elevated"):
                 request.state.is_elevated = True
             return await call_next(request)
