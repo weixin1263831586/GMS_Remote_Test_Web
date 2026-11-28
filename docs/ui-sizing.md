@@ -86,3 +86,7 @@ tests/runtime_ui/test_workspaces.py`。建议在桌面宽度 1440/1792px
 普通输入框、下拉框和表单行使用 32px 控件角色；明确的组合输入及其操作按钮使用 28px 紧凑角色。普通卡片使用 8px 圆角。普通空状态及日志工具栏复用 `ui-foundations.css`；日志内容滚动、特定工具的操作顺序仍由模块管理。
 
 Redmine/Gerrit 通过 `ui-dashboard` 共用普通按钮、输入/选择框及页头筛选布局。普通控件 32px，紧凑筛选 28px，移动端触控要求保留。分页采用 `ui-pagination`，页码控件 28px，`ui-pagination-footer` 管理页大小选择框；表格操作组采用 `ui-table-actions`，可通过修饰类指定右对齐。弹框共用科技风底部按钮布局，特定业务宽度及文件浏览、复杂内容布局仍独立。
+
+状态标签统一使用 `.ui-status` 和语义色角色（`is-success`、`is-warning`、`is-danger`、`is-info`、`is-accent`），业务状态和值保持原样。普通空状态使用 `.ui-empty-state`，行内提示使用 `ui-empty-state--inline`，表格空态保留单个跨列单元格。日志工具栏、操作组、内容滚动分别使用 `.ui-log-toolbar`、`.ui-log-actions`、`.ui-log-content`；xterm 及日志操作权限不变。报告行操作允许按列宽换行，按钮标签本身不换行。
+
+Runner 的页面清单测试输出 `table-inventory.json`、`component-inventory.json` 和各页面截图；控件采样用于核对字体、尺寸、圆角和滚动，不能替代实测结果审查。

@@ -361,6 +361,38 @@ class UiSizingContractTests(unittest.TestCase):
         self.assertNotRegex(workspace, r"\.page-ui-rework\s+\.page-stat-row\s*\{[^}]*gap:")
         self.assertNotRegex(workspace, r"\.page-ui-rework\s+\.suite-empty\s*\{")
 
+    def test_status_empty_and_log_roles_are_shared_by_renderers(self):
+        for path, roles in {
+            "features/cluster/ui/state.js": ("status ui-status", "is-danger", "is-success"),
+            "features/cluster/ui/management.js": ("ui-empty-state", "table-placeholder", "status ui-status"),
+            "features/devices/ui/page.js": ("status-pill ui-status", "ui-log-toolbar", "ui-log-actions", "ui-log-content"),
+            "web/static/js/pages/sdk-config.js": ("agent-access-status-badge ui-status",),
+            "web/static/js/pages/agent-access.js": ("agent-token-status ui-status",),
+            "features/gerrit/ui/render.js": ("renderGerritStatus", "ui-status", "ui-empty-state"),
+            "features/automation/ui/runs.js": ("badge ui-status", "automationStatusTone"),
+            "web/static/js/pages/report-analysis.js": ("dx-status-pill ui-status", "dx-exempt-badge ui-status"),
+            "web/static/js/pages/test-reports.js": ("ui-table-actions ui-table-actions--wrap", "btn-tone-info"),
+        }.items():
+            with self.subTest(path=path):
+                source = (ROOT / path).read_text(encoding="utf-8")
+                for role in roles:
+                    self.assertIn(role, source)
+        for name, legacy in {
+            "common.css": ("--radius-control:", "--radius-surface:", "td.table-placeholder {"),
+            "common-components.css": ("var(--radius-surface)",),
+            "analysis-workbench-tokens.css": ("--analysis-pane-radius:", "--analysis-pane-gap:"),
+            "report-workbench.css": ("var(--analysis-pane-radius)", "var(--analysis-pane-gap)"),
+            "other-workspaces.css": ("--workbench-radius:",),
+        }.items():
+            source = (CSS / name).read_text(encoding="utf-8")
+            for token in legacy:
+                self.assertNotIn(token, source, (name, token))
+        reports = (ROOT / "web/static/js/pages/test-reports.js").read_text(encoding="utf-8")
+        self.assertNotRegex(reports, r'<button[^>]*data-action="(?:analyze|retry|results|logs|download|delete)"[^>]*style=')
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        for role in (".ui-empty-state--inline", ".ui-log-content", ".ui-table-actions--wrap"):
+            self.assertIn(role, foundation)
+
     def test_shared_templates_consume_tokens(self):
         mapping = {
             "common.css": ("--ui-control-height-small", "--ui-stat-height"),

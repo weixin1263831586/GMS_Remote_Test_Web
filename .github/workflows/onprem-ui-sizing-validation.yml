@@ -139,6 +139,7 @@ jobs:
             tests/runtime_ui/test_aoa_workbench.py::RuntimeAoaWorkbenchTests::test_command_grid_keeps_labels_comments_and_actions_on_one_line \
             tests/runtime_ui/test_aoa_calibrate_locate.py \
             tests/runtime_ui/test_ui_sizing_rendered.py \
+            tests/runtime_ui/test_cluster.py::RuntimeClusterTests::test_cluster_worker_row_distinguishes_hidden_external_test \
             tests/runtime_ui/test_knowledge_source_status.py \
             tests/runtime_ui/test_agent.py::RuntimeAgentTests::test_short_agent_and_sdk_tables_have_no_reserved_blank_rows \
             tests/runtime_ui/test_page_outer_inset.py \

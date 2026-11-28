@@ -690,11 +690,93 @@ class UiSizingRenderedTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_embedded_status_renderers_use_shared_badge_geometry(self):
+        page = self.new_page()
+        try:
+            page.set_viewport_size({"width": 1440, "height": 900})
+            cases = (
+                ("cluster", "badge", ["online", "external_busy", "failed"]),
+                ("gerrit-dashboard", "renderGerritStatus", ["MERGED", "NEW", "ABANDONED"]),
+            )
+            for module, renderer, values in cases:
+                page.goto(f"{self.base_url}/{module}", wait_until="domcontentloaded")
+                page.wait_for_function("(name) => typeof window[name] === 'function'", arg=renderer)
+                geometry = page.evaluate(
+                    """({renderer, values}) => {
+                        const sample = document.createElement('div');
+                        sample.style.cssText = 'position:fixed;top:0;left:0;z-index:9999';
+                        sample.innerHTML = values.map(value => window[renderer](value)).join('');
+                        document.body.append(sample);
+                        const badges = [...sample.children].map(node => {
+                            const css = getComputedStyle(node);
+                            return {role:node.classList.contains('ui-status'),
+                                    height:node.getBoundingClientRect().height,
+                                    radius:parseFloat(css.borderTopLeftRadius),
+                                    nowrap:css.whiteSpace, display:css.display,
+                                    tone:css.getPropertyValue('--status-color').trim()};
+                        });
+                        sample.remove();
+                        return badges;
+                    }""", {"renderer": renderer, "values": values},
+                )
+                self.assertEqual(len(geometry), 3)
+                for badge in geometry:
+                    self.assertTrue(badge["role"], badge)
+                    self.assertGreaterEqual(badge["height"], 24, badge)
+                    self.assertEqual(badge["radius"], 5, badge)
+                    self.assertEqual(badge["nowrap"], "nowrap", badge)
+                    self.assertEqual(badge["display"], "inline-flex", badge)
+                self.assertEqual(len({badge["tone"] for badge in geometry}), 3, geometry)
+        finally:
+            page.close()
+
+    def test_report_row_actions_use_shared_classes(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('reports', null)")
+            result = page.evaluate("""() => {
+                displayTestReports([{timestamp:'shared-actions',report_name:'shared-actions',
+                    test_type:'CTS',pass:1,fail:0,total:1}]);
+                const group = document.querySelector('#reports-table-body .ui-table-actions');
+                return {display:getComputedStyle(group).display,
+                    wrap:getComputedStyle(group).flexWrap,
+                    actions:[...group.querySelectorAll('button')].map(button => ({
+                        action:button.dataset.action,inline:button.hasAttribute('style')
+                    }))};
+            }""")
+            self.assertEqual(result["display"], "flex")
+            self.assertEqual(result["wrap"], "wrap")
+            self.assertEqual([item["action"] for item in result["actions"]],
+                             ["analyze", "retry", "results", "logs", "download", "delete"])
+            self.assertFalse(any(item["inline"] for item in result["actions"]))
+        finally:
+            page.close()
+
     def test_visible_workspace_table_geometry_inventory(self):
         """Record actual tables, including same-origin embedded workspaces."""
         page = self.new_page()
         evidence = {}
+        component_evidence = {}
         failures = []
+        measure_components = """() => {
+            const visible = el => {
+                const r = el.getBoundingClientRect();
+                return r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+            };
+            return [...document.querySelectorAll(
+                'button,input:not([type=hidden]),select,textarea,.ui-status,.ui-empty-state,' +
+                '.ui-log-toolbar,.ui-log-content,.log-frame-header,.log-text,.page-stat-card,.ui-kpi-card--compact'
+            )].filter(visible).map(el => {
+                const r = el.getBoundingClientRect(), css = getComputedStyle(el);
+                return {id:el.id, tag:el.tagName, role:String(el.className),
+                    label:(el.getAttribute('aria-label') || el.textContent || '').trim().slice(0,60),
+                    width:r.width,height:r.height,font:css.fontSize,radius:css.borderTopLeftRadius,
+                    whiteSpace:css.whiteSpace,overflowX:css.overflowX,overflowY:css.overflowY,
+                    scrollWidth:el.scrollWidth,clientWidth:el.clientWidth,
+                    scrollHeight:el.scrollHeight,clientHeight:el.clientHeight};
+            });
+        }"""
         measure = """() => [...document.querySelectorAll('table')].flatMap((table, i) => {
             const rect = el => el.getBoundingClientRect();
             const visible = el => rect(el).width > 0 && rect(el).height > 0
@@ -735,22 +817,26 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                     page.wait_for_timeout(200)
                     key = f"{name}-{width}"
                     tables = page.evaluate(measure)
+                    components = page.evaluate(measure_components)
                     for frame in page.frames:
                         if frame == page.main_frame:
                             continue
                         owner = frame.frame_element()
                         if owner.is_visible() and frame.url.startswith(self.base_url):
                             tables.extend(frame.evaluate(measure))
+                            components.extend(frame.evaluate(measure_components))
                     evidence[key] = tables
+                    component_evidence[key] = components
                     for table in tables:
                         if table["blankVisible"] or table["maxColumnDelta"] > 2:
                             failures.append(f"{key}: {table}")
                     target = os.getenv("GMS_UI_PREVIEW_DIR")
-                    if target and tables:
+                    if target:
                         directory = Path(target)
                         directory.mkdir(parents=True, exist_ok=True)
                         page.screenshot(path=str(directory / f"table-inventory-{key}.png"))
             self.assertTrue(any(evidence.values()), "No rendered tables recorded")
+            self.assertTrue(any(component_evidence.values()), "No rendered controls recorded")
             self.assertEqual(failures, [], "\n".join(failures))
         finally:
             target = os.getenv("GMS_UI_PREVIEW_DIR")
@@ -759,4 +845,6 @@ class UiSizingRenderedTests(RuntimeUiHarness):
                 directory.mkdir(parents=True, exist_ok=True)
                 (directory / "table-inventory.json").write_text(
                     json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")
+                (directory / "component-inventory.json").write_text(
+                    json.dumps(component_evidence, ensure_ascii=False, indent=2), encoding="utf-8")
             page.close()
