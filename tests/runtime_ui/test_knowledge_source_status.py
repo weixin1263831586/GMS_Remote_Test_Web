@@ -101,7 +101,7 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                     const headingRect = actionHeading.getBoundingClientRect();
                     const labelRect = labelRange.getBoundingClientRect();
                     return {rows, scrollable: wrap.scrollWidth > wrap.clientWidth,
-                        actionHeadingCenterDelta: Math.abs((headingRect.left + headingRect.right - labelRect.left - labelRect.right) / 2),
+                        actionHeadingRightDelta: Math.abs(headingRect.right - parseFloat(getComputedStyle(actionHeading).paddingRight) - labelRect.right),
                         panelGap: panel.top - toolbar.bottom,
                         leftEdgeDelta: panel.left - toolbar.left,
                         rightEdgeDelta: panel.right - toolbar.right,
@@ -124,7 +124,7 @@ class RuntimeKnowledgeSourceStatusTests(RuntimeUiHarness):
                     self.assertGreater(metrics["urlWidth"], metrics["inputWidth"])
                 self.assertGreaterEqual(metrics["nameWidth"], 299)
                 self.assertGreaterEqual(metrics["actionWidth"], 459)
-                self.assertLessEqual(metrics["actionHeadingCenterDelta"], 1)
+                self.assertLessEqual(metrics["actionHeadingRightDelta"], 1)
                 for row in metrics["rows"]:
                     self.assertTrue(row["fits"] and row["singleLine"] and row["aligned"], metrics)
                     self.assertAlmostEqual(row["right"], metrics["rows"][0]["right"], delta=1)
