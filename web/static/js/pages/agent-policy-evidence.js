@@ -86,6 +86,7 @@ function renderGmsPolicyEvidence(result) {
         const displayRows = requested && result.lookup_scope === 'low_ram_declaration'
             ? matchedRows : (section.table_rows || []);
         for (const row of displayRows) {
+            if (!Array.isArray(row.values) || !row.values.some(value => String(value ?? '').trim())) continue;
             const key = row.table_index;
             if (!grouped.has(key)) grouped.set(key, []);
             grouped.get(key).push(row);
