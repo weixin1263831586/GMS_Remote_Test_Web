@@ -210,7 +210,7 @@
 #page-notes .kb-doc-title { margin-bottom: var(--ui-spacing-xs); }
 #page-notes .kb-doc-summary { color: var(--text-secondary); line-height: 1.5; }
 #page-notes .kb-doc-tags { display: flex; flex-wrap: wrap; gap: var(--ui-spacing-xs); margin-top: var(--ui-spacing-xs); }
-.file-browser-error { cursor: default; flex-direction: column; align-items: flex-start; gap: var(--ui-spacing-sm); }
+.file-browser-error { display: flex; cursor: default; flex-direction: column; align-items: flex-start; gap: var(--ui-spacing-sm); }
 .file-browser-route-action { margin-top: var(--ui-spacing-xs); }
 
 /* 个人知识库：沿用 Agent 的三栏 pane 文法和原有滚动归属。 */
@@ -224,15 +224,6 @@
     /* The full-size page already has a single frame; do not double-frame it. */
     border: 0 !important;
     border-radius: 8px; background: var(--card-bg); box-shadow: none;
-}
-#page-websites.page-ui-rework :is(.tool-card, .category-section),
-#page-tools.page-ui-rework :is(.tool-card, .category-section) {
-    border: 1px solid var(--border-color);
-    border-radius: 8px; background: var(--light-bg); box-shadow: none;
-}
-#page-websites.page-ui-rework .tool-card:hover,
-#page-tools.page-ui-rework .tool-card:hover {
-    transform: none; border-color: var(--primary-color); box-shadow: none;
 }
 .page-ui-rework .embedded-frame-shell {
     min-width: 0; min-height: 0;
@@ -254,12 +245,10 @@
         transition-duration: .01ms !important;
     }
 }
-:is(#page-tools,#page-websites).page-ui-rework .category-section { margin-bottom:7px; padding:7px 9px; }
 :is(#page-tools,#page-websites).page-ui-rework .tools-grid { gap:8px; }
 :is(#page-tools,#page-websites).page-ui-rework .category-header {
   min-height:26px; margin-bottom:5px; padding-bottom:3px;
 }
-:is(#page-tools,#page-websites).page-ui-rework .tool-card .tool-actions button { min-height:var(--ui-control-height-icon); }
 
 /* Security audit: a real-log console, no synthetic risk scoring or timeseries. */
 #page-security-audit.page-ui-rework {

@@ -5,19 +5,17 @@
 function toolsRenderCategoryHeader({ category, icon, count, addButtonBackground }) {
     const safeCategory = escapeIconAttr(category);
     return `
-            <div class="category-header" style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 5px; padding-bottom: 4px; border-bottom: 1px solid var(--border-color); cursor: move;">
-                <div style="display: flex; align-items: center;">
-                    <span style="font-size: var(--ui-type-size-dialog); margin-right: 6px; cursor: grab;">${escapeHtml(icon)}</span>
-                    <button type="button" data-tools-action="edit-category" data-category="${safeCategory}" style="padding: 0; border: 0; background: transparent; color: var(--text-primary); cursor: pointer;"><span class="category-name">${escapeHtml(category)}</span></button>
-                    <span style="margin-left: 10px; padding: 2px 8px; background: var(--light-bg); border-radius: 10px; font-size: var(--ui-type-size-compact); color: var(--text-muted);">${count}</span>
+            <div class="category-header">
+                <div class="tools-category-title">
+                    <span class="tools-category-icon">${escapeHtml(icon)}</span>
+                    <button type="button" data-tools-action="edit-category" data-category="${safeCategory}" class="tools-category-name"><span class="category-name">${escapeHtml(category)}</span></button>
+                    <span class="ui-status tools-category-count">${count}</span>
                 </div>
-                <div style="display: flex; gap: 6px;">
-                    <button type="button" data-tools-action="add-tool" data-category="${safeCategory}" style="padding: 6px 16px; background: ${addButtonBackground}; color: white; border: none; border-radius: 5px; cursor: pointer; transition: all 0.2s;"
-                        class="hover-dim">
+                <div class="ui-action-group">
+                    <button type="button" data-tools-action="add-tool" data-category="${safeCategory}" class="btn-xs btn-primary">
                         添加工具
                     </button>
-                    <button type="button" data-tools-action="delete-category" data-category="${safeCategory}" style="padding: 6px 12px; background: var(--danger-color); color: white; border: none; border-radius: 5px; cursor: pointer; transition: all 0.2s;"
-                        class="hover-dim"
+                    <button type="button" data-tools-action="delete-category" data-category="${safeCategory}" class="btn-xs btn-danger"
                         title="删除分类">
                         🗑️
                     </button>
@@ -39,7 +37,7 @@ ${cardsHtml}
 
 function toolsRenderEmptyGrid({ icon, title, hint, padding = '60px 20px', iconSize = '64px' }) {
     return `
-        <div style="text-align: center; padding: ${padding}; color: var(--text-muted);">
+        <div class="ui-empty-state tools-empty-state">
             <div style="font-size: ${iconSize}; margin-bottom: 20px;">${escapeHtml(icon)}</div>
             <div style="font-size: var(--ui-type-size-dialog); margin-bottom: 8px;">${escapeHtml(title)}</div>
             <div style="font-size: var(--ui-type-size-body);">${escapeHtml(hint)}</div>
@@ -52,19 +50,19 @@ function toolsRenderToolCard({ tool, category, index, cardColor, actionsHtml, ca
     const safeDescription = escapeIconAttr(tool?.description || '');
     const tooltipAttr = (tooltip || safeDescription) ? ` title="${tooltip ? escapeIconAttr(tooltip) : safeDescription}"` : '';
     return `
-        <div class="tool-card${cardClass ? ` ${cardClass}` : ''}" data-tool-category="${safeCategory}" data-tool-index="${index}" draggable="true"${clickAttrs ? ` ${clickAttrs}` : ''} style="--card-accent: ${cardColor}; background: var(--card-bg); border-radius: 6px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 6px; border: 1px solid var(--border-color); border-top: 2px solid ${cardColor}; transition: all 0.2s; cursor: grab; min-width: 100px; max-width: 130px; min-height: 118px;"${tooltipAttr}${dragAttrs ? ` ${dragAttrs}` : ''}>
+        <div class="tool-card ui-card${cardClass ? ` ${cardClass}` : ''}" data-tool-category="${safeCategory}" data-tool-index="${index}" draggable="true"${clickAttrs ? ` ${clickAttrs}` : ''} style="--card-accent: ${cardColor};"${tooltipAttr}${dragAttrs ? ` ${dragAttrs}` : ''}>
 
-            <div class="tool-icon" style="width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--light-bg); border-radius: 6px; font-size: var(--ui-type-size-stat); pointer-events: none;">
+            <div class="tool-icon">
                 ${toolsRenderToolIcon(tool?.icon, tool)}
             </div>
 
-            <div class="tool-info" style="text-align: center; width: 100%; pointer-events: none;">
-                <div class="tool-title" style=" color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; width: 100%; margin-bottom: 0;">
+            <div class="tool-info">
+                <div class="tool-title">
                     ${escapeHtml(tool?.title || '')}
                 </div>
             </div>
 
-            <div class="tool-actions" style="display: flex; gap: 3px; width: 100%;${actionsStyle ? ` ${actionsStyle}` : ''}">
+            <div class="tool-actions"${actionsStyle ? ` style="${actionsStyle}"` : ''}>
                 ${actionsHtml}
             </div>
         </div>

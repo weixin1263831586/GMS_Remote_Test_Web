@@ -53,7 +53,7 @@ function renderFactsList(items, total) {
     const sig = f.error_signature ? `<span class="case-sig">${esc(f.error_signature)}</span>` : '';
     const scope = [f.chip_platform, f.android_version, f.certification_type, f.module].filter(Boolean).map(esc).join(' / ');
     const conf = f.confidence ? `<span class="muted" style="float:right">置信度 ${f.confidence}</span>` : '';
-    return `<div class="case-card" data-click="showCaseFact" data-a0="${f.issue_id}">
+    return `<div class="case-card ui-card" data-click="showCaseFact" data-a0="${f.issue_id}">
       <div class="case-head"><span class="case-status ui-status is-warning draft">${renderRedmineIssueLink(f.issue_id)}</span>${sig}${conf}</div>
       <div class="case-title">${esc(f.subject || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
@@ -73,7 +73,7 @@ function renderCasesList(items, total) {
     const badge = status === 'approved' ? '✅已审核' : status === 'draft' ? '📝草稿' : esc(status);
     const sig = c.canonical_error_signature ? `<span class="case-sig">${esc(c.canonical_error_signature)}</span>` : '';
     const scope = [c.chip_platform, c.android_version, c.certification_type, c.module].filter(Boolean).map(esc).join(' / ');
-    return `<div class="case-card" data-click="showCaseDetail" data-a0="${c.case_id}">
+    return `<div class="case-card ui-card" data-click="showCaseDetail" data-a0="${c.case_id}">
       <div class="case-head"><span class="case-status ui-status ${status === 'approved' ? 'is-success' : status === 'draft' ? 'is-warning' : ''} ${esc(status)}">${badge}</span>${sig}</div>
       <div class="case-title">${esc(c.title || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>

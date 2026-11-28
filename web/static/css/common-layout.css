@@ -638,49 +638,21 @@
 
 /* ==================== Tool Cards ==================== */
 .tool-card {
-    background: var(--card-bg);
-    border: 1px solid var(--border-color);
-    border-top: 3px solid var(--primary-color);
-    border-radius: 8px;
-    padding: 16px;
+    border-top: 2px solid var(--card-accent, var(--primary-color));
+    padding: var(--ui-spacing-sm);
     text-align: center;
-    cursor: pointer;
-    transition: var(--transition-normal);
+    cursor: grab;
+    transition: var(--transition-fast);
     position: relative;
     overflow: hidden;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    min-width: 120px;
-    max-width: 160px;
+    gap: var(--ui-spacing-xs);
+    min-height: 118px;
+    max-width: 130px;
 }
-
-.tool-card::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 3px;
-    background: var(--primary-gradient);
-    transform: scaleX(0);
-    transition: var(--transition-normal);
-}
-
-.tool-card:hover {
-    transform: translateY(-4px);
-    box-shadow: var(--shadow-md);
-    border-color: var(--primary-color);
-}
-
-.tool-card:hover::before {
-    transform: scaleX(1);
-}
-
-.tool-card:active {
-    transform: translateY(-2px);
-}
+.tool-card:hover { border-color: var(--card-accent, var(--primary-color)); }
 
 /* ==================== Emoji Picker ==================== */
 .emoji-picker-grid {
@@ -758,7 +730,11 @@
 
 /* Category Sections */
 .category-section {
-    margin-bottom: 28px;
+    margin-bottom: var(--ui-spacing-sm);
+    padding: var(--ui-spacing-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-card);
+    background: var(--light-bg);
 }
 
 .category-section:last-child {
@@ -768,31 +744,31 @@
 .category-header {
     display: flex;
     align-items: center;
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+    justify-content: space-between;
+    gap: var(--ui-spacing-sm);
+    margin-bottom: var(--ui-spacing-xs);
+    padding-bottom: var(--ui-spacing-xs);
     border-bottom: 1px solid var(--border-color);
+    cursor: move;
 }
-
-.category-header span:first-child {
-
-    margin-right: 6px;
-}
-
-.category-header span:nth-child(2) {
-
-    color: var(--text-primary);
-}
+.tools-category-title { display: flex; align-items: center; min-width: 0; gap: var(--ui-spacing-xs); }
+.tools-category-icon { font-size: var(--ui-type-size-dialog); cursor: grab; }
+.tools-category-name { padding: 0; border: 0; background: transparent; color: var(--text-primary); cursor: pointer; }
+.tools-category-count { margin-left: var(--ui-spacing-xs); }
+.tools-empty-state { padding-block: var(--ui-spacing-lg); }
 
 /* Tool Cards */
 .tool-icon {
-    width: 36px;
-    height: 36px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: center;
     background: var(--light-bg);
-    border-radius: 8px;
+    border-radius: var(--ui-radius-control);
+    font-size: var(--ui-type-size-stat);
+    pointer-events: none;
 
 }
 
@@ -805,12 +781,13 @@
 .tool-info {
     text-align: center;
     width: 100%;
+    pointer-events: none;
 }
 
 .tool-title {
 
     color: var(--text-primary);
-    margin-bottom: 4px;
+    margin-bottom: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -827,20 +804,24 @@
 
 .tool-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--ui-spacing-xs);
     width: 100%;
+    margin-top: auto;
 }
-
 .tool-actions button {
     flex: 1;
-    padding: 6px;
-    min-height: var(--ui-control-height-icon);
-    border: none;
-    border-radius: 6px;
-
+    min-width: 0;
+    padding: 2px 3px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--ui-radius-control);
+    background: transparent;
+    color: var(--text-secondary);
     cursor: pointer;
     transition: var(--transition-fast);
+    white-space: nowrap;
 }
+.tool-actions .act-primary { flex: 2; background: var(--success-color); color: var(--text-on-accent); }
+.tool-actions .act-danger { color: var(--text-muted); }
 
 /* 网站导航和常用工具均会动态生成操作按钮；为 CSP 下无法依赖内联
    样式的首帧提供稳定尺寸，同时满足紧凑控件的最小点击目标。 */
@@ -991,12 +972,6 @@
 
     }
 
-    .tool-card {
-        min-width: 110px;
-        max-width: 140px;
-        padding: 16px;
-        gap: 10px;
-    }
 
     .tool-icon {
         width: 32px;

@@ -61,6 +61,7 @@
     };
     let criticalGerritRequest = 0;
     const criticalFilterIds = ['critical_year', 'critical_month', 'critical_version', 'critical_kind'];
+    const gerritStatusTone = status => ({merged:'is-success',partial:'is-warning',open:'is-info',missing:'is-danger'})[status] || '';
     const GERRIT_LABELS = {merged: '已合入', partial: '部分合入', open: '评审中', missing: '未合入', unknown: '未能核对'};
     const criticalFilterState = new Map();
     let activeCriticalFilter = null;
@@ -250,14 +251,14 @@
       if (!criticalGerritReady) return '<span class="muted">待核对</span>';
       const status = versionGerritStatus(item, version);
       const count = found && found.upstream_total ? `${found.upstream_merged}/${found.upstream_total}` : '';
-      return `<span class="gerrit-badge gerrit-${esc(status)}">${esc(GERRIT_LABELS[status])}</span>${count ? '<div class="muted">' + esc(count) + '</div>' : ''}`;
+      return `<span class="gerrit-badge ui-status ${gerritStatusTone(status)} gerrit-${esc(status)}">${esc(GERRIT_LABELS[status])}</span>${count ? '<div class="muted">' + esc(count) + '</div>' : ''}`;
     }
     function matrixOverall(item) {
       const row = gerritByPatch && gerritByPatch[criticalKey(item)];
       if (!criticalGerritReady) return '<span class="muted">待核对</span>';
       const status = row && GERRIT_LABELS[row.status] ? row.status : 'unknown';
       const count = row && row.upstream_total ? `${row.upstream_merged}/${row.upstream_total}` : '';
-      return `<button type="button" class="critical-text-button gerrit-badge gerrit-${esc(status)}" data-critical-detail="${esc(criticalKey(item))}" title="查看完整核对证据">${esc(GERRIT_LABELS[status])}${row && row.truncated ? ' ※' : ''}</button>${count ? '<div class="muted">' + esc(count) + '</div>' : ''}`;
+      return `<button type="button" class="critical-text-button gerrit-badge gerrit-${esc(status)}" data-critical-detail="${esc(criticalKey(item))}" title="查看完整核对证据"><span class="ui-status ${gerritStatusTone(status)}">${esc(GERRIT_LABELS[status])}${row && row.truncated ? ' ※' : ''}</span></button>${count ? '<div class="muted">' + esc(count) + '</div>' : ''}`;
     }
     function criticalRows(items, versions) {
       return items.map(item => {
@@ -420,13 +421,13 @@
     }
     function gerritCell(row) {
       if (!row || !GERRIT_LABELS[row.status]) return '<span class="muted">尚无核对证据</span>';
-      const parts = [`<span class="gerrit-badge gerrit-${esc(row.status)}">${esc(GERRIT_LABELS[row.status])}</span>`];
+      const parts = [`<span class="gerrit-badge ui-status ${gerritStatusTone(row.status)} gerrit-${esc(row.status)}">${esc(GERRIT_LABELS[row.status])}</span>`];
       const versions = Array.isArray(row.versions) ? row.versions : [];
       if (versions.length) {
         versions.forEach(version => {
           const state = GERRIT_LABELS[version.status] ? version.status : 'unknown';
           const count = version.upstream_total ? `${version.upstream_merged}/${version.upstream_total}` : '—';
-          parts.push(`<div class="gerrit-version-result"><span>${esc(version.version)}</span> <span class="gerrit-badge gerrit-${esc(state)}">${esc(GERRIT_LABELS[state])}</span> <span class="muted">${esc(count)}</span></div>`);
+          parts.push(`<div class="gerrit-version-result"><span>${esc(version.version)}</span> <span class="gerrit-badge ui-status ${gerritStatusTone(state)} gerrit-${esc(state)}">${esc(GERRIT_LABELS[state])}</span> <span class="muted">${esc(count)}</span></div>`);
         });
       } else if (row.upstream_total) {
         parts.push(`<div class="muted">${esc(row.upstream_merged)}/${esc(row.upstream_total)} 个公告补丁</div>`);
@@ -438,7 +439,7 @@
         const detail = [];
         upstreams.forEach(item => {
           const label = GERRIT_LABELS[item.status] || '未能核对';
-          detail.push(`<div class="gerrit-badge gerrit-${esc(item.status || 'unknown')}">${esc(label)}</div> <span class="muted">${esc([item.version, item.project].filter(Boolean).join(' · '))}</span>`);
+          detail.push(`<div class="gerrit-badge ui-status ${gerritStatusTone(item.status)} gerrit-${esc(item.status || 'unknown')}">${esc(label)}</div> <span class="muted">${esc([item.version, item.project].filter(Boolean).join(' · '))}</span>`);
           if (item.subject) detail.push(`<div class="muted">${esc(item.subject)}</div>`);
           detail.push(gerritChangeLinks(item.changes));
         });

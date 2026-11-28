@@ -360,8 +360,6 @@ function ut_renderAllCategories(grid) {
         catIndex,
         icon: ut_getCategoryInfo(category).icon,
         count: ut_categorizedTools[category].length,
-        addButtonBackground: 'var(--primary-gradient)',
-        sectionStyle: 'margin-bottom: 4px;',
         cardsHtml: ut_categorizedTools[category]
             .map((tool, index) => ut_createToolCard(tool, category, index, toolsCategoryColor(catIndex)))
             .join('\n'),
@@ -405,44 +403,38 @@ function ut_createToolCard(tool, category, index, cardColor) {
     const actions = [];
     if (tool.builtin_id === 'gms-update-radar') {
         actions.push(`
-                <button type="button" class="btn-act act-edit" aria-label="修改" title="修改雷达执行时间、收件人、发送策略和监听任务" data-tools-action="radar-edit"
-                        style="flex: 1; padding: 3px; border: 1px solid var(--border-color); border-radius: 4px; background: var(--lighter-bg); color: var(--text-primary); cursor: pointer; line-height: 1;">
+                <button type="button" class="btn-act act-edit" aria-label="修改" title="修改雷达执行时间、收件人、发送策略和监听任务" data-tools-action="radar-edit">
                     ✏️
                 </button>`);
     }
     // sync 工具显示触发按钮
     if (isSyncTool) {
         actions.push(`
-                <button type="button" class="btn-act" aria-label="触发扫描" title="${tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes'}" data-tools-action="trigger-sync" data-sync-kind="${tool.action}" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                <button type="button" class="btn-act act-primary" aria-label="触发扫描" title="${tool.action === 'gms-update-sync' ? '扫描 GMS/CTS 更新' : '扫描 Mainline release notes'}" data-tools-action="trigger-sync" data-sync-kind="${tool.action}" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     触发扫描
                 </button>`);
     }
     // 只有有 url 的非内置工具才显示下载按钮
     if (!tool.builtin_id && !isSyncTool && !isShareFirmwareTool && !isDownloadOnlyTool) {
         actions.push(`
-                <button type="button" class="btn-act" aria-label="下载文件" title="下载文件" data-tools-action="download-tool" data-tool-id="${escapeIconAttr(tool.tool_id)}" data-tool-title="${escapeIconAttr(tool.title)}"
-                        style="flex: 2; padding: 2px 3px; background: var(--success-color); color: white; border: none; border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                <button type="button" class="btn-act act-primary" aria-label="下载文件" title="下载文件" data-tools-action="download-tool" data-tool-id="${escapeIconAttr(tool.tool_id)}" data-tool-title="${escapeIconAttr(tool.title)}">
                     下载
                 </button>`);
     }
     if (!tool.builtin_id) {
         actions.push(`
-                <button type="button" class="btn-act act-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-secondary); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                <button type="button" class="btn-act act-edit" aria-label="编辑工具" data-tools-action="edit-tool" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     ✏️
                 </button>`);
         actions.push(`
-                <button type="button" class="btn-act act-danger" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                <button type="button" class="btn-act act-danger" aria-label="删除工具" data-tools-action="delete-tool" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     🗑️
                 </button>`);
     }
     // Built-in tools get a hide button so users can remove them.
     if (tool.builtin_id) {
         actions.push(`
-                <button type="button" class="btn-act act-danger" aria-label="隐藏此内置工具" title="隐藏此内置工具" data-tools-action="hide-builtin" data-builtin-id="${escapeIconAttr(tool.builtin_id)}" data-category="${escapeIconAttr(category)}" data-index="${index}"
-                        style="flex: 1; padding: 2px 3px; background: transparent; color: var(--text-muted); border: 1px solid var(--border-color); border-radius: 3px; cursor: pointer; transition: all 0.2s; line-height: 1;">
+                <button type="button" class="btn-act act-danger" aria-label="隐藏此内置工具" title="隐藏此内置工具" data-tools-action="hide-builtin" data-builtin-id="${escapeIconAttr(tool.builtin_id)}" data-category="${escapeIconAttr(category)}" data-index="${index}">
                     🗑️
                 </button>`);
     }
@@ -464,7 +456,6 @@ function ut_createToolCard(tool, category, index, cardColor) {
         cardColor,
         actionsHtml: actions.join(''),
         clickAttrs,
-        actionsStyle: 'margin-top: auto;',
         dragAttrs: 'data-dragstart="handleToolDragStart" data-r0="event"'
             + ' data-dragend="handleToolDragEnd" data-r1="event"'
             + ' data-dragover="handleToolDragOver" data-r2="event"'
