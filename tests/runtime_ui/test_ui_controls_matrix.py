@@ -91,3 +91,48 @@ class UiControlsMatrixTests(RuntimeUiHarness):
             self.assertEqual(failures, [], "\n".join(failures) + f"\nSamples: {seen}")
         finally:
             page.close()
+
+
+    def test_plain_actions_keep_their_label_and_busy_geometry(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            result = page.evaluate("""() => {
+                const selectors = [
+                    '#apk-task-history-refresh',
+                    '#users-list-refresh',
+                    '#refresh-suites-btn',
+                    '#refresh-devices-btn',
+                    '#page-api-docs .api-search-toolbar .api-action',
+                    '#page-security-audit .audit-toolbar-button',
+                    '#page-devices .inventory-refresh'
+                ];
+                const controls = selectors.flatMap(selector => [...document.querySelectorAll(selector)]);
+                const bad = controls.filter(el => el.querySelector('svg, .test-action-icon') ||
+                    /[↻🔄]/u.test(el.textContent)).map(el => el.id || el.textContent.trim());
+                const original = document.getElementById('apk-task-history-refresh');
+                const probe = original.cloneNode(true);
+                probe.removeAttribute('id');
+                probe.disabled = false;
+                probe.textContent = '刷新';
+                document.body.append(probe);
+                const before = probe.getBoundingClientRect().width;
+                setActionButtonBusy(probe, true, '刷新中');
+                const busy = {label: probe.textContent, disabled: probe.disabled,
+                    width: probe.getBoundingClientRect().width};
+                setActionButtonBusy(probe, false);
+                const after = {label: probe.textContent, disabled: probe.disabled,
+                    width: probe.getBoundingClientRect().width};
+                probe.remove();
+                return {count: controls.length, bad, before, busy, after};
+            }""")
+            self.assertGreaterEqual(result["count"], 7)
+            self.assertEqual(result["bad"], [])
+            self.assertEqual(result["busy"]["label"], "刷新中")
+            self.assertTrue(result["busy"]["disabled"])
+            self.assertEqual(result["after"]["label"], "刷新")
+            self.assertFalse(result["after"]["disabled"])
+            self.assertAlmostEqual(result["before"], result["busy"]["width"], delta=1)
+            self.assertAlmostEqual(result["before"], result["after"]["width"], delta=1)
+        finally:
+            page.close()

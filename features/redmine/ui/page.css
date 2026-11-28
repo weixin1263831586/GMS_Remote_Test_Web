@@ -11,8 +11,6 @@
     .header-right { display:flex; align-items:center; gap:12px; flex-shrink:0; flex-wrap:wrap; }
     .muted { color:var(--muted);  line-height:1.6; }
     button.warn { background:#b45309; }
-    button.danger { background:#b91c1c; }
-    button.danger:hover { background:#991b1b; }
     /* 工具栏与 Tabs 同行，整体靠右；控件略微缩小，筛选区与按钮区以细分隔线区分。 */
     header .filter-bar input#searchInput { width:clamp(140px, 12vw, 200px); min-width:140px; }
     header .filter-bar select { width:86px; min-width:86px; }
@@ -245,9 +243,7 @@
 
     /* ---- Knowledge base: case cards + actions ---- */
     .knowledge-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border); }
-    .ka-btn {  padding:4px 8px; border-radius:var(--ui-radius-control); border:1px solid var(--border); background:var(--lighter-bg); color:var(--text-secondary); cursor:pointer; }
-    .ka-btn.primary { background:var(--primary-gradient); border-color:var(--primary-color); color:#fff; }
-    .ka-btn:hover { background:var(--border-light); color:#fff; }
+
     .settings-subsection-title {   color:var(--primary-light); }
     .setting-help { margin-top:3px; color:var(--muted);  line-height:1.5; }
     .setting-checkbox-row { display:flex !important; align-items:center; gap:8px; color:var(--text) !important; }
@@ -276,7 +272,7 @@
     .daily-brief-toolbar-right .daily-brief-single-form { justify-content:flex-end; }
     .daily-brief-run-controls { justify-content:flex-end; }
     .daily-brief-toolbar .ka-btn { white-space:nowrap; }
-    .daily-brief-toolbar .ka-btn.primary:hover { background:var(--primary-gradient-hover); }
+
     #singleIssueAnalysisId { width:200px; max-width:100%; flex:0 1 200px; }
     .single-issue-analysis-hint-modal textarea { min-height:300px; height:min(52vh, 440px); resize:vertical; line-height:1.55; }
     .daily-brief-run-controls { padding-left:8px; border-left:1px solid var(--border); }

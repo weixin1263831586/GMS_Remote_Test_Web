@@ -1,8 +1,8 @@
 <div class="container page-content" id="page-agent">
             {% include 'components/page-header.html' %}<span class="page-title-icon" aria-hidden="true">💬</span> 对话Agent{% include 'components/page-header-actions.html' %}
-                <button class="btn-xs" data-click="newAgentSession"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#plus"></use></svg>新会话</button>
-                <button class="btn-xs btn-danger-quiet" data-click="cancelAgentSession"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#stop"></use></svg>取消Agent</button>
-                <button class="btn-xs" data-click="exportAgentSessionTranscript"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg>导出记录</button>
+                <button class="btn-xs" data-click="newAgentSession">新会话</button>
+                <button class="btn-xs btn-danger-quiet" data-click="cancelAgentSession">取消Agent</button>
+                <button class="btn-xs" data-click="exportAgentSessionTranscript">导出记录</button>
             {% include 'components/page-header-end.html' %}
 
             <div class="ui-workspace-grid agent-layout agent-layout-with-sessions">

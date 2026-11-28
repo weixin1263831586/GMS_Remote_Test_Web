@@ -120,7 +120,24 @@ img.page-title-icon { width: 16px; height: var(--ui-type-size-page-heading); obj
 .section-title > .ui-icon { margin-right: 6px; }
 button > .ui-icon { margin-right: 6px; }
 /* Action-only icons inherit the button tone, not the information icon palette. */
-:is(body, .page-ui-rework, .tech-dialog) button:where([aria-label], [title]):not(:disabled) > svg.ui-icon:only-child:has(> use) { color: inherit; }
+:is(body, .page-ui-rework, .tech-dialog) .ui-icon-button > svg.ui-icon { color: inherit; width: 16px; height: 16px; margin: 0; }
+button.ui-icon-button {
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--ui-control-height);
+    min-width: var(--ui-control-height);
+    padding: 0;
+    border: 1px solid var(--border-light);
+    border-radius: var(--ui-radius-control);
+    background: var(--light-bg);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+button.ui-icon-button:hover:not(:disabled) { background: var(--lighter-bg); border-color: var(--primary-light); }
+button.ui-icon-button:disabled { opacity: .55; cursor: not-allowed; }
+.ui-dashboard .header-toolbar button.ui-icon-button { width: var(--ui-control-height-dense); min-width: var(--ui-control-height-dense); }
 button > .ui-icon:last-child:first-child { margin-right: 0; }
 .ui-name { color: var(--text-primary, var(--text, #eaf0f9));   line-height: 1.5; }
 .ui-meta { color: var(--text-secondary, var(--muted, #91a1b7));   line-height: 1.5; }

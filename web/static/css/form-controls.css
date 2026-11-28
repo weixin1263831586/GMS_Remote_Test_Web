@@ -99,9 +99,11 @@
     background: var(--primary-strong);
     cursor: pointer;
 }
-:where(.ui-dashboard) button.secondary { background: var(--light-bg); border-color: var(--border-light); color: var(--text-primary); }
-:where(.ui-dashboard) button.secondary:hover:not(:disabled) { background: var(--lighter-bg); border-color: var(--primary-light); }
+:where(.ui-dashboard) button:is(.secondary, .ka-btn:not(.primary)) { background: var(--light-bg); border-color: var(--border-light); color: var(--text-primary); }
+:where(.ui-dashboard) button:is(.secondary, .ka-btn:not(.primary)):hover:not(:disabled) { background: var(--lighter-bg); border-color: var(--primary-light); }
 :where(.ui-dashboard) button.danger { background: color-mix(in srgb, var(--danger-color) 12%, var(--card-bg)); border-color: var(--danger-color); color: var(--danger-color); }
+:where(.ui-dashboard) button.danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger-color) 22%, var(--card-bg)); }
+:where(.ui-dashboard) button.ka-btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--primary-strong) 80%, var(--primary-color)); }
 :where(.ui-dashboard) button:disabled { opacity: .55; cursor: not-allowed; }
 :where(.ui-dashboard) :is(input:not([type=checkbox],[type=radio],[type=file],[type=hidden]), select) {
     box-sizing: border-box;

@@ -44,7 +44,7 @@
                                     <select id="test-suite" class="combo-box" data-test-config-control>
                                         <option value="" disabled selected></option>
                                     </select>
-                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites"><span class="test-action-icon" aria-hidden="true">🔄</span> 刷新套件</button>
+                                    <button id="refresh-suites-btn" class="btn-xxs ui-refresh-action" data-click="refreshTestSuites">刷新套件</button>
                                 </div>
                                 <div class="form-row">
                                     <label>测试报告:</label>
@@ -98,7 +98,7 @@
                     </div>
                     <!-- ADB 控制按钮 -->
                     <div class="adb-button-frame" data-operation-log-tab="system">
-                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices"><span class="test-action-icon" aria-hidden="true">🔄</span> 刷新设备</button>
+                        <button id="refresh-devices-btn" class="btn-xxs ui-refresh-action" data-click="refreshDevices">刷新设备</button>
                         <button class="btn-xxs" data-click="selectAllDevices"><span class="test-action-icon" aria-hidden="true">✅</span> 全选设备</button>
                         <button class="btn-xxs" data-click="rebootDevices"><span class="reboot-icon" aria-hidden="true">⏻</span> 重启设备</button>
                         <button id="btn-remount-devices" class="btn-xxs" data-click="remountDevices" title="对选中设备执行 adb remount，重新挂载可写分区"><span class="test-action-icon" aria-hidden="true">⚡</span> Remount</button>
@@ -126,7 +126,7 @@
                     <div class="section-title">操作控制</div>
                     <!-- VPN 控制按钮 -->
                     <div class="vpn-btn-frame" data-operation-log-tab="system">
-                        <button class="btn-xxs" data-click="copyDeployCommand"><span class="test-action-icon" aria-hidden="true">📋</span> 复制部署命令</button>
+                        <button class="btn-xxs" data-click="copyDeployCommand">复制部署命令</button>
                         <button class="btn-xxs" data-click="showTailscaleInfoModal"><span class="test-action-icon" aria-hidden="true">🌐</span> Tailscale 组网</button>
                         <button class="btn-xxs" id="check-sshd-btn" data-click="checkSshd"><span class="test-action-icon" aria-hidden="true">🖥️</span> 检查 SSHD</button>
                         <button class="btn-xxs" id="check-routing-btn" data-click="checkRouting"><span class="test-action-icon" aria-hidden="true">🧭</span> 检查路由</button>
@@ -148,7 +148,7 @@
                                 </div>
                                 <div class="drop-zone-filename" id="drop-zone-filename"></div>
                             </div>
-                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile"><span class="test-action-icon" aria-hidden="true">📤</span> 上传到测试主机</button>
+                            <button class="btn-xs" id="upload-test-host-btn" data-click="handleUploadFile">上传到测试主机</button>
                         </div>
                         <!-- 上传进度 -->
                         <div class="progress-container">
@@ -161,7 +161,7 @@
                     <!-- 测试按钮 -->
                     <div class="test-btn-frame">
                         <button class="btn-primary btn-lg" id="test-toggle-btn" data-click="toggleTest">开始测试</button>
-                        <button class="btn-xxs" data-click="downloadTestLog"><span class="test-action-icon" aria-hidden="true">💾</span> 保存日志</button>
+                        <button class="btn-xxs" data-click="downloadTestLog">保存日志</button>
                         <button class="btn-xxs" data-click="cleanTest"><span class="test-action-icon" aria-hidden="true">🗑️</span> 清除日志</button>
                     </div>
                 </div>

@@ -293,10 +293,6 @@
     flex: 0 0 auto; min-height: var(--ui-control-height); padding: 6px 13px; white-space: nowrap;
 }
 #page-security-audit .audit-filter-bar .audit-toolbar-button[data-busy-size] { padding-inline:6px; gap:2px; }
-#page-security-audit .audit-filter-bar .audit-toolbar-export {
-    background: color-mix(in srgb, var(--primary-color) 17%, var(--card-bg));
-    border-color: color-mix(in srgb, var(--primary-color) 55%, var(--border-color));
-}
 #page-security-audit .audit-log-panel,
 #page-security-audit .audit-side-card {
     min-width: 0; border: 1px solid var(--audit-edge); border-radius: var(--ui-radius-card);
