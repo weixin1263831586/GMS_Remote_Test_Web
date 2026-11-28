@@ -496,7 +496,7 @@ dialog.gms-native-dialog::backdrop { background: rgb(18 18 24 / 40%); backdrop-f
   border: 1px solid #503c69; border-radius: 10px; background: #211c2c;
 }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card {
-  margin: 0; gap: 12px; min-height: 65px; background: #252033;
+  margin: 0; row-gap: 12px; min-height: 65px; background: #252033;
 }
 #username-detect-modal .tech-form-section--username-detect .tech-field-card > input {
   min-width: 0; flex: 1; width: 100%;
