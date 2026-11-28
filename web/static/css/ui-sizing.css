@@ -79,6 +79,13 @@
 .ui-toolbar > :is(button,.btn-xs,.btn-xxs,.btn-small),
 .ui-control:is(button,select) { white-space: nowrap; }
 
+/* Do not reserve data-row height for structurally empty placeholder rows.
+   Real loading, empty-state, editable and grouped rows contain content or controls. */
+:is(table.ui-table, table.list-table, table.users-table, table.agent-access-table, table.dept-table, table.dash-resource-table, table.firmware-share-table):not(:where(.md-table, .info-table, .input-table, .aoa-command-table, .analysis-doc table, .markdown-body table))
+    > tbody > tr:not(:where(.group-row, [contenteditable], [aria-busy="true"])):not(:has(> :is(td, th):not(:empty))) {
+    display: none;
+}
+
 /* Ordinary data tables retain a divider below every data row. */
 :is(.list-table, .ui-table, .users-table, .agent-access-table, .dept-table, .dash-resource-table) > tbody > tr > td {
     border-bottom: 1px solid var(--border-color, var(--border, #2b384b));
