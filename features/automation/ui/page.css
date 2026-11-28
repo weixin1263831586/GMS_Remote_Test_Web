@@ -440,25 +440,20 @@ textarea { min-height: 76px; resize: vertical;  }
 .log-view {
     height: auto;
     max-height: 100%;
-    min-height: 0;
-    overflow: auto;
     margin: 0;
     padding: 14px;
     border: 0;
     border-radius: 0 0 6px 0;
     background: var(--panel-2);
     color: var(--text);
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
 
 
     line-height: 1.5;
-    overscroll-behavior: contain;
     scrollbar-gutter: stable;
 }
 .build-job {
     border: 1px solid var(--line);
-    border-radius: 5px;
+    border-radius: var(--ui-radius-card);
     padding: 8px;
     cursor: pointer;
 }
@@ -521,7 +516,7 @@ textarea { min-height: 76px; resize: vertical;  }
     align-items: center;
     padding: 12px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--ui-radius-card);
     background: var(--panel-2);
 }
 .report-card:hover { border-color: var(--primary); background: var(--panel-3); }
@@ -536,7 +531,7 @@ textarea { min-height: 76px; resize: vertical;  }
     gap: 12px;
     padding: 10px;
     border: 1px solid var(--line);
-    border-radius: 6px;
+    border-radius: var(--ui-radius-card);
     background: var(--panel-2);
     cursor: pointer;
 }
@@ -569,19 +564,6 @@ textarea { min-height: 76px; resize: vertical;  }
     align-items: center;
     gap: 8px;
 }
-.badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 7px;
-    border-radius: 999px;
-    border: 1px solid var(--line);
-    color: var(--text);
-    white-space: nowrap;
-
-}
-.badge.completed { color: var(--ok); border-color: var(--ok); }
-.badge.failed, .badge.jenkins_failed, .badge.flash_failed, .badge.test_failed { color: var(--danger); border-color: var(--danger); }
-.badge.testing, .badge.flashing, .badge.jenkins_building { color: var(--warn); border-color: var(--warn); }
 .events {
     height: 100%;
     min-height: 0;
@@ -959,9 +941,9 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 
 :where(.panel, .dash-stat-card, .overview-card, .run-card) {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; box-shadow: none;
+    border-radius: var(--ui-radius-card); box-shadow: none;
 }
 :where(.panel-header, .section-head) { background: var(--panel2); }
-:where(.status, .badge) { border-radius: 5px; font-variant-numeric: tabular-nums; }
+
 table th { color: var(--muted); background: var(--panel2);  }
 table tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }

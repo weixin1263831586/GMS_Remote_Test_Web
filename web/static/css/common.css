@@ -1134,10 +1134,6 @@ body {
 .list-table tbody tr:hover {
     background: color-mix(in srgb, var(--primary-color) 5%, transparent);
 }
-td.table-placeholder {
-    color: var(--text-secondary);
-    text-align: center;
-}
 .table-load-more {
     padding: 12px;
     text-align: center;
@@ -1718,7 +1714,6 @@ td.table-placeholder {
 
 .log-text {
     flex: 1;
-    min-height: 0;
     height: 100%;
     background: var(--darker-bg);
     border: 1px solid var(--border-color);
@@ -1730,8 +1725,6 @@ td.table-placeholder {
 
     line-height: 1.7;
     color: #e8e8f0;
-    word-wrap: break-word;
-    white-space: pre-wrap;
 }
 
 .log-entry {

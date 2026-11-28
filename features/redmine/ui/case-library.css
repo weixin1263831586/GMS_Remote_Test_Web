@@ -1,5 +1,5 @@
 /* 知识库案例与工单工作台。 */
-    .case-card { border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer; background:var(--card-bg); transition:border-color .15s; }
+    .case-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:10px 12px; margin-bottom:8px; cursor:pointer; background:var(--card-bg); transition:border-color .15s; }
     .case-card:hover { border-color:var(--primary-color); }
     .case-head { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
     .case-status {  padding:2px 6px; border-radius:4px; }

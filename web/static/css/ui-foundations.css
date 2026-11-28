@@ -433,7 +433,7 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     padding: var(--ui-spacing-lg) var(--ui-spacing-md);
 }
 .ui-empty-state.ui-empty-state--inline { padding: 0; text-align: inherit; }
-:where(.users-empty-message, .agent-access-empty, .table-placeholder) { color: var(--text-secondary); text-align: center; }
+:is(.users-empty-message, .agent-access-empty, .table-placeholder) { color: var(--text-secondary); text-align: center; }
 :is(.ui-log-toolbar, .log-frame-header, .build-log-toolbar) {
     display: flex;
     align-items: center;
@@ -442,7 +442,7 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     min-width: 0;
 }
 :is(.ui-log-actions, .log-actions) { display: flex; align-items: center; gap: var(--ui-spacing-sm); }
-.ui-log-content { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; }
+:is(.ui-log-content, .log-text) { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Dashboard toolbar and grouped actions, shared by all opted-in dashboards. */
 :where(.ui-dashboard) .btn-group,

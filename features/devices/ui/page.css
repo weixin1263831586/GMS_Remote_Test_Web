@@ -34,14 +34,14 @@ h1,h2,h3,p{margin:0}
 @keyframes toast-in{from{opacity:0;transform:translate(-50%,-50%) scale(.9)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
 .console-heading{align-items:flex-start}.console-actions{flex-wrap:wrap;justify-content:flex-end}
 .terminal-column{min-width:0}
-.terminal,.history-output{margin:0;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:8px;color:var(--text-primary);}
+.terminal,.history-output{margin:0;background:var(--darker-bg);border:1px solid var(--border-color);border-radius:var(--ui-radius-card);color:var(--text-primary);}
 .terminal{height:min(58vh,650px);padding:6px;overflow:hidden}
 /* xterm 两条字体链必须一致：CharSizeService/WidthCache 测量 span 在
    .xterm-helpers（继承本规则），行 span 靠 xterm 注入样式表。若注入样式
    因任何原因失效，行 span 会退回继承 .terminal 的 12px 栈，与测量链
    解析出不同字体，DOM 渲染器的 letter-spacing 补偿把日志撑成散字。
    这里把两条链的 family/size/weight 显式钉成同一组值兜底。 */
-.terminal .xterm{height:100%}.terminal .xterm-viewport{overscroll-behavior:contain}.history-output{white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto}
+.terminal .xterm{height:100%}.terminal .xterm-viewport{overscroll-behavior:contain}
 .input-row{margin-top:8px}.input-row input{flex:1;min-width:80px}
 input,textarea,select{width:100%;border:1px solid var(--border);border-radius:6px;background:var(--darker-bg);color:var(--text);padding:7px 9px;outline:none}
 input:focus,textarea:focus,select:focus{border-color:var(--blue);box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color) 15%, transparent)}
@@ -154,7 +154,7 @@ button.primary:hover:not(:disabled){background:var(--primary-gradient-hover)}
 .page-shell, .view-panel { color: var(--text); }
 
 :where(.panel, .port-card, .history-column) {
-    border-color: var(--border); border-radius: 8px;
+    border-color: var(--border); border-radius: var(--ui-radius-card);
     background: var(--panel);
 }
 .terminal { border-color: var(--border); }

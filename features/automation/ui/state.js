@@ -162,6 +162,14 @@ function compareSuitesNewest(first, second) {
 }
 
 function qs(id) { return document.getElementById(id); }
+function automationStatusTone(value) {
+    const status = String(value || 'unknown');
+    if (['online', 'available', 'completed', 'artifact_ready', 'flash_completed', 'flash_verified'].includes(status)) return 'is-success';
+    if (['offline', 'unauthorized', 'artifact_missing', 'failed'].includes(status) || status.endsWith('_failed')) return 'is-danger';
+    if (['created', 'fastboot', 'report_collecting', 'reporting'].includes(status)) return 'is-info';
+    if (['unknown', 'cancelled'].includes(status)) return '';
+    return Object.prototype.hasOwnProperty.call(STATUS_LABELS_ZH, status) ? 'is-warning' : '';
+}
 function statusLabel(value) {
     const status = String(value || 'unknown');
     return STATUS_LABELS_ZH[status] || status;

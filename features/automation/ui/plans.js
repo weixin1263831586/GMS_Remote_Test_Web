@@ -88,7 +88,7 @@ async function loadTestPlans() {
     if (request !== atsPlanRequest) return;
     atsTestPlans = data.items || [];
     qs('test-plan-list').innerHTML = atsTestPlans.length ? atsTestPlans.map(plan => `
-        <article class="run-card"><div class="run-main"><div class="run-title"><input type="checkbox" class="test-plan-selection" value="${esc(plan.id)}" aria-label="选择计划 ${esc(plan.name)}"><strong>${esc(plan.name)}</strong><span class="badge ${plan.enabled ? 'completed' : 'cancelled'}">${plan.enabled ? '已启用' : '已暂停'}</span>${(plan.labels || []).map(label => `<span class="test-outcome unknown">${esc(label)}</span>`).join('')}</div>
+        <article class="run-card"><div class="run-main"><div class="run-title"><input type="checkbox" class="test-plan-selection" value="${esc(plan.id)}" aria-label="选择计划 ${esc(plan.name)}"><strong>${esc(plan.name)}</strong><span class="badge ui-status ${plan.enabled ? 'completed is-success' : 'cancelled'}">${plan.enabled ? '已启用' : '已暂停'}</span>${(plan.labels || []).map(label => `<span class="test-outcome unknown">${esc(label)}</span>`).join('')}</div>
         <div class="run-value">${esc(testPlanScheduleLabel(plan.schedule))} · ${esc(plan.step_count)} 步 · ${plan.stop_on_failure ? '失败停止' : '失败继续'}</div>
         <div class="muted">下次：${esc(testPlanLocalTime(plan.next_run_at, plan.schedule.timezone))} · 上次：${esc(testPlanLocalTime(plan.last_run_at, plan.schedule.timezone))} (${esc(plan.schedule.timezone)})</div>
         ${plan.active_batch_id ? `<div class="muted">当前批次：${esc(plan.active_batch_id)}</div>` : ''}

@@ -28,7 +28,7 @@ async function loadDashboard() {
     if (statusEl) {
         const entries = Object.entries(byStatus).sort((a, b) => b[1] - a[1]);
         statusEl.innerHTML = entries.length
-            ? entries.map(([s, c]) => `<div class="breakdown-row"><span class="badge ${esc(s)}" title="${esc(s)}">${esc(statusLabel(s))}</span><span class="breakdown-count">${esc(c)}</span></div>`).join('')
+            ? entries.map(([s, c]) => `<div class="breakdown-row"><span class="badge ui-status ${automationStatusTone(s)} ${esc(s)}" title="${esc(s)}">${esc(statusLabel(s))}</span><span class="breakdown-count">${esc(c)}</span></div>`).join('')
             : '<div class="muted">暂无运行。</div>';
     }
 
@@ -54,7 +54,7 @@ async function loadDashboard() {
             <article class="run-card" data-click="loadEvents" data-a0="${esc(run.id)}">
                 <div class="run-main">
                     <div class="run-title">
-                        <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
+                        <span class="badge ui-status ${automationStatusTone(run.status)} ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                         <strong>${esc(run.profile_id || 'manual')}</strong>
                         <span class="muted">${esc(run.id)} · ${esc(compactTime(run.updated_at || run.created_at))}</span>
                     </div>
@@ -83,7 +83,7 @@ async function loadTrace(runId) {
 
         const build = data.build_job;
         qs('trace-build').innerHTML = build ? [
-            `<div class="trace-key">状态</div><div class="trace-val"><span class="badge ${esc(build.status)}" title="${esc(build.status)}">${esc(statusLabel(build.status))}</span></div>`,
+            `<div class="trace-key">状态</div><div class="trace-val"><span class="badge ui-status ${automationStatusTone(build.status)} ${esc(build.status)}" title="${esc(build.status)}">${esc(statusLabel(build.status))}</span></div>`,
             traceField('模板', build.template_id),
             traceField('工作目录', build.remote_workspace),
             traceField('产物', (build.artifacts || [])[0]?.path || ''),

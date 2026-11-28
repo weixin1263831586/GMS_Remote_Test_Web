@@ -121,7 +121,7 @@ async function dryRunProfile() {
         });
         const result = qs('dryrun-result');
         const req = data.run_request || {};
-        result.innerHTML = `<span class="badge ${data.matched ? 'completed' : 'failed'}">${data.matched ? '匹配' : '未匹配'}</span>`
+        result.innerHTML = `<span class="badge ui-status ${data.matched ? 'completed is-success' : 'failed is-danger'}">${data.matched ? '匹配' : '未匹配'}</span>`
             + (data.matched ? `<div class="muted" style="margin-top:6px">将创建运行：${esc(req.profile_id || profileId)} / ${esc(req.test_plan?.test_type || '-')} / 设备 ${(req.devices || []).length}</div>` : '');
         toast(data.matched ? '试运行：匹配，会创建运行' : '试运行：未匹配');
     } catch (err) { toast(err.message); }

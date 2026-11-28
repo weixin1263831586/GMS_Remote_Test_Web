@@ -7,7 +7,7 @@ async function loadBuildJobs() {
         ? buildJobs.map(job => {
             const terminal = TERMINAL_STATUSES.has(job.status);
             return `<div class="build-job ${job.id === selectedBuildJobId ? 'active' : ''}" data-click="loadBuildLog" data-a0="${esc(job.id)}">
-                <div class="build-job-head"><span class="badge ${esc(job.status)}" title="${esc(job.status)}">${esc(statusLabel(job.status))}</span><strong>${esc(job.template_id)}</strong>
+                <div class="build-job-head"><span class="badge ui-status ${automationStatusTone(job.status)} ${esc(job.status)}" title="${esc(job.status)}">${esc(statusLabel(job.status))}</span><strong>${esc(job.template_id)}</strong>
                 ${terminal ? `<button type="button" class="build-job-delete" title="删除历史任务" data-click="deleteBuildJob" data-a0="${esc(job.id)}" data-stop>删除</button>` : ''}</div>
                 <div class="muted">${esc(job.id)} / ${esc(job.remote_workspace || '')}</div>
                 <div class="build-job-source">${job.automation_run_id ? `ATS ${esc(job.automation_run_id)}` : '独立调试构建'}</div>

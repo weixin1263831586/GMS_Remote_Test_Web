@@ -104,7 +104,7 @@ function renderOpsStatus(data) {
             && (worker.last_tick_seconds_ago === null
                 || worker.last_tick_seconds_ago < (worker.interval_seconds || 15) * 4);
         pane.innerHTML = `
-            <span class="badge ${paused ? 'failed' : 'completed'}">${paused ? '推进已暂停' : '推进正常'}</span>
+            <span class="badge ui-status ${paused ? 'failed is-danger' : 'completed is-success'}">${paused ? '推进已暂停' : '推进正常'}</span>
             <span class="muted">Worker：${alive ? '运行中' : '未运行/停滞'}</span>
             <span class="muted">磁盘剩余：${data.disk?.available_gb ?? '-'} GB</span>
             <span class="muted">未确认告警：${Number(data.open_alerts || 0)} 条</span>
@@ -150,7 +150,7 @@ function renderOpsEvents() {
     if (!list) return;
     list.innerHTML = opsEventsCache.length ? opsEventsCache.map(event => `
         <article class="run-card"><div class="run-main">
-        <div class="run-title"><span class="badge ${event.severity === 'critical' ? 'failed' : (event.severity === 'warning' ? 'cancelled' : 'completed')}">${esc(event.severity)}</span><strong>${esc(event.kind)}</strong>${event.subject ? `<span class="test-outcome unknown">${esc(event.subject)}</span>` : ''}</div>
+        <div class="run-title"><span class="badge ui-status ${event.severity === 'critical' ? 'failed is-danger' : (event.severity === 'warning' ? 'cancelled is-warning' : 'completed is-success')}">${esc(event.severity)}</span><strong>${esc(event.kind)}</strong>${event.subject ? `<span class="test-outcome unknown">${esc(event.subject)}</span>` : ''}</div>
         <div class="run-value">${esc(event.message)}</div>
         <div class="muted">${esc(event.created_at)} · ${event.status === 'open' ? '未确认' : `已确认 ${esc(event.acknowledged_by || '')}`}</div>
         </div>

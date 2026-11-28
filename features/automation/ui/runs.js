@@ -26,7 +26,7 @@ async function loadRuns() {
         <article class="run-card${run.id === selectedRunId ? ' active' : ''}" data-click="loadEvents" data-a0="${esc(run.id)}">
             <div class="run-main">
                 <div class="run-title">
-                    <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
+                    <span class="badge ui-status ${automationStatusTone(run.status)} ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                     <strong>${esc(run.profile_id || 'manual')}</strong>
                     <span class="muted">${esc(run.source_type || 'manual')}</span>
                     ${run.source_type === 'assistant_chat' ? `<button type="button" class="btn-xs" data-click="jumpToAgentConversation" data-a0="${esc(run.id)}" data-stop title="回到发起这条运行的对话 Agent 会话">来自对话 Agent ↗</button>` : ''}
@@ -91,7 +91,7 @@ async function loadRuns() {
                 <article class="report-card">
                     <div class="report-card-main">
                         <div class="run-title">
-                            <span class="badge ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
+                            <span class="badge ui-status ${automationStatusTone(run.status)} ${esc(run.status)}" title="${esc(run.status)}">${esc(statusLabel(run.status))}</span>
                             <strong>${esc(run.profile_id || 'manual')}</strong>
                             <span class="muted">${esc(run.source_type || 'manual')}</span>
                             ${renderTestOutcome(run)}
