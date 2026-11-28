@@ -10,6 +10,9 @@ on:
       - 'web/static/css/ui-foundations.css'
       - 'web/static/css/form-controls.css'
       - 'web/shell/pages/api-docs.html'
+      - 'web/shell/pages/users.html'
+      - 'web/shell/pages/devices.html'
+      - 'web/static/js/shell/shell-device-management.js'
       - 'features/devices/ui/page.html'
       - 'features/devices/ui/page.js'
       - 'features/redmine/ui/settings.html'
@@ -147,6 +150,7 @@ jobs:
             tests/runtime_ui/test_cluster.py::RuntimeClusterTests::test_cluster_worker_row_distinguishes_hidden_external_test \
             tests/runtime_ui/test_knowledge_source_status.py \
             tests/runtime_ui/test_agent.py::RuntimeAgentTests::test_short_agent_and_sdk_tables_have_no_reserved_blank_rows \
+            tests/runtime_ui/test_agent.py::RuntimeAgentTests::test_sdk_first_load_keeps_toolbar_and_table_stationary \
             tests/runtime_ui/test_page_outer_inset.py \
             tests/runtime_ui/test_header_action_alignment.py \
             tests/architecture/test_shared_page_edge.py \

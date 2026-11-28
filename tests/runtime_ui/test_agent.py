@@ -104,6 +104,9 @@ class RuntimeAgentTests(RuntimeUiHarness):
                             refresh:rect('#agent-sdk-sources-refresh')};
                 }""")
             before = geometry()
+            self.assertGreaterEqual(before["stats"]["height"], 95)
+            expect(panel.locator("#agent-sdk-sources-refresh")).to_be_disabled()
+            expect(panel.locator("#agent-sdk-sources-refresh")).to_have_text("刷新中")
             # Pump Playwright events until both deliberately deferred reads arrive.
             for _ in range(100):
                 if len(pending) >= 2:
@@ -115,6 +118,8 @@ class RuntimeAgentTests(RuntimeUiHarness):
             expect(panel.locator("#agent-sdk-stat-row")).to_have_attribute("aria-busy", "false")
             expect(panel.locator("#agent-sdk-stat-row .page-stat-card")).to_have_count(5)
             expect(panel.locator("#agent-sdk-sources-tbody tr")).to_have_count(4)
+            expect(panel.locator('#agent-sdk-sources-refresh')).to_be_enabled()
+            expect(panel.locator('#agent-sdk-sources-refresh')).to_have_text('刷新')
             after = geometry()
             for part in before:
                 for prop in before[part]:

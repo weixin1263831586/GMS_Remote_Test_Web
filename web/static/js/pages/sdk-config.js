@@ -32,10 +32,10 @@ async function sdkConfigToggle(show) {
     return usersViewSwitch(target);
 }
 
-async function sdkConfigLoadSources(button) {
+async function sdkConfigLoadSources(button, force = false) {
     const tbody = document.getElementById('agent-sdk-sources-tbody');
     if (!tbody || (button && button.disabled)) return;
-    if ((agentSdkSourcesLoaded || agentSdkSourcesLoading) && !button) return; // 自动加载不重复请求
+    if ((agentSdkSourcesLoaded || agentSdkSourcesLoading) && !button && !force) return; // 自动加载不重复请求
     const sequence = ++agentSdkSourcesSequence;
     agentSdkSourcesLoading = true;
     const refresh = button || document.getElementById('agent-sdk-sources-refresh');
@@ -292,7 +292,7 @@ async function sdkConfigSubmitEdit(event) {
         }
         // 更新后的 Android 版本立即反映在版本统计卡和表格中。
         agentSdkSourcesLoaded = false;
-        await sdkConfigLoadSources();
+        await sdkConfigLoadSources(null, true);
     } catch (error) {
         showToast(`保存失败：${error.message || '未知错误'}`, 'error');
     } finally {
@@ -589,7 +589,7 @@ async function sdkConfigSubmitAdd(event) {
         const probeBox = document.getElementById('agent-sdk-add-probe-result');
         if (probeBox) probeBox.hidden = true;
         agentSdkSourcesLoaded = false;
-        sdkConfigLoadSources();
+        sdkConfigLoadSources(null, true);
     } catch (error) {
         showToast(`添加失败：${error.message || '未知错误'}`, 'error');
     } finally {
@@ -624,7 +624,7 @@ async function sdkConfigDeleteSource(sourceId) {
         }
         delete agentSdkUserLiveCache[sourceId];
         agentSdkSourcesLoaded = false;
-        sdkConfigLoadSources();
+        sdkConfigLoadSources(null, true);
     } catch (error) {
         showToast(`删除失败：${error.message || '未知错误'}`, 'error');
     }
