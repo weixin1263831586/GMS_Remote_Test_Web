@@ -49,7 +49,7 @@ function updateDashGauges(){
  const metrics=document.querySelector('#dash-gauges-chart');if(!metrics)return;
  const bar=(value,type)=>{
   const valid=value!==null&&value!==undefined&&value!==''&&Number.isFinite(Number(value));
-  if(!valid)return '<span class="dash-empty">未上报</span>';
+  if(!valid)return '<span class="dash-empty ui-empty-state ui-empty-state--inline">未上报</span>';
   const number=Math.max(0,Math.min(100,Number(value))),display=number.toFixed(1).replace(/\.0$/,'');
   const color=number>=85?'#ef6572':number>=70?'#e8b956':type==='cpu'?'#5b9af0':'#3acb98';
   return `<span class="resource-progress"><span class="resource-track"><span class="resource-fill" style="--progress:${number}%;--bar-color:${color}"></span></span><strong>${display}%</strong></span>`;
@@ -60,7 +60,7 @@ function updateDashGauges(){
   const disk=worker.disk_percent??(total>0?100*(1-free/total):null);
   return `<tr><td><span class="resource-host-name" title="${esc(worker.name||worker.id)}">${esc(worker.name||worker.id)}</span><span class="resource-host-sub">${esc(worker.address||worker.hostname||'')} · ${worker.id===localId?'Controller':'Worker'}</span></td><td>${workerBadge(worker)}</td><td>${bar(offline?null:worker.cpu_percent,'cpu')}</td><td>${bar(offline?null:worker.memory_percent,'memory')}</td><td>${bar(offline?null:disk,'disk')}</td></tr>`;
  };
- metrics.innerHTML=selected.length?`<table class="dash-resource-table"><thead><tr><th style="width:24%">Worker / 主机</th><th style="width:12%">状态</th><th>CPU</th><th>内存</th><th>磁盘</th></tr></thead><tbody>${selected.map(row).join('')}</tbody></table>`:'<div class="dash-empty">暂无已注册主机</div>';
+ metrics.innerHTML=selected.length?`<table class="dash-resource-table"><thead><tr><th style="width:24%">Worker / 主机</th><th style="width:12%">状态</th><th>CPU</th><th>内存</th><th>磁盘</th></tr></thead><tbody>${selected.map(row).join('')}</tbody></table>`:'<div class="dash-empty ui-empty-state">暂无已注册主机</div>';
  const footer=document.querySelector('#dash-gauges-detail');
  if(footer)footer.textContent=dashGaugesWorker&&selected.length?
  `主机 ${selected[0].id} · 可用内存 ${oneDecimal(selected[0].memory_available_gb)} GiB · 可用磁盘 ${oneDecimal(selected[0].disk_free_gb)} GiB · 负载 ${oneDecimal(selected[0].load_1m)}`:
@@ -86,7 +86,7 @@ function updateDashDevicePie(){
   const summary=present.map(({key,count})=>`${dashStateNames[key]} ${count}`).join(' · ')||'暂无设备';
   const bars=total?present.map(({key,count})=>`<span class="dist-segment" style="width:${count*100/total}%;background:${dashStateColors[key]}" title="${esc(dashStateNames[key])}: ${count}"></span>`).join(''):'';
   return `<div class="dist-row"><span class="dist-host" title="${esc(worker.name||worker.id)}">${esc(worker.name||worker.id)}</span><span class="dist-number">${total}</span><span class="dist-track">${bars}</span><span class="dist-summary" title="${esc(summary)}">${esc(summary)}</span></div>`;
- }).join('')||'<div class="dash-empty">暂无在线 Worker</div>';
+ }).join('')||'<div class="dash-empty ui-empty-state">暂无在线 Worker</div>';
 }
 
 function renderDashPieDetail(){/* details now shown in tooltip */}
@@ -105,7 +105,7 @@ async function updateDashTrend(force=false){
  const workers=[...new Set((dashMetricsHistory||[]).map(m=>m.worker_id))];
  workers.sort((a,b)=>(a===localId?-1:b===localId?1:String(a).localeCompare(String(b),undefined,{numeric:true})));
  if(!dashTrendWorker&&workers.length)dashTrendWorker=workers[0];
- if(tabsEl)tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w===dashTrendWorker?' active':''}" data-click="selectDashTrendWorker" data-a0="${esc(w)}">${esc(w)}</button>`).join('')||'<span class="dash-empty">无数据</span>';
+ if(tabsEl)tabsEl.innerHTML=workers.map(w=>`<button class="dash-trend-btn${w===dashTrendWorker?' active':''}" data-click="selectDashTrendWorker" data-a0="${esc(w)}">${esc(w)}</button>`).join('')||'<span class="dash-empty ui-empty-state ui-empty-state--inline">无数据</span>';
  const byWorker={};
  (dashMetricsHistory||[]).forEach(m=>{(byWorker[m.worker_id]=byWorker[m.worker_id]||[]).push(m)});
  const data=byWorker[dashTrendWorker]||[];
