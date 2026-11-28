@@ -31,7 +31,7 @@
     .clickable-stat { cursor:pointer; transition:transform .15s,box-shadow .15s; }
     .clickable-stat:hover { transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.3); }
     .trend-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(380px, 1fr)); gap:12px; margin-bottom:18px; }
-    .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:12px; min-height:180px; display:flex; flex-direction:column; }
+    .trend-panel { background:var(--panel); border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:12px; min-height:180px; display:flex; flex-direction:column; }
     .trend-panel h2, .list-section h2 { margin:0 0 10px;  }
     .dept-section-head { display:flex; align-items:baseline; gap:10px; margin-bottom:10px; flex-wrap:wrap; }
     .dept-section-head h2 { margin:0; }
@@ -58,8 +58,8 @@
     a { color:var(--primary-light); text-decoration:none;  }
     a.member-link:hover { text-decoration:underline; }
     .muted { color:var(--muted);  line-height:1.6; }
-    .wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; }
-    .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:8px; margin-bottom:18px; }
+    .wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--ui-radius-card); }
+    .dept-table-wrap { overflow:auto; border:1px solid var(--border); border-radius:var(--ui-radius-card); margin-bottom:18px; }
     .dept-table { width:100%; border-collapse:collapse; min-width:760px;  }
     .dept-table th { text-align:left; color:var(--muted); background:var(--panel2); border-bottom:1px solid var(--border); white-space:nowrap; }
     .dept-table td { white-space:nowrap; }
@@ -286,7 +286,7 @@
 <script src="/static/js/shell/act-bridge.js?v=20260913-csp-bridge" defer></script>
 <script src="/static/js/embedded-workspace.js?v=20260917-arrow-forward-v2"></script>
 <script src="/static/js/embedded-ui/modal-controller.js?v=20260916-modal-controller"></script>
-<script src="/gerrit-dashboard/render.js?v=20260930-ui-split"></script>
+<script src="/gerrit-dashboard/render.js?v=20261128-shared-status"></script>
 <script src="/gerrit-dashboard/page.js?v=20261126-query-auth-status"></script>
 </body>
 </html>
