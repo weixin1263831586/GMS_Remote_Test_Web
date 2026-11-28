@@ -45,75 +45,10 @@
     overflow: hidden;
 }
 /* Three canonical result views only; no artificial dashboard or risk scores. */
-#page-apk-analysis .apk-tab-actions {
-    box-sizing: border-box;
-    display: flex;
-    align-items: center;
-    flex-wrap: nowrap;
-    min-height: calc(var(--ui-tab-height) + 2px);
-    height: calc(var(--ui-tab-height) + 2px);
-    min-width: 0;
-    gap: 12px;
-    margin-bottom: 8px;
-    padding: 0 10px 0 6px;
-    background: var(--apk-surface);
-    border: 1px solid var(--apk-border);
-    border-radius: 8px;
-}
-#page-apk-analysis .apk-tab-actions > [role="tablist"] {
-    display: flex;
-    flex: 0 0 auto;
-    min-width: 0;
-    height: var(--ui-tab-height);
-    align-items: stretch;
-    gap: 0;
-}
-#page-apk-analysis .filter-btn[data-apk-tab] {
-    position: relative;
-    box-sizing: border-box;
-    min-height: var(--ui-tab-height);
-    height: var(--ui-tab-height);
-    margin: 0;
-    padding: 0 14px;
-    border: 0;
-    border-radius: 0;
-    background: transparent;
-    box-shadow: none;
-    color: var(--apk-muted);
-
-
-    white-space: nowrap;
-}
-#page-apk-analysis .filter-btn[data-apk-tab] .ui-icon {
-    color: var(--apk-accent);
-}
-#page-apk-analysis .filter-btn[data-apk-tab]:hover {
-    border: 0;
-    background: rgba(255, 255, 255, .03);
-    color: var(--text-primary);
-}
-#page-apk-analysis .filter-btn[data-apk-tab].active {
-    border: 0;
-    background: var(--apk-accent-wash);
-    box-shadow: none;
-    color: var(--text-primary);
-}
-#page-apk-analysis .filter-btn[data-apk-tab].active::after {
-    content: "";
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 0;
-    height: 2px;
-    border-radius: 2px;
-    background: var(--apk-accent);
-}
-#page-apk-analysis .filter-btn[data-apk-tab]:focus-visible {
-    outline: 2px solid var(--apk-accent-line);
-    outline-offset: -3px;
-}
+#page-apk-analysis .apk-tab-actions { position: relative; margin-bottom: var(--ui-spacing-sm); }
+#page-apk-analysis .workspace-tabs--content .workspace-tab[data-apk-tab="manifest"] { --workspace-tab-width: 150px; }
 #page-apk-analysis .apk-tab-actions .apk-search-container {
-    min-width: 0;
+    display: flex; align-items: center; min-width: 0;
     flex: 1 1 auto;
     justify-content: flex-end;
     gap: 6px;
@@ -363,6 +298,7 @@
 
 }
 #page-apk-analysis #apk-file-content {
+    box-sizing: border-box; line-height: 1.5; max-height: none;
     flex: 1 1 auto;
     width: 100%;
     margin: 0;
@@ -415,13 +351,10 @@
 #page-apk-analysis :is(.apk-file-tab, .apk-tree-item) { scroll-margin-block: 20px; }
 @media (max-width: 1100px) {
     #page-apk-analysis .apk-tab-actions > [role="tablist"] { overflow-x: auto; }
-    #page-apk-analysis .filter-btn[data-apk-tab] { padding: 0 10px; }
     #page-apk-analysis #apk-file-search { width: min(27vw, 260px); }
 }
 @media (max-width: 850px) {
     #page-apk-analysis .apk-tab-actions { flex-wrap: wrap; height: auto; padding: 3px 7px 7px; }
-    #page-apk-analysis .apk-tab-actions > [role="tablist"] { width: 100%; height: var(--ui-tab-height-narrow); }
-    #page-apk-analysis .filter-btn[data-apk-tab] { height: var(--ui-tab-height-narrow); min-height: var(--ui-tab-height-narrow); }
     #page-apk-analysis .apk-tab-actions .apk-search-container { width: 100%; justify-content: flex-start; }
     #page-apk-analysis #apk-file-search { flex: 1 1 auto; width: auto; }
     #page-apk-analysis :is(#apk-tab-manifest, #apk-tab-permissions, #apk-tab-source) {

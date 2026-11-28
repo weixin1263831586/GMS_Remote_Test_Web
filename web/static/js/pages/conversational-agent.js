@@ -655,7 +655,7 @@ function renderAgentSteps(session) {
         return `
             <article class="agent-step" data-status="${escapeHtml(step.status || 'pending')}">
                 <span class="agent-step-marker" aria-hidden="true">${GmsUi.icon(presentation[1])}</span>
-                <div class="agent-step-card">
+                <div class="agent-step-card ui-card">
                     <div class="agent-step-heading">
                         <span class="agent-step-title">${escapeHtml(step.title || '')}</span>
                         ${GmsUi.badge(...presentation)}

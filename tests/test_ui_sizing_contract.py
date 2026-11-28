@@ -583,7 +583,7 @@ class UiSizingContractTests(unittest.TestCase):
                 "--ui-radius-card",
             ),
             "web/static/css/apk-workbench.css": (
-                "--ui-tab-height", "--ui-tab-height-narrow", "--ui-control-height-dense",
+                "--ui-control-height-dense",
             ),
             "web/static/css/common-layout.css": ("--ui-control-height-icon",),
             "web/static/css/agent-access.css": ("--ui-control-height-dialog",),

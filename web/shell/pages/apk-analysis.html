@@ -60,13 +60,13 @@
             <!-- 分析结果区域 -->
             <div id="apk-analysis-result" style="display: none;">
                 <!-- 标签页导航 + 搜索框 -->
-                <div class="apk-tab-actions">
-                    <div class="apk-status-actions" role="tablist" aria-label="APK 分析视图">
-                        <button class="filter-btn active" data-apk-tab="manifest" role="tab" aria-controls="apk-tab-manifest" aria-selected="true" data-click="switchApkTab" data-a0="manifest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> AndroidManifest</button>
-                        <button class="filter-btn" data-apk-tab="permissions" role="tab" aria-controls="apk-tab-permissions" aria-selected="false" data-click="switchApkTab" data-a0="permissions"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 权限列表</button>
-                        <button class="filter-btn" data-apk-tab="source" role="tab" aria-controls="apk-tab-source" aria-selected="false" data-click="switchApkTab" data-a0="source"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg> 源码浏览</button>
+                <div class="apk-tab-actions workspace-header workspace-header--content">
+                    <div class="workspace-tabs workspace-tabs--content" role="tablist" aria-label="APK 分析视图">
+                        <button class="filter-btn workspace-tab active" data-apk-tab="manifest" role="tab" aria-controls="apk-tab-manifest" aria-selected="true" data-click="switchApkTab" data-a0="manifest"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#info"></use></svg> AndroidManifest</button>
+                        <button class="filter-btn workspace-tab" data-apk-tab="permissions" role="tab" aria-controls="apk-tab-permissions" aria-selected="false" data-click="switchApkTab" data-a0="permissions"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#lock"></use></svg> 权限列表</button>
+                        <button class="filter-btn workspace-tab" data-apk-tab="source" role="tab" aria-controls="apk-tab-source" aria-selected="false" data-click="switchApkTab" data-a0="source"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#terminal"></use></svg> 源码浏览</button>
                     </div>
-                    <div class="apk-search-container">
+                    <div class="apk-search-container workspace-actions">
                         <input type="text" id="apk-file-search" class="apk-search-input" placeholder="🔍 搜索文件名..."
                                data-input="debounceFilterApkFiles"
                                data-keydown="jumpToApkFile" data-key="13">

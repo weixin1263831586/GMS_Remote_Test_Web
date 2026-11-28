@@ -48,13 +48,13 @@
 }
 
 .aoa-column {
-    background: var(--light-bg);
+    background: var(--card-bg);
     border: 1px solid var(--border-color);
-    border-radius: 10px;
+    border-radius: var(--ui-radius-card);
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 10px;
     min-height: 0;
     min-width: 0;
     overflow: auto;
@@ -62,7 +62,7 @@
 }
 .aoa-column > * { flex-shrink: 0; }
 .aoa-screen-column { container-type: inline-size; }
-.aoa-config-column { gap: 8px; padding: 10px; }
+.aoa-config-column { gap: 6px; padding: 8px 10px; }
 .aoa-config-column .aoa-config-group, .aoa-config-column .aoa-target-section { gap: 6px; }
 .aoa-config-column .aoa-config-group { padding-bottom: 8px; }
 .aoa-config-column .aoa-form-grid, .aoa-config-column .aoa-device-selectors { gap: 6px; }
@@ -79,7 +79,7 @@
     flex: none;
     gap: 8px;
     justify-content: space-between;
-    min-height: 40px;
+    min-height: var(--ui-control-height);
     padding-bottom: 8px;
 }
 /* 标题 + 副标题同一行（基线对齐）；副标题超宽时截断省略，
@@ -399,3 +399,52 @@
 .aoa-command-actions { display: flex; flex: none; flex-wrap: nowrap; gap: 4px; margin-left: auto; white-space: nowrap; }
 .aoa-command-editor { flex: 1; min-width: 0; width: 100%;  padding: 2px 4px; }
 #aoa-panel input.aoa-command-editor { height: var(--ui-aoa-command-editor-height); padding: 1px 6px; }
+
+/* Three work areas keep their own scroll surfaces and existing control IDs. */
+#aoa-panel .aoa-workbench-header > div:first-child { flex: 1; min-width: 0; }
+#aoa-panel .aoa-header-status { flex: 1; align-self: center; max-width: 45%; }
+#aoa-panel .aoa-screen-column .aoa-column-heading,
+#aoa-panel .aoa-command-column .aoa-column-heading { flex-wrap: wrap; }
+#aoa-panel .aoa-screen-column .aoa-column-heading > div:first-child { flex: 1 0 120px; }
+#aoa-panel .aoa-command-column .aoa-column-heading > div:first-child { flex: 1 0 185px; }
+#aoa-panel .aoa-screen-toolbar { flex-wrap: wrap; }
+#aoa-panel .aoa-screen-toolbar .btn-xxs { flex: 1 1 62px; min-width: 62px; }
+#aoa-panel .aoa-config-column > .aoa-column-heading > div { width: 100%; justify-content: space-between; }
+#aoa-panel .aoa-screen-stage { background: var(--darker-bg); border-color: var(--border-color); }
+#aoa-panel .aoa-calibration-status { border-radius: var(--ui-radius-control); background: var(--light-bg); border: 1px solid var(--border-color); }
+.aoa-operation-block { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+.aoa-operation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.aoa-operation-block > .aoa-muted { margin-top: 4px; }
+#aoa-panel .aoa-save-block { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+#aoa-panel .aoa-target-section { padding: 8px 10px; border: 1px solid var(--border-color); border-radius: 6px; background: var(--light-bg); }
+#aoa-panel .aoa-profile-library { padding: 10px; border: 1px solid var(--border-color); border-radius: 6px; }
+#aoa-panel .aoa-semantic-tools { border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 10px; }
+/* ③ 配置列紧凑化：新增录制块后整列内容超出 720p 视口高度，会把
+   列压出内部滚动条（运行时 UI 契约要求 scrollHeight ≤ clientHeight）。
+   统一压薄各块的 padding/间隙/控件高度；两行次要说明文案仅在
+   高视口（≥820px）保留。 */
+#aoa-panel .aoa-config-column .aoa-config-group,
+#aoa-panel .aoa-config-column .aoa-target-section { gap: 4px; padding-bottom: 6px; }
+#aoa-panel .aoa-config-column label,
+#aoa-panel .aoa-config-column .aoa-field { gap: 2px; line-height: 15px; }
+#aoa-panel .aoa-config-column input,
+#aoa-panel .aoa-config-column select { height: var(--ui-aoa-config-control-height); }
+#aoa-panel .aoa-save-block .aoa-subheading { line-height: 16px; }
+#aoa-panel .aoa-save-block .aoa-form-grid { gap: 4px 6px; }
+#aoa-panel .aoa-profile-summary { padding: 4px 6px; }
+#aoa-panel .aoa-semantic-tools { padding: 6px 10px; }
+@media (max-height: 820px) {
+    #aoa-panel .aoa-operation-block > .aoa-muted,
+    #aoa-panel .aoa-save-block > .aoa-muted { display: none; }
+    /* 矮视口再加一档余量：720p 下可用高度仅 ~617px。 */
+    #aoa-panel .aoa-config-column { gap: 5px; }
+    #aoa-panel .aoa-target-section { padding: 6px 8px; }
+    #aoa-panel .aoa-semantic-tools { padding: 5px 8px; }
+}
+@media (min-width: 1181px) {
+    #aoa-panel .aoa-workbench-grid { grid-template-columns: minmax(240px, .78fr) minmax(360px, 1.22fr) minmax(330px, 1.08fr); }
+}
+
+@media (max-width: 760px) {
+    #aoa-panel .aoa-header-status { flex: none; align-self: stretch; max-width: 100%; width: 100%; }
+}
