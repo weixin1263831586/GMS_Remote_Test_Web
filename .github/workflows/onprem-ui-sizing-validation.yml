@@ -54,6 +54,12 @@ on:
       - 'tests/test_typography_contract.py'
       - 'tests/test_ui_sizing_contract.py'
       - 'tests/runtime_ui/test_ui_sizing_rendered.py'
+      - 'tests/runtime_ui/test_knowledge_source_status.py'
+      - 'tests/runtime_ui/test_agent.py'
+      - 'web/static/js/pages/agent-policy-evidence.js'
+      - 'web/static/js/shell/shell-personal-knowledge.js'
+      - 'web/static/js/pages/agent-access.js'
+      - 'web/static/js/pages/sdk-config.js'
       - 'tests/runtime_ui/test_page_outer_inset.py'
       - 'tests/runtime_ui/test_header_action_alignment.py'
       - 'tests/architecture/test_shared_page_edge.py'
@@ -133,6 +139,8 @@ jobs:
             tests/runtime_ui/test_aoa_workbench.py::RuntimeAoaWorkbenchTests::test_command_grid_keeps_labels_comments_and_actions_on_one_line \
             tests/runtime_ui/test_aoa_calibrate_locate.py \
             tests/runtime_ui/test_ui_sizing_rendered.py \
+            tests/runtime_ui/test_knowledge_source_status.py \
+            tests/runtime_ui/test_agent.py::RuntimeAgentTests::test_short_agent_and_sdk_tables_have_no_reserved_blank_rows \
             tests/runtime_ui/test_page_outer_inset.py \
             tests/runtime_ui/test_header_action_alignment.py \
             tests/architecture/test_shared_page_edge.py \
