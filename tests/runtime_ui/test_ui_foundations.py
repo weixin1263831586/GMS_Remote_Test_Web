@@ -85,7 +85,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                 results.push({
                                     headerTheme: [...head.rows[0].cells].every(cell => {
                                         const style = getComputedStyle(cell);
-                                        return style.backgroundColor === 'rgb(112, 93, 135)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
+                                        return style.backgroundColor === 'rgb(124, 110, 144)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
                                     }),
                                     groupHeight,
                                     name: selector,
@@ -113,7 +113,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                         suites.append(host);
                         try {
                             results.push({
-                                headerTheme: getComputedStyle(host.firstElementChild).backgroundColor === 'rgb(112, 93, 135)' && getComputedStyle(host.firstElementChild).color === 'rgb(255, 255, 255)',
+                                headerTheme: getComputedStyle(host.firstElementChild).backgroundColor === 'rgb(124, 110, 144)' && getComputedStyle(host.firstElementChild).color === 'rgb(255, 255, 255)',
                                 name: 'suite-file-table',
                                 header: host.firstElementChild.getBoundingClientRect().height,
                                 row: host.lastElementChild.getBoundingClientRect().height,
@@ -163,7 +163,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                                 align: getComputedStyle(table.tBodies[0].rows[0].cells[0]).verticalAlign,
                                 headerTheme: [...table.tHead.rows[0].cells].every(cell => {
                                     const style = getComputedStyle(cell);
-                                    return style.backgroundColor === 'rgb(112, 93, 135)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
+                                    return style.backgroundColor === 'rgb(124, 110, 144)' && style.color === 'rgb(255, 255, 255)' && style.backgroundImage === 'none';
                                 }),
                             };
                         } finally { table.remove(); }
