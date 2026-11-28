@@ -13,14 +13,13 @@
 #page-api-docs .api-search-box .ui-icon { width:16px;height:16px;flex:none;color:var(--primary-light); }
 #page-api-docs #api-search-input.entry-field { flex:1 1 auto;width:100%;min-width:0;height:calc(var(--ui-control-height) - 2px);margin:0;padding:0;border:0;outline:0;background:transparent; }
 #page-api-docs .api-search-box:focus-within { outline:2px solid var(--primary-color);outline-offset:1px; }
-#page-api-docs .api-search-toolbar .api-action,#page-api-docs .api-category-toolbar .filter-btn { display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:var(--ui-control-height-small);height:var(--ui-control-height-small);max-height:var(--ui-control-height-small);padding:3px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);box-shadow:none;color:var(--text-secondary);white-space:nowrap;cursor:pointer; }
+#page-api-docs .api-category-toolbar .filter-btn { display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:var(--ui-control-height-small);height:var(--ui-control-height-small);max-height:var(--ui-control-height-small);padding:3px 8px;border:1px solid var(--border-color);border-radius:6px;background:var(--light-bg);box-shadow:none;color:var(--text-secondary);white-space:nowrap;cursor:pointer; }
 /* The search action shares 32px with its adjacent input; category chips remain
    26px to preserve the existing single-row density and wrap breakpoints. */
 #page-api-docs .api-search-toolbar .api-action { height:var(--ui-control-height);min-height:var(--ui-control-height);max-height:var(--ui-control-height); }
-#page-api-docs .api-action .ui-icon,#page-api-docs .api-category-toolbar .filter-btn .ui-icon { width:14px;height:14px;margin:0; }
-#page-api-docs .api-search-toolbar .api-action:hover,#page-api-docs .api-category-toolbar .filter-btn:hover { border-color:var(--primary-color);color:var(--text-primary); }
-#page-api-docs .api-search-toolbar .api-action-accent,#page-api-docs .api-category-toolbar .filter-btn.active { background:color-mix(in srgb,var(--primary-color) 20%,var(--card-bg));border-color:color-mix(in srgb,var(--primary-color) 50%,var(--border-color));color:var(--primary-light); }
-#page-api-docs .api-category-toolbar .api-action-install { background:color-mix(in srgb,var(--success-color) 12%,var(--card-bg));color:var(--success-color); }
+#page-api-docs .api-category-toolbar .filter-btn .ui-icon { width:14px;height:14px;margin:0; }
+#page-api-docs .api-category-toolbar .filter-btn:hover { border-color:var(--primary-color);color:var(--text-primary); }
+#page-api-docs .api-category-toolbar .filter-btn.active { background:color-mix(in srgb,var(--primary-color) 20%,var(--card-bg));border-color:color-mix(in srgb,var(--primary-color) 50%,var(--border-color));color:var(--primary-light); }
 #page-api-docs .api-category-chips { display:flex;flex:1 1 auto;align-items:center;flex-wrap:wrap;gap:5px;min-width:0; }
 #page-api-docs .api-category-actions { display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:6px;padding-left:8px;border-left:1px solid var(--border-color); }
 #page-api-docs.page-ui-rework .api-table-scroll.list-table-wrap { flex:1 1 auto;min-height:0;height:0;max-height:none;overflow:auto!important; }

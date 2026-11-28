@@ -241,13 +241,13 @@ select option {
 /* ==================== Buttons ==================== */
 .btn-xxs, .btn-xs, .btn-small {
     padding: 5px 10px;
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-light);
     border-radius: var(--ui-radius-control);
     cursor: pointer;
 
 
     background: var(--light-bg);
-    color: #fff;
+    color: var(--text-primary);
     transition: color .15s ease, border-color .15s ease, background-color .15s ease;
     box-shadow: none;
     display: inline-flex;
@@ -273,7 +273,7 @@ select option {
     min-height: var(--ui-control-height-small);
 }
 
-.btn-xxs:hover, .btn-xs:hover, .btn-small:hover {
+:is(.btn-xxs, .btn-xs, .btn-small):hover:not(:disabled) {
     transform: none;
     box-shadow: none;
     background: var(--lighter-bg);
@@ -292,7 +292,7 @@ select option {
 
 }
 
-.btn-xxs:disabled {
+:is(.btn-xxs, .btn-xs, .btn-small, .btn-primary, .btn-danger):disabled {
     opacity: 0.4;
     cursor: not-allowed;
     transform: none;
@@ -302,7 +302,7 @@ select option {
     border-radius: var(--ui-radius-control);
     transition: color .15s ease, border-color .15s ease, background-color .15s ease;
     color: var(--text-on-accent);
-    border: none;
+    border: 1px solid transparent;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -310,28 +310,30 @@ select option {
 }
 
 .btn-primary {
-    background: var(--primary-gradient);
+    background: var(--primary-strong);
+    border-color: var(--primary-color);
     color: var(--text-on-accent);
     box-shadow: none;
 
 }
 
 .btn-primary:hover:not(:disabled) {
-    background: var(--primary-gradient-hover);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-glow);
+    background: color-mix(in srgb, var(--primary-strong) 80%, var(--primary-color));
+    transform: none;
+    box-shadow: none;
 }
 
 .btn-danger {
-    background: var(--danger-color);
-    color: var(--text-on-accent);
+    background: color-mix(in srgb, var(--danger-color) 12%, var(--card-bg));
+    border-color: color-mix(in srgb, var(--danger-color) 65%, var(--border-color));
+    color: var(--danger-color);
     box-shadow: none;
 }
 
 .btn-danger:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--danger-color) 82%, white);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
+    background: color-mix(in srgb, var(--danger-color) 22%, var(--card-bg));
+    transform: none;
+    box-shadow: none;
 }
 
 .btn-lg {

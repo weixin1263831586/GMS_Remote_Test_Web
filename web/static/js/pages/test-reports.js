@@ -385,8 +385,8 @@ function displayTestReports(reports) {
                 <button class="btn-xxs btn-primary" data-action="retry">🔄 retry</button>
                 <button class="btn-xxs btn-tone-info" data-action="results">results</button>
                 <button class="btn-xxs btn-tone-warning" data-action="logs">logs</button>
-                <button class="btn-xxs btn-tone-success" data-action="download">⬇️ 下载</button>
-                <button class="btn-xxs btn-danger" data-action="delete">🗑️ 删除</button>
+                <button class="btn-xxs btn-tone-success" data-action="download">下载</button>
+                <button class="btn-xxs btn-danger" data-action="delete">删除</button>
                 </div>
             </td>
         `;

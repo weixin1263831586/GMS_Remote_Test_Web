@@ -12,8 +12,8 @@
       <label class="api-search-box" for="api-search-input"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg>
         <input id="api-search-input" class="entry-field" type="search" placeholder="搜索 API 路径、接口说明或 Skill..." data-input="debounceFilterApiDocs" aria-label="搜索系统接口">
       </label>
-      <button class="btn-xs api-action" type="button" data-click="loadApiDocs" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-      <button class="btn-xs api-action api-action-accent" type="button" data-click="exportApiDocsCsv"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 导出</button>
+      <button class="btn-xs api-action" type="button" data-click="loadApiDocs" data-a0="true">刷新</button>
+      <button class="btn-xs api-action" type="button" data-click="exportApiDocsCsv">导出</button>
     </div>
     <div class="api-category-toolbar ui-panel-frame ui-toolbar">
       <div class="api-category-chips" aria-label="业务分类">
@@ -62,9 +62,9 @@
 
       </div>
       <div class="api-category-actions">
-        <button class="filter-btn api-action" type="button" data-click="showUsageExamples"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#book"></use></svg> 使用实例</button>
-        <button class="filter-btn api-action api-action-install" type="button" data-click="copySkillInstallCommand" title="复制 Skill 一键安装或更新命令"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 安装/更新命令</button>
-        <button class="filter-btn api-action" type="button" data-click="downloadSkillsZip" title="下载离线部署 ZIP"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#package"></use></svg> 离线包</button>
+        <button class="btn-small api-action" type="button" data-click="showUsageExamples">使用实例</button>
+        <button class="btn-small api-action" type="button" data-click="copySkillInstallCommand" title="复制 Skill 一键安装或更新命令">安装/更新命令</button>
+        <button class="btn-small api-action" type="button" data-click="downloadSkillsZip" title="下载离线部署 ZIP">离线包</button>
       </div>
     </div>
     <div class="api-body-grid ui-workspace-grid ui-workspace-grid--aside">

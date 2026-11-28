@@ -173,8 +173,8 @@
     </div>
     <div class="btn-group">
       <button id="syncMembersBtn" data-busy-size="plain" class="secondary" data-click="syncRedmineMembers" data-r0="el" hidden>同步成员</button>
-      <button id="refreshBtn" data-busy-size="icon" class="secondary" data-click="refreshCurrentTab"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-      <button class="secondary" data-click="showSettings" title="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
+      <button id="refreshBtn" data-busy-size="plain" class="secondary" data-click="refreshCurrentTab">刷新</button>
+      <button class="secondary" data-click="showSettings" title="设置" aria-label="设置"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#settings"></use></svg></button>
     </div>
   </div>
 </header>
@@ -183,7 +183,7 @@
     <div id="connMsg"></div>
     <div id="connDetail" class="conn-detail"></div>
   </div>
-  <button class="secondary" data-click="checkGerritRoute"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#network"></use></svg> 检查路由</button>
+  <button class="secondary" data-click="checkGerritRoute">检查路由</button>
 </div>
 <main>
   <section id="tab-personal" class="tab-content active ui-page-edge">

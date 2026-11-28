@@ -5,7 +5,7 @@
                     <select id="apk-task-history" class="entry-field" data-change="restoreApkTask" data-r0="value">
                         <option value="">正在读取…</option>
                     </select>
-                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                    <button id="apk-task-history-refresh" class="btn-xs ui-refresh-action" type="button" data-click="loadApkTaskHistory" data-a0="true">刷新</button>
                 </div>
             {% include 'components/page-header-end.html' %}
 
@@ -23,7 +23,7 @@
                             </div>
                         </div>
                         <button class="btn-xs" data-click="_actClickById" data-a0="apk-file-input">
-                            <svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#upload"></use></svg> 选择 APK/JAR 文件
+                            选择 APK/JAR 文件
                         </button>
                     </div>
                     <div class="apk-upload-progress analysis-upload-progress" id="apk-upload-progress">
@@ -42,8 +42,8 @@
                             <div id="apk-analysis-state" class="analysis-status-text" aria-live="polite">准备分析...</div>
                         </div>
                         <div class="apk-status-actions">
-                            <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 开始分析</button>
-                            <button class="btn-xs" id="apk-btn-download" data-click="downloadApkSource" style="display: none;"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#download"></use></svg> 下载源码</button>
+                            <button class="btn-xs" id="apk-btn-analyze" data-click="startApkAnalysis" style="display: none;">开始分析</button>
+                            <button class="btn-xs" id="apk-btn-download" data-click="downloadApkSource" style="display: none;">下载源码</button>
                             <button class="btn-xs" data-click="resetApkAnalysis">关闭</button>
                         </div>
                     </div>

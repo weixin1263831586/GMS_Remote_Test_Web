@@ -118,7 +118,9 @@
    其余 Emoji 标题图标仍使用统一的 14px 字号和 20px 容器宽度。 */
 img.page-title-icon { width: 16px; height: var(--ui-type-size-page-heading); object-fit: contain; }
 .section-title > .ui-icon { margin-right: 6px; }
-button > .ui-icon { margin-right: 5px; }
+button > .ui-icon { margin-right: 6px; }
+/* Action-only icons inherit the button tone, not the information icon palette. */
+:is(body, .page-ui-rework, .tech-dialog) button:where([aria-label], [title]):not(:disabled) > svg.ui-icon:only-child:has(> use) { color: inherit; }
 button > .ui-icon:last-child:first-child { margin-right: 0; }
 .ui-name { color: var(--text-primary, var(--text, #eaf0f9));   line-height: 1.5; }
 .ui-meta { color: var(--text-secondary, var(--muted, #91a1b7));   line-height: 1.5; }

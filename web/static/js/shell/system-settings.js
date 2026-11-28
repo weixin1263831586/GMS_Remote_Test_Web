@@ -259,7 +259,7 @@ async function loadSystemRuntimeConfig() {
                 <button type="submit" class="btn-xxs btn-primary" disabled>保存 SMTP 配置</button>
             </div>
             <div class="settings-filter-row">
-                <button class="btn-xxs" id="email-outbox-refresh-btn" type="button">↻ 刷新历史邮件</button>
+                <button class="btn-xxs" id="email-outbox-refresh-btn" type="button">刷新历史邮件</button>
                 <label class="email-outbox-filter-label" style="margin:0;">通道:
                     <select id="email-outbox-channel" >
                         <option value="">全部</option>

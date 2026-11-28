@@ -104,12 +104,7 @@ async function loadApkTaskHistory(force = false) {
 
     const previous = window.apkCurrentTaskId || select.value;
     select.setAttribute('aria-busy', 'true');
-    if (refresh) {
-        refresh.disabled = true;
-        /* 「刷新中」三字与「↻ 刷新」同宽（按钮 64px 钉死），加载态
-           不引起右上角控件尺寸变化。 */
-        refresh.textContent = '刷新中';
-    }
+    setActionButtonBusy(refresh, true, '刷新中');
     window.apkTaskHistoryPromise = (async () => {
         try {
             const result = await apiCall('/api/apk/tasks');
@@ -140,10 +135,7 @@ async function loadApkTaskHistory(force = false) {
             return [];
         } finally {
             select.setAttribute('aria-busy', 'false');
-            if (refresh) {
-                refresh.disabled = false;
-                refresh.textContent = '↻ 刷新';
-            }
+            setActionButtonBusy(refresh, false);
             window.apkTaskHistoryPromise = null;
         }
     })();

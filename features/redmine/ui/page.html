@@ -59,9 +59,9 @@
     </div>
     <div id="statsToolbar" class="filter-bar" hidden></div>
     <div class="btn-group">
-      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 扫描</button>
-      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
-      <button class="secondary" data-click="showResetModal"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#trash"></use></svg> 重置</button>
+      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden>扫描</button>
+      <button id="refreshBtn" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">刷新</button>
+      <button class="secondary danger" data-click="showResetModal">重置</button>
     </div>
   </div>
 </header>
@@ -91,7 +91,7 @@
     <summary>⚙️ 高级同步</summary>
     <div class="redmine-advanced-sync-body">
       <input type="text" id="syncAssigneeInput" placeholder="同步负责人" title="姓名或登录名；留空则同步当前登录用户">
-      <button id="syncBtn" data-busy-size="long" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 全量同步</button>
+      <button id="syncBtn" data-busy-size="long" class="secondary" data-click="triggerSync" title="全量同步指派工单并分析新工单，耗时较长">全量同步</button>
       <span class="muted">首次初始化、数据修复或切换负责人时使用</span>
     </div>
   </details>

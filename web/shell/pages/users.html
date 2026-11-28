@@ -39,7 +39,7 @@
                     </div>
                     <div class="users-list-actions">
                         <span id="users-list-visible-count" role="status" aria-live="polite">正在加载用户…</span>
-                        <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                        <button id="users-list-refresh" class="btn-xs" type="button" data-click="loadUsersList">刷新</button>
                     </div>
                 </div>
                 <div class="users-table-wrap">
@@ -93,14 +93,14 @@
                             <span id="agent-access-list-count">仅显示接入凭据信息，不展示原始 Token。</span>
                         </div>
                         <div class="agent-access-list-actions">
-                            <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">＋ 创建配对码</button>
+                            <button id="agent-access-create-toggle" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-access-create-modal" data-click="agentAccessToggleCreate">创建配对码</button>
                             <input id="agent-access-search" class="combo-box" type="search" placeholder="搜索 Agent、Token ID 或设备" aria-label="搜索 Agent Token" data-input="agentAccessFilterTokens">
                             <select id="agent-access-status-filter" class="combo-box" aria-label="按状态筛选 Agent Token" data-change="agentAccessFilterTokens">
                                 <option value="">全部状态</option><option value="active">有效</option>
                                 <option value="inactive">已失效</option><option value="expired">已过期</option>
                                 <option value="revoked">已吊销</option>
                             </select>
-                            <button id="agent-access-refresh" data-busy-size="icon" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                            <button id="agent-access-refresh" data-busy-size="plain" class="btn-xs" type="button" data-click="agentAccessReload" data-r0="el">刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
@@ -131,8 +131,8 @@
                             <span id="agent-sdk-sources-count">分析 Redmine 问题时的只读源码取证来源（本机 / 编译服务器 / OpenGrok）。</span>
                         </div>
                         <div class="agent-access-list-actions">
-                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">＋ 添加SDK</button>
-                            <button id="agent-sdk-sources-refresh" data-busy-size="icon" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#refresh"></use></svg> 刷新</button>
+                            <button id="agent-sdk-sources-add" class="btn-xs btn-primary" type="button" aria-haspopup="dialog" aria-expanded="false" aria-controls="agent-sdk-add-modal" data-click="sdkConfigToggleAddSdk">添加SDK</button>
+                            <button id="agent-sdk-sources-refresh" data-busy-size="plain" class="btn-xs" type="button" data-click="sdkConfigLoadSources" data-r0="el">刷新</button>
                         </div>
                     </div>
                     <div class="agent-access-table-wrap">
