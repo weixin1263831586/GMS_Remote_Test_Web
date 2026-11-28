@@ -98,8 +98,7 @@ def test_aoa_recovery_heading_uses_workflow_icon():
 def test_suite_refresh_and_test_toggle_preserve_requested_text_and_icon_contracts():
     source = (ROOT / "web/shell/pages/test.html").read_text(encoding="utf-8")
     suite = re.search(r'<button[^>]*id="refresh-suites-btn"[^>]*>(.*?)</button>', source, re.DOTALL)
-    assert suite and '<span class="test-action-icon" aria-hidden="true">🔄</span>' in suite.group(1)
-    assert "刷新套件" in suite.group(1)
+    assert suite and suite.group(1).strip() == "刷新套件"
     test_toggle = re.search(r'<button[^>]*id="test-toggle-btn"[^>]*>(.*?)</button>', source, re.DOTALL)
     assert test_toggle and test_toggle.group(1).strip() == "开始测试"
     control = (ROOT / "web/static/js/pages/test-control.js").read_text(encoding="utf-8")
@@ -116,7 +115,6 @@ def test_suite_refresh_and_test_toggle_preserve_requested_text_and_icon_contract
 def test_test_workspace_action_icons_preserve_color_and_semantics():
     source = (ROOT / "web/shell/pages/test.html").read_text(encoding="utf-8")
     emoji_mapping = {
-        "refreshDevices": "🔄",
         "remountDevices": "⚡",
         "selectAllDevices": "✅",
         "factoryResetDevices": "🧹",
@@ -128,7 +126,6 @@ def test_test_workspace_action_icons_preserve_color_and_semantics():
         "showDeviceScreen": "📺",
         "setupAdbPortForward": "🔌",
         "setupUsbipForward": "📱",
-        "copyDeployCommand": "📋",
         "checkSshd": "🖥️",
         "checkRouting": "🧭",
         "connectVpn": "🔌",
@@ -150,20 +147,24 @@ def test_test_workspace_action_icons_preserve_color_and_semantics():
     assert 'ui.svg#mount' not in source
     assert 'USB/IP' in source
     assert '复制部署命令' in source
+    plain_actions = {"refreshDevices": "刷新设备", "copyDeployCommand": "复制部署命令"}
+    for action, label in plain_actions.items():
+        button = re.search(r'<button\b[^>]*data-click="' + action + r'"[^>]*>(.*?)</button>', source, re.DOTALL)
+        assert button and button.group(1).strip() == label, action
     for section in ("adb-button-frame", "vnc-button-frame", "vpn-btn-frame"):
         region = source.split('class="' + section + '"', 1)[1].split("</div>", 1)[0]
         buttons = re.findall(r'<button\b[^>]*>.*?</button>', region, re.DOTALL)
         assert buttons, section
         assert all('test-action-icon' in button or 'class="ui-icon"' in button
                    or 'class="reboot-icon" aria-hidden="true">⏻</span>' in button
+                   or any(f'data-click="{action}"' in button for action in plain_actions)
                    for button in buttons), section
 
 
 def test_dynamic_device_button_labels_preserve_color_icons():
     source = (ROOT / "web/shell/pages/test.html").read_text(encoding="utf-8")
     refresh = re.search(r'<button[^>]*id="refresh-devices-btn"[^>]*>(.*?)</button>', source, re.DOTALL)
-    assert refresh and '<span class="test-action-icon" aria-hidden="true">🔄</span>' in refresh.group(1)
-    assert "刷新设备" in refresh.group(1)
+    assert refresh and refresh.group(1).strip() == "刷新设备"
     devices = (ROOT / "web/static/js/pages/test-suite-browser-devices.js").read_text(encoding="utf-8")
     assert "setActionButtonBusy(button, true, '刷新中')" in devices
     assert "await loadDevices(true, {source: 'manual'})" in devices

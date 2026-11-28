@@ -127,7 +127,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 self.assertEqual(len(samples), 11, samples)
                 for item in samples:
                     with self.subTest(width=width, table=item['name']):
-                        self.assertAlmostEqual(item['header'], 38, delta=1, msg=str(item))
+                        self.assertAlmostEqual(item['header'], 42, delta=1, msg=str(item))
                         self.assertAlmostEqual(item['row'], 36, delta=1, msg=str(item))
                         self.assertTrue(item['middle'], item)
                         self.assertTrue(item['padding'], item)
@@ -158,7 +158,7 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                             };
                         } finally { table.remove(); }
                     }""")
-                    self.assertAlmostEqual(result['header'], 38, delta=1, msg=str(result))
+                    self.assertAlmostEqual(result['header'], 42, delta=1, msg=str(result))
                     self.assertAlmostEqual(result['row'], 36, delta=1, msg=str(result))
                     self.assertEqual(result['align'], 'middle')
         finally:
@@ -299,16 +299,21 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
                 });
             }""")
             self.assertGreaterEqual(len(data), 20)
+            plain_labels = {'刷新设备', '复制部署命令'}
             self.assertTrue(all((item['decorative'] and item['width'] > 5)
-                                or item['originalPower'] for item in data), data)
+                                or item['originalPower'] for item in data
+                                if item['label'] not in plain_labels), data)
+            for item in data:
+                if item['label'] in plain_labels:
+                    self.assertEqual(item['width'], 0, item)
+                    self.assertIsNone(item['emoji'], item)
             icons = {item['label']: item for item in data}
             for label, glyph in {
-                '刷新设备': '🔄', '全选设备': '✅', '恢复出厂': '🧹',
+                '全选设备': '✅', '恢复出厂': '🧹',
                 'Remount': '⚡',
                 '连接WiFi': '🛜', '锁定设备': '🔒', '解锁设备': '🔓',
                 '烧写固件': '🔥', '烧写 GSI': '🔥', '启动 VNC': '🚀',
                 '设备投屏': '📺', 'ADB 接入': '🔌', 'USB/IP': '📱',
-                '复制部署命令': '📋',
             }.items():
                 self.assertEqual(icons[label]['emoji'], glyph, (label, data))
             self.assertIsNone(icons['Remount']['symbol'])
@@ -470,7 +475,8 @@ class RuntimeUiFoundationsTests(RuntimeUiHarness):
         try:
             self.goto_shell(page)
             suite = page.locator('#refresh-suites-btn')
-            self.assertEqual(suite.locator('.test-action-icon').inner_text(), '🔄')
+            self.assertEqual(suite.inner_text().strip(), '刷新套件')
+            self.assertEqual(suite.locator('svg, .test-action-icon').count(), 0)
             states = (
                 (False, False, False, '开始测试', 'btn-primary', False),
                 (False, True, False, '启动中', 'btn-primary', True),

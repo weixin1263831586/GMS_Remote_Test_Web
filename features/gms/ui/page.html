@@ -71,7 +71,9 @@
     #critical-detail-dialog:not([open]) { display: none; }
     #critical-detail-dialog::backdrop { background: transparent; }
     .critical-matrix .gerrit-badge { white-space: nowrap; }
-    .critical-status-stack { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:2.8em; line-height:1.4; }
+    .critical-status-stack { display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:calc(24px + 1.4em); line-height:1.4; }
+    .critical-status-stack > button.critical-text-button { display:flex; align-items:center; min-height:0; }
+    .critical-status-stack > .muted { line-height:1.4; }
     #gerrit-refresh { width:88px; flex:0 0 auto; white-space:nowrap; }
     #critical-legacy-toggle { flex: 0 0 auto; white-space: nowrap; background: var(--light-bg); color: var(--text-secondary); border: 1px solid var(--border-color); }
     #critical-legacy-toggle[aria-pressed="true"] { color: var(--primary-light); border-color: var(--primary-color); }

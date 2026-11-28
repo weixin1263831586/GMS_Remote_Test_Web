@@ -115,8 +115,11 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                 probe.removeAttribute('id');
                 probe.disabled = false;
                 probe.textContent = '刷新';
+                probe.style.cssText = 'position:fixed;top:8px;left:8px';
                 document.body.append(probe);
                 const before = probe.getBoundingClientRect().width;
+                const style = getComputedStyle(probe);
+                const identifiable = style.borderTopStyle === 'solid' && parseFloat(style.borderTopWidth) >= 1 && style.backgroundColor !== 'rgba(0, 0, 0, 0)';
                 setActionButtonBusy(probe, true, '刷新中');
                 const busy = {label: probe.textContent, disabled: probe.disabled,
                     width: probe.getBoundingClientRect().width};
@@ -124,10 +127,12 @@ class UiControlsMatrixTests(RuntimeUiHarness):
                 const after = {label: probe.textContent, disabled: probe.disabled,
                     width: probe.getBoundingClientRect().width};
                 probe.remove();
-                return {count: controls.length, bad, before, busy, after};
+                return {count: controls.length, bad, before, busy, after, identifiable};
             }""")
             self.assertGreaterEqual(result["count"], 7)
             self.assertEqual(result["bad"], [])
+            self.assertTrue(result["identifiable"])
+            self.assertGreater(result["before"], 0)
             self.assertEqual(result["busy"]["label"], "刷新中")
             self.assertTrue(result["busy"]["disabled"])
             self.assertEqual(result["after"]["label"], "刷新")
