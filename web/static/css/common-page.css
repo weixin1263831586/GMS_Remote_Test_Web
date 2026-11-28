@@ -40,10 +40,6 @@
 }
 
 @media (max-width: 700px) {
-    .apk-page-header {
-        align-items: stretch;
-        flex-direction: column;
-    }
 
     .apk-task-history-controls {
         position: static;
@@ -1004,7 +1000,6 @@ body.apk-resizing {
     color: var(--text-secondary);
 
 }
-.api-toolbar { margin-bottom: 10px; }
 #api-search-input {
     width: 100%;
     box-sizing: border-box;
@@ -1015,13 +1010,6 @@ body.apk-resizing {
     color: var(--text-primary);
 
 }
-.api-filter-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 10px;
-}
-.api-filter-spacer { flex: 1; }
 .filter-btn.tone-primary { background: var(--primary-gradient); color: #fff; }
 .filter-btn.tone-success { background: var(--success-color); color: #fff; }
 #suite-download-url { width: 100%; }

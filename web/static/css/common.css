@@ -461,19 +461,6 @@ body {
     display: block;
 }
 
-.section-title-with-icon {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-}
-
-.section-title-icon {
-    width: 14px;
-    height: 14px;
-    object-fit: contain;
-    flex-shrink: 0;
-}
-
 .sidebar-text {
 
 
@@ -738,30 +725,6 @@ body {
     display: none;
 }
 
-/* ==================== Desktop Page ==================== */
-.desktop-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    padding: 0;
-    overflow: hidden;
-    flex: 1;
-}
-
-.desktop-container .vnc-canvas {
-    height: 100vh;
-    border: none;
-    border-radius: 0;
-}
-
-.desktop-frame {
-    display: grid;
-    grid-template-rows: auto 1fr;
-    gap: 15px;
-    flex: 1;
-    min-height: 0;
-}
-
 .host-workspace-layouts { display:flex; align-items:stretch; gap:0; flex-wrap:nowrap; }
 .host-workspace-layouts > .btn-xs {
     /* Both layout tabs and Users/Audit tabs live in a 26px title action row.
@@ -793,163 +756,6 @@ body {
 @media (max-width:900px) {
     .host-workspace-grid.layout-horizontal, .host-workspace-grid.layout-quad { grid-template-columns:minmax(0,1fr); }
     .host-workspace-grid.layout-quad { grid-template-rows:repeat(4,minmax(260px,1fr)); overflow-y:auto; }
-}
-
-.desktop-control-panel {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 10px;
-}
-
-.control-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 10px;
-}
-
-.control-row label {
-    min-width: 80px;
-    color: var(--text-secondary);
-
-}
-
-.status-label {
-    padding: 4px 10px;
-    border-radius: 4px;
-
-
-    background: var(--darker-bg);
-    color: var(--text-muted);
-}
-
-.status-label.connected {
-    background: color-mix(in srgb, var(--success-color) 20%, transparent);
-    color: var(--success-color);
-}
-
-.status-label.disconnected {
-    background: color-mix(in srgb, var(--danger-color) 20%, transparent);
-    color: var(--danger-color);
-}
-
-.control-buttons {
-    display: flex;
-    gap: 5px;
-    flex-wrap: wrap;
-}
-
-.vnc-display-frame {
-    background: var(--light-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    padding: 10px;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
-.vnc-canvas {
-    flex: 1;
-    background: var(--darker-bg);
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    position: relative;
-    overflow: hidden;
-    min-height: 400px;
-}
-
-.vnc-placeholder {
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 15px;
-}
-
-.placeholder-icon {
-
-    opacity: 0.3;
-}
-
-.placeholder-text {
-
-    color: var(--text-secondary);
-}
-
-.placeholder-hint {
-
-    color: var(--text-muted);
-}
-
-.vnc-iframe {
-    width: 100%;
-    height: 100%;
-    border: none;
-}
-
-.vnc-iframe.hidden {
-    display: none;
-}
-
-.vnc-placeholder.hidden {
-    display: none;
-}
-
-.vnc-display-info {
-    padding: 4px 10px;
-    border-radius: 4px;
-
-
-    background: var(--darker-bg);
-    color: var(--info-color);
-
-}
-
-.placeholder-instructions {
-    margin-top: 20px;
-    padding: 15px;
-    background: var(--darker-bg);
-    border-radius: 4px;
-
-    color: var(--text-secondary);
-    line-height: 1.8;
-}
-
-.placeholder-instructions div {
-    margin-bottom: 8px;
-}
-
-.placeholder-instructions code {
-    display: inline-block;
-    margin-top: 5px;
-    padding: 2px 8px;
-    background: var(--primary-gradient);
-    color: var(--text-primary);
-    border-radius: 3px;
-
-
-    cursor: pointer;
-}
-
-.placeholder-instructions code:hover {
-    background: var(--primary-strong);
-}
-
-
-
-.main-frame {
-    display: flex;
-    flex-direction: column;
-    gap: 15px;
-    flex: 1;
-    overflow: hidden;
 }
 
 /* ==================== Section Title ==================== */
@@ -1047,8 +853,6 @@ body {
     color: #fff;
     border-color: var(--primary-color);
 }
-/* 标题图标沿公共 24px 行盒居中，具体字号由 typography.css 管理。 */
-.page-header-row > .section-title .section-title-icon { margin-top: 1.6px; }
 /* 拉丁混排标题（Gerrit/Redmine）保持输入原样，不吃基类 uppercase。 */
 #page-gerrit-dashboard .page-header-row > .section-title,
 #page-redmine-agent .page-header-row > .section-title { text-transform: none; }
@@ -1347,16 +1151,6 @@ body {
     background: var(--primary-gradient);
 }
 
-/* ==================== 设备分组 ==================== */
-.device-area-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
-    margin-bottom: 6px;
-}
-
 .device-group-toolbar {
     display: flex;
     align-items: center;
@@ -1386,13 +1180,6 @@ body {
 #btn-follow-filter:disabled {
     opacity: 0.45;
     cursor: not-allowed;
-}
-
-.device-group-section {
-    margin-bottom: 6px;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    overflow: hidden;
 }
 
 .device-group-header {
@@ -1442,24 +1229,10 @@ body {
     flex-shrink: 0;
 }
 
-.device-group-selectall {
-    width: 15px;
-    height: 15px;
-    cursor: pointer;
-}
-
 .device-group-header .btn-xxs {
     padding: 2px 5px;
 
     line-height: 1;
-}
-
-.device-group-list {
-    padding: 4px 5px;
-}
-
-.device-group-list .device-item {
-    margin-bottom: 3px;
 }
 
 /* 分组弹框设备勾选列表 */
@@ -1495,10 +1268,6 @@ body {
 .group-pick-off {
     color: var(--text-muted);
 
-}
-
-.device-scrollable-frame {
-    padding: 5px;
 }
 
 /* ==================== Device Items ==================== */
@@ -1553,11 +1322,6 @@ body {
     white-space: nowrap;
 }
 
-.device-model {
-    color: var(--text-secondary);
-
-}
-
 .device-source {
     color: var(--text-secondary);
 
@@ -1595,15 +1359,6 @@ body {
 
 .device-item.locked .device-checkbox:disabled {
     cursor: not-allowed;
-}
-
-.lock-status {
-
-    color: var(--danger-color);
-    margin-top: 2px;
-    display: flex;
-    align-items: center;
-    gap: 2px;
 }
 
 /* ==================== Button Frames ==================== */

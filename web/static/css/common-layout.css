@@ -7,7 +7,6 @@
     margin-bottom: 8px;
 }
 .report-result-card:last-child { margin-bottom: 0; }
-.report-float-action { float: right; }
 #report-analysis-result [data-click="sendReportAnalysisEmail"] { margin-right: 6px; }
 .report-summary-grid {
     display: grid;
@@ -103,33 +102,6 @@
     border-radius: 6px;
     background: var(--darker-bg);
 }
-.report-failure-card-head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: start;
-}
-.report-failure-title {
-    display: grid;
-    gap: 6px;
-    min-width: 0;
-    color: var(--text-secondary);
-}
-.report-failure-title span {
-    color: var(--text-primary);
-}
-.report-failure-title code {
-    color: var(--primary-color);
-
-    white-space: normal;
-    word-break: break-word;
-}
-.report-failure-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 6px;
-}
 .report-failure-action {
     min-height: var(--ui-control-height-small);
     padding: 4px 9px;
@@ -149,52 +121,7 @@
 .report-failure-action.diagnose {
     background: var(--primary-gradient);
 }
-.report-failure-reason-label {
-    margin-bottom: 5px;
-    color: var(--text-secondary);
-}
-@media (max-width: 760px) {
-    .report-failure-card-head {
-        grid-template-columns: 1fr;
-    }
-    .report-failure-actions {
-        justify-content: flex-start;
-    }
-}
 
-/* ==================== 日志进度条 ==================== */
-.log-progress-container {
-    padding: 12px 16px;
-    background: var(--darker-bg);
-    border-top: 1px solid var(--border-color);
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 8px;
-    flex-shrink: 0; /* 防止被压缩 */
-}
-.log-progress-bar {
-    flex: 1;
-    height: 8px;
-    background: var(--light-bg);
-    border-radius: 4px;
-    overflow: hidden;
-    position: relative;
-}
-.log-progress-fill {
-    height: 100%;
-    background: var(--primary-gradient);
-    border-radius: 4px;
-    transition: width 0.3s ease;
-    width: 0%;
-}
-.log-progress-text {
-    min-width: 45px;
-    text-align: right;
-
-    color: var(--primary-light);
-}
 
 /* 检查路由连通性：冷灰底、紫色折角。宽度高度走 modal-s。 */
 #route-check-dialog .modal-content {
@@ -703,31 +630,6 @@
     transform: scale(0.95);
 }
 
-/* ==================== Tools Page Design ==================== */
-
-/* Category Tabs Styling */
-.category-tab {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    border-radius: 8px;
-
-    cursor: pointer;
-    transition: var(--transition-normal);
-    border: 1px solid transparent;
-    white-space: nowrap;
-}
-
-.category-tab:hover {
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-}
-
-.category-tab.active {
-    box-shadow: var(--shadow-glow);
-}
-
 /* Category Sections */
 .category-section {
     margin-bottom: var(--ui-spacing-sm);
@@ -829,15 +731,6 @@
 #tools-grid button,
 #ut-grid button {
     min-height: var(--ui-control-height-icon);
-}
-
-.btn-visit {
-    background: var(--primary-gradient);
-    color: var(--text-primary);
-}
-
-.btn-visit:hover {
-    opacity: 0.85;
 }
 
 .btn-edit {
@@ -964,12 +857,6 @@
         width: 100%;
     }
 
-    /* Tools */
-    .category-tab {
-        padding: 6px 12px;
-
-    }
-
 
     .tool-icon {
         width: 32px;
@@ -1019,8 +906,7 @@
 .suite-browser-toolbar,
 .suite-browser-header { justify-content: space-between; }
 .suite-browser-count,
-.suite-browser-path,
-.suite-file-meta {
+.suite-browser-path {
     color: var(--text-secondary);
 
 }
@@ -1082,10 +968,6 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-    white-space: nowrap;
-}
-.suite-file-meta {
-    flex-shrink: 0;
     white-space: nowrap;
 }
 .suite-suite-path,
@@ -1217,53 +1099,6 @@
     gap: 6px;
 }
 
-.dx-chip {
-    display: inline-flex;
-    align-items: center;
-    min-height: 22px;
-    padding: 3px 8px;
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
-    background: rgba(0, 0, 0, 0.18);
-    color: var(--text-secondary);
-
-    line-height: 1.3;
-    white-space: nowrap;
-}
-
-.dx-meta-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 8px;
-    min-width: 0;
-}
-
-.dx-meta-grid-compact {
-    grid-template-columns: minmax(120px, 0.55fr) minmax(0, 1fr);
-}
-
-.dx-metric {
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    border-radius: var(--ui-radius-card);
-    background: var(--darker-bg);
-    display: grid;
-    gap: 5px;
-    min-width: 0;
-}
-
-.dx-metric-label {
-    color: var(--text-secondary);
-
-}
-
-.dx-metric-value {
-    color: var(--text-primary);
-
-    line-height: 1.45;
-    word-break: break-word;
-}
-
 .dx-locator-list {
     display: grid;
     gap: 8px;
@@ -1296,50 +1131,6 @@
     line-height: 1.6;
     overflow-x: auto;
     white-space: nowrap;
-}
-
-.dx-tabs {
-    display: flex;
-    gap: 6px;
-    padding: 6px;
-    border: 1px solid var(--border-color);
-    border-radius: 8px;
-    background: var(--darker-bg);
-    position: sticky;
-    top: 0;
-    z-index: 1;
-}
-
-.dx-tab {
-    min-height: 30px;
-    padding: 6px 12px;
-    border: 1px solid transparent;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--text-secondary);
-
-    cursor: pointer;
-    transition: var(--transition-fast);
-}
-
-.dx-tab:hover {
-    color: var(--text-primary);
-    background: var(--lighter-bg);
-}
-
-.dx-tab.active {
-    color: #fff;
-    border-color: color-mix(in srgb, var(--primary-color) 55%, transparent);
-    background: color-mix(in srgb, var(--primary-color) 22%, transparent);
-}
-
-.dx-panel {
-    display: none;
-    min-width: 0;
-}
-
-.dx-panel.active {
-    display: block;
 }
 
 .dx-workflow {
@@ -1817,19 +1608,7 @@
     }
 }
 
-@media (max-width: 700px) {
-    .dx-meta-grid-compact {
-        grid-template-columns: 1fr;
-    }
 
-    .dx-tabs {
-        overflow-x: auto;
-    }
-
-    .dx-tab {
-        white-space: nowrap;
-    }
-}
 /* Shared semantic suite palette: list, selected suite and report type. */
 :is(.suite-type-badge, .suite-header-type, .reports-type-cell) {
     --suite-type-color: var(--text-secondary);

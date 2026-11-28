@@ -530,19 +530,6 @@ select option {
     min-width: 66px;
 }
 
-.device-routing-checkbox-row {
-    align-items: center;
-}
-
-.device-routing-checkbox-label {
-    display: flex;
-    flex: 1;
-    align-items: center;
-    gap: 7px;
-    width: auto;
-    text-align: left;
-}
-
 .adb-proxy-host-grid .modal-form-row label {
     min-width: 0;
 }
@@ -1149,14 +1136,6 @@ select option {
     margin-top: 10px;
 }
 
-.modal-fieldset-title {
-
-
-    letter-spacing: 0.5px;
-    color: var(--text-secondary);
-    margin-bottom: 8px;
-}
-
 /* 烧写弹框：AOA 恢复选项分组 */
 .firmware-aoa-options {
     margin-top: 4px;
@@ -1272,29 +1251,6 @@ select option {
     color: var(--text-muted);
 
     white-space: nowrap;
-}
-
-.file-browser-breadcrumb {
-    display: flex;
-    gap: 5px;
-    padding: 8px 10px;
-    background: var(--light-bg);
-    border-radius: 4px;
-    margin-bottom: 10px;
-
-}
-
-.file-browser-breadcrumb-item {
-    color: var(--primary-color);
-    cursor: pointer;
-}
-
-.file-browser-breadcrumb-item:hover {
-    text-decoration: underline;
-}
-
-.file-browser-breadcrumb-separator {
-    color: var(--text-muted);
 }
 
 /* ==================== Toast Notification ==================== */
