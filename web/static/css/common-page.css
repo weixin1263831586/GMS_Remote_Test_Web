@@ -949,10 +949,6 @@ body.apk-resizing {
 
 
 
-    .suite-browser-filter {
-        width: calc(100% - 20px);
-        min-width: 0;
-    }
 
     .suite-browser-header > div {
         min-width: 0;

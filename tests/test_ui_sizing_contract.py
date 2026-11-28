@@ -277,6 +277,10 @@ class UiSizingContractTests(unittest.TestCase):
                 if set(part.strip() for part in selector.split(",")) <= {"#tab-dashboard", "#tab-management"}:
                     self.assertNotRegex(body, r"(?:^|;)\s*padding(?:-[\w-]+)?\s*:", (line, selector))
         self.assertNotIn("border-radius:9px;background:#1c1c24", cluster)
+        cluster_markup = (ROOT / "features/cluster/ui/page.html").read_text(encoding="utf-8")
+        self.assertNotIn("main{max-width:100%;gap:10px}", cluster_markup)
+        suite = (CSS / "common-page.css").read_text(encoding="utf-8")
+        self.assertNotRegex(suite, r"\.suite-browser-filter\s*\{[^}]*width:\s*calc\(100% - 20px\)")
 
     def test_workspace_sidebar_roles(self):
         for filename, selector in (

@@ -444,7 +444,7 @@
     background: color-mix(in srgb, var(--primary-color) 23%, transparent);
     color: var(--primary-light); text-align: center;
 }
-#page-test-suites .suite-browser-filter { display: block; margin: 0; width: 100%; }
+#page-test-suites .suite-browser-filter { display: block; width: 100%; min-width: 0; }
 #page-test-suites .suite-browser-list { padding: 6px 8px 8px; }
 #page-test-suites.page-ui-rework .suite-suite-item {
     display: flex; min-height: 61px; gap: 10px; margin: 3px 0;
