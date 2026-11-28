@@ -1,10 +1,7 @@
 /* 知识库案例与工单工作台。 */
-    .case-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:10px 12px; margin-bottom:8px; cursor:pointer; background:var(--card-bg); transition:border-color .15s; }
+    .case-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:var(--ui-spacing-sm) var(--ui-spacing-md); margin-bottom:var(--ui-spacing-sm); cursor:pointer; background:var(--card-bg); transition:border-color .15s; }
     .case-card:hover { border-color:var(--primary-color); }
     .case-head { display:flex; gap:8px; align-items:center; margin-bottom:4px; }
-    .case-status {  padding:2px 6px; border-radius:4px; }
-    .case-status.approved { background:#064e3b; color:#6ee7b7; }
-    .case-status.draft { background:#3b2f12; color:#fcd34d; }
     .case-sig {  padding:2px 6px; border-radius:4px; background:var(--lighter-bg); color:var(--primary-light); }
     .case-title {   color:var(--text-primary); }
     .case-scope {  margin-top:2px; }

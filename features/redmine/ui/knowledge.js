@@ -46,7 +46,7 @@ async function loadCases() {
 function renderFactsList(items, total) {
   const box = document.getElementById('casesList');
   if (!items.length) {
-    box.innerHTML = '<div class="muted" style="padding:14px">暂无已导入的工单。点击顶部「📚 导入」粘贴工单号,或导入最近20个我的指派。</div>';
+    box.innerHTML = '<div class="ui-empty-state">暂无已导入的工单。点击顶部「📚 导入」粘贴工单号,或导入最近20个我的指派。</div>';
     return;
   }
   box.innerHTML = items.map(f => {
@@ -54,7 +54,7 @@ function renderFactsList(items, total) {
     const scope = [f.chip_platform, f.android_version, f.certification_type, f.module].filter(Boolean).map(esc).join(' / ');
     const conf = f.confidence ? `<span class="muted" style="float:right">置信度 ${f.confidence}</span>` : '';
     return `<div class="case-card" data-click="showCaseFact" data-a0="${f.issue_id}">
-      <div class="case-head"><span class="case-status draft">${renderRedmineIssueLink(f.issue_id)}</span>${sig}${conf}</div>
+      <div class="case-head"><span class="case-status ui-status is-warning draft">${renderRedmineIssueLink(f.issue_id)}</span>${sig}${conf}</div>
       <div class="case-title">${esc(f.subject || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
       <div class="case-sources muted">${esc(f.problem_summary || '').slice(0,80)}</div>
@@ -65,7 +65,7 @@ function renderFactsList(items, total) {
 function renderCasesList(items, total) {
   const box = document.getElementById('casesList');
   if (!items.length) {
-    box.innerHTML = '<div class="muted" style="padding:14px">暂无成熟案例。请先点击顶部「📚 导入」结构化历史工单,再选中若干案例构建成熟案例。</div>';
+    box.innerHTML = '<div class="ui-empty-state">暂无成熟案例。请先点击顶部「📚 导入」结构化历史工单,再选中若干案例构建成熟案例。</div>';
     return;
   }
   box.innerHTML = items.map(c => {
@@ -74,7 +74,7 @@ function renderCasesList(items, total) {
     const sig = c.canonical_error_signature ? `<span class="case-sig">${esc(c.canonical_error_signature)}</span>` : '';
     const scope = [c.chip_platform, c.android_version, c.certification_type, c.module].filter(Boolean).map(esc).join(' / ');
     return `<div class="case-card" data-click="showCaseDetail" data-a0="${c.case_id}">
-      <div class="case-head"><span class="case-status ${status}">${badge}</span>${sig}</div>
+      <div class="case-head"><span class="case-status ui-status ${status === 'approved' ? 'is-success' : status === 'draft' ? 'is-warning' : ''} ${esc(status)}">${badge}</span>${sig}</div>
       <div class="case-title">${esc(c.title || '-')}</div>
       <div class="case-scope muted">${scope || '-'}</div>
       <div class="case-sources muted">来源: ${renderRedmineIssueLinks(c.source_issue_ids_json || [])}</div>
@@ -167,7 +167,7 @@ async function findSimilarCase(issueId) {
     if (!items.length) { setKnowledgeBody('<div class="muted">知识库暂无相似工单。请先批量导入历史单。</div>'); return; }
     setKnowledgeBody(items.map(s=>`<div class="ref-item">
       ${renderRedmineIssueLink(s.issue_id, {stopPropagation: false})}
-      <span class="ref-badge ${s.similarity_level}">${s.similarity_level==='high'?'高':s.similarity_level==='medium'?'中':'低'} ${s.score}</span>
+      <span class="ref-badge ui-status ${s.similarity_level === 'high' ? 'is-danger' : s.similarity_level === 'medium' ? 'is-warning' : ''} ${esc(s.similarity_level)}">${s.similarity_level==='high'?'高':s.similarity_level==='medium'?'中':'低'} ${s.score}</span>
       <span class="ref-title">${esc(s.subject||'')}</span>
       <span class="muted">[${esc(s.module||'-')}${s.error_signature?'/'+esc(s.error_signature):''}]</span>
     </div>`).join(''));
@@ -222,7 +222,7 @@ function renderIssueWorkbench(data) {
         <div class="similar-list">${similar.length ? similar.map(s => `
           <div class="ref-item">
             ${renderRedmineIssueLink(s.issue_id, {stopPropagation: false})}
-            <span class="ref-badge ${s.similarity_level || 'low'}">${esc(s.similarity_level || 'low')} ${s.score || 0}</span>
+            <span class="ref-badge ui-status ${s.similarity_level === 'high' ? 'is-danger' : s.similarity_level === 'medium' ? 'is-warning' : ''} ${esc(s.similarity_level || 'low')}">${esc(s.similarity_level || 'low')} ${s.score || 0}</span>
             <span class="ref-title">${esc(s.subject || '')}</span>
           </div>`).join('') : '<div class="muted">暂无相似历史工单。</div>'}</div>
         <div class="source-links">${sourceIds.length ? '来源: ' + renderRedmineIssueLinks(sourceIds, {stopPropagation: false}) : ''}</div>

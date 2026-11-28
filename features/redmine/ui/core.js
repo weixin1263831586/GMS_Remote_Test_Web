@@ -834,8 +834,8 @@ function _claimBadgeHtml(text) {
   var refs = (m[2] || '').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
   var chips = refs.map(function(r){ return '<span class="claim-ref">' + esc(r) + '</span>'; }).join(' ');
   // chip 后补真实空格:纯文本复制时徽章/chip/正文不粘连。
-  return '<span class="claim-line"><span class="claim-badge claim-'
-    + ({ '事实': 'fact', '推断': 'inference', '待验证': 'unverified' })[m[1]]
+  return '<span class="claim-line"><span class="claim-badge ui-status claim-'
+    + ({ '事实': 'fact is-success', '推断': 'inference is-info', '待验证': 'unverified is-warning' })[m[1]]
     + '">' + m[1] + '</span>' + ' '
     + chips + ' '
     + '<span class="claim-text">' + _inlineMd(esc(m[3])) + '</span></span>';

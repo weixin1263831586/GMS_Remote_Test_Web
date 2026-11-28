@@ -89,7 +89,7 @@
     .select-add-btn:hover { color:var(--text); background:transparent; }
 
     /* Issue cards */
-    .issue-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:14px; margin-bottom:14px; background:var(--card-bg); }
+    .issue-card { border:1px solid var(--border); border-radius:var(--ui-radius-card); padding:var(--ui-spacing-md); margin-bottom:var(--ui-spacing-sm); background:var(--card-bg); }
     .issue-card h3 { margin:0 0 10px;  display:flex; align-items:center; gap:8px; }
     .issue-card h3 a { color:var(--primary-light); text-decoration:none; }
     .issue-card h3 a:hover { text-decoration:underline; }
@@ -155,10 +155,6 @@
     .ref-item a { color:var(--primary-light); text-decoration:none;  white-space:nowrap; flex-shrink:0; }
     .ref-item a:hover { text-decoration:underline; }
     .ref-title { color:var(--text);  line-height:1.4; }
-    .ref-badge {  padding:2px 6px; border-radius:999px;  flex-shrink:0; }
-    .ref-badge.high { background:#5c1d1d; color:#fca5a5; }
-    .ref-badge.medium { background:#5c3a0a; color:#fde68a; }
-    .ref-badge.low { background:#2a2a2a; color:#9ca3af; }
 
     /* Run list */
     .run-item { padding:10px 12px; border-bottom:1px solid var(--border); cursor:pointer; }
@@ -385,10 +381,7 @@
     .analysis-doc .md-table tbody tr:nth-child(even) { background:color-mix(in srgb, var(--card-bg) 40%, transparent); }
     .analysis-doc code { background:var(--darker-bg); border:1px solid var(--border-color); border-radius:4px; padding:1px 5px;  color:var(--primary-light); }
     /* 关键结论 claim 行:徽章 + EV 引用 chip + 正文。 */
-    .analysis-doc .claim-badge { display:inline-block; margin-right:6px; padding:1px 8px; border-radius:10px;   vertical-align:1px; }
-    .analysis-doc .claim-fact { color:#86efac; background:#155e3d59; border:1px solid #22c55e66; }
-    .analysis-doc .claim-inference { color:var(--primary-light); background:#1e40af4d; border:1px solid #3b82f666; }
-    .analysis-doc .claim-unverified { color:#fcd34d; background:#92400e4d; border:1px solid #eab30866; }
+    .analysis-doc .claim-badge { margin-right:var(--ui-spacing-xs); vertical-align:middle; }
     .analysis-doc .claim-ref { display:inline-block; margin-right:4px; padding:0 6px; border-radius:8px;  color:#7dd3fc; background:#0c4a6e59; }
     .analysis-doc .claim-text { color:var(--text-secondary); }
     .daily-brief-meta-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 14px; padding:8px 14px !important;  color:var(--text-secondary); }
@@ -439,7 +432,6 @@
     .analysis-timeline-queued { padding:18px 6px; color:var(--muted,var(--text-secondary)); }
     .analysis-timeline-final { display:flex; flex-direction:column; gap:10px; }
     .analysis-timeline-meta { display:inline-flex; flex-wrap:wrap; gap:6px 14px; margin-right:auto; align-self:center; color:var(--muted,var(--text-secondary));  font-variant-numeric:tabular-nums; }
-    .analysis-timeline-badge { display:inline-block; padding:1px 8px; border-radius:10px; background:rgba(148,163,184,.18); color:var(--muted,var(--text-secondary));   white-space:nowrap; }
     /* 弹框 footer 里关闭按钮永远渲染在最右，不随切换按钮的插入位置漂移。 */
     .modal-buttons > [data-analysis-timeline-close] { order:99; }
     .daily-brief-analysis-overlay .analysis-timeline-meta { align-self:auto; }
@@ -520,7 +512,7 @@
 
 :where(.panel, .issue-card, .trend-panel) {
     background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; box-shadow: none;
+    border-radius: var(--ui-radius-card);
 }
 :where(table) th { position: sticky; top: 0; z-index: 1; background: var(--panel2); }
 :where(table) tbody tr:hover { background: color-mix(in srgb, var(--primary) 5%, var(--panel)); }

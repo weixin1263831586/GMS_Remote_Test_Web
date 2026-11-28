@@ -372,7 +372,7 @@ function updateVpnStatus(connected) {
 
     if (connected === null || connected === undefined) {
         label.textContent = '状态: 未知';
-        label.className = 'vpn-status-label disconnected';
+        label.className = 'vpn-status-label ui-status disconnected';
         // 状态未知时按钮回到"连接"文案，与 connectVpn() 对 null 状态
         // 弹出连接框的行为保持一致。
         if (btn) btn.innerHTML = GmsUi.testEmoji('🔌') + ' 连接 VPN';
@@ -381,7 +381,7 @@ function updateVpnStatus(connected) {
     }
     if (connected) {
         label.textContent = '状态: 已连接';
-        label.className = 'vpn-status-label connected';
+        label.className = 'vpn-status-label ui-status is-success connected';
         btn.innerHTML = GmsUi.testEmoji('📡') + ' 检查 VPN';
         state.vpnConnected = true;
     } else {

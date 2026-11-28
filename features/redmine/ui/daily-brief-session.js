@@ -170,7 +170,7 @@ function renderIssueSessionTurn(turn) {
     + '<div class="issue-session-turn-header"><span class="issue-session-avatar">K</span><strong>kkagent</strong>'
     + '<span class="issue-session-turn-meta">回合 #' + esc(turn.sequence)
     + (turn.created_at ? ' · ' + esc(issueSessionTime(turn.created_at)) : '') + '</span>'
-    + (turn.is_final ? '<span class="issue-session-final-tag">最终回答</span>' : '')
+    + (turn.is_final ? '<span class="issue-session-final-tag ui-status is-success">最终回答</span>' : '')
     + '</div><div class="issue-session-turn-body">' + body + '</div></article>';
 }
 

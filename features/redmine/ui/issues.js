@@ -241,7 +241,7 @@ function renderReferenceCard(r) {
   return `<div class="ref-card">
     <div class="ref-item">
       ${renderRedmineIssueLink(r.issue_id, {stopPropagation: false})}
-      <span class="ref-badge ${level}">${levelText} ${score}</span>
+      <span class="ref-badge ui-status ${level === 'high' ? 'is-danger' : level === 'medium' ? 'is-warning' : ''} ${esc(level)}">${levelText} ${score}</span>
       <span class="ref-title">${esc(r.subject || '')}</span>
     </div>
   </div>`;

@@ -330,7 +330,7 @@ function showAnalysisTimelineModal(runId, issueId, options) {
     + '<div class="modal-header tech-dialog-header"><svg class="tech-header-rule" viewBox="0 0 1000 16" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M0 15H490L506 1H916" vector-effect="non-scaling-stroke"/></svg><div class="tech-title-group"><span class="tech-title-glyph" aria-hidden="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#chart"></use></svg></span><span class="tech-title-divider" aria-hidden="true"></span><span class="modal-title daily-brief-modal-title">'
     + '<span id="' + modalId + '-title"><span>'
     + (state.history ? '🕐 执行过程 · #' : analysisTimelineLiveTitlePrefix(state.runStatus)) + esc(state.issueId) + '</span>'
-    + (state.history ? '<span class="analysis-timeline-badge">已结束</span>' : '')
+    + (state.history ? '<span class="analysis-timeline-badge ui-status">已结束</span>' : '')
     + '</span>'
     + (subject ? '<span class="daily-brief-modal-subject">' + esc(subject) + '</span>' : '')
     + '</span></div><button type="button" class="modal-close" aria-label="关闭" data-click="removeDynamicModal" data-a0="' + modalId + '" data-analysis-timeline-close>&times;</button></div>'

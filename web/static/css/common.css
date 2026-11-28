@@ -1656,25 +1656,9 @@ body {
     align-items: center;
 }
 
-.vpn-status-label {
-    padding: 2px 6px;
-    border-radius: 4px;
+.vpn-status-label { margin-left: var(--ui-spacing-xs); }
 
 
-    background: var(--darker-bg);
-    color: var(--text-secondary);
-    margin-left: 6px;
-}
-
-.vpn-status-label.connected {
-    background: color-mix(in srgb, var(--success-color) 20%, transparent);
-    color: var(--success-color);
-}
-
-.vpn-status-label.disconnected {
-    background: color-mix(in srgb, var(--danger-color) 20%, transparent);
-    color: var(--danger-color);
-}
 
 .upload-frame {
     display: flex;
