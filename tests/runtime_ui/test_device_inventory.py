@@ -51,12 +51,16 @@ class RuntimeDeviceInventoryTests(RuntimeUiHarness):
             expect(page.locator('#inventory-total')).to_have_text('共 34 台，已筛选 34 台')
             page.get_by_label('每页设备数').select_option('50')
             expect(rows).to_have_count(34)
+            expect(page.locator('.inventory-footer')).to_be_visible()
+            expect(page.locator('#inventory-pages')).to_be_hidden()
+            expect(page.locator('#inventory-pages button')).to_have_count(0)
             page.get_by_label('每页设备数').select_option('20')
             expect(rows).to_have_count(20)
             page.get_by_role('navigation', name='设备列表分页').get_by_role('button', name='2', exact=True).click()
             expect(rows).to_have_count(14)
             page.locator('#inventory-connection').select_option('usbip')
             expect(rows).to_have_count(12)
+            expect(page.locator('.inventory-footer')).to_be_hidden()
             expect(rows.first.locator('[data-device-field="group"]')).to_have_text('实验室 / RK3588')
             page.locator('#inventory-system').select_option('Android 15')
             expect(rows).to_have_count(6)
@@ -77,7 +81,35 @@ class RuntimeDeviceInventoryTests(RuntimeUiHarness):
             expect(rows).to_have_count(0)
             expect(page.locator('#devices-table-body')).to_contain_text('暂无符合条件的设备')
             expect(page.locator('#inventory-select-page')).to_be_disabled()
+            expect(page.locator('.inventory-footer')).to_be_hidden()
             self.assertEqual(writes, [])
+        finally:
+            page.close()
+
+    def test_pagination_footer_only_reserves_space_when_needed(self):
+        page = self.new_page()
+        try:
+            devices, _ = self.open_inventory(page)
+            page.set_viewport_size({'width': 1912, 'height': 914})
+            footer = page.locator('.inventory-footer')
+            table = page.locator('.devices-table-wrap')
+            rows = page.locator('#devices-table-body tr[data-device-id]')
+            expect(footer).to_be_visible()
+            height_with_footer = table.bounding_box()['height']
+            for count in (14, 20, 0, 21, 14, 34):
+                page.evaluate("""devices => {
+                    allDevices = devices;
+                    displayDevicesManagement(allDevices);
+                }""", devices[:count])
+                expect(rows).to_have_count(min(count, 20))
+                if count <= 20:
+                    expect(footer).to_be_hidden()
+                    self.assertEqual(footer.evaluate('el => el.getBoundingClientRect().height'), 0)
+                    self.assertGreater(table.bounding_box()['height'], height_with_footer)
+                else:
+                    expect(footer).to_be_visible()
+                    expect(page.locator('#inventory-pages')).to_be_visible()
+            self.assertEqual(page.get_by_label('每页设备数').input_value(), '20')
         finally:
             page.close()
 

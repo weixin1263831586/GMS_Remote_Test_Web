@@ -165,6 +165,7 @@ jobs:
             tests/runtime_ui/test_apk_workbench.py \
             tests/runtime_ui/test_report_workbench.py \
             tests/runtime_ui/test_api_catalog.py \
+            tests/runtime_ui/test_device_inventory.py::RuntimeDeviceInventoryTests::test_pagination_footer_only_reserves_space_when_needed \
             tests/runtime_ui/test_system_settings.py \
             tests/runtime_ui/test_outbox_detail_races.py \
             tests/runtime_ui/test_disk_audit_refresh.py \

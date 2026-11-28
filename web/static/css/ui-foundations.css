@@ -565,6 +565,8 @@ button.page-stat-card.workbench-stat:hover:not(:disabled) { border-color: var(--
     min-width: 0;
 }
 .ui-pagination--center { justify-content: center; }
+/* Hidden pagination must not reserve a row in a flex workspace. */
+.ui-pagination-footer[hidden], .ui-pagination[hidden] { display: none !important; }
 .ui-pagination button {
     box-sizing: border-box;
     height: var(--ui-control-height-dense);

@@ -13,5 +13,10 @@ window.GmsUi = (() => {
         const safeTone = /^(success|warning|danger|info|accent|neutral)$/.test(tone) ? tone : 'neutral';
         return `<span class="ui-status is-${safeTone}">${icon(name)}<span>${escape(label)}</span></span>`;
     };
-    return Object.freeze({icon, testEmoji, badge, escape});
+    // Keep the size chooser only when a smaller supported page could require navigation.
+    const paginationVisibility = (total, size, minimumSize) => ({
+        footer: total > minimumSize,
+        navigation: total > size,
+    });
+    return Object.freeze({icon, testEmoji, badge, escape, paginationVisibility});
 })();

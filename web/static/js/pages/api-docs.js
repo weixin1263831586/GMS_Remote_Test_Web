@@ -802,6 +802,12 @@ function goApiDocsPage(page) {
 function renderApiDocsPager(total) {
     const footer = document.getElementById('api-docs-pagination');
     if (!footer) return;
+    const visibility = GmsUi.paginationVisibility(total, apiDocsPageSize, 20);
+    footer.hidden = !visibility.footer;
+    if (!visibility.footer) {
+        footer.replaceChildren();
+        return;
+    }
     const pages = Math.max(1,Math.ceil(total/apiDocsPageSize));
     const start = total ? (apiDocsPage-1)*apiDocsPageSize+1 : 0;
     const end = Math.min(total,apiDocsPage*apiDocsPageSize);
@@ -816,12 +822,12 @@ function renderApiDocsPager(total) {
     footer.innerHTML = '<div class="api-page-info"><span>共 '+total.toLocaleString('zh-CN')+' 条 · '+start+'–'+end+' 条</span>'
         +'<label for="api-docs-page-size">每页</label><select id="api-docs-page-size" aria-label="每页显示条数">'
         +[20,50,100].map(n=>'<option value="'+n+'"'+(n===apiDocsPageSize?' selected':'')+'>'+n+'</option>').join('')
-        +'</select></div><nav class="api-page-actions ui-pagination" aria-label="接口分页">'
+        +'</select></div>' + (visibility.navigation ? '<nav class="api-page-actions ui-pagination" aria-label="接口分页">'
         +'<button type="button" data-api-page="1" aria-label="首页"'+(apiDocsPage===1?' disabled':'')+'>«</button>'
         +'<button type="button" data-api-page="'+(apiDocsPage-1)+'" aria-label="上一页"'+(apiDocsPage===1?' disabled':'')+'>‹</button>'
         +nav.join('')
         +'<button type="button" data-api-page="'+(apiDocsPage+1)+'" aria-label="下一页"'+(apiDocsPage===pages?' disabled':'')+'>›</button>'
-        +'<button type="button" data-api-page="'+pages+'" aria-label="尾页"'+(apiDocsPage===pages?' disabled':'')+'>»</button></nav>';
+        +'<button type="button" data-api-page="'+pages+'" aria-label="尾页"'+(apiDocsPage===pages?' disabled':'')+'>»</button></nav>' : '');
     footer.querySelector('select')?.addEventListener('change',ev=>changeApiDocsPageSize(ev.target));
     footer.querySelectorAll('button[data-api-page]').forEach(el => el.addEventListener('click',()=>goApiDocsPage(el.dataset.apiPage)));
 }

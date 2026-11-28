@@ -99,6 +99,25 @@ class ApiCatalogBrowserTests(RuntimeUiHarness):
         finally:
             page.close()
 
+    def test_pagination_footer_is_conditional(self):
+        page = self.new_page()
+        try:
+            self.goto_shell(page)
+            page.evaluate("switchPage('api-docs')")
+            page.wait_for_function("allApiDocs.length > 21")
+            footer = page.locator('#api-docs-pagination')
+            for total in (0, 14, 20, 21):
+                page.evaluate("(total) => { apiDocsPageSize = 20; apiDocsPage = 1; displayApiDocs(allApiDocs.slice(0, total)); }", total)
+                self.assertEqual(footer.is_visible(), total > 20)
+                if total <= 20:
+                    self.assertEqual(footer.evaluate('el => el.getBoundingClientRect().height'), 0)
+            page.evaluate("() => { apiDocsPageSize = 50; apiDocsPage = 1; displayApiDocs(allApiDocs.slice(0, 21)); }")
+            self.assertTrue(footer.is_visible())
+            self.assertEqual(footer.locator('nav').count(), 0)
+            self.assertEqual(footer.locator('select').input_value(), '50')
+        finally:
+            page.close()
+
     def test_dashboard_filters_and_page_controls(self):
         page = self.new_page()
         try:

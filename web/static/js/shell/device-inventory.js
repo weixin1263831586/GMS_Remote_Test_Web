@@ -52,6 +52,14 @@ window.GmsDeviceInventory = (() => {
         const pages = Math.max(1, Math.ceil(filtered.length / size));
         const pager = field('pages');
         if (!pager) return;
+        const visibility = GmsUi.paginationVisibility(filtered.length, size, 20);
+        const footer = pager.closest('.ui-pagination-footer');
+        if (footer) footer.hidden = !visibility.footer;
+        pager.hidden = !visibility.navigation;
+        if (!visibility.navigation) {
+            pager.replaceChildren();
+            return;
+        }
         const button = (number, label, disabled = false) =>
             `<button type="button" class="btn-xxs${number === page && /^\d+$/.test(label) ? ' active' : ''}"`
             + ` data-click="changeInventoryPage" data-a0="${number}"${disabled ? ' disabled' : ''}`
