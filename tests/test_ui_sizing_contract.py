@@ -176,6 +176,63 @@ class UiSizingContractTests(unittest.TestCase):
             versions[path] = matches[0]
         self.assertEqual(len(set(versions.values())), 1, versions)
 
+    def test_shared_runtime_cache_generation(self):
+        """Shared browser helpers must not serve stale behavior in iframes."""
+        roots = (*ENTRYPOINTS, "features/redmine/ui/settings.html")
+        names = {
+            "shell/ui-primitives.js", "utils.js", "password-controls.js",
+            "shell/act-bridge.js", "dialog-frame.js", "dialog-prompts.js",
+            "update-radar-settings.js", "workspace-tabs.js",
+            "embedded-workspace.js", "embedded-ui/modal-controller.js",
+        }
+        versions = set()
+        seen = set()
+        for path in roots:
+            source = (ROOT / path).read_text(encoding="utf-8")
+            for name, version in re.findall(
+                r'/static/js/([a-zA-Z0-9_/.\-]+\.js)(?:\?v=([a-zA-Z0-9_.\-]+))?(?=["\'])',
+                source,
+            ):
+                if name in names:
+                    self.assertTrue(version, (path, name))
+                    seen.add(name)
+                    versions.add(version)
+            versions.update(re.findall(
+                r'/static/css/ui-sizing\.css\?v=([a-zA-Z0-9_.\-]+)', source,
+            ))
+        self.assertEqual(seen, names)
+        self.assertEqual(len(versions), 1, versions)
+
+    def test_consolidated_controls_do_not_restore_old_owners(self):
+        common = (CSS / "common-components.css").read_text(encoding="utf-8")
+        controls = (CSS / "form-controls.css").read_text(encoding="utf-8")
+        self.assertNotRegex(common, r"(?m)^\.btn-xxs, \.btn-xs, \.btn-small\s*\{")
+        self.assertRegex(controls, r"(?m)^\.btn-xxs, \.btn-xs, \.btn-small\s*\{")
+        old_page = (CSS / "common-page.css").read_text(encoding="utf-8")
+        apk = (CSS / "apk-workbench.css").read_text(encoding="utf-8")
+        for name in ("apk-file-tabs", "apk-file-tab", "apk-file-tab-label",
+                     "apk-file-tab-close"):
+            self.assertNotRegex(old_page, rf"(?m)^\.{name}\s*\{{")
+            self.assertIn(f"#page-apk-analysis .{name}", apk)
+        layout = (CSS / "common-layout.css").read_text(encoding="utf-8")
+        cases = (CSS / "modal-tech-cases.css").read_text(encoding="utf-8")
+        selector = "#route-check-dialog .route-check-actions .btn-xxs {"
+        self.assertNotIn(selector, layout)
+        self.assertEqual(cases.count(selector), 1)
+        dialogs = (CSS / "modal-tech-dialogs.css").read_text(encoding="utf-8")
+        self.assertEqual(dialogs.count(
+            ".tech-dialog :is(input:not([type=checkbox]):not([type=radio]):"
+            "not([type=file]):not([type=hidden]),select,textarea) {"
+        ), 1)
+        sizing = (CSS / "ui-sizing.css").read_text(encoding="utf-8")
+        foundation = (CSS / "ui-foundations.css").read_text(encoding="utf-8")
+        for role, width in (("short", 64), ("plain", 76), ("icon", 82), ("long", 92)):
+            self.assertIn(f"--ui-action-width-{role}: {width}px;", sizing)
+            self.assertIn(f"--ui-action-reserved-width: var(--ui-action-width-{role});", foundation)
+        for role in ("command-button", "command-editor", "config-control", "config-control-height-short"):
+            self.assertIn(f"--ui-aoa-{role}" if role.endswith("short")
+                          else f"--ui-aoa-{role}-height", sizing)
+
     def test_redundant_module_height_aliases_are_not_reintroduced(self):
         """Directly consume shared height roles instead of aliasing identical values."""
         legacy = (
