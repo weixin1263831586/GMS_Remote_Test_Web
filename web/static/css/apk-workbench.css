@@ -25,7 +25,7 @@
     background: var(--darker-bg);
     color: var(--apk-text);
 }
-#page-apk-analysis #apk-task-history-refresh { min-width: 64px; }
+
 /* Active task wrapper follows the shared intake card height. */
 #page-apk-analysis #apk-analysis-status { min-width: 0; }
 #page-apk-analysis .apk-status-actions { align-items: center; flex-wrap: nowrap; }

@@ -297,10 +297,10 @@ function updateRedmineToolbar() {
       action.disabled = false;
       action.title = '';
       if (currentTab === 'cases') {
-        action.textContent = '📚 导入';
+        action.textContent = '导入';
         action.title = '批量导入工单并进行结构化分析';
       } else {
-        action.innerHTML = '<svg class="ui-icon" aria-hidden="true" focusable="false"><use href="/static/icons/ui.svg#search"></use></svg> 扫描';
+        action.textContent = '扫描';
         action.title = currentTab === 'runs'
           ? '扫描最近 48 小时工单并生成扫描记录'
           : '扫描最近 48 小时工单并更新工单分析';

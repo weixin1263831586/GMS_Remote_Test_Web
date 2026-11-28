@@ -21,13 +21,6 @@
 }
 
 #apk-task-history-refresh {
-    /* 宽度钉死（busy 文案「刷新中」与「↻ 刷新」同为 64px 内），
-       刷新态切换不再引起控件尺寸跳动。 */
-    width: 64px;
-    min-width: 64px;
-    max-width: 64px;
-    overflow: hidden;
-    white-space: nowrap;
     min-height: var(--ui-control-height-small);
     height: var(--ui-control-height-small);
 }

@@ -12,7 +12,7 @@
   <link rel="stylesheet" href="/redmine-agent/assets/case-library.css?v=20261128-css-reference-cleanup">
   <link rel="stylesheet" href="/redmine-agent/assets/daily-brief-session.css?v=20261128-component-audit">
   <link rel="stylesheet" href="/static/css/loading-orbit.css?v=20261114-orbit-viewport">
-<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-button-contract">
+<link rel="stylesheet" href="/static/css/ui-foundations.css?v=20261128-action-width">
 <link rel="stylesheet" href="/static/css/modal.css?v=20261116-modal-tiers">
 <link rel="stylesheet" href="/static/css/modal-tech.css?v=20261128-compact-fields">
 <link rel="stylesheet" href="/static/css/form-controls.css?v=20261128-button-convergence">
@@ -59,9 +59,9 @@
     </div>
     <div id="statsToolbar" class="filter-bar" hidden></div>
     <div class="btn-group">
-      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden>扫描</button>
-      <button id="refreshBtn" data-busy-size="plain" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">刷新</button>
-      <button class="secondary danger" data-click="showResetModal">重置</button>
+      <button id="scanBtn" class="secondary" data-click="runRedmineContextAction" hidden data-busy-size="short">扫描</button>
+      <button id="refreshBtn" data-busy-size="short" class="secondary" data-click="refreshCurrentTab" title="绕过缓存，重新从 Redmine 拉取当前页数据">刷新</button>
+      <button class="secondary danger" data-click="showResetModal" data-busy-size="short">重置</button>
     </div>
   </div>
 </header>
