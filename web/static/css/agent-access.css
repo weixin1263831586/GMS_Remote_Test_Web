@@ -150,7 +150,6 @@
 .agent-access-token-scope-list { padding-left: 18px;  }
 .agent-access-token-scope-list li { margin: 12px 0; }
 .agent-access-token-scope-list code { display: block; margin-top: 3px; color: var(--text-secondary);  overflow-wrap: anywhere; }
-.agent-access-empty { text-align: center; color: var(--text-secondary) !important; }
 
 @media (max-width: 1100px) {
     .agent-access-toolbar { flex-wrap: wrap; }
